@@ -913,6 +913,7 @@ dependencies = [
  "laurier",
  "once_cell",
  "ratatui",
+ "regex",
  "rstest",
  "rustc-hash",
  "semver",

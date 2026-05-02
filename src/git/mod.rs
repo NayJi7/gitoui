@@ -1,3 +1,6 @@
+pub mod diff;
+pub mod status;
+
 use std::{
     hash::Hash,
     io::{BufRead, BufReader},
@@ -122,6 +125,7 @@ pub struct Repository {
     head: Head,
     // to preserve order of the original commits from `git log`, we store the commit hashes
     commit_hashes: Vec<CommitHash>,
+    uncommitted_changes: Option<status::UncommittedChanges>,
 }
 
 impl Repository {
@@ -145,6 +149,8 @@ impl Repository {
         let stash_ref_map = load_stashes_as_refs(path);
         merge_ref_maps(&mut ref_map, stash_ref_map);
 
+        let uncommitted_changes = status::UncommittedChanges::load(path).ok();
+
         Ok(Self::new(
             path.to_path_buf(),
             commit_map,
@@ -153,6 +159,7 @@ impl Repository {
             ref_map,
             head,
             commit_hashes,
+            uncommitted_changes,
         ))
     }
 
@@ -164,6 +171,7 @@ impl Repository {
         ref_map: RefMap,
         head: Head,
         commit_hashes: Vec<CommitHash>,
+        uncommitted_changes: Option<status::UncommittedChanges>,
     ) -> Self {
         Self {
             path,
@@ -173,6 +181,7 @@ impl Repository {
             ref_map,
             head,
             commit_hashes,
+            uncommitted_changes,
         }
     }
 
@@ -214,6 +223,10 @@ impl Repository {
 
     pub fn head(&self) -> &Head {
         &self.head
+    }
+
+    pub fn uncommitted_changes(&self) -> Option<&status::UncommittedChanges> {
+        self.uncommitted_changes.as_ref()
     }
 
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
