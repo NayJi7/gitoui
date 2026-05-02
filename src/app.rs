@@ -132,11 +132,23 @@ impl<'a> App<'a> {
         let head = repository.head();
         let mut branch_color_map = FxHashMap::default();
         for r in repository.all_refs() {
-            if let Ref::Branch { name, target } = r {
-                if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
-                    let color = graph_color_set.get(pos_x).to_ratatui_color();
-                    branch_color_map.insert(name.clone(), color);
+            match r {
+                Ref::Branch { name, target } => {
+                    if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
+                        let color = graph_color_set.get(pos_x).to_ratatui_color();
+                        branch_color_map.insert(name.clone(), color);
+                    }
                 }
+                Ref::RemoteBranch { name, target } => {
+                    if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
+                        let color = graph_color_set.get(pos_x).to_ratatui_color();
+                        branch_color_map.insert(name.clone(), color);
+                        if let Some((_, base)) = name.split_once('/') {
+                            branch_color_map.insert(base.to_string(), color);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         let mut commit_list_state = CommitListState::new(
@@ -295,6 +307,10 @@ impl App<'_> {
                 AppEvent::CloseDiff => {
                     terminal.clear()?;
                     self.close_diff();
+                }
+                AppEvent::CloseDiffToDetail => {
+                    terminal.clear()?;
+                    self.close_diff_to_detail();
                 }
                 AppEvent::SelectOlderCommit => {
                     self.select_older_commit();
@@ -644,6 +660,21 @@ impl App<'_> {
         if let View::Diff(ref mut view) = self.view {
             let commit_list_state = view.take_list_state();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
+    fn close_diff_to_detail(&mut self) {
+        if let View::Diff(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            let (commit, changes, refs) = selected_commit_details(self.repository, &commit_list_state);
+            self.view = View::of_detail(
+                commit_list_state,
+                commit,
+                changes,
+                refs,
+                self.ctx.clone(),
+                self.ec.sender(),
+            );
         }
     }
 

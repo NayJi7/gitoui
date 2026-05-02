@@ -32,6 +32,7 @@ pub enum AppEvent {
     OpenDiff,
     OpenFileDiff { hash: String, file_path: String },
     CloseDiff,
+    CloseDiffToDetail,
     SelectNewerCommit,
     SelectOlderCommit,
     SelectParentCommit,

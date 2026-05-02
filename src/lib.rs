@@ -103,6 +103,7 @@ pub enum GraphWidthType {
 pub enum GraphStyle {
     Rounded,
     Angular,
+    Smooth,
 }
 
 impl From<Option<GraphStyle>> for graph::GraphStyle {
@@ -110,6 +111,7 @@ impl From<Option<GraphStyle>> for graph::GraphStyle {
         match style {
             Some(GraphStyle::Rounded) => graph::GraphStyle::Rounded,
             Some(GraphStyle::Angular) => graph::GraphStyle::Angular,
+            Some(GraphStyle::Smooth) => graph::GraphStyle::Smooth,
             None => graph::GraphStyle::Rounded,
         }
     }

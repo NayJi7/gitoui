@@ -280,8 +280,12 @@ impl<'a> ListView<'a> {
 
     pub fn handle_click(&mut self, _col: u16, row: u16) {
         if let Some(list_state) = self.commit_list_state.as_mut() {
+            let header_height = 2u16;
+            if row < header_height {
+                return;
+            }
             let (_, offset, height) = list_state.current_list_status();
-            let row = row as usize;
+            let row = (row - header_height) as usize;
             if row < height {
                 let clicked_index = offset + row;
                 if clicked_index < list_state.total() {
@@ -294,8 +298,12 @@ impl<'a> ListView<'a> {
 
     pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
         if let Some(list_state) = self.commit_list_state.as_mut() {
+            let header_height = 2u16;
+            if row < header_height {
+                return;
+            }
             let (selected, offset, height) = list_state.current_list_status();
-            let row = row as usize;
+            let row = (row - header_height) as usize;
             if row < height {
                 let hover_idx = offset + row;
                 let current_selected = offset + selected;

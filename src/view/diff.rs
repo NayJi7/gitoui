@@ -112,7 +112,7 @@ impl<'a> DiffView<'a> {
                 self.tx.send(AppEvent::OpenHelp);
             }
             UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close => {
-                self.tx.send(AppEvent::CloseDiff);
+                self.tx.send(AppEvent::CloseDiffToDetail);
             }
             UserEvent::Refresh => {
                 self.refresh();

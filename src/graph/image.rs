@@ -22,6 +22,7 @@ use crate::{
 pub enum GraphStyle {
     Rounded,
     Angular,
+    Smooth,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -709,6 +710,21 @@ pub fn calc_graph_row_image(
                 draw_diagonal_connected_edge(&mut img_buf, edges, image_params);
             }
         }
+        GraphStyle::Smooth => {
+            for edge in edges {
+                match edge.edge_type {
+                    EdgeType::RightTop
+                    | EdgeType::RightBottom
+                    | EdgeType::LeftTop
+                    | EdgeType::LeftBottom => {
+                        draw_smooth_corner_edge(&mut img_buf, edge, image_params);
+                    }
+                    _ => {
+                        draw_edge(&mut img_buf, edge, image_params, drawing_pixels);
+                    }
+                }
+            }
+        }
     }
 
     let bytes = build_image(&img_buf, image_width, image_height);
@@ -1024,6 +1040,77 @@ fn draw_diagonal_connected_edge(
                 _ => unreachable!("unexpected edge type for corner edge"),
             }
         }
+    }
+}
+
+fn draw_smooth_corner_edge(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    edge: &Edge,
+    image_params: &ImageParams,
+) {
+    let cell_width = image_params.width as i32;
+    let cell_height = image_params.height as i32;
+    let x_offset = (edge.pos_x * image_params.width as usize) as i32;
+    let center_x = cell_width / 2;
+    let center_y = cell_height / 2;
+    let color = image_params.edge_color(edge.associated_line_pos_x);
+
+    let (x0, y0, x1, y1) = match edge.edge_type {
+        EdgeType::RightBottom => (x_offset + center_x, 0, x_offset, center_y),
+        EdgeType::LeftBottom => (x_offset + center_x, 0, x_offset + cell_width, center_y),
+        EdgeType::RightTop => (x_offset, center_y, x_offset + center_x, cell_height),
+        EdgeType::LeftTop => (x_offset + cell_width, center_y, x_offset + center_x, cell_height),
+        _ => return,
+    };
+
+    draw_cubic_bezier(img_buf, x0, y0, x1, y1, color);
+}
+
+fn draw_cubic_bezier(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: image::Rgba<u8>,
+) {
+    let cp1x = x0 + (x1 - x0) / 2;
+    let cp1y = y0;
+    let cp2x = x0 + (x1 - x0) / 2;
+    let cp2y = y1;
+
+    let steps = 60;
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let mt = 1.0 - t;
+        let mt2 = mt * mt;
+        let mt3 = mt2 * mt;
+
+        let px = (mt3 * x0 as f32
+            + 3.0 * mt2 * t * cp1x as f32
+            + 3.0 * mt * t2 * cp2x as f32
+            + t3 * x1 as f32) as i32;
+        let py = (mt3 * y0 as f32
+            + 3.0 * mt2 * t * cp1y as f32
+            + 3.0 * mt * t2 * cp2y as f32
+            + t3 * y1 as f32) as i32;
+
+        put_pixel_safe(img_buf, px, py, color);
+        put_pixel_safe(img_buf, px + 1, py, color);
+        put_pixel_safe(img_buf, px, py + 1, color);
+    }
+}
+
+fn put_pixel_safe(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    x: i32,
+    y: i32,
+    color: image::Rgba<u8>,
+) {
+    if x >= 0 && x < img_buf.width() as i32 && y >= 0 && y < img_buf.height() as i32 {
+        img_buf.put_pixel(x as u32, y as u32, color);
     }
 }
 

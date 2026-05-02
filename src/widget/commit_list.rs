@@ -898,11 +898,11 @@ impl CommitList<'_> {
 
         for (i, col_type) in self.ctx.ui_config.list.columns.iter().enumerate() {
             let text = match col_type {
-                UserListColumnType::Graph => "",
+                UserListColumnType::Graph => "Graph",
                 UserListColumnType::Marker => "",
                 UserListColumnType::Subject => "Commit message",
                 UserListColumnType::Name => "Committer",
-                UserListColumnType::Hash => "Commit SHA",
+                UserListColumnType::Hash => "SHA",
                 UserListColumnType::Date => "Date",
             };
 
