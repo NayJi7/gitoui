@@ -259,6 +259,13 @@ impl<'a> UserCommandView<'a> {
         };
         self.tx.send(AppEvent::Refresh(context));
     }
+
+    pub fn handle_click(&mut self, _col: u16, row: u16) {
+        let list_state = self.as_mut_list_state();
+        let (_, offset, height) = list_state.current_list_status();
+        let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
+        list_state.select(clicked_index);
+    }
 }
 
 fn build_user_command_output_lines<'a>(

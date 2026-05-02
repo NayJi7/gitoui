@@ -409,6 +409,16 @@ impl<'a> CommitListState<'a> {
         }
     }
 
+    pub fn select(&mut self, index: usize) {
+        if index < self.total {
+            self.selected = index.saturating_sub(self.offset);
+            if self.selected >= self.height {
+                self.selected = self.height - 1;
+                self.offset = index - self.height + 1;
+            }
+        }
+    }
+
     pub fn select_next_match(&mut self) {
         self.select_next_match_index(self.current_selected_index());
     }

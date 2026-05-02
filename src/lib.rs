@@ -55,6 +55,7 @@ pub enum ImageProtocolType {
     Iterm,
     Kitty,
     KittyUnicode,
+    Sixel,
 }
 
 impl From<Option<ImageProtocolType>> for protocol::ImageProtocol {
@@ -66,6 +67,7 @@ impl From<Option<ImageProtocolType>> for protocol::ImageProtocol {
             Some(ImageProtocolType::KittyUnicode) => protocol::ImageProtocol::KittyUnicode {
                 tmux: protocol::detect_tmux(),
             },
+            Some(ImageProtocolType::Sixel) => protocol::ImageProtocol::Sixel,
             None => protocol::auto_detect(),
         }
     }
@@ -180,6 +182,11 @@ pub fn run() -> Result<()> {
 
         if terminal.is_none() {
             terminal = Some(ratatui::init());
+            ratatui::crossterm::execute!(
+                std::io::stdout(),
+                ratatui::crossterm::event::EnableMouseCapture
+            )
+            .unwrap();
         }
 
         let mut app = App::new(
@@ -208,6 +215,11 @@ pub fn run() -> Result<()> {
         }
     };
 
+    ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::DisableMouseCapture
+    )
+    .unwrap();
     ratatui::restore();
     ret.map_err(Into::into)
 }

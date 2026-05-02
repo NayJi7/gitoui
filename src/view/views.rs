@@ -146,6 +146,15 @@ impl<'a> View<'a> {
         View::Help(Box::new(HelpView::new(before, ctx, tx)))
     }
 
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        match self {
+            View::List(view) => view.handle_click(col, row),
+            View::Detail(view) => view.handle_click(col, row),
+            View::UserCommand(view) => view.handle_click(col, row),
+            _ => {}
+        }
+    }
+
     pub fn refresh(&mut self) {
         match self {
             View::Default => {}

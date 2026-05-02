@@ -15,19 +15,23 @@ pub fn auto_detect() -> ImageProtocol {
         } else {
             ImageProtocol::Kitty
         }
+    } else if detect_sixel_support() {
+        ImageProtocol::Sixel
     } else {
         ImageProtocol::Iterm2
     }
 }
 
 fn detect_kitty_graphics_protocol() -> bool {
-    // kitty
-    // https://sw.kovidgoyal.net/kitty/glossary/#envvar-KITTY_WINDOW_ID
     env::var("KITTY_WINDOW_ID").is_ok()
-    // ghostty
-    // https://ghostty.org/docs/help/terminfo
-    || env::var("TERM").ok().is_some_and(|t| t == "xterm-ghostty")
-    || env::var("GHOSTTY_RESOURCES_DIR").is_ok()
+        || env::var("TERM").ok().is_some_and(|t| t == "xterm-ghostty" || t == "xterm-kitty")
+        || env::var("GHOSTTY_RESOURCES_DIR").is_ok()
+        || env::var("TERM_PROGRAM").ok().is_some_and(|tp| tp == "ghostty")
+}
+
+fn detect_sixel_support() -> bool {
+    env::var("TERM").ok().is_some_and(|t| t.contains("sixel"))
+        || env::var("TERM_PROGRAM").ok().is_some_and(|tp| tp == "wezterm")
 }
 
 pub fn detect_tmux() -> bool {
@@ -41,6 +45,7 @@ pub enum ImageProtocol {
     Iterm2,
     Kitty,
     KittyUnicode { tmux: bool },
+    Sixel,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +93,7 @@ impl PreparedImage {
 impl ImageProtocol {
     pub fn prepare_image(&self, bytes: &[u8], cell_width: usize, image_id: u32) -> PreparedImage {
         let symbol = match self {
-            ImageProtocol::Iterm2 => iterm2_encode(bytes, cell_width, 1),
+            ImageProtocol::Iterm2 | ImageProtocol::Sixel => iterm2_encode(bytes, cell_width, 1),
             ImageProtocol::Kitty => kitty_encode(bytes, cell_width, 1),
             ImageProtocol::KittyUnicode { tmux } => {
                 return kitty_unicode_prepare(bytes, cell_width, image_id, *tmux);
@@ -116,7 +121,7 @@ impl ImageProtocol {
 
     pub fn clear_line(&self, y: u16) {
         match self {
-            ImageProtocol::Iterm2 => {}
+            ImageProtocol::Iterm2 | ImageProtocol::Sixel => {}
             ImageProtocol::Kitty => kitty_clear_line(y),
             ImageProtocol::KittyUnicode { .. } => {}
         }
@@ -124,7 +129,7 @@ impl ImageProtocol {
 
     pub fn clear(&self) {
         match self {
-            ImageProtocol::Iterm2 => {}
+            ImageProtocol::Iterm2 | ImageProtocol::Sixel => {}
             ImageProtocol::Kitty => kitty_clear(),
             ImageProtocol::KittyUnicode { .. } => {}
         }
@@ -132,7 +137,7 @@ impl ImageProtocol {
 
     pub fn delete_images(&self, image_ids: &[u32]) -> Result<(), std::io::Error> {
         match self {
-            ImageProtocol::Iterm2 | ImageProtocol::Kitty => Ok(()),
+            ImageProtocol::Iterm2 | ImageProtocol::Kitty | ImageProtocol::Sixel => Ok(()),
             ImageProtocol::KittyUnicode { tmux } => kitty_unicode_delete_images(image_ids, *tmux),
         }
     }

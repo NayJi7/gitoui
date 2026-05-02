@@ -218,6 +218,9 @@ impl App<'_> {
                 AppEvent::Resize(w, h) => {
                     let _ = (w, h);
                 }
+                AppEvent::Mouse(mouse) => {
+                    self.handle_mouse_event(mouse);
+                }
                 AppEvent::Quit => {
                     self.cleanup_graph_images()?;
                     return Ok(Ret::Quit);
@@ -672,6 +675,41 @@ impl App<'_> {
 
     fn clear_status_line(&mut self) {
         self.app_status.status_line = StatusLine::None;
+    }
+
+    fn handle_mouse_event(&mut self, mouse: ratatui::crossterm::event::MouseEvent) {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                let _ = self.view.handle_event(
+                    crate::event::UserEventWithCount::new(
+                        crate::event::UserEvent::NavigateUp,
+                        3,
+                    ),
+                    ratatui::crossterm::event::KeyEvent::new(
+                        ratatui::crossterm::event::KeyCode::Up,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                );
+            }
+            MouseEventKind::ScrollDown => {
+                let _ = self.view.handle_event(
+                    crate::event::UserEventWithCount::new(
+                        crate::event::UserEvent::NavigateDown,
+                        3,
+                    ),
+                    ratatui::crossterm::event::KeyEvent::new(
+                        ratatui::crossterm::event::KeyCode::Down,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ),
+                );
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.view.handle_click(mouse.column, mouse.row);
+            }
+            _ => {}
+        }
     }
 
     fn update_status_input(

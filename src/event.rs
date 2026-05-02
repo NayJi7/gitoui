@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize,
@@ -18,6 +18,7 @@ use crate::view::RefreshViewContext;
 #[derive(Debug)]
 pub enum AppEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Resize(usize, usize),
     Quit,
     OpenDetail,
@@ -112,6 +113,9 @@ impl EventController {
                     Ok(e) => match e {
                         ratatui::crossterm::event::Event::Key(key) => {
                             tx.send(AppEvent::Key(key));
+                        }
+                        ratatui::crossterm::event::Event::Mouse(mouse) => {
+                            tx.send(AppEvent::Mouse(mouse));
                         }
                         ratatui::crossterm::event::Event::Resize(w, h) => {
                             tx.send(AppEvent::Resize(w as usize, h as usize));
