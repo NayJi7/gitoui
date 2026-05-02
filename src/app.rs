@@ -130,12 +130,22 @@ impl<'a> App<'a> {
             CellWidthType::Single => (graph.max_pos_x + 1) as u16,
         };
         let head = repository.head();
+        let mut branch_color_map = FxHashMap::default();
+        for r in repository.all_refs() {
+            if let Ref::Branch { name, target } = r {
+                if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
+                    let color = graph_color_set.get(pos_x).to_ratatui_color();
+                    branch_color_map.insert(name.clone(), color);
+                }
+            }
+        }
         let mut commit_list_state = CommitListState::new(
             commits,
             graph_image_manager,
             graph_cell_width,
             head,
             ref_name_to_commit_index_map,
+            branch_color_map,
             ctx.core_config.search.ignore_case,
             ctx.core_config.search.fuzzy,
         );
@@ -275,9 +285,11 @@ impl App<'_> {
                     self.close_help();
                 }
                 AppEvent::OpenDiff => {
+                    self.clear_image(Some(terminal))?;
                     self.open_diff();
                 }
                 AppEvent::OpenFileDiff { hash, file_path } => {
+                    self.clear_image(Some(terminal))?;
                     self.open_file_diff(hash, file_path);
                 }
                 AppEvent::CloseDiff => {
@@ -428,7 +440,7 @@ impl App<'_> {
                 Constraint::Length(35),
             ]).areas(area);
 
-            let shortcut_spans = vec![Span::styled("d:diff  q:quit  ?:help  r:refresh", dim_text)];
+            let shortcut_spans = vec![Span::styled("q:quit  ?:help  r:refresh", dim_text)];
             let shortcut_line = Line::from(shortcut_spans);
             let shortcut_paragraph = Paragraph::new(shortcut_line)
                 .style(Style::default().bg(Color::Rgb(36, 40, 59)))

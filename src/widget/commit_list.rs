@@ -240,6 +240,7 @@ impl<'a> CommitListState<'a> {
         graph_cell_width: u16,
         head: &'a Head,
         ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
+        branch_color_map: FxHashMap<String, Color>,
         default_ignore_case: bool,
         default_fuzzy: bool,
     ) -> CommitListState<'a> {
@@ -254,14 +255,6 @@ impl<'a> CommitListState<'a> {
         } else {
             CommitHash::default()
         };
-        let mut branch_color_map = FxHashMap::default();
-        for commit_info in &commits {
-            for r in &commit_info.refs {
-                if let Ref::Branch { name, .. } = r {
-                    branch_color_map.insert(name.clone(), commit_info.graph_color);
-                }
-            }
-        }
         let head_commit_hash = match head {
             Head::Detached { target } => Some(target.clone()),
             Head::Branch { name } => ref_name_to_commit_index_map

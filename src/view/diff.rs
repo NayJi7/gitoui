@@ -131,12 +131,18 @@ impl<'a> DiffView<'a> {
         self.content_height = lines.len();
 
         if !self.title.is_empty() {
-            let [title_area, separator_area, content_area] = Layout::vertical([
+            let [separator_area, title_area, content_area] = Layout::vertical([
                 Constraint::Length(1),
                 Constraint::Length(1),
                 Constraint::Min(0),
             ])
             .areas(diff_area);
+
+            let separator = Line::from(
+                "─".repeat(diff_area.width as usize)
+                    .fg(self.ctx.color_theme.divider_fg),
+            );
+            f.render_widget(Paragraph::new(separator), separator_area);
 
             let title_text = format!("─── {} ───", self.title);
             let title = Line::from(Span::styled(
@@ -146,12 +152,6 @@ impl<'a> DiffView<'a> {
                     .add_modifier(Modifier::BOLD),
             ));
             f.render_widget(Paragraph::new(title), title_area);
-
-            let separator = Line::from(
-                "─".repeat(diff_area.width as usize)
-                    .fg(self.ctx.color_theme.divider_fg),
-            );
-            f.render_widget(Paragraph::new(separator), separator_area);
 
             let visible_lines: Vec<Line> = lines
                 .into_iter()
@@ -317,30 +317,32 @@ impl<'a> DiffView<'a> {
     fn build_enhanced_diff_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
-        for entry in &self.diff_entries {
+        for (entry_idx, entry) in self.diff_entries.iter().enumerate() {
             // File header
             let filename = entry
                 .new_path
                 .as_deref()
                 .or(entry.old_path.as_deref())
                 .unwrap_or("unknown");
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "─── ",
-                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                ),
-                Span::styled(
-                    filename.to_string(),
-                    Style::default()
-                        .fg(Color::Rgb(192, 202, 245))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    " ───",
-                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                ),
-            ]));
-            lines.push(Line::from(""));
+            if self.title.is_empty() || entry_idx > 0 {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "─── ",
+                        Style::default().fg(Color::Rgb(59, 66, 97)),
+                    ),
+                    Span::styled(
+                        filename.to_string(),
+                        Style::default()
+                            .fg(Color::Rgb(192, 202, 245))
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " ───",
+                        Style::default().fg(Color::Rgb(59, 66, 97)),
+                    ),
+                ]));
+                lines.push(Line::from(""));
+            }
 
             for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
                 // Show collapsed region between hunks

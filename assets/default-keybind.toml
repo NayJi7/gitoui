@@ -28,12 +28,10 @@ go_to_next = ["n"]
 go_to_previous = ["shift-n"]
 confirm = ["enter"]
 ref_list = ["tab"]
-search = ["/"]
+search = ["f"]
 ignore_case_toggle = ["ctrl-g"]
 fuzzy_toggle = ["ctrl-x"]
 refresh = ["shift-r"]
-
-user_command_1 = ["d"]
 
 # copy part of information, ex: copy the short commit hash not all
 short_copy = ["c"]
