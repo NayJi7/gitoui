@@ -897,6 +897,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "gitbranch"
+version = "0.8.0"
+dependencies = [
+ "ansi-to-tui",
+ "arboard",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "console",
+ "dircpy",
+ "fuzzy-matcher",
+ "garde",
+ "image",
+ "laurier",
+ "once_cell",
+ "ratatui",
+ "rstest",
+ "rustc-hash",
+ "semver",
+ "serde",
+ "smart-default",
+ "tempfile",
+ "text-to-png",
+ "toml",
+ "tui-input",
+ "tui-tree-widget",
+ "umbra",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2060,36 +2090,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
-]
-
-[[package]]
-name = "serie"
-version = "0.8.0"
-dependencies = [
- "ansi-to-tui",
- "arboard",
- "base64 0.22.1",
- "chrono",
- "clap",
- "console",
- "dircpy",
- "fuzzy-matcher",
- "garde",
- "image",
- "laurier",
- "once_cell",
- "ratatui",
- "rstest",
- "rustc-hash",
- "semver",
- "serde",
- "smart-default",
- "tempfile",
- "text-to-png",
- "toml",
- "tui-input",
- "tui-tree-widget",
- "umbra",
 ]
 
 [[package]]

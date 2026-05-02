@@ -19,7 +19,7 @@ use clap::{Parser, ValueEnum};
 use graph::GraphImageManager;
 use serde::Deserialize;
 
-/// Serie - A rich git commit graph in your terminal, like magic 📚
+/// GitBranch - Interactive Git client for the terminal
 #[derive(Parser)]
 #[command(version)]
 struct Args {

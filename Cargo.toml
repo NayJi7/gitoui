@@ -1,10 +1,10 @@
 [package]
-name = "serie"
+name = "gitbranch"
 version = "0.8.0"
-description = "A rich git commit graph in your terminal, like magic"
+description = "Interactive Git client for the terminal"
 authors = ["Kyosuke Fujimoto <kyoro.f@gmail.com>"]
-homepage = "https://github.com/lusingander/serie"
-repository = "https://github.com/lusingander/serie"
+homepage = "https://github.com/aterrak/gitbranch"
+repository = "https://github.com/aterrak/gitbranch"
 readme = "README.md"
 license = "MIT"
 keywords = ["git", "cli", "tui", "terminal"]

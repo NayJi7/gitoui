@@ -18,9 +18,9 @@ use crate::{
 
 const XDG_CONFIG_HOME_ENV_NAME: &str = "XDG_CONFIG_HOME";
 const DEFAULT_CONFIG_DIR: &str = ".config";
-const APP_DIR_NAME: &str = "serie";
+const APP_DIR_NAME: &str = "gitbranch";
 const CONFIG_FILE_NAME: &str = "config.toml";
-const CONFIG_FILE_ENV_NAME: &str = "SERIE_CONFIG_FILE";
+const CONFIG_FILE_ENV_NAME: &str = "GITR_CONFIG_FILE";
 
 pub fn load() -> Result<(
     CoreConfig,
