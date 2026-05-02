@@ -29,6 +29,8 @@ pub enum AppEvent {
     CloseRefs,
     OpenHelp,
     CloseHelp,
+    OpenDiff,
+    CloseDiff,
     SelectNewerCommit,
     SelectOlderCommit,
     SelectParentCommit,

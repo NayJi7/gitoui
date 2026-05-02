@@ -115,6 +115,9 @@ impl<'a> DetailView<'a> {
             UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
             }
+            UserEvent::NavigateRight => {
+                self.tx.send(AppEvent::OpenDiff);
+            }
             UserEvent::Refresh => {
                 self.refresh();
             }

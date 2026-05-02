@@ -238,6 +238,10 @@ impl Repository {
         };
         (commit, changes)
     }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 fn check_git_repository(path: &Path) -> Result<()> {

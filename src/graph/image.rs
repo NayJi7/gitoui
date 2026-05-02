@@ -34,6 +34,7 @@ pub enum GraphImageWidthMode {
 #[derive(Debug)]
 pub struct GraphImageManager<'a> {
     prepared_image_map: FxHashMap<CommitHash, PreparedImage>,
+    uncommitted_image: Option<PreparedImage>,
     image_ids: FxHashSet<u32>,
     pending_uploads: Vec<String>,
 
@@ -61,6 +62,7 @@ impl<'a> GraphImageManager<'a> {
 
         GraphImageManager {
             prepared_image_map: FxHashMap::default(),
+            uncommitted_image: None,
             image_ids: FxHashSet::default(),
             pending_uploads: Vec::default(),
             graph,
@@ -106,6 +108,34 @@ impl<'a> GraphImageManager<'a> {
         }
         self.prepared_image_map.insert(commit_hash.clone(), image);
         self.image_ids.insert(image_id);
+    }
+
+    pub fn ensure_uploaded_uncommitted(&mut self, _graph_color: ratatui::style::Color) {
+        if self.uncommitted_image.is_some() {
+            return;
+        }
+        let image_id = self.session_nonce ^ 0xFFFF_FFFF;
+        let cell_count = match self.image_width_mode {
+            GraphImageWidthMode::Compact => 1,
+            GraphImageWidthMode::Fixed => self.graph.max_pos_x + 1,
+        };
+        let graph_row_image = calc_hollow_circle_graph_row_image(
+            0,
+            cell_count,
+            &self.image_params,
+            &self.drawing_pixels,
+        );
+        let mut image =
+            graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
+        if let Some(upload_data) = image.take_upload_data() {
+            self.pending_uploads.push(upload_data);
+        }
+        self.image_ids.insert(image_id);
+        self.uncommitted_image = Some(image);
+    }
+
+    pub fn prepared_image_uncommitted(&self) -> &PreparedImage {
+        self.uncommitted_image.as_ref().unwrap()
     }
 }
 
@@ -649,6 +679,43 @@ pub fn calc_graph_row_image(
     let bytes = build_image(&img_buf, image_width, image_height);
 
     GraphRowImage { bytes, cell_count }
+}
+
+fn calc_hollow_circle_graph_row_image(
+    commit_pos_x: usize,
+    cell_count: usize,
+    image_params: &ImageParams,
+    drawing_pixels: &DrawingPixels,
+) -> GraphRowImage {
+    let image_width = (image_params.width as usize * cell_count) as u32;
+    let image_height = image_params.height as u32;
+
+    let mut img_buf = image::ImageBuffer::new(image_width, image_height);
+
+    draw_background(&mut img_buf, image_params);
+    draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+
+    let bytes = build_image(&img_buf, image_width, image_height);
+
+    GraphRowImage { bytes, cell_count }
+}
+
+fn draw_hollow_circle(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    circle_pos_x: usize,
+    image_params: &ImageParams,
+    drawing_pixels: &DrawingPixels,
+) {
+    let x_offset = (circle_pos_x * image_params.width as usize) as i32;
+    let color = image::Rgba([0xc0, 0xca, 0xf5, 0xff]);
+
+    for (x, y) in &drawing_pixels.circle_edge {
+        let x = (*x + x_offset) as u32;
+        let y = *y as u32;
+
+        let pixel = img_buf.get_pixel_mut(x, y);
+        *pixel = color;
+    }
 }
 
 fn draw_background(

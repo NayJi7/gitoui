@@ -7,7 +7,7 @@ use crate::{
     event::{Sender, UserEventWithCount},
     git::{Commit, FileChange, Ref},
     view::{
-        detail::DetailView, help::HelpView, list::ListView, refs::RefsView,
+        detail::DetailView, diff::DiffView, help::HelpView, list::ListView, refs::RefsView,
         user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
@@ -19,6 +19,7 @@ pub enum View<'a> {
     Default, // dummy variant to make #[default] work
     List(Box<ListView<'a>>),
     Detail(Box<DetailView<'a>>),
+    Diff(Box<DiffView<'a>>),
     UserCommand(Box<UserCommandView<'a>>),
     Refs(Box<RefsView<'a>>),
     Help(Box<HelpView<'a>>),
@@ -30,6 +31,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.handle_event(event_with_count, key_event),
             View::Detail(view) => view.handle_event(event_with_count, key_event),
+            View::Diff(view) => view.handle_event(event_with_count, key_event),
             View::UserCommand(view) => view.handle_event(event_with_count, key_event),
             View::Refs(view) => view.handle_event(event_with_count, key_event),
             View::Help(view) => view.handle_event(event_with_count, key_event),
@@ -41,6 +43,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.render(f, area),
             View::Detail(view) => view.render(f, area),
+            View::Diff(view) => view.render(f, area),
             View::UserCommand(view) => view.render(f, area),
             View::Refs(view) => view.render(f, area),
             View::Help(view) => view.render(f, area),
@@ -52,6 +55,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.update_layout(area),
             View::Detail(view) => view.update_layout(area),
+            View::Diff(view) => view.update_layout(area),
             View::UserCommand(view) => view.update_layout(area),
             View::Refs(view) => view.update_layout(area),
             View::Help(_) => {}
@@ -63,6 +67,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.prepare_graph_uploads(),
             View::Detail(view) => view.prepare_graph_uploads(),
+            View::Diff(view) => view.prepare_graph_uploads(),
             View::UserCommand(view) => view.prepare_graph_uploads(),
             View::Refs(view) => view.prepare_graph_uploads(),
             View::Help(_) => {}
@@ -74,6 +79,7 @@ impl<'a> View<'a> {
             View::Default => Vec::new(),
             View::List(view) => view.drain_pending_graph_uploads(),
             View::Detail(view) => view.drain_pending_graph_uploads(),
+            View::Diff(view) => view.drain_pending_graph_uploads(),
             View::UserCommand(view) => view.drain_pending_graph_uploads(),
             View::Refs(view) => view.drain_pending_graph_uploads(),
             View::Help(_) => Vec::new(),
@@ -85,6 +91,7 @@ impl<'a> View<'a> {
             View::Default => Vec::new(),
             View::List(view) => view.graph_image_ids_sorted(),
             View::Detail(view) => view.graph_image_ids_sorted(),
+            View::Diff(view) => view.graph_image_ids_sorted(),
             View::UserCommand(view) => view.graph_image_ids_sorted(),
             View::Refs(view) => view.graph_image_ids_sorted(),
             View::Help(view) => view.graph_image_ids_sorted(),
@@ -112,6 +119,20 @@ impl<'a> View<'a> {
             commit,
             changes,
             refs,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_diff_with_entries(
+        commit_list_state: CommitListState<'a>,
+        diff_entries: Vec<crate::git::diff::DiffEntry>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Diff(Box::new(DiffView::new(
+            commit_list_state,
+            diff_entries,
             ctx,
             tx,
         )))
@@ -150,6 +171,7 @@ impl<'a> View<'a> {
         match self {
             View::List(view) => view.handle_click(col, row),
             View::Detail(view) => view.handle_click(col, row),
+            View::Diff(view) => view.handle_click(col, row),
             View::UserCommand(view) => view.handle_click(col, row),
             _ => {}
         }
@@ -160,6 +182,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.refresh(),
             View::Detail(view) => view.refresh(),
+            View::Diff(view) => view.refresh(),
             View::UserCommand(view) => view.refresh(),
             View::Refs(view) => view.refresh(),
             View::Help(_) => {}
@@ -173,6 +196,9 @@ pub enum RefreshViewContext {
         list_context: ListRefreshViewContext,
     },
     Detail {
+        list_context: ListRefreshViewContext,
+    },
+    Diff {
         list_context: ListRefreshViewContext,
     },
     UserCommand {
@@ -190,6 +216,7 @@ impl RefreshViewContext {
         match self {
             RefreshViewContext::List { list_context }
             | RefreshViewContext::Detail { list_context }
+            | RefreshViewContext::Diff { list_context }
             | RefreshViewContext::UserCommand { list_context, .. }
             | RefreshViewContext::Refs { list_context, .. } => list_context,
         }

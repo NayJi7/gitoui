@@ -20,13 +20,14 @@ use crate::{
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{Commit, FileChange, Head, Ref, Repository},
+    git::{diff::DiffEntry, Commit, FileChange, Head, Ref, Repository},
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
     widget::commit_list::{CommitInfo, CommitListState},
 };
+use ratatui::style::Color;
 
 #[derive(Debug, Default)]
 enum StatusLine {
@@ -106,6 +107,24 @@ impl<'a> App<'a> {
                 CommitInfo::new(commit, refs, graph_color)
             })
             .collect();
+        let mut commits: Vec<CommitInfo> = commits;
+
+        if let Some(changes) = repository.uncommitted_changes() {
+            if changes.is_dirty() {
+                let uncommitted_info = CommitInfo::new_uncommitted(
+                    Color::Yellow,
+                    changes.staged.len(),
+                    changes.unstaged.len(),
+                    changes.untracked.len(),
+                );
+                commits.insert(0, uncommitted_info);
+                let mut shifted_map = FxHashMap::default();
+                for (name, idx) in &ref_name_to_commit_index_map {
+                    shifted_map.insert(*name, *idx + 1);
+                }
+                ref_name_to_commit_index_map = shifted_map;
+            }
+        }
         let graph_cell_width = match cell_width_type {
             CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
             CellWidthType::Single => (graph.max_pos_x + 1) as u16,
@@ -254,6 +273,13 @@ impl App<'_> {
                 AppEvent::CloseHelp => {
                     terminal.clear()?;
                     self.close_help();
+                }
+                AppEvent::OpenDiff => {
+                    self.open_diff();
+                }
+                AppEvent::CloseDiff => {
+                    terminal.clear()?;
+                    self.close_diff();
                 }
                 AppEvent::SelectOlderCommit => {
                     self.select_older_commit();
@@ -445,6 +471,37 @@ impl App<'_> {
         }
     }
 
+    fn open_diff(&mut self) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => view.take_list_state(),
+            View::UserCommand(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        let hash = commit_list_state.selected_commit_hash();
+        match DiffEntry::load_for_commit(self.repository.path(), hash.as_str()) {
+            Ok(diff_entries) => {
+                self.view = View::of_diff_with_entries(
+                    commit_list_state,
+                    diff_entries,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn close_diff(&mut self) {
+        if let View::Diff(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
     fn open_user_command(
         &mut self,
         user_command_number: usize,
@@ -616,6 +673,11 @@ impl App<'_> {
     fn select_older_commit(&mut self) {
         if let View::Detail(ref mut view) = self.view {
             view.select_older_commit(self.repository);
+        } else if let View::Diff(ref mut view) = self.view {
+            let hash = view.as_list_state().selected_commit_hash().as_str().to_string();
+            if let Err(err) = view.select_older_commit(self.repository.path(), &hash) {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
         } else if let View::UserCommand(ref mut view) = self.view {
             view.select_older_commit(
                 self.repository,
@@ -628,6 +690,11 @@ impl App<'_> {
     fn select_newer_commit(&mut self) {
         if let View::Detail(ref mut view) = self.view {
             view.select_newer_commit(self.repository);
+        } else if let View::Diff(ref mut view) = self.view {
+            let hash = view.as_list_state().selected_commit_hash().as_str().to_string();
+            if let Err(err) = view.select_newer_commit(self.repository.path(), &hash) {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
         } else if let View::UserCommand(ref mut view) = self.view {
             view.select_newer_commit(
                 self.repository,
@@ -640,6 +707,11 @@ impl App<'_> {
     fn select_parent_commit(&mut self) {
         if let View::Detail(ref mut view) = self.view {
             view.select_parent_commit(self.repository);
+        } else if let View::Diff(ref mut view) = self.view {
+            let hash = view.as_list_state().selected_commit_hash().as_str().to_string();
+            if let Err(err) = view.select_parent_commit(self.repository.path(), &hash) {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
         } else if let View::UserCommand(ref mut view) = self.view {
             view.select_parent_commit(
                 self.repository,
@@ -657,6 +729,9 @@ impl App<'_> {
             RefreshViewContext::List { .. } => {}
             RefreshViewContext::Detail { .. } => {
                 self.open_detail();
+            }
+            RefreshViewContext::Diff { .. } => {
+                self.open_diff();
             }
             RefreshViewContext::UserCommand {
                 user_command_context,
