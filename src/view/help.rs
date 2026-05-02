@@ -93,6 +93,16 @@ impl HelpView<'_> {
                     self.scroll_half_page_up();
                 }
             }
+            UserEvent::ScrollDown => {
+                for _ in 0..count {
+                    self.scroll_down();
+                }
+            }
+            UserEvent::ScrollUp => {
+                for _ in 0..count {
+                    self.scroll_up();
+                }
+            }
             UserEvent::GoToTop => {
                 self.select_first();
             }

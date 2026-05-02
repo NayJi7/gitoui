@@ -272,8 +272,8 @@ impl<'a> ListView<'a> {
             list_state.select_first();
         } else {
             list_state.select_commit_hash(&CommitHash::from(commit_hash.as_str()));
-            for _ in 0..*selected {
-                list_state.scroll_up();
+            if list_state.total() > *height {
+                list_state.restore_visual_selection(*selected);
             }
         }
     }

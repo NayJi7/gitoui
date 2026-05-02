@@ -87,6 +87,16 @@ impl<'a> DetailView<'a> {
                     self.commit_detail_state.scroll_half_page_up();
                 }
             }
+            UserEvent::ScrollDown => {
+                for _ in 0..count {
+                    self.commit_detail_state.scroll_down();
+                }
+            }
+            UserEvent::ScrollUp => {
+                for _ in 0..count {
+                    self.commit_detail_state.scroll_up();
+                }
+            }
             UserEvent::GoToTop => {
                 self.commit_detail_state.select_first();
             }

@@ -880,7 +880,7 @@ impl App<'_> {
             MouseEventKind::ScrollUp => {
                 let _ = self.view.handle_event(
                     crate::event::UserEventWithCount::new(
-                        crate::event::UserEvent::NavigateUp,
+                        crate::event::UserEvent::ScrollUp,
                         3,
                     ),
                     ratatui::crossterm::event::KeyEvent::new(
@@ -892,7 +892,7 @@ impl App<'_> {
             MouseEventKind::ScrollDown => {
                 let _ = self.view.handle_event(
                     crate::event::UserEventWithCount::new(
-                        crate::event::UserEvent::NavigateDown,
+                        crate::event::UserEvent::ScrollDown,
                         3,
                     ),
                     ratatui::crossterm::event::KeyEvent::new(

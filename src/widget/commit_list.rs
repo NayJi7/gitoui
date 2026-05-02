@@ -408,21 +408,23 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn scroll_down(&mut self) {
-        if self.offset + self.height < self.total {
+        let max_offset = self.total.saturating_sub(self.height);
+        if self.offset < max_offset {
             self.offset += 1;
-            if self.selected > 0 {
-                self.selected -= 1;
-            }
         }
     }
 
     pub fn scroll_up(&mut self) {
         if self.offset > 0 {
             self.offset -= 1;
-            if self.selected < self.height - 1 {
-                self.selected += 1;
-            }
         }
+    }
+
+    pub fn restore_visual_selection(&mut self, visual_row: usize) {
+        let current_index = self.current_selected_index();
+        let max_offset = self.total.saturating_sub(self.height);
+        self.offset = current_index.saturating_sub(visual_row).min(max_offset);
+        self.selected = current_index.saturating_sub(self.offset);
     }
 
     pub fn scroll_down_page(&mut self) {
