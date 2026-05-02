@@ -1483,6 +1483,7 @@ fn build_graph_image(
                 image_params,
                 drawing_pixels,
                 graph_style,
+                false,
             );
             (edges.clone(), graph_row_image)
         })

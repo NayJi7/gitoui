@@ -35,8 +35,10 @@ pub enum GraphImageWidthMode {
 pub struct GraphImageManager<'a> {
     prepared_image_map: FxHashMap<CommitHash, PreparedImage>,
     uncommitted_image: Option<PreparedImage>,
+    uncommitted_image_selected: Option<PreparedImage>,
     image_ids: FxHashSet<u32>,
     pending_uploads: Vec<String>,
+    selected_commit_hash: Option<CommitHash>,
 
     graph: &'a Graph<'a>,
     cell_width_type: CellWidthType,
@@ -63,8 +65,10 @@ impl<'a> GraphImageManager<'a> {
         GraphImageManager {
             prepared_image_map: FxHashMap::default(),
             uncommitted_image: None,
+            uncommitted_image_selected: None,
             image_ids: FxHashSet::default(),
             pending_uploads: Vec::default(),
+            selected_commit_hash: None,
             graph,
             cell_width_type,
             graph_style,
@@ -92,7 +96,8 @@ impl<'a> GraphImageManager<'a> {
         if self.prepared_image_map.contains_key(commit_hash) {
             return;
         }
-        let image_id = graph_image_id(self.session_nonce, commit_hash);
+        let selected = self.selected_commit_hash.as_ref() == Some(commit_hash);
+        let image_id = graph_image_id(self.session_nonce, commit_hash, selected);
         let graph_row_image = build_single_graph_row_image(
             self.graph,
             &self.image_params,
@@ -100,6 +105,7 @@ impl<'a> GraphImageManager<'a> {
             self.graph_style,
             self.image_width_mode,
             commit_hash,
+            selected,
         );
         let mut image =
             graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
@@ -110,11 +116,20 @@ impl<'a> GraphImageManager<'a> {
         self.image_ids.insert(image_id);
     }
 
-    pub fn ensure_uploaded_uncommitted(&mut self, _graph_color: ratatui::style::Color) {
-        if self.uncommitted_image.is_some() {
+    pub fn ensure_uploaded_uncommitted(&mut self, _graph_color: ratatui::style::Color, selected: bool) {
+        let cache = if selected {
+            &mut self.uncommitted_image_selected
+        } else {
+            &mut self.uncommitted_image
+        };
+        if cache.is_some() {
             return;
         }
-        let image_id = self.session_nonce ^ 0xFFFF_FFFF;
+        let image_id = if selected {
+            (self.session_nonce ^ 0xFFFF_FFFF).wrapping_add(1)
+        } else {
+            self.session_nonce ^ 0xFFFF_FFFF
+        };
         let cell_count = match self.image_width_mode {
             GraphImageWidthMode::Compact => 1,
             GraphImageWidthMode::Fixed => self.graph.max_pos_x + 1,
@@ -124,6 +139,7 @@ impl<'a> GraphImageManager<'a> {
             cell_count,
             &self.image_params,
             &self.drawing_pixels,
+            selected,
         );
         let mut image =
             graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
@@ -131,11 +147,41 @@ impl<'a> GraphImageManager<'a> {
             self.pending_uploads.push(upload_data);
         }
         self.image_ids.insert(image_id);
-        self.uncommitted_image = Some(image);
+        *cache = Some(image);
     }
 
-    pub fn prepared_image_uncommitted(&self) -> &PreparedImage {
-        self.uncommitted_image.as_ref().unwrap()
+    pub fn prepared_image_uncommitted(&self, selected: bool) -> &PreparedImage {
+        if selected {
+            self.uncommitted_image_selected.as_ref().unwrap()
+        } else {
+            self.uncommitted_image.as_ref().unwrap()
+        }
+    }
+
+    pub fn selected_commit_hash(&self) -> Option<&CommitHash> {
+        self.selected_commit_hash.as_ref()
+    }
+
+    pub fn set_selected_commit_hash(&mut self, commit_hash: Option<&CommitHash>) {
+        if self.selected_commit_hash.as_ref() == commit_hash {
+            return;
+        }
+        self.selected_commit_hash = commit_hash.cloned();
+    }
+
+    pub fn invalidate(&mut self, commit_hash: &CommitHash) {
+        self.prepared_image_map.remove(commit_hash);
+        self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, true));
+        self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, false));
+    }
+
+    pub fn invalidate_uncommitted(&mut self) {
+        self.uncommitted_image = None;
+        self.uncommitted_image_selected = None;
+        let id1 = self.session_nonce ^ 0xFFFF_FFFF;
+        let id2 = id1.wrapping_add(1);
+        self.image_ids.remove(&id1);
+        self.image_ids.remove(&id2);
     }
 }
 
@@ -186,10 +232,11 @@ fn create_session_nonce() -> u32 {
     hasher.finish() as u32
 }
 
-fn graph_image_id(session_nonce: u32, commit_hash: &CommitHash) -> u32 {
+fn graph_image_id(session_nonce: u32, commit_hash: &CommitHash, selected: bool) -> u32 {
     let mut hasher = rustc_hash::FxHasher::default();
     session_nonce.hash(&mut hasher);
     commit_hash.hash(&mut hasher);
+    selected.hash(&mut hasher);
     hasher.finish() as u32
 }
 
@@ -257,6 +304,7 @@ fn build_single_graph_row_image(
     graph_style: GraphStyle,
     image_width_mode: GraphImageWidthMode,
     commit_hash: &CommitHash,
+    selected: bool,
 ) -> GraphRowImage {
     let (pos_x, pos_y) = graph.commit_pos_map[&commit_hash];
     let edges = &graph.edges[pos_y];
@@ -275,6 +323,7 @@ fn build_single_graph_row_image(
         image_params,
         drawing_pixels,
         graph_style,
+        selected,
     )
 }
 
@@ -641,6 +690,7 @@ pub fn calc_graph_row_image(
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
     graph_style: GraphStyle,
+    selected: bool,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -648,7 +698,11 @@ pub fn calc_graph_row_image(
     let mut img_buf = image::ImageBuffer::new(image_width, image_height);
 
     draw_background(&mut img_buf, image_params);
-    draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    if selected {
+        draw_selected_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    } else {
+        draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    }
 
     match graph_style {
         GraphStyle::Rounded => {
@@ -686,6 +740,7 @@ fn calc_hollow_circle_graph_row_image(
     cell_count: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    selected: bool,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -694,6 +749,9 @@ fn calc_hollow_circle_graph_row_image(
 
     draw_background(&mut img_buf, image_params);
     draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    if selected {
+        draw_arrow_in_circle(&mut img_buf, commit_pos_x, image_params);
+    }
 
     let bytes = build_image(&img_buf, image_width, image_height);
 
@@ -715,6 +773,50 @@ fn draw_hollow_circle(
 
         let pixel = img_buf.get_pixel_mut(x, y);
         *pixel = color;
+    }
+}
+
+fn draw_selected_commit(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    circle_pos_x: usize,
+    image_params: &ImageParams,
+    drawing_pixels: &DrawingPixels,
+) {
+    let x_offset = (circle_pos_x * image_params.width as usize) as i32;
+    let color = image_params.edge_color(circle_pos_x);
+
+    for (x, y) in &drawing_pixels.circle_edge {
+        let x = (*x + x_offset) as u32;
+        let y = *y as u32;
+
+        let pixel = img_buf.get_pixel_mut(x, y);
+        *pixel = color;
+    }
+
+    draw_arrow_in_circle(img_buf, circle_pos_x, image_params);
+}
+
+fn draw_arrow_in_circle(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    circle_pos_x: usize,
+    image_params: &ImageParams,
+) {
+    let center_x = (circle_pos_x * image_params.width as usize + image_params.width as usize / 2) as i32;
+    let center_y = (image_params.height / 2) as i32;
+    let arrow_color = image::Rgba([0xff, 0xff, 0xff, 0xff]);
+
+    let arrow_size = (image_params.circle_inner_radius as i32 / 2).max(2);
+    let base_x = center_x - arrow_size;
+
+    for dy in -arrow_size..=arrow_size {
+        let y = center_y + dy;
+        let width = arrow_size + 1 - dy.abs();
+        for dx in 0..width {
+            let x = base_x + dx;
+            if x >= 0 && x < img_buf.width() as i32 && y >= 0 && y < img_buf.height() as i32 {
+                img_buf.put_pixel(x as u32, y as u32, arrow_color);
+            }
+        }
     }
 }
 
@@ -1027,6 +1129,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1053,6 +1156,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1079,6 +1183,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1104,6 +1209,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1131,6 +1237,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1157,6 +1264,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1188,6 +1296,7 @@ mod tests {
             image_params,
             drawing_pixels,
             graph_style,
+            false,
             file_name,
         );
     }
@@ -1231,6 +1340,7 @@ mod tests {
         image_params: ImageParams,
         drawing_pixels: DrawingPixels,
         graph_style: GraphStyle,
+        selected: bool,
         file_name: &str,
     ) {
         let graph_row_images: Vec<GraphRowImage> = params
@@ -1247,6 +1357,7 @@ mod tests {
                     &image_params,
                     &drawing_pixels,
                     graph_style,
+                    selected,
                 )
             })
             .collect();

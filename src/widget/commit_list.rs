@@ -292,17 +292,38 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn ensure_visible_graph_uploaded(&mut self) {
+        let current_selected_hash = self.selected_commit_hash().clone();
+        let manager_selected = self.graph_image_manager.selected_commit_hash().cloned();
+        if manager_selected.as_ref() != Some(&current_selected_hash) {
+            if let Some(old) = manager_selected {
+                if old == self.uncommitted_hash {
+                    self.graph_image_manager.invalidate_uncommitted();
+                } else {
+                    self.graph_image_manager.invalidate(&old);
+                }
+            }
+            if current_selected_hash == self.uncommitted_hash {
+                self.graph_image_manager.invalidate_uncommitted();
+            } else {
+                self.graph_image_manager.invalidate(&current_selected_hash);
+            }
+            self.graph_image_manager
+                .set_selected_commit_hash(Some(&current_selected_hash));
+        }
+
         self.commits
             .iter()
             .skip(self.offset)
             .take(self.height)
-            .for_each(|commit_info| {
+            .enumerate()
+            .for_each(|(i, commit_info)| {
                 if let Some(commit) = commit_info.commit {
                     self.graph_image_manager
                         .ensure_uploaded(&commit.commit_hash);
                 } else if commit_info.is_uncommitted {
+                    let is_selected = i == self.selected;
                     self.graph_image_manager
-                        .ensure_uploaded_uncommitted(commit_info.graph_color);
+                        .ensure_uploaded_uncommitted(commit_info.graph_color, is_selected);
                 }
             });
     }
@@ -754,11 +775,12 @@ impl<'a> CommitListState<'a> {
         }
     }
 
-    fn prepared_image(&self, commit_info: &'a CommitInfo) -> &PreparedImage {
+    fn prepared_image(&self, commit_info: &'a CommitInfo, visible_row_index: usize) -> &PreparedImage {
         if let Some(commit) = commit_info.commit {
             self.graph_image_manager.prepared_image(&commit.commit_hash)
         } else {
-            self.graph_image_manager.prepared_image_uncommitted()
+            let is_selected = visible_row_index == self.selected;
+            self.graph_image_manager.prepared_image_uncommitted(is_selected)
         }
     }
 }
@@ -829,7 +851,7 @@ impl CommitList<'_> {
         }
         self.rendering_commit_info_iter(state)
             .for_each(|(i, commit_info)| {
-                let prepared_image = state.prepared_image(commit_info);
+                let prepared_image = state.prepared_image(commit_info, i);
                 let max_graph_width = area.width.saturating_sub(1) as usize;
                 let y = area.top() + i as u16;
                 for (x, image_cell) in prepared_image

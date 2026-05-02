@@ -5,7 +5,7 @@ use std::{
 
 use ratatui::{
     crossterm::event::{KeyCode, KeyEvent},
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Padding, Paragraph},
@@ -277,6 +277,9 @@ impl App<'_> {
                 AppEvent::OpenDiff => {
                     self.open_diff();
                 }
+                AppEvent::OpenFileDiff { hash, file_path } => {
+                    self.open_file_diff(hash, file_path);
+                }
                 AppEvent::CloseDiff => {
                     terminal.clear()?;
                     self.close_diff();
@@ -349,8 +352,7 @@ impl App<'_> {
 
     fn render(&mut self, f: &mut Frame) {
         let base = Block::default()
-            .fg(self.ctx.color_theme.fg)
-            .bg(self.ctx.color_theme.bg);
+            .fg(self.ctx.color_theme.fg);
         f.render_widget(base, f.area());
 
         let [view_area, status_line_area] = split_app_areas(f.area());
@@ -418,12 +420,36 @@ impl App<'_> {
             &self.app_status.status_line,
             StatusLine::None | StatusLine::NotificationInfo(_)
         );
+        let is_normal_mode = matches!(&self.app_status.status_line, StatusLine::None);
+
+        let status_area = if is_normal_mode {
+            let [left_area, right_area] = Layout::horizontal([
+                Constraint::Min(0),
+                Constraint::Length(35),
+            ]).areas(area);
+
+            let shortcut_spans = vec![Span::styled("d:diff  q:quit  ?:help  r:refresh", dim_text)];
+            let shortcut_line = Line::from(shortcut_spans);
+            let shortcut_paragraph = Paragraph::new(shortcut_line)
+                .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+                .alignment(Alignment::Right)
+                .block(Block::default().padding(Padding::horizontal(1)));
+            f.render_widget(shortcut_paragraph, right_area);
+
+            left_area
+        } else {
+            area
+        };
 
         if show_enhanced {
             match self.repository.head() {
                 Head::Branch { name } => {
                     spans.push(Span::styled(
-                        " ● ",
+                        "HEAD → ",
+                        Style::default().fg(Color::Rgb(125, 207, 255)).add_modifier(Modifier::BOLD),
+                    ));
+                    spans.push(Span::styled(
+                        "● ",
                         Style::default().fg(Color::Rgb(122, 162, 247)),
                     ));
                     spans.push(Span::styled(
@@ -435,8 +461,12 @@ impl App<'_> {
                 }
                 Head::Detached { .. } => {
                     spans.push(Span::styled(
-                        " ● detached",
-                        Style::default().fg(Color::Rgb(255, 158, 100)),
+                        "HEAD → ",
+                        Style::default().fg(Color::Rgb(125, 207, 255)).add_modifier(Modifier::BOLD),
+                    ));
+                    spans.push(Span::styled(
+                        "● detached",
+                        Style::default().fg(Color::Rgb(255, 158, 100)).add_modifier(Modifier::BOLD),
                     ));
                 }
                 Head::None => {}
@@ -467,30 +497,15 @@ impl App<'_> {
                             Style::default().fg(Color::Rgb(187, 154, 247)),
                         ));
                     }
-                } else {
-                    spans.push(Span::styled(" │ ", dim_separator));
-                    spans.push(Span::styled(
-                        " ✓ clean",
-                        Style::default().fg(Color::Rgb(158, 206, 106)),
-                    ));
                 }
             }
-
-            spans.push(Span::styled(" │ ", dim_separator));
-            let protocol_name = match self.ctx.image_protocol {
-                ImageProtocol::Kitty => "Kitty",
-                ImageProtocol::KittyUnicode { .. } => "Kitty/Tmux",
-                ImageProtocol::Iterm2 => "iTerm2",
-                ImageProtocol::Sixel => "Sixel",
-            };
-            spans.push(Span::styled(format!(" {} ⊙", protocol_name), dim_text));
         }
 
         let line = Line::from(spans);
         let paragraph = Paragraph::new(line)
             .style(Style::default().bg(Color::Rgb(36, 40, 59)))
             .block(Block::default().padding(Padding::horizontal(1)));
-        f.render_widget(paragraph, area);
+        f.render_widget(paragraph, status_area);
 
         if let StatusLine::Input(_, Some(cursor_pos), _) = &self.app_status.status_line {
             let (x, y) = (area.x + cursor_pos + 1, area.y);
@@ -566,6 +581,27 @@ impl App<'_> {
                 self.view = View::of_diff_with_entries(
                     commit_list_state,
                     diff_entries,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_file_diff(&mut self, hash: String, file_path: String) {
+        let commit_list_state = match self.view {
+            View::Detail(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        match DiffEntry::load_for_file(self.repository.path(), &hash, &file_path) {
+            Ok(diff_entry) => {
+                self.view = View::of_diff_with_entries(
+                    commit_list_state,
+                    vec![diff_entry],
                     self.ctx.clone(),
                     self.ec.sender(),
                 );

@@ -18,9 +18,14 @@ use crate::{
 pub struct CommitDetailState {
     height: usize,
     offset: usize,
+    pub selected_file: usize,
 }
 
 impl CommitDetailState {
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
     pub fn scroll_down(&mut self) {
         self.offset = self.offset.saturating_add(1);
     }
@@ -47,10 +52,26 @@ impl CommitDetailState {
 
     pub fn select_first(&mut self) {
         self.offset = 0;
+        self.selected_file = 0;
     }
 
     pub fn select_last(&mut self) {
         self.offset = usize::MAX;
+    }
+
+    pub fn select_next_file(&mut self, total: usize) {
+        if total == 0 {
+            return;
+        }
+        if self.selected_file < total.saturating_sub(1) {
+            self.selected_file += 1;
+        }
+    }
+
+    pub fn select_prev_file(&mut self) {
+        if self.selected_file > 0 {
+            self.selected_file -= 1;
+        }
     }
 }
 
@@ -84,10 +105,20 @@ impl StatefulWidget for CommitDetail<'_> {
         let [labels_area, value_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(area);
 
-        let (mut label_lines, mut value_lines) = self.contents(area);
+        let (mut label_lines, mut value_lines, changes_start) = self.contents(area);
 
         let content_area_height = area.height as usize - 1; // minus the top border
-        self.update_state(state, value_lines.len(), content_area_height);
+        self.update_state(state, value_lines.len(), content_area_height, changes_start);
+
+        // Apply selection highlight to the selected file line
+        if !self.changes.is_empty() {
+            let selected_line = changes_start + state.selected_file;
+            for (i, line) in value_lines.iter_mut().enumerate() {
+                if i == selected_line {
+                    line.style = Style::default().add_modifier(Modifier::REVERSED);
+                }
+            }
+        }
 
         label_lines = label_lines.into_iter().skip(state.offset).collect();
         value_lines = value_lines.into_iter().skip(state.offset).collect();
@@ -122,7 +153,7 @@ impl CommitDetail<'_> {
         paragraph.render(area, buf);
     }
 
-    fn contents(&self, area: Rect) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
+    fn contents(&self, area: Rect) -> (Vec<Line<'_>>, Vec<Line<'_>>, usize) {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
@@ -155,7 +186,9 @@ impl CommitDetail<'_> {
         value_lines.push(self.divider_line(area.width as usize));
         value_lines.extend(self.changes_lines());
 
-        (label_lines, value_lines)
+        let changes_start = value_lines.len() - self.changes.len();
+
+        (label_lines, value_lines, changes_start)
     }
 
     fn author_lines(&self) -> Vec<Line<'_>> {
@@ -310,9 +343,25 @@ impl CommitDetail<'_> {
         Line::from("─".repeat(width).fg(self.ctx.color_theme.divider_fg))
     }
 
-    fn update_state(&self, state: &mut CommitDetailState, line_count: usize, area_height: usize) {
+    fn update_state(
+        &self,
+        state: &mut CommitDetailState,
+        line_count: usize,
+        area_height: usize,
+        changes_start: usize,
+    ) {
         state.height = area_height;
         state.offset = state.offset.min(line_count.saturating_sub(area_height));
+
+        // Auto-scroll to keep the selected file visible
+        if !self.changes.is_empty() {
+            let selected_line = changes_start + state.selected_file;
+            if selected_line < state.offset {
+                state.offset = selected_line;
+            } else if selected_line >= state.offset + area_height {
+                state.offset = selected_line.saturating_sub(area_height - 1);
+            }
+        }
     }
 }
 

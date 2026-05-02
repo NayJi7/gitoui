@@ -28,6 +28,7 @@ pub struct DetailView<'a> {
 
     ctx: Rc<AppContext>,
     tx: Sender,
+    list_height: usize,
 }
 
 impl<'a> DetailView<'a> {
@@ -47,6 +48,7 @@ impl<'a> DetailView<'a> {
             refs,
             ctx,
             tx,
+            list_height: 0,
         }
     }
 
@@ -112,11 +114,17 @@ impl<'a> DetailView<'a> {
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);
             }
-            UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close => {
+            UserEvent::Confirm => {
+                self.open_selected_file_diff();
+            }
+            UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
             }
             UserEvent::NavigateRight => {
-                self.tx.send(AppEvent::OpenDiff);
+                self.commit_detail_state.select_next_file(self.changes.len());
+            }
+            UserEvent::NavigateLeft => {
+                self.commit_detail_state.select_prev_file();
             }
             UserEvent::Refresh => {
                 self.refresh();
@@ -138,6 +146,7 @@ impl<'a> DetailView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
+        self.list_height = list_area.height as usize;
         self.as_mut_list_state()
             .update_height(list_area.height as usize);
     }
@@ -223,9 +232,68 @@ impl<'a> DetailView<'a> {
     }
 
     pub fn handle_click(&mut self, _col: u16, row: u16) {
-        let list_state = self.as_mut_list_state();
-        let (_, offset, height) = list_state.current_list_status();
-        let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
-        list_state.select(clicked_index);
+        if (row as usize) < self.list_height {
+            let list_state = self.as_mut_list_state();
+            let (_, offset, height) = list_state.current_list_status();
+            let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
+            list_state.select(clicked_index);
+        } else {
+            let detail_local_row = (row as usize) - self.list_height;
+            if detail_local_row == 0 {
+                return; // clicked on border
+            }
+            let content_row = detail_local_row - 1;
+            let clicked_line = self.commit_detail_state.offset() + content_row;
+            let changes_start = self.compute_changes_start_line();
+            if clicked_line >= changes_start && clicked_line < changes_start + self.changes.len() {
+                let file_idx = clicked_line - changes_start;
+                self.commit_detail_state.selected_file = file_idx;
+                self.open_selected_file_diff();
+            }
+        }
+    }
+
+    fn open_selected_file_diff(&self) {
+        if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
+            let file_path = match change {
+                FileChange::Add { path } | FileChange::Modify { path } | FileChange::Delete { path } => path.clone(),
+                FileChange::Move { to, .. } => to.clone(),
+            };
+            let _ = self.tx.send(AppEvent::OpenFileDiff {
+                hash: self.commit.commit_hash.as_str().to_string(),
+                file_path,
+            });
+        }
+    }
+
+    fn compute_changes_start_line(&self) -> usize {
+        let mut count = 0;
+        count += 2; // author name + date
+        if self.commit.author_name != self.commit.committer_name
+            || self.commit.author_email != self.commit.committer_email
+            || self.commit.author_date != self.commit.committer_date
+        {
+            count += 2; // committer name + date
+        }
+        count += 1; // SHA
+        if !self.commit.parent_commit_hashes.is_empty() {
+            count += 1; // Parents
+        }
+        if self.refs.iter().any(|r| {
+            matches!(
+                r,
+                Ref::Branch { .. } | Ref::RemoteBranch { .. } | Ref::Tag { .. }
+            )
+        }) {
+            count += 1; // Refs
+        }
+        count += 1; // divider
+        count += 1; // subject
+        if !self.commit.body.is_empty() {
+            count += 1; // empty line
+            count += self.commit.body.lines().count();
+        }
+        count += 1; // divider
+        count
     }
 }

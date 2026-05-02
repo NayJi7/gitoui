@@ -30,6 +30,7 @@ pub enum AppEvent {
     OpenHelp,
     CloseHelp,
     OpenDiff,
+    OpenFileDiff { hash: String, file_path: String },
     CloseDiff,
     SelectNewerCommit,
     SelectOlderCommit,
