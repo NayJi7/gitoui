@@ -59,12 +59,12 @@ impl<'a> DetailView<'a> {
         match event {
             UserEvent::NavigateDown => {
                 for _ in 0..count {
-                    self.commit_detail_state.scroll_down();
+                    self.commit_detail_state.select_next_file(self.changes.len());
                 }
             }
             UserEvent::NavigateUp => {
                 for _ in 0..count {
-                    self.commit_detail_state.scroll_up();
+                    self.commit_detail_state.select_prev_file();
                 }
             }
             UserEvent::PageDown => {
@@ -119,12 +119,6 @@ impl<'a> DetailView<'a> {
             }
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
-            }
-            UserEvent::NavigateRight => {
-                self.commit_detail_state.select_next_file(self.changes.len());
-            }
-            UserEvent::NavigateLeft => {
-                self.commit_detail_state.select_prev_file();
             }
             UserEvent::Refresh => {
                 self.refresh();
@@ -232,23 +226,48 @@ impl<'a> DetailView<'a> {
     }
 
     pub fn handle_click(&mut self, _col: u16, row: u16) {
-        if (row as usize) < self.list_height {
-            let list_state = self.as_mut_list_state();
-            let (_, offset, height) = list_state.current_list_status();
-            let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
-            list_state.select(clicked_index);
-        } else {
-            let detail_local_row = (row as usize) - self.list_height;
-            if detail_local_row == 0 {
-                return; // clicked on border
-            }
-            let content_row = detail_local_row - 1;
-            let clicked_line = self.commit_detail_state.offset() + content_row;
-            let changes_start = self.compute_changes_start_line();
-            if clicked_line >= changes_start && clicked_line < changes_start + self.changes.len() {
-                let file_idx = clicked_line - changes_start;
+        let row = row as usize;
+        if row < self.list_height {
+            // Ignore clicks in the commit list pane when in detail view
+            return;
+        }
+
+        let detail_local_row = row - self.list_height;
+        if detail_local_row == 0 {
+            return; // clicked on border
+        }
+
+        let content_row = detail_local_row - 1;
+        let clicked_line = self.commit_detail_state.offset() + content_row;
+        let changes_start = self.compute_changes_start_line();
+
+        if clicked_line >= changes_start && clicked_line < changes_start + self.changes.len() {
+            let file_idx = clicked_line - changes_start;
+            self.commit_detail_state.selected_file = file_idx;
+            self.open_selected_file_diff();
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
+        let row = row as usize;
+        if row < self.list_height {
+            // Ignore mouse movement in the commit list pane
+            return;
+        }
+
+        let detail_local_row = row - self.list_height;
+        if detail_local_row == 0 {
+            return; // border
+        }
+
+        let content_row = detail_local_row - 1;
+        let hover_line = self.commit_detail_state.offset() + content_row;
+        let changes_start = self.compute_changes_start_line();
+
+        if hover_line >= changes_start && hover_line < changes_start + self.changes.len() {
+            let file_idx = hover_line - changes_start;
+            if file_idx != self.commit_detail_state.selected_file {
                 self.commit_detail_state.selected_file = file_idx;
-                self.open_selected_file_diff();
             }
         }
     }

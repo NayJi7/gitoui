@@ -583,6 +583,7 @@ impl App<'_> {
                     diff_entries,
                     self.ctx.clone(),
                     self.ec.sender(),
+                    String::new(),
                 );
             }
             Err(err) => {
@@ -599,11 +600,13 @@ impl App<'_> {
         };
         match DiffEntry::load_for_file(self.repository.path(), &hash, &file_path) {
             Ok(diff_entry) => {
+                let title = format!("Diff: {}", file_path);
                 self.view = View::of_diff_with_entries(
                     commit_list_state,
                     vec![diff_entry],
                     self.ctx.clone(),
                     self.ec.sender(),
+                    title,
                 );
             }
             Err(err) => {
@@ -900,6 +903,9 @@ impl App<'_> {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 self.view.handle_click(mouse.column, mouse.row);
+            }
+            MouseEventKind::Moved => {
+                self.view.handle_mouse_move(mouse.column, mouse.row);
             }
             _ => {}
         }

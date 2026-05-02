@@ -129,12 +129,14 @@ impl<'a> View<'a> {
         diff_entries: Vec<crate::git::diff::DiffEntry>,
         ctx: Rc<AppContext>,
         tx: Sender,
+        title: String,
     ) -> Self {
         View::Diff(Box::new(DiffView::new(
             commit_list_state,
             diff_entries,
             ctx,
             tx,
+            title,
         )))
     }
 
@@ -173,6 +175,14 @@ impl<'a> View<'a> {
             View::Detail(view) => view.handle_click(col, row),
             View::Diff(view) => view.handle_click(col, row),
             View::UserCommand(view) => view.handle_click(col, row),
+            _ => {}
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        match self {
+            View::List(view) => view.handle_mouse_move(col, row),
+            View::Detail(view) => view.handle_mouse_move(col, row),
             _ => {}
         }
     }

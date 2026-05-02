@@ -214,9 +214,11 @@ pub struct CommitListState<'a> {
     graph_image_manager: GraphImageManager<'a>,
     graph_cell_width: u16,
     head: &'a Head,
+    head_commit_hash: Option<CommitHash>,
     uncommitted_hash: CommitHash,
 
     ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
+    branch_color_map: FxHashMap<String, Color>,
 
     search_state: SearchState,
     search_input: Input,
@@ -252,14 +254,32 @@ impl<'a> CommitListState<'a> {
         } else {
             CommitHash::default()
         };
+        let mut branch_color_map = FxHashMap::default();
+        for commit_info in &commits {
+            for r in &commit_info.refs {
+                if let Ref::Branch { name, .. } = r {
+                    branch_color_map.insert(name.clone(), commit_info.graph_color);
+                }
+            }
+        }
+        let head_commit_hash = match head {
+            Head::Detached { target } => Some(target.clone()),
+            Head::Branch { name } => ref_name_to_commit_index_map
+                .get(name.as_str())
+                .and_then(|&index| commits.get(index))
+                .and_then(|info| info.commit.map(|c| c.commit_hash.clone())),
+            Head::None => None,
+        };
         CommitListState {
             commits,
             commit_hash_set,
             graph_image_manager,
             graph_cell_width,
             head,
+            head_commit_hash,
             uncommitted_hash,
             ref_name_to_commit_index_map,
+            branch_color_map,
             search_state: SearchState::Inactive,
             search_input: Input::default(),
             search_matches: vec![SearchMatch::default(); total],
@@ -292,38 +312,38 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn ensure_visible_graph_uploaded(&mut self) {
-        let current_selected_hash = self.selected_commit_hash().clone();
-        let manager_selected = self.graph_image_manager.selected_commit_hash().cloned();
-        if manager_selected.as_ref() != Some(&current_selected_hash) {
-            if let Some(old) = manager_selected {
+        let current_head_hash = self.head_commit_hash.clone();
+        let manager_head = self.graph_image_manager.head_commit_hash().cloned();
+        if manager_head.as_ref() != current_head_hash.as_ref() {
+            if let Some(old) = manager_head {
                 if old == self.uncommitted_hash {
                     self.graph_image_manager.invalidate_uncommitted();
                 } else {
                     self.graph_image_manager.invalidate(&old);
                 }
             }
-            if current_selected_hash == self.uncommitted_hash {
-                self.graph_image_manager.invalidate_uncommitted();
-            } else {
-                self.graph_image_manager.invalidate(&current_selected_hash);
+            if let Some(new) = &current_head_hash {
+                if *new == self.uncommitted_hash {
+                    self.graph_image_manager.invalidate_uncommitted();
+                } else {
+                    self.graph_image_manager.invalidate(new);
+                }
             }
             self.graph_image_manager
-                .set_selected_commit_hash(Some(&current_selected_hash));
+                .set_head_commit_hash(current_head_hash.as_ref());
         }
 
         self.commits
             .iter()
             .skip(self.offset)
             .take(self.height)
-            .enumerate()
-            .for_each(|(i, commit_info)| {
+            .for_each(|commit_info| {
                 if let Some(commit) = commit_info.commit {
                     self.graph_image_manager
                         .ensure_uploaded(&commit.commit_hash);
                 } else if commit_info.is_uncommitted {
-                    let is_selected = i == self.selected;
                     self.graph_image_manager
-                        .ensure_uploaded_uncommitted(commit_info.graph_color, is_selected);
+                        .ensure_uploaded_uncommitted(commit_info.graph_color);
                 }
             });
     }
@@ -509,6 +529,10 @@ impl<'a> CommitListState<'a> {
 
     pub fn current_list_status(&self) -> (usize, usize, usize) {
         (self.selected, self.offset, self.height)
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
     }
 
     pub fn reset_height(&mut self, height: usize) {
@@ -775,12 +799,11 @@ impl<'a> CommitListState<'a> {
         }
     }
 
-    fn prepared_image(&self, commit_info: &'a CommitInfo, visible_row_index: usize) -> &PreparedImage {
+    fn prepared_image(&self, commit_info: &'a CommitInfo, _visible_row_index: usize) -> &PreparedImage {
         if let Some(commit) = commit_info.commit {
             self.graph_image_manager.prepared_image(&commit.commit_hash)
         } else {
-            let is_selected = visible_row_index == self.selected;
-            self.graph_image_manager.prepared_image_uncommitted(is_selected)
+            self.graph_image_manager.prepared_image_uncommitted()
         }
     }
 }
@@ -895,6 +918,7 @@ impl CommitList<'_> {
                     state.head,
                     &state.search_matches[state.offset + i].refs,
                     &self.ctx.color_theme,
+                    &state.branch_color_map,
                 );
                 let ref_spans_width: usize = spans.iter().map(|s| s.width()).sum();
                 let max_width = max_width.saturating_sub(ref_spans_width);
@@ -1105,6 +1129,7 @@ fn refs_spans<'a>(
     head: &'a Head,
     refs_matches: &'a FxHashMap<String, SearchMatchPosition>,
     color_theme: &'a ColorTheme,
+    branch_color_map: &'a FxHashMap<String, Color>,
 ) -> Vec<Span<'a>> {
     let refs = &commit_info.refs;
 
@@ -1121,11 +1146,21 @@ fn refs_spans<'a>(
         .iter()
         .filter_map(|r| match r {
             Ref::Branch { name, .. } => {
-                let fg = color_theme.list_ref_branch_fg;
+                let fg = branch_color_map
+                    .get(name)
+                    .copied()
+                    .unwrap_or(color_theme.list_ref_branch_fg);
                 Some((name, fg))
             }
             Ref::RemoteBranch { name, .. } => {
-                let fg = color_theme.list_ref_remote_branch_fg;
+                let fg = branch_color_map
+                    .get(name)
+                    .copied()
+                    .or_else(|| {
+                        name.split_once('/')
+                            .and_then(|(_, branch)| branch_color_map.get(branch).copied())
+                    })
+                    .unwrap_or(color_theme.list_ref_remote_branch_fg);
                 Some((name, fg))
             }
             Ref::Tag { name, .. } => {

@@ -209,6 +209,15 @@
                 }
               ],
               "default": "Native"
+            },
+            "diff_mode": {
+              "type": "string",
+              "description": "The diff rendering mode. 'enhanced' shows a VS Code-style diff with line numbers and syntax highlighting. 'raw' shows the raw git diff output.",
+              "enum": [
+                "enhanced",
+                "raw"
+              ],
+              "default": "enhanced"
             }
           },
           "additionalProperties": false

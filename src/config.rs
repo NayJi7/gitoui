@@ -287,6 +287,14 @@ pub struct UiConfig {
     pub refs: UiRefsConfig,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffMode {
+    #[default]
+    Enhanced,
+    Raw,
+}
+
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct UiCommonConfig {
@@ -294,6 +302,8 @@ pub struct UiCommonConfig {
     pub cursor_type: CursorType,
     #[default = true]
     pub mouse_enabled: bool,
+    #[default(DiffMode::Enhanced)]
+    pub diff_mode: DiffMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -407,9 +417,9 @@ pub struct GraphConfig {
 pub struct GraphColorConfig {
     #[garde(length(min = 1), inner(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")))]
     #[default(vec![
+        "#3366ff".into(),
         "#ff3366".into(),
         "#33ff66".into(),
-        "#3366ff".into(),
         "#ff33ff".into(),
         "#33ffff".into(),
         "#ffff33".into(),
@@ -476,6 +486,7 @@ mod tests {
                 common: UiCommonConfig {
                     cursor_type: CursorType::Native,
                     mouse_enabled: true,
+                    diff_mode: DiffMode::Enhanced,
                 },
                 list: UiListConfig {
                     columns: vec![
@@ -504,9 +515,9 @@ mod tests {
                 row_image_width: GraphImageWidthMode::Compact,
                 color: GraphColorConfig {
                     branches: vec![
+                        "#3366ff".into(),
                         "#ff3366".into(),
                         "#33ff66".into(),
-                        "#3366ff".into(),
                         "#ff33ff".into(),
                         "#33ffff".into(),
                         "#ffff33".into(),
@@ -637,6 +648,7 @@ mod tests {
                 common: UiCommonConfig {
                     cursor_type: CursorType::Virtual("|".into()),
                     mouse_enabled: true,
+                    diff_mode: DiffMode::Enhanced,
                 },
                 list: UiListConfig {
                     columns: vec![
@@ -724,6 +736,7 @@ mod tests {
                 common: UiCommonConfig {
                     cursor_type: CursorType::Native,
                     mouse_enabled: true,
+                    diff_mode: DiffMode::Enhanced,
                 },
                 list: UiListConfig {
                     columns: vec![
@@ -752,9 +765,9 @@ mod tests {
                 row_image_width: GraphImageWidthMode::Compact,
                 color: GraphColorConfig {
                     branches: vec![
+                        "#3366ff".into(),
                         "#ff3366".into(),
                         "#33ff66".into(),
-                        "#3366ff".into(),
                         "#ff33ff".into(),
                         "#33ffff".into(),
                         "#ffff33".into(),

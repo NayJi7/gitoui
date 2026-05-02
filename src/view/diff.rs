@@ -3,7 +3,7 @@ use std::rc::Rc;
 use ratatui::{
     crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
     Frame,
@@ -11,6 +11,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
+    config::DiffMode,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::diff::{DiffEntry, DiffLineType},
     view::{ListRefreshViewContext, RefreshViewContext},
@@ -23,6 +24,7 @@ pub struct DiffView<'a> {
     diff_entries: Vec<DiffEntry>,
     scroll_offset: usize,
     content_height: usize,
+    title: String,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -34,12 +36,14 @@ impl<'a> DiffView<'a> {
         diff_entries: Vec<DiffEntry>,
         ctx: Rc<AppContext>,
         tx: Sender,
+        title: String,
     ) -> DiffView<'a> {
         DiffView {
             commit_list_state: Some(commit_list_state),
             diff_entries,
             scroll_offset: 0,
             content_height: 0,
+            title,
             ctx,
             tx,
         }
@@ -126,14 +130,46 @@ impl<'a> DiffView<'a> {
         let lines = self.build_diff_lines(&diff_area);
         self.content_height = lines.len();
 
-        let visible_lines: Vec<Line> = lines
-            .into_iter()
-            .skip(self.scroll_offset)
-            .take(diff_area.height as usize)
-            .collect();
+        if !self.title.is_empty() {
+            let [title_area, separator_area, content_area] = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(diff_area);
 
-        let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
-        f.render_widget(paragraph, diff_area);
+            let title = Line::from(Span::styled(
+                self.title.clone(),
+                Style::default()
+                    .fg(self.ctx.color_theme.fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            f.render_widget(Paragraph::new(title), title_area);
+
+            let separator = Line::from(
+                "─".repeat(diff_area.width as usize)
+                    .fg(self.ctx.color_theme.divider_fg),
+            );
+            f.render_widget(Paragraph::new(separator), separator_area);
+
+            let visible_lines: Vec<Line> = lines
+                .into_iter()
+                .skip(self.scroll_offset)
+                .take(content_area.height as usize)
+                .collect();
+
+            let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+            f.render_widget(paragraph, content_area);
+        } else {
+            let visible_lines: Vec<Line> = lines
+                .into_iter()
+                .skip(self.scroll_offset)
+                .take(diff_area.height as usize)
+                .collect();
+
+            let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+            f.render_widget(paragraph, diff_area);
+        }
     }
 
     pub fn update_layout(&mut self, area: Rect) {
@@ -174,6 +210,13 @@ impl<'a> DiffView<'a> {
     }
 
     fn build_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
+        match self.ctx.ui_config.common.diff_mode {
+            DiffMode::Raw => self.build_raw_diff_lines(diff_area),
+            DiffMode::Enhanced => self.build_enhanced_diff_lines(),
+        }
+    }
+
+    fn build_raw_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
         let width = diff_area.width as usize;
         let mut lines = Vec::new();
 
@@ -242,6 +285,146 @@ impl<'a> DiffView<'a> {
             }
 
             lines.push(Line::from(""));
+        }
+
+        lines
+    }
+
+    fn build_enhanced_diff_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+
+        for entry in &self.diff_entries {
+            // File header
+            let filename = entry
+                .new_path
+                .as_deref()
+                .or(entry.old_path.as_deref())
+                .unwrap_or("unknown");
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "─── ",
+                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                ),
+                Span::styled(
+                    filename.to_string(),
+                    Style::default()
+                        .fg(Color::Rgb(192, 202, 245))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " ───",
+                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                ),
+            ]));
+            lines.push(Line::from(""));
+
+            for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
+                // Show collapsed region between hunks
+                if hunk_idx > 0 {
+                    if let Some(prev_hunk) = entry.hunks.get(hunk_idx - 1) {
+                        let old_gap = hunk
+                            .old_start
+                            .saturating_sub(prev_hunk.old_start + prev_hunk.old_count);
+                        let new_gap = hunk
+                            .new_start
+                            .saturating_sub(prev_hunk.new_start + prev_hunk.new_count);
+                        let gap = old_gap.max(new_gap);
+                        if gap > 0 {
+                            lines.push(Line::from(vec![Span::styled(
+                                format!("─── {} lines unchanged ───", gap),
+                                Style::default()
+                                    .fg(Color::Rgb(59, 66, 97))
+                                    .add_modifier(Modifier::ITALIC),
+                            )]));
+                            lines.push(Line::from(""));
+                        }
+                    }
+                }
+
+                // Hunk header
+                if let Some(header_line) = hunk.lines.first() {
+                    lines.push(Line::from(vec![Span::styled(
+                        header_line.content.clone(),
+                        Style::default()
+                            .fg(Color::Rgb(86, 95, 137))
+                            .add_modifier(Modifier::ITALIC),
+                    )]));
+                }
+
+                // Context/addition/deletion lines
+                for diff_line in hunk.lines.iter().skip(1) {
+                    match diff_line.line_type {
+                        DiffLineType::Addition => {
+                            let line_num =
+                                format!("{:>4}", diff_line.new_line_no.unwrap_or(0));
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    line_num,
+                                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                                ),
+                                Span::styled(
+                                    " │ ",
+                                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                                ),
+                                Span::styled(
+                                    diff_line.content.clone(),
+                                    Style::default()
+                                        .fg(Color::Rgb(158, 206, 106))
+                                        .bg(Color::Rgb(29, 43, 59)),
+                                ),
+                            ]));
+                        }
+                        DiffLineType::Deletion => {
+                            let line_num =
+                                format!("{:>4}", diff_line.old_line_no.unwrap_or(0));
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    line_num,
+                                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                                ),
+                                Span::styled(
+                                    " │ ",
+                                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                                ),
+                                Span::styled(
+                                    diff_line.content.clone(),
+                                    Style::default()
+                                        .fg(Color::Rgb(247, 118, 142))
+                                        .bg(Color::Rgb(59, 29, 43)),
+                                ),
+                            ]));
+                        }
+                        DiffLineType::Context => {
+                            let line_num =
+                                format!("{:>4}", diff_line.old_line_no.unwrap_or(0));
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    line_num,
+                                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                                ),
+                                Span::styled(
+                                    " │ ",
+                                    Style::default().fg(Color::Rgb(59, 66, 97)),
+                                ),
+                                Span::styled(
+                                    diff_line.content.clone(),
+                                    Style::default().fg(Color::Rgb(192, 202, 245)),
+                                ),
+                            ]));
+                        }
+                        DiffLineType::BinaryNote => {
+                            lines.push(Line::from(vec![Span::styled(
+                                diff_line.content.clone(),
+                                Style::default()
+                                    .fg(Color::Rgb(192, 202, 245))
+                                    .add_modifier(Modifier::DIM),
+                            )]));
+                        }
+                        _ => {}
+                    }
+                }
+                lines.push(Line::from(""));
+            }
         }
 
         lines
