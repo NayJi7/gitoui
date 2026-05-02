@@ -7,8 +7,8 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent},
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style, Stylize},
-    text::Line,
-    widgets::{Block, Borders, Padding, Paragraph},
+    text::{Line, Span},
+    widgets::{Block, Padding, Paragraph},
     DefaultTerminal, Frame,
 };
 use rustc_hash::FxHashMap;
@@ -364,54 +364,136 @@ impl App<'_> {
 
 impl App<'_> {
     fn render_status_line(&self, f: &mut Frame, area: Rect) {
-        let text: Line = match &self.app_status.status_line {
+        let mut spans = match &self.app_status.status_line {
+            StatusLine::None if self.app_status.numeric_prefix.is_empty() => vec![],
             StatusLine::None => {
-                if self.app_status.numeric_prefix.is_empty() {
-                    Line::raw("")
-                } else {
-                    Line::raw(self.app_status.numeric_prefix.as_str())
-                        .fg(self.ctx.color_theme.status_input_transient_fg)
-                }
+                vec![Span::styled(
+                    self.app_status.numeric_prefix.as_str(),
+                    Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                )]
             }
             StatusLine::Input(msg, _, transient_msg) => {
                 let msg_w = console::measure_text_width(msg.as_str());
                 if let Some(t_msg) = transient_msg {
                     let t_msg_w = console::measure_text_width(t_msg.as_str());
-                    let pad_w = area.width as usize - msg_w - t_msg_w - 2 /* pad */;
-                    Line::from(vec![
-                        msg.as_str().fg(self.ctx.color_theme.status_input_fg),
-                        " ".repeat(pad_w).into(),
-                        t_msg
-                            .as_str()
-                            .fg(self.ctx.color_theme.status_input_transient_fg),
-                    ])
+                    let pad_w = area.width as usize - msg_w - t_msg_w - 2;
+                    vec![
+                        Span::styled(msg.as_str(), Style::default().fg(self.ctx.color_theme.status_input_fg)),
+                        Span::raw(" ".repeat(pad_w)),
+                        Span::styled(t_msg.as_str(), Style::default().fg(self.ctx.color_theme.status_input_transient_fg)),
+                    ]
                 } else {
-                    Line::raw(msg).fg(self.ctx.color_theme.status_input_fg)
+                    vec![Span::styled(
+                        msg.as_str(),
+                        Style::default().fg(self.ctx.color_theme.status_input_fg),
+                    )]
                 }
             }
             StatusLine::NotificationInfo(msg) => {
-                Line::raw(msg).fg(self.ctx.color_theme.status_info_fg)
+                vec![Span::styled(msg.as_str(), Style::default().fg(self.ctx.color_theme.status_info_fg))]
             }
-            StatusLine::NotificationSuccess(msg) => Line::raw(msg)
-                .add_modifier(Modifier::BOLD)
-                .fg(self.ctx.color_theme.status_success_fg),
-            StatusLine::NotificationWarn(msg) => Line::raw(msg)
-                .add_modifier(Modifier::BOLD)
-                .fg(self.ctx.color_theme.status_warn_fg),
-            StatusLine::NotificationError(msg) => Line::raw(format!("ERROR: {msg}"))
-                .add_modifier(Modifier::BOLD)
-                .fg(self.ctx.color_theme.status_error_fg),
+            StatusLine::NotificationSuccess(msg) => {
+                vec![Span::styled(
+                    msg.as_str(),
+                    Style::default().fg(self.ctx.color_theme.status_success_fg).add_modifier(Modifier::BOLD),
+                )]
+            }
+            StatusLine::NotificationWarn(msg) => {
+                vec![Span::styled(
+                    msg.as_str(),
+                    Style::default().fg(self.ctx.color_theme.status_warn_fg).add_modifier(Modifier::BOLD),
+                )]
+            }
+            StatusLine::NotificationError(msg) => {
+                vec![Span::styled(
+                    format!("ERROR: {msg}"),
+                    Style::default().fg(self.ctx.color_theme.status_error_fg).add_modifier(Modifier::BOLD),
+                )]
+            }
         };
-        let paragraph = Paragraph::new(text).block(
-            Block::default()
-                .borders(Borders::TOP)
-                .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-                .padding(Padding::horizontal(1)),
+
+        let dim_separator = Style::default().fg(Color::Rgb(59, 66, 97));
+        let dim_text = Style::default().fg(Color::Rgb(86, 95, 137));
+        let show_enhanced = matches!(
+            &self.app_status.status_line,
+            StatusLine::None | StatusLine::NotificationInfo(_)
         );
+
+        if show_enhanced {
+            match self.repository.head() {
+                Head::Branch { name } => {
+                    spans.push(Span::styled(
+                        " ● ",
+                        Style::default().fg(Color::Rgb(122, 162, 247)),
+                    ));
+                    spans.push(Span::styled(
+                        name.clone(),
+                        Style::default()
+                            .fg(Color::Rgb(122, 162, 247))
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                Head::Detached { .. } => {
+                    spans.push(Span::styled(
+                        " ● detached",
+                        Style::default().fg(Color::Rgb(255, 158, 100)),
+                    ));
+                }
+                Head::None => {}
+            }
+
+            if let Some(changes) = self.repository.uncommitted_changes() {
+                let staged = changes.staged.len();
+                let unstaged = changes.unstaged.len();
+                let untracked = changes.untracked.len();
+
+                if changes.is_dirty() {
+                    spans.push(Span::styled(" │ ", dim_separator));
+                    if staged > 0 {
+                        spans.push(Span::styled(
+                            format!(" ✓{}", staged),
+                            Style::default().fg(Color::Rgb(158, 206, 106)),
+                        ));
+                    }
+                    if unstaged > 0 {
+                        spans.push(Span::styled(
+                            format!(" ⚡{}", unstaged),
+                            Style::default().fg(Color::Rgb(224, 175, 104)),
+                        ));
+                    }
+                    if untracked > 0 {
+                        spans.push(Span::styled(
+                            format!(" ?{}", untracked),
+                            Style::default().fg(Color::Rgb(187, 154, 247)),
+                        ));
+                    }
+                } else {
+                    spans.push(Span::styled(" │ ", dim_separator));
+                    spans.push(Span::styled(
+                        " ✓ clean",
+                        Style::default().fg(Color::Rgb(158, 206, 106)),
+                    ));
+                }
+            }
+
+            spans.push(Span::styled(" │ ", dim_separator));
+            let protocol_name = match self.ctx.image_protocol {
+                ImageProtocol::Kitty => "Kitty",
+                ImageProtocol::KittyUnicode { .. } => "Kitty/Tmux",
+                ImageProtocol::Iterm2 => "iTerm2",
+                ImageProtocol::Sixel => "Sixel",
+            };
+            spans.push(Span::styled(format!(" {} ⊙", protocol_name), dim_text));
+        }
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line)
+            .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+            .block(Block::default().padding(Padding::horizontal(1)));
         f.render_widget(paragraph, area);
 
         if let StatusLine::Input(_, Some(cursor_pos), _) = &self.app_status.status_line {
-            let (x, y) = (area.x + cursor_pos + 1, area.y + 1);
+            let (x, y) = (area.x + cursor_pos + 1, area.y);
             match &self.ctx.ui_config.common.cursor_type {
                 CursorType::Native => {
                     f.set_cursor_position((x, y));
@@ -426,7 +508,7 @@ impl App<'_> {
 }
 
 fn split_app_areas(area: Rect) -> [Rect; 2] {
-    Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).areas(area)
+    Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area)
 }
 
 impl App<'_> {
