@@ -1,4 +1,4 @@
-# gitr — Design Document
+# gitbranch — Design Document
 
 **Date:** 2026-05-02  
 **Status:** Draft  
@@ -9,7 +9,7 @@
 
 ## 1. Vision
 
-**gitr** is a fully interactive Git client for the terminal. It provides the same level of functionality as the Git Graph VS Code extension — visual commit graph, diffs, staging, branch/tag/stash operations, push/pull — rendered with pixel-perfect PNG graphics (Bezier curves, anti-aliased nodes, specular highlights) via Kitty/iTerm2/Sixel image protocols.
+**gitbranch** is a fully interactive Git client for the terminal. It provides the same level of functionality as the Git Graph VS Code extension — visual commit graph, diffs, staging, branch/tag/stash operations, push/pull — rendered with pixel-perfect PNG graphics (Bezier curves, anti-aliased nodes, specular highlights) via Kitty/iTerm2/Sixel image protocols.
 
 **Core principle:** Every phase ships a complete, usable tool. No half-features.
 
@@ -139,7 +139,7 @@ src/
 | Code review tracking | Mark files as reviewed per commit range, persisted to disk |
 | Issue linking | Configurable regex to turn issue references into highlighted text |
 | Multi-repo | Detect repos in workspace, dropdown to switch |
-| Config export | Share config in repo (.gitr/config.toml) |
+| Config export | Share config in repo (.gitbranch/config.toml) |
 | Performance | Lazy-load commits (initial batch + load-more on scroll) for large repos |
 
 ---
@@ -185,7 +185,7 @@ All bindings fully customizable via TOML config (from serie's keybind system).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ gitr — my-project (main)                                       ? help  q quit │
+│ gitbranch — my-project (main)                                       ? help  q quit │
 ├──────────────────────────────┬───────────────────────────────────────────────┤
 │                              │ ● a1b2c3d (HEAD -> main, origin/main)        │
 │   [PNG pixel-perfect         │ Alice • 2026-05-01                            │
@@ -323,7 +323,7 @@ Activated by pressing `Tab` to switch focus from graph to staging pane.
 
 ## 8. Configuration
 
-TOML config at `$XDG_CONFIG_HOME/gitr/config.toml` or `$GITR_CONFIG_FILE`.
+TOML config at `$XDG_CONFIG_HOME/gitbranch/config.toml` or `$GITBRANCH_CONFIG_FILE`.
 
 All of serie's existing config options are preserved. New options:
 
@@ -771,9 +771,9 @@ Git command failures are captured (stderr) and displayed in a dialog overlay. Th
 
 ---
 
-## 12. Comparison: gitr vs Git Graph vs serie
+## 12. Comparison: gitbranch vs Git Graph vs serie
 
-| Feature | serie | gitr (target) | Git Graph |
+| Feature | serie | gitbranch (target) | Git Graph |
 |---------|-------|---------------|-----------|
 | Pixel-perfect graph | PNG (Kitty/iTerm2) | PNG (Kitty/iTerm2/Sixel) + Unicode fallback | SVG/Canvas (webview) |
 | Mouse support | No | Yes (scroll, click, drag) | Yes |
