@@ -8,9 +8,9 @@ use crate::config::GraphColorConfig;
 #[optional(derives = [Deserialize], visibility = pub)]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct ColorTheme {
-    #[default(RatatuiColor::Reset)]
+    #[default(RatatuiColor::Rgb(0xc0, 0xca, 0xf5))]
     pub fg: RatatuiColor,
-    #[default(RatatuiColor::Reset)]
+    #[default(RatatuiColor::Rgb(0x1a, 0x1b, 0x26))]
     pub bg: RatatuiColor,
 
     #[default(RatatuiColor::White)]
@@ -58,13 +58,13 @@ pub struct ColorTheme {
     pub detail_ref_remote_branch_fg: RatatuiColor,
     #[default(RatatuiColor::Yellow)]
     pub detail_ref_tag_fg: RatatuiColor,
-    #[default(RatatuiColor::Green)]
+    #[default(RatatuiColor::Rgb(0x9e, 0xce, 0x6a))]
     pub detail_file_change_add_fg: RatatuiColor,
-    #[default(RatatuiColor::Yellow)]
+    #[default(RatatuiColor::Rgb(0xe0, 0xaf, 0x68))]
     pub detail_file_change_modify_fg: RatatuiColor,
-    #[default(RatatuiColor::Red)]
+    #[default(RatatuiColor::Rgb(0xf7, 0x76, 0x8e))]
     pub detail_file_change_delete_fg: RatatuiColor,
-    #[default(RatatuiColor::Magenta)]
+    #[default(RatatuiColor::Rgb(0x7d, 0xcf, 0xff))]
     pub detail_file_change_move_fg: RatatuiColor,
 
     #[default(RatatuiColor::White)]

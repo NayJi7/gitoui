@@ -397,12 +397,14 @@ pub struct GraphConfig {
 pub struct GraphColorConfig {
     #[garde(length(min = 1), inner(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")))]
     #[default(vec![
-        "#E06C76".into(),
-        "#98C379".into(),
-        "#E5C07B".into(),
-        "#61AFEF".into(),
-        "#C678DD".into(),
-        "#56B6C2".into(),
+        "#7aa2f7".into(),
+        "#bb9af7".into(),
+        "#7dcfff".into(),
+        "#ff9e64".into(),
+        "#9ece6a".into(),
+        "#f7768e".into(),
+        "#e0af68".into(),
+        "#2ac3de".into(),
     ])]
     pub branches: Vec<String>,
     #[garde(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"))]
@@ -487,12 +489,14 @@ mod tests {
                 row_image_width: GraphImageWidthMode::Compact,
                 color: GraphColorConfig {
                     branches: vec![
-                        "#E06C76".into(),
-                        "#98C379".into(),
-                        "#E5C07B".into(),
-                        "#61AFEF".into(),
-                        "#C678DD".into(),
-                        "#56B6C2".into(),
+                        "#7aa2f7".into(),
+                        "#bb9af7".into(),
+                        "#7dcfff".into(),
+                        "#ff9e64".into(),
+                        "#9ece6a".into(),
+                        "#f7768e".into(),
+                        "#e0af68".into(),
+                        "#2ac3de".into(),
                     ],
                     edge: "#00000000".into(),
                     background: "#00000000".into(),
@@ -723,12 +727,14 @@ mod tests {
                 row_image_width: GraphImageWidthMode::Compact,
                 color: GraphColorConfig {
                     branches: vec![
-                        "#E06C76".into(),
-                        "#98C379".into(),
-                        "#E5C07B".into(),
-                        "#61AFEF".into(),
-                        "#C678DD".into(),
-                        "#56B6C2".into(),
+                        "#7aa2f7".into(),
+                        "#bb9af7".into(),
+                        "#7dcfff".into(),
+                        "#ff9e64".into(),
+                        "#9ece6a".into(),
+                        "#f7768e".into(),
+                        "#e0af68".into(),
+                        "#2ac3de".into(),
                     ],
                     edge: "#00000000".into(),
                     background: "#00000000".into(),
