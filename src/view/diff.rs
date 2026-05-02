@@ -138,8 +138,9 @@ impl<'a> DiffView<'a> {
             ])
             .areas(diff_area);
 
+            let title_text = format!("─── {} ───", self.title);
             let title = Line::from(Span::styled(
-                self.title.clone(),
+                title_text,
                 Style::default()
                     .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
@@ -205,8 +206,31 @@ impl<'a> DiffView<'a> {
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
-        let diff_height = (area.height / 2).max(8);
-        Layout::vertical([Constraint::Min(0), Constraint::Length(diff_height)]).areas(area)
+        let available_height = area.height;
+        let content_lines = self.count_diff_lines();
+
+        let min_diff_height = (available_height * 2) / 3;
+        let ideal_diff_height = if content_lines > min_diff_height as usize {
+            available_height
+        } else {
+            min_diff_height
+        };
+
+        let diff_height = ideal_diff_height
+            .min(available_height.saturating_sub(3))
+            .max(8);
+        let list_height = available_height - diff_height;
+
+        Layout::vertical([
+            Constraint::Length(list_height),
+            Constraint::Length(diff_height),
+        ])
+        .areas(area)
+    }
+
+    fn count_diff_lines(&self) -> usize {
+        let dummy_area = Rect::new(0, 0, 1000, 1);
+        self.build_diff_lines(&dummy_area).len()
     }
 
     fn build_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {

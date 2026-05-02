@@ -575,6 +575,18 @@ impl App<'_> {
             View::UserCommand(ref mut view) => view.take_list_state(),
             _ => return,
         };
+        let title = commit_list_state
+            .selected_commit_subject()
+            .map(|subject| {
+                let hash = commit_list_state.selected_commit_hash().as_short_hash();
+                let truncated = if subject.len() > 50 {
+                    format!("{}...", &subject[..50])
+                } else {
+                    subject.to_string()
+                };
+                format!("Diff: {} ({})", hash, truncated)
+            })
+            .unwrap_or_default();
         let hash = commit_list_state.selected_commit_hash();
         match DiffEntry::load_for_commit(self.repository.path(), hash.as_str()) {
             Ok(diff_entries) => {
@@ -583,7 +595,7 @@ impl App<'_> {
                     diff_entries,
                     self.ctx.clone(),
                     self.ec.sender(),
-                    String::new(),
+                    title,
                 );
             }
             Err(err) => {

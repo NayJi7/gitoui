@@ -525,6 +525,11 @@ impl<'a> CommitListState<'a> {
             .unwrap_or(&self.uncommitted_hash)
     }
 
+    pub fn selected_commit_subject(&self) -> Option<&str> {
+        let info = &self.commits[self.current_selected_index()];
+        info.commit.map(|c| c.subject.as_str())
+    }
+
     fn current_selected_index(&self) -> usize {
         self.offset + self.selected
     }
