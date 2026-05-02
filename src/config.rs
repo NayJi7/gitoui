@@ -347,10 +347,10 @@ pub struct UiListConfig {
     #[default = 20]
     pub subject_min_width: u16,
     #[garde(length(min = 1))]
-    #[default = "%Y-%m-%d"]
+    #[default = "%d/%m/%Y - %H:%M"]
     pub date_format: String,
     #[garde(range(min = 0))]
-    #[default = 10]
+    #[default = 16]
     pub date_width: u16,
     #[garde(skip)]
     #[default = true]
@@ -498,8 +498,8 @@ mod tests {
                         UserListColumnType::Date,
                     ],
                     subject_min_width: 20,
-                    date_format: "%Y-%m-%d".into(),
-                    date_width: 10,
+                    date_format: "%d/%m/%Y - %H:%M".into(),
+                    date_width: 16,
                     date_local: true,
                     name_width: 20,
                 },
@@ -749,7 +749,7 @@ mod tests {
                     ],
                     subject_min_width: 20,
                     date_format: "%Y/%m/%d".into(),
-                    date_width: 10,
+                    date_width: 16,
                     date_local: true,
                     name_width: 20,
                 },

@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{List, ListItem, StatefulWidget, Widget},
+    widgets::{List, ListItem, Paragraph, StatefulWidget, Widget},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use tui_input::{backend::crossterm::EventHandler, Input};
@@ -826,17 +826,34 @@ impl<'a> StatefulWidget for CommitList<'a> {
     type State = CommitListState<'a>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        self.update_state(area, state);
+        if area.height == 0 {
+            return;
+        }
+
+        let (header_area, rows_area) = if area.height >= 2 {
+            (
+                Some(Rect::new(area.x, area.y, area.width, 2)),
+                Rect::new(area.x, area.y + 2, area.width, area.height - 2),
+            )
+        } else {
+            (None, area)
+        };
+
+        self.update_state(rows_area, state);
+
+        if let Some(header_area) = header_area {
+            self.render_header(buf, header_area, state);
+        }
 
         let constraints = calc_cell_widths(
-            area.width,
+            rows_area.width,
             self.ctx.ui_config.list.subject_min_width,
             state.graph_area_cell_width(),
             self.ctx.ui_config.list.name_width,
             self.ctx.ui_config.list.date_width,
             &self.ctx.ui_config.list.columns,
         );
-        let chunks = Layout::horizontal(constraints).split(area);
+        let chunks = Layout::horizontal(constraints).split(rows_area);
 
         for (i, col) in self.ctx.ui_config.list.columns.iter().enumerate() {
             match col {
@@ -866,6 +883,46 @@ impl<'a> StatefulWidget for CommitList<'a> {
 impl CommitList<'_> {
     fn update_state(&self, area: Rect, state: &mut CommitListState) {
         state.update_height(area.height as usize);
+    }
+
+    fn render_header(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
+        let constraints = calc_cell_widths(
+            area.width,
+            self.ctx.ui_config.list.subject_min_width,
+            state.graph_area_cell_width(),
+            self.ctx.ui_config.list.name_width,
+            self.ctx.ui_config.list.date_width,
+            &self.ctx.ui_config.list.columns,
+        );
+        let chunks = Layout::horizontal(constraints).split(area);
+
+        for (i, col_type) in self.ctx.ui_config.list.columns.iter().enumerate() {
+            let text = match col_type {
+                UserListColumnType::Graph => "",
+                UserListColumnType::Marker => "",
+                UserListColumnType::Subject => "Commit message",
+                UserListColumnType::Name => "Committer",
+                UserListColumnType::Hash => "Commit SHA",
+                UserListColumnType::Date => "Date",
+            };
+
+            if !text.is_empty() {
+                let style = Style::default()
+                    .fg(Color::Rgb(86, 95, 137))
+                    .add_modifier(Modifier::BOLD);
+                let line = Line::from(Span::styled(text.to_string(), style));
+                let para = Paragraph::new(line);
+                let text_area = Rect::new(chunks[i].x, chunks[i].y, chunks[i].width, 1);
+                para.render(text_area, buf);
+            }
+        }
+
+        // Draw separator line below header
+        let sep_style = Style::default().fg(Color::Rgb(59, 66, 97));
+        for col in area.left()..area.right() {
+            buf[(col, area.top() + 1)].set_symbol("─");
+            buf[(col, area.top() + 1)].set_style(sep_style);
+        }
     }
 
     fn render_graph(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
