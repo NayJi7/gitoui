@@ -127,6 +127,14 @@ pub struct CoreOptionConfig {
     pub graph_width: Option<GraphWidthType>,
     pub graph_style: Option<GraphStyle>,
     pub initial_selection: Option<InitialSelection>,
+    #[default = true]
+    pub auto_refresh: bool,
+    #[default = 500]
+    pub auto_refresh_debounce_ms: u64,
+    #[default = 500]
+    pub initial_load_count: usize,
+    #[default = 200]
+    pub load_more_count: usize,
 }
 
 #[optional(derives = [Deserialize])]
@@ -284,6 +292,8 @@ pub struct UiConfig {
 pub struct UiCommonConfig {
     #[default(CursorType::Native)]
     pub cursor_type: CursorType,
+    #[default = true]
+    pub mouse_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -430,6 +440,10 @@ mod tests {
                     graph_width: None,
                     graph_style: None,
                     initial_selection: None,
+                    auto_refresh: true,
+                    auto_refresh_debounce_ms: 500,
+                    initial_load_count: 500,
+                    load_more_count: 200,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,
@@ -461,6 +475,7 @@ mod tests {
             ui: UiConfig {
                 common: UiCommonConfig {
                     cursor_type: CursorType::Native,
+                    mouse_enabled: true,
                 },
                 list: UiListConfig {
                     columns: vec![
@@ -559,6 +574,10 @@ mod tests {
                     graph_width: Some(GraphWidthType::Single),
                     graph_style: Some(GraphStyle::Angular),
                     initial_selection: Some(InitialSelection::Head),
+                    auto_refresh: true,
+                    auto_refresh_debounce_ms: 500,
+                    initial_load_count: 500,
+                    load_more_count: 200,
                 },
                 search: CoreSearchConfig {
                     ignore_case: true,
@@ -617,6 +636,7 @@ mod tests {
             ui: UiConfig {
                 common: UiCommonConfig {
                     cursor_type: CursorType::Virtual("|".into()),
+                    mouse_enabled: true,
                 },
                 list: UiListConfig {
                     columns: vec![
@@ -668,6 +688,10 @@ mod tests {
                     graph_width: None,
                     graph_style: None,
                     initial_selection: None,
+                    auto_refresh: true,
+                    auto_refresh_debounce_ms: 500,
+                    initial_load_count: 500,
+                    load_more_count: 200,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,
@@ -699,6 +723,7 @@ mod tests {
             ui: UiConfig {
                 common: UiCommonConfig {
                     cursor_type: CursorType::Native,
+                    mouse_enabled: true,
                 },
                 list: UiListConfig {
                     columns: vec![
