@@ -69,6 +69,10 @@ impl RefListState {
         self.tree_state.key_left();
     }
 
+    pub fn toggle_selected(&mut self) {
+        self.tree_state.toggle_selected();
+    }
+
     pub fn selected_ref_name(&self) -> Option<String> {
         self.tree_state.selected().last().cloned()
     }

@@ -43,17 +43,26 @@ impl<'a> DialogView<'a> {
         Self { before, kind, input_value: String::new(), dropdown_selected, checkboxes, ctx, tx }
     }
 
-    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         let event = event_with_count.event;
         match event {
             UserEvent::Confirm => self.confirm(),
             UserEvent::Cancel | UserEvent::Close => self.tx.send(AppEvent::DialogCancel),
-            UserEvent::Input(c) => { self.input_value.push(c); }
-            UserEvent::Backspace => { self.input_value.pop(); }
             UserEvent::NavigateDown => self.navigate_down(),
             UserEvent::NavigateUp => self.navigate_up(),
             UserEvent::NavigateLeft | UserEvent::NavigateRight => self.toggle_checkbox(),
-            _ => {}
+            _ => {
+                // Handle text input directly from key events
+                match key.code {
+                    ratatui::crossterm::event::KeyCode::Char(c) => {
+                        self.input_value.push(c);
+                    }
+                    ratatui::crossterm::event::KeyCode::Backspace => {
+                        self.input_value.pop();
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -361,7 +370,7 @@ impl<'a> DialogView<'a> {
                 let force = if self.checkboxes.get(0).copied().unwrap_or(false) { "[x]" } else { "[ ]" };
                 lines.push(Line::from(format!("{} Force with lease (--force-with-lease)", force)));
             }
-            DialogKind::CreateBranchFromStash { stash_ref } => {
+            DialogKind::CreateBranchFromStash { target, stash_ref } => {
                 lines.push(Line::from(vec![Span::styled("Create Branch from Stash", Style::default().add_modifier(Modifier::BOLD))]));
                 lines.push(Line::from(format!("Stash: {}", stash_ref)));
                 lines.push(Line::from(""));

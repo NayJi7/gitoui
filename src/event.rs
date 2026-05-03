@@ -81,7 +81,7 @@ pub enum DialogKind {
     DeleteTag { tag: String },
     PushTag { tag: String },
     // Stash actions
-    CreateBranchFromStash { stash_ref: String },
+    CreateBranchFromStash { target: String, stash_ref: String },
     // Uncommitted actions
     StashWithMessage,
     CommitWithMessage,

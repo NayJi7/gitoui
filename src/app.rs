@@ -391,6 +391,18 @@ impl App<'_> {
                 AppEvent::NotifyError(msg) => {
                     self.error_notification(msg);
                 }
+                // Phase 2 - Git Actions (TODO: implement handlers)
+                AppEvent::OpenDialog(_kind) => {}
+                AppEvent::CloseDialog => {}
+                AppEvent::DialogConfirm => {}
+                AppEvent::DialogCancel => {}
+                AppEvent::DialogInput(_input) => {}
+                AppEvent::ExecuteGitAction { .. } => {}
+                AppEvent::OpenBranchDetail { .. } => {}
+                AppEvent::OpenTagDetail { .. } => {}
+                AppEvent::StageFile { .. } => {}
+                AppEvent::UnstageFile { .. } => {}
+                AppEvent::DiscardFile { .. } => {}
             }
         }
     }
@@ -499,22 +511,6 @@ impl App<'_> {
         let is_diff = matches!(&self.view, View::Diff(_));
 
         let status_area = if show_shortcuts {
-            let right_constraint = if is_search_querying {
-                Constraint::Length(16)
-            } else if is_search_active {
-                Constraint::Length(58)
-            } else if is_config_active {
-                Constraint::Length(32)
-            } else if is_diff {
-                Constraint::Length(55)
-            } else {
-                Constraint::Length(38)
-            };
-            let [left_area, right_area] = Layout::horizontal([
-                Constraint::Min(0),
-                right_constraint,
-            ]).areas(area);
-
             let shortcut_text: String = if is_search_querying {
                 "Esc:cancel".into()
             } else if is_search_active {
@@ -527,15 +523,31 @@ impl App<'_> {
                 "Enter/←→:cycle Esc:close".into()
             } else {
                 match &self.view {
-                    View::List(_) => "f:search r:refresh ?:help q:quit".into(),
+                    View::List(_) => "f:search c:hash C:subject r:refresh ?:help q:quit".into(),
                     View::Diff(_) => self.view.diff_footer_hint().unwrap_or_else(|| "c:copy-path Esc:close".into()),
-                    View::Detail(_) => "Esc:close".into(),
+                    View::Detail(_) => "c:hash C:subject Esc:close".into(),
                     View::Refs(_) => "Esc:close".into(),
                     View::Help(_) => "Esc:close".into(),
                     View::UserCommand(_) => "Esc:close".into(),
                     _ => "f:search ?:help q:quit r:refresh".into(),
                 }
             };
+
+            let right_constraint = if is_search_querying {
+                Constraint::Length(16)
+            } else if is_search_active {
+                Constraint::Length(58)
+            } else if is_config_active {
+                Constraint::Length(32)
+            } else if is_diff {
+                Constraint::Length(55)
+            } else {
+                Constraint::Length(shortcut_text.len() as u16 + 4)
+            };
+            let [left_area, right_area] = Layout::horizontal([
+                Constraint::Min(0),
+                right_constraint,
+            ]).areas(area);
             let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
             let shortcut_line = Line::from(shortcut_spans);
             let shortcut_paragraph = Paragraph::new(shortcut_line)

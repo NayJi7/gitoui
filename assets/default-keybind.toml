@@ -31,7 +31,7 @@ ref_list = ["tab"]
 search = ["f"]
 ignore_case_toggle = ["s"]
 fuzzy_toggle = ["z"]
-refresh = ["shift-r"]
+refresh = ["r"]
 
 # copy part of information, ex: copy the short commit hash not all
 config = ["p"]

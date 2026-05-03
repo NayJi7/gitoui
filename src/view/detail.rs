@@ -113,10 +113,10 @@ impl<'a> DetailView<'a> {
                 self.tx.send(AppEvent::SelectParentCommit);
             }
             UserEvent::ShortCopy => {
-                self.copy_commit_short_hash();
+                self.copy_commit_hash();
             }
             UserEvent::FullCopy => {
-                self.copy_commit_hash();
+                self.copy_commit_subject();
             }
             UserEvent::UserCommand(n) => {
                 self.tx.send(AppEvent::OpenUserCommand(n));
@@ -214,14 +214,13 @@ impl<'a> DetailView<'a> {
         self.commit_detail_state.select_first();
     }
 
-    fn copy_commit_short_hash(&self) {
-        let selected = &self.commit.commit_hash;
-        self.copy_to_clipboard("Commit SHA (short)".into(), selected.as_short_hash().into());
-    }
-
     fn copy_commit_hash(&self) {
         let selected = &self.commit.commit_hash;
         self.copy_to_clipboard("Commit SHA".into(), selected.as_str().into());
+    }
+
+    fn copy_commit_subject(&self) {
+        self.copy_to_clipboard("Commit subject".into(), self.commit.subject.clone());
     }
 
     fn copy_to_clipboard(&self, name: String, value: String) {

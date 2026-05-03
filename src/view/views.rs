@@ -145,7 +145,7 @@ impl<'a> View<'a> {
             View::Refs(view) => view.as_list_state().search_state().is_active(),
             View::Help(view) => view.is_search_active(),
             View::Config(view) => view.is_search_active(),
-            View::Dialog(view) => view.take_before_view().is_search_active(),
+            View::Dialog(_) => false,
             View::BranchDetail(_) => false,
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
@@ -162,7 +162,7 @@ impl<'a> View<'a> {
             View::Refs(view) => view.as_list_state().search_state().is_querying(),
             View::Help(view) => view.is_search_querying(),
             View::Config(view) => view.is_search_querying(),
-            View::Dialog(view) => view.take_before_view().is_search_querying(),
+            View::Dialog(_) => false,
             View::BranchDetail(_) => false,
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
@@ -179,7 +179,7 @@ impl<'a> View<'a> {
             View::Refs(view) => view.as_list_state().search_case_fuzzy(),
             View::Help(view) => view.search_case_fuzzy(),
             View::Config(view) => view.search_case_fuzzy(),
-            View::Dialog(view) => view.take_before_view().search_case_fuzzy(),
+            View::Dialog(_) => None,
             View::BranchDetail(_) => None,
             View::TagDetail(_) => None,
             View::Uncommitted(_) => None,
@@ -308,6 +308,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.refresh(),
             View::Help(_) => {}
             View::Config(_) => {}
+            View::Dialog(_) => {}
+            View::BranchDetail(_) => {}
+            View::TagDetail(_) => {}
+            View::Uncommitted(_) => {}
         }
     }
 

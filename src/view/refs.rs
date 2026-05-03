@@ -93,6 +93,10 @@ impl<'a> RefsView<'a> {
                 self.ref_list_state.close_node();
                 self.update_commit_list_selected();
             }
+            UserEvent::Confirm => {
+                self.ref_list_state.toggle_selected();
+                self.update_commit_list_selected();
+            }
             UserEvent::ShortCopy | UserEvent::FullCopy => {
                 self.copy_ref_name();
             }
