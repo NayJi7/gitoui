@@ -16,17 +16,22 @@ use rustc_hash::FxHashMap;
 use crate::{
     color::{ColorTheme, GraphColorSet},
     config::{save, CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
-    event::{AppEvent, DialogKind, EventController, GitAction, Sender, UserEvent, UserEventWithCount},
+    event::{
+        AppEvent, DialogKind, EventController, GitAction, Sender, UserEvent, UserEventWithCount,
+    },
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{actions, diff::DiffEntry, status::UncommittedChanges, Commit, CommitHash, FileChange, Head, Ref, Repository},
+    git::{
+        actions, diff::DiffEntry, status::UncommittedChanges, Commit, CommitHash, FileChange, Head,
+        Ref, Repository,
+    },
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
-    widget::{branch_detail::BranchMetadata, tag_detail::TagMetadata},
     widget::commit_list::{CommitInfo, CommitListState},
+    widget::{branch_detail::BranchMetadata, tag_detail::TagMetadata},
 };
 use ratatui::style::Color;
 
@@ -306,6 +311,7 @@ impl App<'_> {
                 }
                 AppEvent::OpenDetail => {
                     self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_detail();
                 }
                 AppEvent::CloseDetail => {
@@ -328,6 +334,7 @@ impl App<'_> {
                 }
                 AppEvent::OpenUserCommand(n) => {
                     self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_user_command(n, Some(terminal));
                 }
                 AppEvent::CloseUserCommand => {
@@ -358,6 +365,7 @@ impl App<'_> {
                 }
                 AppEvent::OpenFileDiff { hash, file_path } => {
                     self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_file_diff(hash, file_path);
                 }
                 AppEvent::CloseDiff => {
@@ -414,14 +422,17 @@ impl App<'_> {
                 }
                 AppEvent::OpenBranchDetail { branch_name } => {
                     self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_branch_detail(branch_name);
                 }
                 AppEvent::OpenTagDetail { tag_name } => {
                     self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_tag_detail(tag_name);
                 }
                 AppEvent::OpenUncommitted => {
                     self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_uncommitted();
                 }
                 AppEvent::StageFile { file } => self.stage_file(file),
@@ -459,8 +470,7 @@ impl App<'_> {
     }
 
     fn render(&mut self, f: &mut Frame) {
-        let base = Block::default()
-            .fg(self.ctx.color_theme.fg);
+        let base = Block::default().fg(self.ctx.color_theme.fg);
         f.render_widget(base, f.area());
 
         let [view_area, _gap, status_line_area] = split_app_areas(f.area());
@@ -488,9 +498,15 @@ impl App<'_> {
                     let t_msg_w = console::measure_text_width(t_msg.as_str());
                     let pad_w = area.width as usize - msg_w - t_msg_w - 2;
                     vec![
-                        Span::styled(msg.as_str(), Style::default().fg(self.ctx.color_theme.status_input_fg)),
+                        Span::styled(
+                            msg.as_str(),
+                            Style::default().fg(self.ctx.color_theme.status_input_fg),
+                        ),
                         Span::raw(" ".repeat(pad_w)),
-                        Span::styled(t_msg.as_str(), Style::default().fg(self.ctx.color_theme.status_input_transient_fg)),
+                        Span::styled(
+                            t_msg.as_str(),
+                            Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                        ),
                     ]
                 } else {
                     vec![Span::styled(
@@ -500,24 +516,33 @@ impl App<'_> {
                 }
             }
             StatusLine::NotificationInfo(msg) => {
-                vec![Span::styled(msg.as_str(), Style::default().fg(self.ctx.color_theme.status_info_fg))]
+                vec![Span::styled(
+                    msg.as_str(),
+                    Style::default().fg(self.ctx.color_theme.status_info_fg),
+                )]
             }
             StatusLine::NotificationSuccess(msg) => {
                 vec![Span::styled(
                     msg.as_str(),
-                    Style::default().fg(self.ctx.color_theme.status_success_fg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_success_fg)
+                        .add_modifier(Modifier::BOLD),
                 )]
             }
             StatusLine::NotificationWarn(msg) => {
                 vec![Span::styled(
                     msg.as_str(),
-                    Style::default().fg(self.ctx.color_theme.status_warn_fg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_warn_fg)
+                        .add_modifier(Modifier::BOLD),
                 )]
             }
             StatusLine::NotificationError(msg) => {
                 vec![Span::styled(
                     format!("ERROR: {msg}"),
-                    Style::default().fg(self.ctx.color_theme.status_error_fg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_error_fg)
+                        .add_modifier(Modifier::BOLD),
                 )]
             }
         };
@@ -530,8 +555,11 @@ impl App<'_> {
         let show_enhanced = matches!(
             &self.app_status.status_line,
             StatusLine::None | StatusLine::NotificationInfo(_)
-        ) && !is_search_active && !is_config_active;
-        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None) || is_search_active || is_config_active;
+        ) && !is_search_active
+            && !is_config_active;
+        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None)
+            || is_search_active
+            || is_config_active;
         let is_diff = matches!(&self.view, View::Diff(_));
 
         let status_area = if show_shortcuts {
@@ -547,17 +575,26 @@ impl App<'_> {
                 "Enter/←→:cycle Esc:close".into()
             } else {
                 match &self.view {
-                    View::List(_) => "f:search c:hash C:subject r:refresh ?:help q:quit".into(),
-                    View::Diff(_) => self.view.diff_footer_hint().unwrap_or_else(|| "c:copy-path Esc:close".into()),
-                    View::Detail(_) => "c:hash C:subject Esc:close".into(),
+                    View::List(_) => {
+                        "f:search c:copy-hash C:copy-subject Tab:refs r:refresh ?:help q:quit"
+                            .into()
+                    }
+                    View::Diff(_) => self
+                        .view
+                        .diff_footer_hint()
+                        .unwrap_or_else(|| "c:copy-path Esc:close".into()),
+                    View::Detail(_) => "c:copy-hash C:copy-subject Esc:close".into(),
                     View::Refs(_) => "Esc:close".into(),
                     View::Help(_) => "Esc:close".into(),
                     View::UserCommand(_) => "Esc:close".into(),
                     View::Dialog(_) => "Enter:confirm Esc:cancel".into(),
                     View::BranchDetail(_) => "c:copy-name o:checkout Esc:close".into(),
                     View::TagDetail(_) => "c:copy-name p:push Esc:close".into(),
-                    View::Uncommitted(_) => self.view.uncommitted_footer_hint().unwrap_or_else(|| "Esc:close".into()),
-                    _ => "f:search ?:help q:quit r:refresh".into(),
+                    View::Uncommitted(_) => self
+                        .view
+                        .uncommitted_footer_hint()
+                        .unwrap_or_else(|| "Esc:close".into()),
+                    _ => "f:search Tab:refs ?:help q:quit r:refresh".into(),
                 }
             };
 
@@ -572,10 +609,8 @@ impl App<'_> {
             } else {
                 Constraint::Length(shortcut_text.len() as u16 + 4)
             };
-            let [left_area, right_area] = Layout::horizontal([
-                Constraint::Min(0),
-                right_constraint,
-            ]).areas(area);
+            let [left_area, right_area] =
+                Layout::horizontal([Constraint::Min(0), right_constraint]).areas(area);
             let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
             let shortcut_line = Line::from(shortcut_spans);
             let shortcut_paragraph = Paragraph::new(shortcut_line)
@@ -606,18 +641,19 @@ impl App<'_> {
         if show_enhanced {
             match self.repository.head() {
                 Head::Branch { name } => {
-                    let branch_color = self.ctx.branch_color_map
+                    let branch_color = self
+                        .ctx
+                        .branch_color_map
                         .get(name)
                         .copied()
                         .unwrap_or(Color::Rgb(122, 162, 247));
                     spans.push(Span::styled(
                         "HEAD → ",
-                        Style::default().fg(Color::Rgb(125, 207, 255)).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Rgb(125, 207, 255))
+                            .add_modifier(Modifier::BOLD),
                     ));
-                    spans.push(Span::styled(
-                        "⎇ ",
-                        Style::default().fg(branch_color),
-                    ));
+                    spans.push(Span::styled("⎇ ", Style::default().fg(branch_color)));
                     spans.push(Span::styled(
                         name.clone(),
                         Style::default()
@@ -628,11 +664,15 @@ impl App<'_> {
                 Head::Detached { .. } => {
                     spans.push(Span::styled(
                         "HEAD → ",
-                        Style::default().fg(Color::Rgb(125, 207, 255)).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Rgb(125, 207, 255))
+                            .add_modifier(Modifier::BOLD),
                     ));
                     spans.push(Span::styled(
                         "● detached",
-                        Style::default().fg(Color::Rgb(255, 158, 100)).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Rgb(255, 158, 100))
+                            .add_modifier(Modifier::BOLD),
                     ));
                 }
                 Head::None => {}
@@ -702,7 +742,10 @@ impl App<'_> {
         self.app_status.view_area = view_area;
     }
 
-    fn clear_image(&mut self, terminal: Option<&mut DefaultTerminal>) -> Result<(), std::io::Error> {
+    fn clear_image(
+        &mut self,
+        terminal: Option<&mut DefaultTerminal>,
+    ) -> Result<(), std::io::Error> {
         // Clear prepared images so they get re-uploaded after terminal clear
         self.view.clear_graph_images();
         // Sometimes the first image fails to render after a full screen clear
@@ -743,7 +786,8 @@ impl App<'_> {
             }
             View::BranchDetail(ref mut view) => {
                 if let Some(commit_list_state) = view.take_list_state() {
-                    self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    self.view =
+                        View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
                     true
                 } else {
                     false
@@ -751,7 +795,8 @@ impl App<'_> {
             }
             View::TagDetail(ref mut view) => {
                 if let Some(commit_list_state) = view.take_list_state() {
-                    self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    self.view =
+                        View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
                     true
                 } else {
                     false
@@ -759,7 +804,8 @@ impl App<'_> {
             }
             View::Uncommitted(ref mut view) => {
                 if let Some(commit_list_state) = view.take_list_state() {
-                    self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    self.view =
+                        View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
                     true
                 } else {
                     false
@@ -775,12 +821,15 @@ impl App<'_> {
             View::Diff(ref mut view) => view.take_list_state(),
             _ => return,
         };
-        let all_files = self.repository
+        let all_files = self
+            .repository
             .commit_detail(&CommitHash::from(hash.as_str()))
             .1
             .iter()
             .map(|c| match c {
-                crate::git::FileChange::Add { path, .. } | crate::git::FileChange::Modify { path, .. } | crate::git::FileChange::Delete { path, .. } => path.clone(),
+                crate::git::FileChange::Add { path, .. }
+                | crate::git::FileChange::Modify { path, .. }
+                | crate::git::FileChange::Delete { path, .. } => path.clone(),
                 crate::git::FileChange::Move { to, .. } => to.clone(),
             })
             .collect();
@@ -814,7 +863,8 @@ impl App<'_> {
     fn close_diff_to_detail(&mut self) {
         if let View::Diff(ref mut view) = self.view {
             let commit_list_state = view.take_list_state();
-            let (commit, changes, refs) = selected_commit_details(self.repository, &commit_list_state);
+            let (commit, changes, refs) =
+                selected_commit_details(self.repository, &commit_list_state);
             self.view = View::of_detail(
                 commit_list_state,
                 commit,
@@ -1038,7 +1088,11 @@ impl App<'_> {
         if let View::Detail(ref mut view) = self.view {
             view.select_older_commit(self.repository);
         } else if let View::Diff(ref mut view) = self.view {
-            let hash = view.as_list_state().selected_commit_hash().as_str().to_string();
+            let hash = view
+                .as_list_state()
+                .selected_commit_hash()
+                .as_str()
+                .to_string();
             if let Err(err) = view.select_older_commit(self.repository.path(), &hash) {
                 self.ec.send(AppEvent::NotifyError(err));
             }
@@ -1055,7 +1109,11 @@ impl App<'_> {
         if let View::Detail(ref mut view) = self.view {
             view.select_newer_commit(self.repository);
         } else if let View::Diff(ref mut view) = self.view {
-            let hash = view.as_list_state().selected_commit_hash().as_str().to_string();
+            let hash = view
+                .as_list_state()
+                .selected_commit_hash()
+                .as_str()
+                .to_string();
             if let Err(err) = view.select_newer_commit(self.repository.path(), &hash) {
                 self.ec.send(AppEvent::NotifyError(err));
             }
@@ -1072,7 +1130,11 @@ impl App<'_> {
         if let View::Detail(ref mut view) = self.view {
             view.select_parent_commit(self.repository);
         } else if let View::Diff(ref mut view) = self.view {
-            let hash = view.as_list_state().selected_commit_hash().as_str().to_string();
+            let hash = view
+                .as_list_state()
+                .selected_commit_hash()
+                .as_str()
+                .to_string();
             if let Err(err) = view.select_parent_commit(self.repository.path(), &hash) {
                 self.ec.send(AppEvent::NotifyError(err));
             }
@@ -1122,10 +1184,7 @@ impl App<'_> {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 let _ = self.view.handle_event(
-                    crate::event::UserEventWithCount::new(
-                        crate::event::UserEvent::ScrollUp,
-                        3,
-                    ),
+                    crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollUp, 3),
                     ratatui::crossterm::event::KeyEvent::new(
                         ratatui::crossterm::event::KeyCode::Up,
                         ratatui::crossterm::event::KeyModifiers::NONE,
@@ -1134,10 +1193,7 @@ impl App<'_> {
             }
             MouseEventKind::ScrollDown => {
                 let _ = self.view.handle_event(
-                    crate::event::UserEventWithCount::new(
-                        crate::event::UserEvent::ScrollDown,
-                        3,
-                    ),
+                    crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollDown, 3),
                     ratatui::crossterm::event::KeyEvent::new(
                         ratatui::crossterm::event::KeyCode::Down,
                         ratatui::crossterm::event::KeyModifiers::NONE,
@@ -1228,24 +1284,34 @@ impl App<'_> {
             GitAction::CreateBranch { name, checkout } => {
                 actions::create_branch_at(repo_path, &name, &target, checkout)
             }
-            GitAction::AddTag { name, annotated, message } => {
+            GitAction::AddTag {
+                name,
+                annotated,
+                message,
+            } => {
                 let msg = if annotated { message.as_deref() } else { None };
                 actions::create_tag(repo_path, &name, &target, msg)
             }
-            GitAction::CherryPick { no_commit, record_origin } => {
-                actions::cherry_pick(repo_path, &target, no_commit, record_origin)
-            }
+            GitAction::CherryPick {
+                no_commit,
+                record_origin,
+            } => actions::cherry_pick(repo_path, &target, no_commit, record_origin),
             GitAction::Revert => actions::revert_commit(repo_path, &target),
             GitAction::Drop => actions::drop_commit(repo_path, &target),
-            GitAction::Merge { no_ff, squash, no_commit } => {
-                actions::merge_commit(repo_path, &target, no_ff, squash, no_commit)
-            }
-            GitAction::Rebase { ignore_date, interactive } => {
-                actions::rebase_onto(repo_path, &target, ignore_date, interactive)
-            }
+            GitAction::Merge {
+                no_ff,
+                squash,
+                no_commit,
+            } => actions::merge_commit(repo_path, &target, no_ff, squash, no_commit),
+            GitAction::Rebase {
+                ignore_date,
+                interactive,
+            } => actions::rebase_onto(repo_path, &target, ignore_date, interactive),
             GitAction::Reset { mode } => actions::reset(repo_path, &target, &mode),
             GitAction::DeleteBranch { force } => actions::delete_branch(repo_path, &target, force),
-            GitAction::RenameBranch { new_name } => actions::rename_branch(repo_path, &target, &new_name),
+            GitAction::RenameBranch { new_name } => {
+                actions::rename_branch(repo_path, &target, &new_name)
+            }
             GitAction::PushBranch { force } => actions::push_branch(repo_path, &target, force),
             GitAction::PullBranch { rebase } => {
                 if rebase {
@@ -1277,7 +1343,13 @@ impl App<'_> {
                 // git archive branch > branch.zip
                 std::process::Command::new("git")
                     .current_dir(repo_path)
-                    .args(["archive", "--format=zip", "-o", &format!("{}.zip", target), &target])
+                    .args([
+                        "archive",
+                        "--format=zip",
+                        "-o",
+                        &format!("{}.zip", target),
+                        &target,
+                    ])
                     .output()
                     .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
                     .map_err(|e| format!("Failed to create archive: {}", e))
@@ -1290,7 +1362,9 @@ impl App<'_> {
                 if !msg.is_empty() {
                     self.ec.send(AppEvent::NotifySuccess(msg));
                 } else {
-                    self.ec.send(AppEvent::NotifySuccess("Operation completed successfully".into()));
+                    self.ec.send(AppEvent::NotifySuccess(
+                        "Operation completed successfully".into(),
+                    ));
                 }
                 self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
                     list_context: crate::view::ListRefreshViewContext {
@@ -1323,7 +1397,10 @@ impl App<'_> {
         let (tip_hash, tip_subject) = actions::branch_tip_info(repo_path, &branch_name)
             .map(|s| {
                 let mut parts = s.splitn(2, ' ');
-                (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string())
+                (
+                    parts.next().unwrap_or("").to_string(),
+                    parts.next().unwrap_or("").to_string(),
+                )
             })
             .unwrap_or_default();
         let metadata = BranchMetadata {
@@ -1337,13 +1414,14 @@ impl App<'_> {
             ahead,
             behind,
         };
-        self.view = View::BranchDetail(Box::new(crate::view::branch_detail::BranchDetailView::new(
-            branch_name,
-            metadata,
-            commit_list_state,
-            self.ctx.clone(),
-            self.ec.sender(),
-        )));
+        self.view =
+            View::BranchDetail(Box::new(crate::view::branch_detail::BranchDetailView::new(
+                branch_name,
+                metadata,
+                commit_list_state,
+                self.ctx.clone(),
+                self.ec.sender(),
+            )));
     }
 
     fn open_tag_detail(&mut self, tag_name: String) {
@@ -1382,13 +1460,14 @@ impl App<'_> {
             _ => None,
         };
         let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
-        let convert = |f: &crate::git::status::FileStatus| crate::widget::uncommitted::UncommittedFile {
-            status: f.status.clone(),
-            path: f.path.clone(),
-            old_path: f.old_path.clone(),
-            additions: 0,
-            deletions: 0,
-        };
+        let convert =
+            |f: &crate::git::status::FileStatus| crate::widget::uncommitted::UncommittedFile {
+                status: f.status.clone(),
+                path: f.path.clone(),
+                old_path: f.old_path.clone(),
+                additions: 0,
+                deletions: 0,
+            };
         let staged: Vec<_> = changes.staged.iter().map(convert).collect();
         let unstaged: Vec<_> = changes.unstaged.iter().map(convert).collect();
         let untracked: Vec<_> = changes.untracked.iter().map(convert).collect();
