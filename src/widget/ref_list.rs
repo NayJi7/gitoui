@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use ratatui::{
     buffer::Buffer,
@@ -25,6 +25,8 @@ const TREE_STASH_ROOT_TEXT: &str = "≡ Stashes";
 #[derive(Debug, Default)]
 pub struct RefListState {
     tree_state: TreeState<String>,
+    /// Identifiers that have children and can be toggled open/closed.
+    nodes_with_children: HashSet<Vec<String>>,
 }
 
 impl RefListState {
@@ -32,7 +34,10 @@ impl RefListState {
         let mut tree_state = TreeState::default();
         tree_state.select(vec![TREE_BRANCH_ROOT_IDENT.into()]);
         tree_state.open(vec![TREE_BRANCH_ROOT_IDENT.into()]);
-        Self { tree_state }
+        Self {
+            tree_state,
+            nodes_with_children: HashSet::new(),
+        }
     }
 }
 
@@ -75,6 +80,11 @@ impl RefListState {
 
     pub fn selected_ref_name(&self) -> Option<String> {
         self.tree_state.selected().last().cloned()
+    }
+
+    pub fn selected_is_node(&self) -> bool {
+        let selected = self.tree_state.selected();
+        !selected.is_empty() && self.nodes_with_children.contains(selected)
     }
 
     pub fn selected_branch(&self) -> Option<String> {
@@ -139,10 +149,28 @@ impl RefList {
     }
 }
 
+fn collect_node_identifiers(
+    items: &[TreeItem<'_, String>],
+    prefix: &mut Vec<String>,
+    out: &mut HashSet<Vec<String>>,
+) {
+    for item in items {
+        let mut path = prefix.clone();
+        path.push(item.identifier().clone());
+        if !item.children().is_empty() {
+            out.insert(path.clone());
+            collect_node_identifiers(item.children(), &mut path, out);
+        }
+    }
+}
+
 impl StatefulWidget for RefList {
     type State = RefListState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        state.nodes_with_children.clear();
+        collect_node_identifiers(&self.items, &mut Vec::new(), &mut state.nodes_with_children);
+
         let tree = Tree::new(&self.items)
             .unwrap()
             .node_closed_symbol("\u{25b8} ") // ▸

@@ -257,7 +257,7 @@ impl CommitDetail<'_> {
         }
 
         if has_refs(self.refs) {
-            label_lines.push(Line::from("     Refs: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("       Refs: ").fg(self.ctx.color_theme.detail_label_fg));
             value_lines.push(self.refs_line());
         }
 

@@ -94,7 +94,10 @@ impl<'a> RefsView<'a> {
                 self.update_commit_list_selected();
             }
             UserEvent::Confirm => {
-                if let Some(branch_name) = self.ref_list_state.selected_branch() {
+                if self.ref_list_state.selected_is_node() {
+                    self.ref_list_state.toggle_selected();
+                    self.update_commit_list_selected();
+                } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
                     self.tx.send(AppEvent::OpenBranchDetail { branch_name });
                 } else if let Some(tag_name) = self.ref_list_state.selected_tag() {
                     self.tx.send(AppEvent::OpenTagDetail { tag_name });
@@ -240,7 +243,9 @@ impl<'a> RefsView<'a> {
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         self.ref_list_state.handle_click(col, row);
-        if let Some(branch_name) = self.ref_list_state.selected_branch() {
+        if self.ref_list_state.selected_is_node() {
+            self.update_commit_list_selected();
+        } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
             self.tx.send(AppEvent::OpenBranchDetail { branch_name });
         } else if let Some(tag_name) = self.ref_list_state.selected_tag() {
             self.tx.send(AppEvent::OpenTagDetail { tag_name });
