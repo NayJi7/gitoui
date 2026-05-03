@@ -184,7 +184,7 @@ impl<'a> UncommittedWidget<'a> {
         let block = Block::default()
             .borders(Borders::TOP)
             .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 2, 0, 0));
+            .padding(Padding::new(2, 2, 0, 0));
         let inner = block.inner(area);
         block.render(area, buf);
 

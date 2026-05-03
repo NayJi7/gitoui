@@ -175,27 +175,19 @@ impl<'a> UncommittedView<'a> {
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
                 let local_row = row.saturating_sub(detail_area.y + 1) as usize;
-                // Approximate layout: title(0), empty(1), unstaged header(2), files(3..), empty, staged header, files, empty, untracked header, files
-                let unstaged_count = self.unstaged.len().max(1) + 2; // header + files + empty
-                let staged_count = self.staged.len().max(1) + 2; // header + files + empty
-                if local_row < unstaged_count {
+                let unstaged_files_start = 3usize;
+                let staged_files_start = 5 + self.unstaged.len().max(1);
+                let untracked_files_start = staged_files_start + 2 + self.staged.len().max(1);
+
+                if local_row >= unstaged_files_start && local_row < unstaged_files_start + self.unstaged.len() {
                     self.state.section = UncommittedSection::Unstaged;
-                    let file_row = local_row.saturating_sub(1);
-                    if file_row < self.unstaged.len() {
-                        self.state.selected = file_row;
-                    }
-                } else if local_row < unstaged_count + staged_count {
+                    self.state.selected = local_row - unstaged_files_start;
+                } else if local_row >= staged_files_start && local_row < staged_files_start + self.staged.len() {
                     self.state.section = UncommittedSection::Staged;
-                    let file_row = local_row.saturating_sub(unstaged_count + 1);
-                    if file_row < self.staged.len() {
-                        self.state.selected = file_row;
-                    }
-                } else {
+                    self.state.selected = local_row - staged_files_start;
+                } else if local_row >= untracked_files_start && local_row < untracked_files_start + self.untracked.len() {
                     self.state.section = UncommittedSection::Untracked;
-                    let file_row = local_row.saturating_sub(unstaged_count + staged_count + 1);
-                    if file_row < self.untracked.len() {
-                        self.state.selected = file_row;
-                    }
+                    self.state.selected = local_row - untracked_files_start;
                 }
             }
         }
@@ -218,26 +210,19 @@ impl<'a> UncommittedView<'a> {
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
                 let local_row = row.saturating_sub(detail_area.y + 1) as usize;
-                let unstaged_count = self.unstaged.len().max(1) + 2;
-                let staged_count = self.staged.len().max(1) + 2;
-                if local_row < unstaged_count {
+                let unstaged_files_start = 3usize;
+                let staged_files_start = 5 + self.unstaged.len().max(1);
+                let untracked_files_start = staged_files_start + 2 + self.staged.len().max(1);
+
+                if local_row >= unstaged_files_start && local_row < unstaged_files_start + self.unstaged.len() {
                     self.state.section = UncommittedSection::Unstaged;
-                    let file_row = local_row.saturating_sub(1);
-                    if file_row < self.unstaged.len() {
-                        self.state.selected = file_row;
-                    }
-                } else if local_row < unstaged_count + staged_count {
+                    self.state.selected = local_row - unstaged_files_start;
+                } else if local_row >= staged_files_start && local_row < staged_files_start + self.staged.len() {
                     self.state.section = UncommittedSection::Staged;
-                    let file_row = local_row.saturating_sub(unstaged_count + 1);
-                    if file_row < self.staged.len() {
-                        self.state.selected = file_row;
-                    }
-                } else {
+                    self.state.selected = local_row - staged_files_start;
+                } else if local_row >= untracked_files_start && local_row < untracked_files_start + self.untracked.len() {
                     self.state.section = UncommittedSection::Untracked;
-                    let file_row = local_row.saturating_sub(unstaged_count + staged_count + 1);
-                    if file_row < self.untracked.len() {
-                        self.state.selected = file_row;
-                    }
+                    self.state.selected = local_row - untracked_files_start;
                 }
                 self.state.hovered_action = None;
                 return;

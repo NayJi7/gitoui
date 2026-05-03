@@ -20,6 +20,7 @@ pub struct CommitDetailState {
     offset: usize,
     pub selected_file: usize,
     pub hovered_action: Option<usize>,
+    last_selected_file: usize,
 }
 
 impl CommitDetailState {
@@ -72,6 +73,18 @@ impl CommitDetailState {
     pub fn select_prev_file(&mut self) {
         if self.selected_file > 0 {
             self.selected_file -= 1;
+        }
+    }
+
+    fn ensure_selected_visible(&mut self, changes_start: usize) {
+        if self.selected_file != self.last_selected_file {
+            self.last_selected_file = self.selected_file;
+            let selected_line = changes_start + self.selected_file;
+            if selected_line < self.offset {
+                self.offset = selected_line;
+            } else if selected_line >= self.offset + self.height {
+                self.offset = selected_line.saturating_sub(self.height - 1);
+            }
         }
     }
 }
@@ -133,7 +146,8 @@ impl StatefulWidget for CommitDetail<'_> {
         let (mut label_lines, mut value_lines, changes_start) = self.contents(content_area);
 
         let content_area_height = content_area.height as usize - 1; // minus the top border
-        self.update_state(state, value_lines.len(), content_area_height, changes_start);
+        self.update_state(state, value_lines.len(), content_area_height);
+        state.ensure_selected_visible(changes_start);
 
         // Apply selection highlight to the selected file line
         if !self.changes.is_empty() {
@@ -419,20 +433,9 @@ impl CommitDetail<'_> {
         state: &mut CommitDetailState,
         line_count: usize,
         area_height: usize,
-        changes_start: usize,
     ) {
         state.height = area_height;
         state.offset = state.offset.min(line_count.saturating_sub(area_height));
-
-        // Auto-scroll to keep the selected file visible
-        if !self.changes.is_empty() {
-            let selected_line = changes_start + state.selected_file;
-            if selected_line < state.offset {
-                state.offset = selected_line;
-            } else if selected_line >= state.offset + area_height {
-                state.offset = selected_line.saturating_sub(area_height - 1);
-            }
-        }
     }
 }
 
