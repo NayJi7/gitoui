@@ -308,29 +308,28 @@ impl CommitDetail<'_> {
     fn changes_lines(&self) -> Vec<Line<'_>> {
         self.changes
             .iter()
-            .map(|c| match c {
-                FileChange::Add { path } => Line::from(vec![
-                    "A".fg(self.ctx.color_theme.detail_file_change_add_fg),
+            .map(|c| {
+                let (status, path, add, del) = match c {
+                    FileChange::Add { path, additions } => ("A", path.as_str(), *additions, 0usize),
+                    FileChange::Modify { path, additions, deletions } => ("M", path.as_str(), *additions, *deletions),
+                    FileChange::Delete { path, deletions } => ("D", path.as_str(), 0usize, *deletions),
+                    FileChange::Move { from, to, additions, deletions } => ("R", to.as_str(), *additions, *deletions),
+                };
+                let add_str = if add > 0 { format!(" +{add}") } else { "".to_string() };
+                let del_str = if del > 0 { format!(" -{del}") } else { "".to_string() };
+                let status_color = match status {
+                    "A" => self.ctx.color_theme.detail_file_change_add_fg,
+                    "M" => self.ctx.color_theme.detail_file_change_modify_fg,
+                    "D" => self.ctx.color_theme.detail_file_change_delete_fg,
+                    _ => self.ctx.color_theme.detail_file_change_move_fg,
+                };
+                Line::from(vec![
+                    status.fg(status_color),
                     " ".into(),
-                    path.into(),
-                ]),
-                FileChange::Modify { path } => Line::from(vec![
-                    "M".fg(self.ctx.color_theme.detail_file_change_modify_fg),
-                    " ".into(),
-                    path.into(),
-                ]),
-                FileChange::Delete { path } => Line::from(vec![
-                    "D".fg(self.ctx.color_theme.detail_file_change_delete_fg),
-                    " ".into(),
-                    path.into(),
-                ]),
-                FileChange::Move { from, to } => Line::from(vec![
-                    "R".fg(self.ctx.color_theme.detail_file_change_move_fg),
-                    " ".into(),
-                    from.into(),
-                    " -> ".into(),
-                    to.into(),
-                ]),
+                    path.fg(self.ctx.color_theme.fg),
+                    add_str.fg(self.ctx.color_theme.detail_file_change_add_fg),
+                    del_str.fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                ])
             })
             .collect()
     }

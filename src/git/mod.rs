@@ -631,13 +631,14 @@ fn get_current_branch(path: &Path) -> Option<String> {
 
 #[derive(Debug)]
 pub enum FileChange {
-    Add { path: String },
-    Modify { path: String },
-    Delete { path: String },
-    Move { from: String, to: String },
+    Add { path: String, additions: usize },
+    Modify { path: String, additions: usize, deletions: usize },
+    Delete { path: String, deletions: usize },
+    Move { from: String, to: String, additions: usize, deletions: usize },
 }
 
 pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {
+    // First get file statuses
     let mut cmd = Command::new("git")
         .arg("diff")
         .arg("--name-status")
@@ -650,43 +651,73 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
         .unwrap();
 
     let stdout = cmd.stdout.take().expect("failed to open stdout");
-
     let reader = BufReader::new(stdout);
 
-    let mut changes = Vec::new();
-
+    let mut status_map: FxHashMap<String, (char, Option<String>)> = FxHashMap::default();
     for line in reader.lines() {
         let line = line.unwrap();
         let parts: Vec<&str> = line.split('\t').collect();
+        if parts.is_empty() {
+            continue;
+        }
+        let status = parts[0].chars().next().unwrap_or('?');
+        let path_name = parts[1].to_string();
+        let rename_to = parts.get(2).map(|s| s.to_string());
+        status_map.insert(path_name.clone(), (status, rename_to));
+    }
+    cmd.wait().unwrap();
 
-        match &parts[0][0..1] {
-            "A" => changes.push(FileChange::Add {
-                path: parts[1].into(),
-            }),
-            "M" => changes.push(FileChange::Modify {
-                path: parts[1].into(),
-            }),
-            "D" => changes.push(FileChange::Delete {
-                path: parts[1].into(),
-            }),
-            "R" => changes.push(FileChange::Move {
-                from: parts[1].into(),
-                to: parts[2].into(),
-            }),
+    // Then get numstat for additions/deletions
+    let mut cmd2 = Command::new("git")
+        .arg("diff")
+        .arg("--numstat")
+        .arg(format!("{}^", commit_hash.0))
+        .arg(&commit_hash.0)
+        .current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let stdout2 = cmd2.stdout.take().expect("failed to open stdout");
+    let reader2 = BufReader::new(stdout2);
+
+    let mut stats_map: FxHashMap<String, (usize, usize)> = FxHashMap::default();
+    for line in reader2.lines() {
+        let line = line.unwrap();
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 3 {
+            let add = parts[0].parse().unwrap_or(0);
+            let del = parts[1].parse().unwrap_or(0);
+            let file_path = parts[2].to_string();
+            stats_map.insert(file_path, (add, del));
+        }
+    }
+    cmd2.wait().unwrap();
+
+    let mut changes = Vec::new();
+    for (path_name, (status, rename_to)) in status_map {
+        let (additions, deletions) = stats_map.get(&path_name).copied().unwrap_or((0, 0));
+        match status {
+            'A' => changes.push(FileChange::Add { path: path_name, additions }),
+            'M' => changes.push(FileChange::Modify { path: path_name, additions, deletions }),
+            'D' => changes.push(FileChange::Delete { path: path_name, deletions }),
+            'R' => {
+                let to = rename_to.unwrap_or_else(|| path_name.clone());
+                changes.push(FileChange::Move { from: path_name, to, additions, deletions });
+            }
             _ => {}
         }
     }
-
-    cmd.wait().unwrap();
 
     changes
 }
 
 pub fn get_initial_commit_additions(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {
     let mut cmd = Command::new("git")
-        .arg("ls-tree")
-        .arg("--name-status")
-        .arg("-r") // the empty tree hash
+        .arg("diff")
+        .arg("--numstat")
+        .arg("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
         .arg(&commit_hash.0)
         .current_dir(path)
         .stdout(Stdio::piped())
@@ -695,14 +726,18 @@ pub fn get_initial_commit_additions(path: &Path, commit_hash: &CommitHash) -> Ve
         .unwrap();
 
     let stdout = cmd.stdout.take().expect("failed to open stdout");
-
     let reader = BufReader::new(stdout);
 
     let mut changes = Vec::new();
 
     for line in reader.lines() {
         let line = line.unwrap();
-        changes.push(FileChange::Add { path: line });
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 3 {
+            let additions = parts[0].parse().unwrap_or(0);
+            let path = parts[2].to_string();
+            changes.push(FileChange::Add { path, additions });
+        }
     }
 
     cmd.wait().unwrap();

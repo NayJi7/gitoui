@@ -285,7 +285,7 @@ impl<'a> DetailView<'a> {
     fn open_selected_file_diff(&self) {
         if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
             let file_path = match change {
-                FileChange::Add { path } | FileChange::Modify { path } | FileChange::Delete { path } => path.clone(),
+                FileChange::Add { path, .. } | FileChange::Modify { path, .. } | FileChange::Delete { path, .. } => path.clone(),
                 FileChange::Move { to, .. } => to.clone(),
             };
             let _ = self.tx.send(AppEvent::OpenFileDiff {

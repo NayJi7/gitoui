@@ -14,6 +14,7 @@ use crate::{
     config::DiffMode,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::diff::{DiffEntry, DiffLineType},
+    highlight::SyntaxHighlighter,
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::commit_list::{CommitList, CommitListState},
 };
@@ -25,6 +26,8 @@ pub struct DiffView<'a> {
     scroll_offset: usize,
     content_height: usize,
     title: String,
+    commit_hash: String,
+    all_file_paths: Vec<String>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -37,6 +40,8 @@ impl<'a> DiffView<'a> {
         ctx: Rc<AppContext>,
         tx: Sender,
         title: String,
+        commit_hash: String,
+        all_file_paths: Vec<String>,
     ) -> DiffView<'a> {
         DiffView {
             commit_list_state: Some(commit_list_state),
@@ -44,6 +49,8 @@ impl<'a> DiffView<'a> {
             scroll_offset: 0,
             content_height: 0,
             title,
+            commit_hash,
+            all_file_paths,
             ctx,
             tx,
         }
@@ -100,10 +107,16 @@ impl<'a> DiffView<'a> {
                 self.tx.send(AppEvent::SelectParentCommit);
             }
             UserEvent::ShortCopy => {
-                self.copy_commit_short_hash();
+                self.copy_file_path();
             }
             UserEvent::FullCopy => {
                 self.copy_commit_hash();
+            }
+            UserEvent::NavigateRight => {
+                self.cycle_file(1);
+            }
+            UserEvent::NavigateLeft => {
+                self.cycle_file(-1);
             }
             UserEvent::UserCommand(n) => {
                 self.tx.send(AppEvent::OpenUserCommand(n));
@@ -144,13 +157,42 @@ impl<'a> DiffView<'a> {
             );
             f.render_widget(Paragraph::new(separator), separator_area);
 
-            let title_text = format!("─── {} ───", self.title);
-            let title = Line::from(Span::styled(
-                title_text,
+            // Build title with diff stats
+            let (add_count, del_count) = if let Some(entry) = self.diff_entries.first() {
+                let a = entry.hunks.iter().flat_map(|h| h.lines.iter()).filter(|l| l.line_type == DiffLineType::Addition).count();
+                let d = entry.hunks.iter().flat_map(|h| h.lines.iter()).filter(|l| l.line_type == DiffLineType::Deletion).count();
+                (a, d)
+            } else {
+                (0, 0)
+            };
+            // Build colored stats: additions in bright green, deletions in bright red
+            let mut title_spans = vec![
+                Span::styled(
+                    format!("─── {} ", self.title),
+                    Style::default()
+                        .fg(self.ctx.color_theme.fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+            if add_count > 0 {
+                title_spans.push(Span::styled(
+                    format!("+{add_count} "),
+                    Style::default().fg(Color::Rgb(0, 255, 135)).add_modifier(Modifier::BOLD),
+                ));
+            }
+            if del_count > 0 {
+                title_spans.push(Span::styled(
+                    format!("-{del_count} "),
+                    Style::default().fg(Color::Rgb(255, 80, 80)).add_modifier(Modifier::BOLD),
+                ));
+            }
+            title_spans.push(Span::styled(
+                "───",
                 Style::default()
                     .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ));
+            let title = Line::from(title_spans);
             f.render_widget(Paragraph::new(title), title_area);
 
             let visible_lines: Vec<Line> = lines
@@ -348,120 +390,120 @@ impl<'a> DiffView<'a> {
     fn build_enhanced_diff_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
-        for (entry_idx, entry) in self.diff_entries.iter().enumerate() {
-            // File header
-            let filename = entry
-                .new_path
-                .as_deref()
-                .or(entry.old_path.as_deref())
-                .unwrap_or("unknown");
-            if self.title.is_empty() || entry_idx > 0 {
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "─── ",
-                        Style::default().fg(Color::Rgb(59, 66, 97)),
-                    ),
-                    Span::styled(
-                        filename.to_string(),
-                        Style::default()
-                            .fg(Color::Rgb(192, 202, 245))
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        " ───",
-                        Style::default().fg(Color::Rgb(59, 66, 97)),
-                    ),
-                ]));
-                lines.push(Line::from(""));
-            }
+        let entry = match self.diff_entries.first() {
+            Some(e) => e,
+            None => return lines,
+        };
 
-            for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
-                // Show collapsed region between hunks
-                if hunk_idx > 0 {
-                    if let Some(prev_hunk) = entry.hunks.get(hunk_idx - 1) {
-                        let old_gap = hunk
-                            .old_start
-                            .saturating_sub(prev_hunk.old_start + prev_hunk.old_count);
-                        let new_gap = hunk
-                            .new_start
-                            .saturating_sub(prev_hunk.new_start + prev_hunk.new_count);
-                        let gap = old_gap.max(new_gap);
-                        if gap > 0 {
-                            lines.push(Line::from(vec![Span::styled(
-                                format!("─── {} lines unchanged ───", gap),
-                                Style::default()
-                                    .fg(Color::Rgb(59, 66, 97))
-                                    .add_modifier(Modifier::ITALIC),
-                            )]));
-                            lines.push(Line::from(""));
-                        }
-                    }
-                }
+        let file_path = entry.new_path.as_deref().or(entry.old_path.as_deref()).unwrap_or("");
+        let mut highlighter = SyntaxHighlighter::new_with_theme(
+            file_path,
+            &self.ctx.core_config.option.syntax_theme,
+        );
 
-                // Hunk header
-                if let Some(header_line) = hunk.lines.first() {
-                    for chunk in wrap_text(&header_line.content, width as usize) {
+        // Softer diff colors matching VS Code style
+        let add_style = Style::default()
+            .fg(Color::Rgb(158, 206, 106))
+            .bg(Color::Rgb(29, 43, 59));
+        let del_style = Style::default()
+            .fg(Color::Rgb(247, 118, 142))
+            .bg(Color::Rgb(59, 29, 43));
+        let ctx_style = Style::default().fg(Color::Rgb(192, 202, 245));
+
+        for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
+            // Show collapsed region between hunks
+            if hunk_idx > 0 {
+                if let Some(prev_hunk) = entry.hunks.get(hunk_idx - 1) {
+                    let old_gap = hunk
+                        .old_start
+                        .saturating_sub(prev_hunk.old_start + prev_hunk.old_count);
+                    let new_gap = hunk
+                        .new_start
+                        .saturating_sub(prev_hunk.new_start + prev_hunk.new_count);
+                    let gap = old_gap.max(new_gap);
+                    if gap > 0 {
                         lines.push(Line::from(vec![Span::styled(
-                            chunk.to_string(),
+                            format!("─── {} lines unchanged ───", gap),
                             Style::default()
-                                .fg(Color::Rgb(86, 95, 137))
+                                .fg(Color::Rgb(59, 66, 97))
                                 .add_modifier(Modifier::ITALIC),
                         )]));
+                        lines.push(Line::from(""));
                     }
                 }
-
-                // Context/addition/deletion lines
-                for diff_line in hunk.lines.iter().skip(1) {
-                    match diff_line.line_type {
-                        DiffLineType::Addition => {
-                            let line_num =
-                                format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
-                            lines.extend(wrap_diff_line(
-                                &diff_line.content,
-                                &line_num,
-                                Style::default()
-                                    .fg(Color::Rgb(158, 206, 106))
-                                    .bg(Color::Rgb(29, 43, 59)),
-                                width,
-                            ));
-                        }
-                        DiffLineType::Deletion => {
-                            let line_num =
-                                format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
-                            lines.extend(wrap_diff_line(
-                                &diff_line.content,
-                                &line_num,
-                                Style::default()
-                                    .fg(Color::Rgb(247, 118, 142))
-                                    .bg(Color::Rgb(59, 29, 43)),
-                                width,
-                            ));
-                        }
-                        DiffLineType::Context => {
-                            let line_num =
-                                format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
-                            lines.extend(wrap_diff_line(
-                                &diff_line.content,
-                                &line_num,
-                                Style::default().fg(Color::Rgb(192, 202, 245)),
-                                width,
-                            ));
-                        }
-                        DiffLineType::BinaryNote => {
-                            for chunk in wrap_text(&diff_line.content, width as usize) {
-                                lines.push(Line::from(vec![Span::styled(
-                                    chunk.to_string(),
-                                    Style::default()
-                                        .fg(Color::Rgb(192, 202, 245))
-                                        .add_modifier(Modifier::DIM),
-                                )]));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                lines.push(Line::from(""));
             }
+
+            // Hunk header — show line range instead of raw @@
+            let hunk_label = format!(
+                "@@ lines {}–{} (old)  →  lines {}–{} (new) @@",
+                hunk.old_start,
+                hunk.old_start + hunk.old_count.saturating_sub(1),
+                hunk.new_start,
+                hunk.new_start + hunk.new_count.saturating_sub(1),
+            );
+            for chunk in wrap_text(&hunk_label, width as usize) {
+                lines.push(Line::from(vec![Span::styled(
+                    chunk.to_string(),
+                    Style::default()
+                        .fg(Color::Rgb(86, 95, 137))
+                        .add_modifier(Modifier::ITALIC),
+                )]));
+            }
+
+            // Context/addition/deletion lines
+            for diff_line in hunk.lines.iter().skip(1) {
+                match diff_line.line_type {
+                    DiffLineType::Addition => {
+                        let line_num = format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
+                        lines.extend(wrap_diff_line(
+                            &diff_line.content,
+                            &line_num,
+                            add_style,
+                            width,
+                        ));
+                    }
+                    DiffLineType::Deletion => {
+                        let line_num = format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
+                        lines.extend(wrap_diff_line(
+                            &diff_line.content,
+                            &line_num,
+                            del_style,
+                            width,
+                        ));
+                    }
+                    DiffLineType::Context => {
+                        let line_num = format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
+                        if let Some(ref mut h) = highlighter {
+                            lines.extend(wrap_diff_line_with_syntax(
+                                &diff_line.content,
+                                &line_num,
+                                ctx_style,
+                                width,
+                                h,
+                            ));
+                        } else {
+                            lines.extend(wrap_diff_line(
+                                &diff_line.content,
+                                &line_num,
+                                ctx_style,
+                                width,
+                            ));
+                        }
+                    }
+                    DiffLineType::BinaryNote => {
+                        for chunk in wrap_text(&diff_line.content, width as usize) {
+                            lines.push(Line::from(vec![Span::styled(
+                                chunk.to_string(),
+                                Style::default()
+                                    .fg(Color::Rgb(192, 202, 245))
+                                    .add_modifier(Modifier::DIM),
+                            )]));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            lines.push(Line::from(""));
         }
 
         lines
@@ -547,9 +589,11 @@ impl<'a> DiffView<'a> {
         self.scroll_offset = max;
     }
 
-    fn copy_commit_short_hash(&self) {
-        let hash = self.as_list_state().selected_commit_hash();
-        self.copy_to_clipboard("Commit SHA (short)".into(), hash.as_short_hash().into());
+    fn copy_file_path(&self) {
+        if let Some(entry) = self.diff_entries.first() {
+            let path = entry.new_path.as_deref().or(entry.old_path.as_deref()).unwrap_or("");
+            self.copy_to_clipboard("File path".into(), path.into());
+        }
     }
 
     fn copy_commit_hash(&self) {
@@ -561,11 +605,44 @@ impl<'a> DiffView<'a> {
         self.tx.send(AppEvent::CopyToClipboard { name, value });
     }
 
+    fn cycle_file(&self, delta: isize) {
+        if self.all_file_paths.len() <= 1 {
+            return;
+        }
+        let current = self.title.strip_prefix("Diff: ").unwrap_or("");
+        if let Some(idx) = self.all_file_paths.iter().position(|p| p == current) {
+            let new_idx = ((idx as isize + delta).rem_euclid(self.all_file_paths.len() as isize)) as usize;
+            let new_path = self.all_file_paths[new_idx].clone();
+            self.tx.send(AppEvent::OpenFileDiff {
+                hash: self.commit_hash.clone(),
+                file_path: new_path,
+            });
+        }
+    }
+
     pub fn refresh(&self) {
         let list_state = self.as_list_state();
         let list_context = ListRefreshViewContext::from(list_state);
         let context = RefreshViewContext::Detail { list_context };
         self.tx.send(AppEvent::Refresh(context));
+    }
+
+    pub fn footer_hint(&self) -> String {
+        let mut parts = Vec::new();
+        if self.all_file_paths.len() > 1 {
+            let current = self.title.strip_prefix("Diff: ").unwrap_or("");
+            if let Some(idx) = self.all_file_paths.iter().position(|p| p == current) {
+                if idx > 0 {
+                    parts.push("←:prev-file");
+                }
+                if idx + 1 < self.all_file_paths.len() {
+                    parts.push("→:next-file");
+                }
+            }
+        }
+        parts.push("c:copy-path");
+        parts.push("Esc:close");
+        parts.join(" ")
     }
 
     pub fn handle_click(&mut self, _col: u16, row: u16) {
@@ -615,6 +692,74 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
             lines.push(before);
             remaining = after;
         }
+    }
+
+    lines
+}
+
+fn wrap_diff_line_with_syntax(
+    content: &str,
+    line_num_str: &str,
+    base_style: Style,
+    available_width: u16,
+    highlighter: &mut SyntaxHighlighter,
+) -> Vec<Line<'static>> {
+    let line_num_width = 7; // "1234 │ " = 7 chars
+    let content_width = available_width.saturating_sub(line_num_width) as usize;
+
+    let mut lines = Vec::new();
+    if content_width == 0 {
+        let spans = highlighter.highlight_line(content, base_style, None);
+        let mut all_spans = vec![Span::styled(line_num_str.to_string(), Style::default().fg(Color::Rgb(59, 66, 97)))];
+        all_spans.extend(spans);
+        lines.push(Line::from(all_spans));
+        return lines;
+    }
+
+    let mut remaining = content;
+    let mut first = true;
+
+    while !remaining.is_empty() {
+        let (chunk, rest) = if remaining.chars().count() > content_width {
+            let char_indices: Vec<(usize, char)> =
+                remaining.char_indices().take(content_width + 1).collect();
+            let mut break_at = content_width;
+            while break_at > 0 {
+                if char_indices[break_at - 1].1.is_ascii_whitespace() {
+                    break;
+                }
+                break_at -= 1;
+            }
+            if break_at == 0 {
+                break_at = content_width;
+            }
+            let byte_break = if break_at < char_indices.len() {
+                char_indices[break_at].0
+            } else {
+                remaining.len()
+            };
+            let (before, after) = remaining.split_at(byte_break);
+            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
+                (before.trim_end(), after.trim_start())
+            } else {
+                (before, after)
+            }
+        } else {
+            (remaining, "")
+        };
+
+        let num_span = if first {
+            Span::styled(line_num_str.to_string(), Style::default().fg(Color::Rgb(59, 66, 97)))
+        } else {
+            Span::styled("     │ ".to_string(), Style::default().fg(Color::Rgb(59, 66, 97)))
+        };
+
+        let mut spans = vec![num_span];
+        spans.extend(highlighter.highlight_line(chunk, base_style, None));
+        lines.push(Line::from(spans));
+
+        remaining = rest;
+        first = false;
     }
 
     lines

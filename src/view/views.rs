@@ -148,6 +148,13 @@ impl<'a> View<'a> {
         matches!(self, View::Config(_))
     }
 
+    pub fn diff_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Diff(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
     pub fn of_list(
         commit_list_state: CommitListState<'a>,
         ctx: Rc<AppContext>,
@@ -180,6 +187,8 @@ impl<'a> View<'a> {
         ctx: Rc<AppContext>,
         tx: Sender,
         title: String,
+        commit_hash: String,
+        all_file_paths: Vec<String>,
     ) -> Self {
         View::Diff(Box::new(DiffView::new(
             commit_list_state,
@@ -187,6 +196,8 @@ impl<'a> View<'a> {
             ctx,
             tx,
             title,
+            commit_hash,
+            all_file_paths,
         )))
     }
 
