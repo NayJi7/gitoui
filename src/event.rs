@@ -130,7 +130,7 @@ pub enum GitAction {
     DiscardFile { file: String },
     DiscardAll,
     Stash { message: Option<String> },
-    Commit { message: String },
+    Commit { message: String, amend: bool },
     CleanUntracked,
     Push,
 }

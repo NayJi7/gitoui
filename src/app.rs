@@ -1226,7 +1226,7 @@ impl App<'_> {
             GitAction::DiscardFile { file } => actions::discard_file(repo_path, &file),
             GitAction::DiscardAll => actions::discard_all(repo_path),
             GitAction::Stash { message } => actions::stash(repo_path, message.as_deref()),
-            GitAction::Commit { message } => actions::commit(repo_path, &message),
+            GitAction::Commit { message, amend } => actions::commit(repo_path, &message, amend),
             GitAction::CleanUntracked => actions::clean_untracked(repo_path),
             GitAction::Push => actions::push_commit(repo_path, &target),
             GitAction::CreateArchive => {

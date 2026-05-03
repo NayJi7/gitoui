@@ -203,11 +203,7 @@ impl<'a> DialogView<'a> {
                     return;
                 }
                 let amend = self.checkboxes.get(0).copied().unwrap_or(false);
-                let mut action = GitAction::Commit { message: self.input_value.clone() };
-                if amend {
-                    // Amend is handled by a separate action if needed, but for now we just commit
-                    // TODO: support amend in git/actions.rs
-                }
+                let action = GitAction::Commit { message: self.input_value.clone(), amend };
                 (String::new(), action)
             }
             DialogKind::ConfirmDiscardFile { file } => {

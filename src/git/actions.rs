@@ -173,8 +173,12 @@ pub fn stash(path: &Path, message: Option<&str>) -> GitResult {
     }
 }
 
-pub fn commit(path: &Path, message: &str) -> GitResult {
-    run_git(path, &["commit", "-m", message])
+pub fn commit(path: &Path, message: &str, amend: bool) -> GitResult {
+    if amend {
+        run_git(path, &["commit", "--amend", "-m", message])
+    } else {
+        run_git(path, &["commit", "-m", message])
+    }
 }
 
 pub fn fetch(path: &Path) -> GitResult {
