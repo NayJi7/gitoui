@@ -1,6 +1,7 @@
 pub mod color;
 pub mod config;
 pub mod git;
+pub mod highlight;
 pub mod graph;
 pub mod protocol;
 

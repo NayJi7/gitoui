@@ -135,6 +135,8 @@ pub struct CoreOptionConfig {
     pub initial_load_count: usize,
     #[default = 200]
     pub load_more_count: usize,
+    #[default = "base16-ocean.dark"]
+    pub syntax_theme: String,
 }
 
 #[optional(derives = [Deserialize])]
@@ -512,6 +514,8 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
     set_nested_bool(&mut doc, &["core", "search", "ignore_case"], core.search.ignore_case);
     set_nested_bool(&mut doc, &["core", "search", "fuzzy"], core.search.fuzzy);
 
+    set_nested_string(&mut doc, &["core", "option", "syntax_theme"], &core.option.syntax_theme);
+
     let toml_string = toml::to_string_pretty(&doc)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&path, toml_string)
@@ -560,9 +564,10 @@ mod tests {
                     auto_refresh_debounce_ms: 500,
                     initial_load_count: 500,
                     load_more_count: 200,
+                    syntax_theme: "base16-ocean.dark".into(),
                 },
                 search: CoreSearchConfig {
-                    ignore_case: true,
+                    ignore_case: false,
                     fuzzy: false,
                 },
                 user_command: CoreUserCommandConfig {
@@ -695,10 +700,11 @@ mod tests {
                     auto_refresh_debounce_ms: 500,
                     initial_load_count: 500,
                     load_more_count: 200,
+                    syntax_theme: "base16-ocean.dark".into(),
                 },
                 search: CoreSearchConfig {
                     ignore_case: true,
-                    fuzzy: false,
+                    fuzzy: true,
                 },
                 user_command: CoreUserCommandConfig {
                     commands: FxHashMap::from_iter([
@@ -810,9 +816,10 @@ mod tests {
                     auto_refresh_debounce_ms: 500,
                     initial_load_count: 500,
                     load_more_count: 200,
+                    syntax_theme: "base16-ocean.dark".into(),
                 },
                 search: CoreSearchConfig {
-                    ignore_case: true,
+                    ignore_case: false,
                     fuzzy: false,
                 },
                 user_command: CoreUserCommandConfig {
@@ -928,5 +935,24 @@ mod tests {
                 commands: vec!["xclip".into(), "-selection".into(), "clipboard".into()]
             }
         );
+    }
+
+    #[test]
+    fn test_config_syntax_theme_roundtrip() {
+        let mut core = CoreConfig::default();
+        let ui = UiConfig::default();
+        core.option.syntax_theme = "Monokai Extended".into();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", temp_dir.path());
+        let app_dir = temp_dir.path().join("gitbranch");
+        std::fs::create_dir_all(&app_dir).unwrap();
+
+        // Save config
+        save(&core, &ui).unwrap();
+
+        // Load config
+        let (loaded_core, _, _, _, _) = load().unwrap();
+        assert_eq!(loaded_core.option.syntax_theme, "Monokai Extended");
     }
 }

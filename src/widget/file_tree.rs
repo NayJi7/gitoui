@@ -72,9 +72,9 @@ impl StatefulWidget for FileTree<'_> {
             .map(|(i, change)| {
                 let is_selected = state.offset + i == state.selected;
                 let (status_char, status_color, path) = match change {
-                    FileChange::Add { path } => ("A", Color::Rgb(158, 206, 106), path.as_str()),
-                    FileChange::Modify { path } => ("M", Color::Rgb(224, 175, 104), path.as_str()),
-                    FileChange::Delete { path } => ("D", Color::Rgb(247, 118, 142), path.as_str()),
+                    FileChange::Add { path, .. } => ("A", Color::Rgb(158, 206, 106), path.as_str()),
+                    FileChange::Modify { path, .. } => ("M", Color::Rgb(224, 175, 104), path.as_str()),
+                    FileChange::Delete { path, .. } => ("D", Color::Rgb(247, 118, 142), path.as_str()),
                     FileChange::Move { to, .. } => ("R", Color::Rgb(125, 207, 255), to.as_str()),
                 };
 

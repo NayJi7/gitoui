@@ -31,7 +31,6 @@ pub enum AppEvent {
     CloseHelp,
     OpenConfig,
     CloseConfig,
-    OpenDiff,
     OpenFileDiff { hash: String, file_path: String },
     CloseDiff,
     CloseDiffToDetail,

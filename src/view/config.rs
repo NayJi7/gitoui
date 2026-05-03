@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use ratatui::{
     crossterm::event::KeyEvent,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Padding, Paragraph},
@@ -13,6 +13,7 @@ use crate::{
     app::AppContext,
     config::{save, CoreConfig, DiffMode, UiConfig},
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    highlight::SyntaxHighlighter,
     view::View,
     GraphStyle, ImageProtocolType,
 };
@@ -51,7 +52,7 @@ impl<'a> ConfigView<'a> {
                 }
             }
             UserEvent::NavigateDown | UserEvent::SelectDown => {
-                if self.selected < 3 {
+                if self.selected < 4 {
                     self.selected += 1;
                 }
             }
@@ -69,7 +70,7 @@ impl<'a> ConfigView<'a> {
             }
             UserEvent::PageDown => {
                 for _ in 0..count {
-                    if self.selected < 3 {
+                    if self.selected < 4 {
                         self.selected += 1;
                     }
                 }
@@ -85,7 +86,7 @@ impl<'a> ConfigView<'a> {
                 self.selected = 0;
             }
             UserEvent::GoToBottom => {
-                self.selected = 3;
+                self.selected = 4;
             }
             _ => {}
         }
@@ -122,6 +123,13 @@ impl<'a> ConfigView<'a> {
                     ImageProtocolType::KittyUnicode => ImageProtocolType::Sixel,
                 };
                 self.core_config.set_protocol(prev);
+            }
+            4 => {
+                let themes = ["base16-ocean.dark", "base16-ocean.light", "base16-mocha.dark", "base16-eighties.dark", "InspiredGitHub", "Solarized (dark)", "Solarized (light)", "Dracula", "Monokai", "3024 Day", "Agola Dark", "Blackboard", "Cobalt"];
+                let current = self.core_config.option.syntax_theme.as_str();
+                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
+                let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
+                self.core_config.option.syntax_theme = themes[prev_idx].to_string();
             }
             _ => {}
         }
@@ -163,6 +171,13 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_protocol(next);
             }
+            4 => {
+                let themes = ["base16-ocean.dark", "base16-ocean.light", "base16-mocha.dark", "base16-eighties.dark", "InspiredGitHub", "Solarized (dark)", "Solarized (light)", "Dracula", "Monokai", "3024 Day", "Agola Dark", "Blackboard", "Cobalt"];
+                let current = self.core_config.option.syntax_theme.as_str();
+                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
+                let next_idx = (idx + 1) % themes.len();
+                self.core_config.option.syntax_theme = themes[next_idx].to_string();
+            }
             _ => {}
         }
 
@@ -200,12 +215,25 @@ impl<'a> ConfigView<'a> {
         let sep_line = Line::from("─".repeat(inner.width as usize)).style(sep_style);
         f.render_widget(Paragraph::new(sep_line), sep_area);
 
-        // Items list
+        // Split remaining area into two columns
+        let content_area = Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: inner.height - 3,
+        };
+        let [left_area, right_area] = Layout::horizontal([
+            Constraint::Percentage(45),
+            Constraint::Percentage(55),
+        ]).areas(content_area);
+
+        // Items list (left column)
         let items = vec![
             ("Graph Style", graph_style_display(self.core_config.graph_style())),
             ("Diff Mode", diff_mode_display(self.ui_config.common.diff_mode)),
             ("Mouse", mouse_display(self.ui_config.common.mouse_enabled)),
             ("Image Protocol", protocol_display(self.core_config.protocol())),
+            ("Syntax Theme", self.core_config.option.syntax_theme.clone()),
         ];
 
         let lines: Vec<Line> = items
@@ -214,7 +242,7 @@ impl<'a> ConfigView<'a> {
             .map(|(i, (name, value))| {
                 let display = format!("< {} >", value);
                 let spans = vec![
-                    Span::raw(format!("{:<20}", name)),
+                    Span::raw(format!("{:<18}", name)),
                     Span::styled(display, Style::default().fg(self.ctx.color_theme.fg)),
                 ];
                 let mut line = Line::from(spans);
@@ -225,21 +253,69 @@ impl<'a> ConfigView<'a> {
             })
             .collect();
 
-        let list_area = Rect {
-            x: inner.x,
-            y: inner.y + 2,
-            width: inner.width,
-            height: inner.height - 3,
-        };
         let paragraph = Paragraph::new(lines);
-        f.render_widget(paragraph, list_area);
+        f.render_widget(paragraph, left_area);
+
+        // Description / preview (right column)
+        let descriptions = [
+            "Controls how commit connection lines are rendered in the graph.",
+            "Enhanced shows contextual line numbers; Raw shows plain git diff output.",
+            "Enable mouse support for clicking and scrolling.",
+            "Terminal image protocol used for rendering commit graph images.",
+            "Color theme for syntax highlighting in code diffs.",
+        ];
+
+        let mut right_lines: Vec<Line> = vec![
+            Line::from(vec![
+                Span::styled("Description", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from(descriptions[self.selected]),
+        ];
+
+        match self.selected {
+            4 => {
+                // Syntax Theme preview
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![
+                    Span::styled("Preview", Style::default().add_modifier(Modifier::BOLD)),
+                ]));
+                right_lines.push(Line::from(""));
+
+                let preview_code = vec![
+                    "// Example code",
+                    "fn greet(name: &str) -> String {",
+                    "    let count = 42;",
+                    "    format!(\"Hello {}!\", name)",
+                    "}",
+                ];
+
+                if let Some(mut highlighter) = SyntaxHighlighter::new_with_theme(
+                    "test.rs",
+                    &self.core_config.option.syntax_theme,
+                ) {
+                    for line in preview_code {
+                        let spans = highlighter.highlight_line(line, Style::default(), None);
+                        right_lines.push(Line::from(spans));
+                    }
+                } else {
+                    for line in preview_code {
+                        right_lines.push(Line::from(line));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let right_paragraph = Paragraph::new(right_lines);
+        f.render_widget(right_paragraph, right_area);
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         let inner_y = 3; // block padding top + title + sep
         let item_y_start = inner_y;
         let item_idx = (row as usize).saturating_sub(item_y_start);
-        if item_idx < 4 {
+        if item_idx < 5 {
             self.selected = item_idx;
             self.cycle_option();
         }
@@ -249,7 +325,7 @@ impl<'a> ConfigView<'a> {
         let inner_y = 3;
         let item_y_start = inner_y;
         let item_idx = (row as usize).saturating_sub(item_y_start);
-        if item_idx < 4 {
+        if item_idx < 5 {
             self.selected = item_idx;
         }
     }
