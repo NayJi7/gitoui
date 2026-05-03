@@ -307,7 +307,7 @@ impl<'a> DetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(1);
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(3);
                 if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
                     self.execute_action(action_idx);
                 }
@@ -342,7 +342,7 @@ impl<'a> DetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(1);
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(3);
                 self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
                 return;
             } else {

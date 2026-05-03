@@ -413,12 +413,15 @@ impl App<'_> {
                     self.execute_git_action(target, action);
                 }
                 AppEvent::OpenBranchDetail { branch_name } => {
+                    self.clear_image(Some(terminal))?;
                     self.open_branch_detail(branch_name);
                 }
                 AppEvent::OpenTagDetail { tag_name } => {
+                    self.clear_image(Some(terminal))?;
                     self.open_tag_detail(tag_name);
                 }
                 AppEvent::OpenUncommitted => {
+                    self.clear_image(Some(terminal))?;
                     self.open_uncommitted();
                 }
                 AppEvent::StageFile { file } => self.stage_file(file),
@@ -1307,6 +1310,7 @@ impl App<'_> {
             View::List(ref mut view) => Some(view.take_list_state()),
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
             _ => None,
         };
         let repo_path = self.repository.path();
@@ -1345,6 +1349,7 @@ impl App<'_> {
             View::List(ref mut view) => Some(view.take_list_state()),
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
             _ => None,
         };
         let repo_path = self.repository.path();
@@ -1371,6 +1376,7 @@ impl App<'_> {
             View::List(ref mut view) => Some(view.take_list_state()),
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
             _ => None,
         };
         let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
@@ -1383,9 +1389,11 @@ impl App<'_> {
         };
         let staged: Vec<_> = changes.staged.iter().map(convert).collect();
         let unstaged: Vec<_> = changes.unstaged.iter().map(convert).collect();
+        let untracked: Vec<_> = changes.untracked.iter().map(convert).collect();
         self.view = View::Uncommitted(Box::new(crate::view::uncommitted::UncommittedView::new(
             unstaged,
             staged,
+            untracked,
             commit_list_state,
             self.ctx.clone(),
             self.ec.sender(),

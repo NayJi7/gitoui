@@ -20,6 +20,7 @@ pub struct UncommittedView<'a> {
     tx: Sender,
     unstaged: Vec<UncommittedFile>,
     staged: Vec<UncommittedFile>,
+    untracked: Vec<UncommittedFile>,
     state: UncommittedState,
     detail_area: Option<Rect>,
 }
@@ -28,6 +29,7 @@ impl<'a> UncommittedView<'a> {
     pub fn new(
         unstaged: Vec<UncommittedFile>,
         staged: Vec<UncommittedFile>,
+        untracked: Vec<UncommittedFile>,
         commit_list_state: Option<CommitListState<'a>>,
         ctx: Rc<AppContext>,
         tx: Sender,
@@ -38,6 +40,7 @@ impl<'a> UncommittedView<'a> {
             tx,
             unstaged,
             staged,
+            untracked,
             state: UncommittedState::default(),
             detail_area: None,
         }
@@ -50,7 +53,7 @@ impl<'a> UncommittedView<'a> {
         match event {
             UserEvent::NavigateDown => {
                 for _ in 0..count {
-                    let total = self.state.total_in_section(self.unstaged.len(), self.staged.len());
+                    let total = self.state.total_in_section(self.unstaged.len(), self.staged.len(), self.untracked.len());
                     self.state.select_next(total);
                 }
             }
@@ -63,7 +66,7 @@ impl<'a> UncommittedView<'a> {
                 self.state.switch_section();
             }
             UserEvent::Stage => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged) {
+                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
                     self.tx.send(AppEvent::StageFile {
                         file: file.path.clone(),
                     });
@@ -73,7 +76,7 @@ impl<'a> UncommittedView<'a> {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
             }
             UserEvent::Unstage => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged) {
+                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
                     self.tx.send(AppEvent::UnstageFile {
                         file: file.path.clone(),
                     });
@@ -83,7 +86,7 @@ impl<'a> UncommittedView<'a> {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
             }
             UserEvent::Discard => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged) {
+                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
                     self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardFile {
                         file: file.path.clone(),
                     }));
@@ -126,7 +129,7 @@ impl<'a> UncommittedView<'a> {
             f.render_stateful_widget(commit_list, list_area, list_state);
         }
 
-        let widget = UncommittedWidget::new(&self.unstaged, &self.staged, self.ctx.clone());
+        let widget = UncommittedWidget::new(&self.unstaged, &self.staged, &self.untracked, self.ctx.clone());
         f.render_stateful_widget(widget, detail_area, &mut self.state);
         self.detail_area = Some(detail_area);
     }
@@ -149,7 +152,7 @@ impl<'a> UncommittedView<'a> {
             if col >= detail_area.x + (detail_area.width as f32 * 0.6) as u16
                 && row >= detail_area.y
             {
-                let action_bar_row = (row - detail_area.y).saturating_sub(1) as usize;
+                let action_bar_row = (row - detail_area.y).saturating_sub(3) as usize;
                 if action_bar_row == 0 {
                     self.tx.send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
                 } else if action_bar_row == 1 {
@@ -163,17 +166,26 @@ impl<'a> UncommittedView<'a> {
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
                 let local_row = row.saturating_sub(detail_area.y + 1) as usize;
-                let unstaged_count = self.unstaged.len().saturating_add(1);
+                // Approximate layout: title(0), empty(1), unstaged header(2), files(3..), empty, staged header, files, empty, untracked header, files
+                let unstaged_count = self.unstaged.len().max(1) + 2; // header + files + empty
+                let staged_count = self.staged.len().max(1) + 2; // header + files + empty
                 if local_row < unstaged_count {
                     self.state.section = UncommittedSection::Unstaged;
-                    if local_row > 0 && local_row <= self.unstaged.len() {
-                        self.state.selected = local_row - 1;
+                    let file_row = local_row.saturating_sub(1);
+                    if file_row < self.unstaged.len() {
+                        self.state.selected = file_row;
+                    }
+                } else if local_row < unstaged_count + staged_count {
+                    self.state.section = UncommittedSection::Staged;
+                    let file_row = local_row.saturating_sub(unstaged_count + 1);
+                    if file_row < self.staged.len() {
+                        self.state.selected = file_row;
                     }
                 } else {
-                    self.state.section = UncommittedSection::Staged;
-                    let staged_row = local_row.saturating_sub(unstaged_count + 2);
-                    if staged_row < self.staged.len() {
-                        self.state.selected = staged_row;
+                    self.state.section = UncommittedSection::Untracked;
+                    let file_row = local_row.saturating_sub(unstaged_count + staged_count + 1);
+                    if file_row < self.untracked.len() {
+                        self.state.selected = file_row;
                     }
                 }
             }
@@ -185,7 +197,7 @@ impl<'a> UncommittedView<'a> {
             if col >= detail_area.x + (detail_area.width as f32 * 0.6) as u16
                 && row >= detail_area.y
             {
-                let action_bar_row = (row - detail_area.y).saturating_sub(1) as usize;
+                let action_bar_row = (row - detail_area.y).saturating_sub(3) as usize;
                 self.state.hovered_action = if action_bar_row < 3 {
                     Some(action_bar_row)
                 } else {

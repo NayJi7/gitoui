@@ -38,6 +38,7 @@ pub enum UncommittedSection {
     #[default]
     Unstaged,
     Staged,
+    Untracked,
 }
 
 #[derive(Debug, Default)]
@@ -65,7 +66,8 @@ impl UncommittedState {
     pub fn switch_section(&mut self) {
         self.section = match self.section {
             UncommittedSection::Unstaged => UncommittedSection::Staged,
-            UncommittedSection::Staged => UncommittedSection::Unstaged,
+            UncommittedSection::Staged => UncommittedSection::Untracked,
+            UncommittedSection::Untracked => UncommittedSection::Unstaged,
         };
         self.selected = 0;
         self.offset = 0;
@@ -75,17 +77,20 @@ impl UncommittedState {
         &self,
         unstaged: &'a [UncommittedFile],
         staged: &'a [UncommittedFile],
+        untracked: &'a [UncommittedFile],
     ) -> Option<&'a UncommittedFile> {
         match self.section {
             UncommittedSection::Unstaged => unstaged.get(self.selected),
             UncommittedSection::Staged => staged.get(self.selected),
+            UncommittedSection::Untracked => untracked.get(self.selected),
         }
     }
 
-    pub fn total_in_section(&self, unstaged_len: usize, staged_len: usize) -> usize {
+    pub fn total_in_section(&self, unstaged_len: usize, staged_len: usize, untracked_len: usize) -> usize {
         match self.section {
             UncommittedSection::Unstaged => unstaged_len,
             UncommittedSection::Staged => staged_len,
+            UncommittedSection::Untracked => untracked_len,
         }
     }
 }
@@ -93,6 +98,7 @@ impl UncommittedState {
 pub struct UncommittedWidget<'a> {
     unstaged: &'a [UncommittedFile],
     staged: &'a [UncommittedFile],
+    untracked: &'a [UncommittedFile],
     ctx: Rc<AppContext>,
 }
 
@@ -100,11 +106,13 @@ impl<'a> UncommittedWidget<'a> {
     pub fn new(
         unstaged: &'a [UncommittedFile],
         staged: &'a [UncommittedFile],
+        untracked: &'a [UncommittedFile],
         ctx: Rc<AppContext>,
     ) -> Self {
         Self {
             unstaged,
             staged,
+            untracked,
             ctx,
         }
     }
@@ -179,6 +187,29 @@ impl<'a> UncommittedWidget<'a> {
             for (i, file) in self.staged.iter().enumerate() {
                 let is_selected =
                     state.section == UncommittedSection::Staged && i == state.selected;
+                let style = if is_selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                lines.push(self.file_line(file, style));
+            }
+        }
+        lines.push(Line::from(""));
+
+        // Untracked section
+        lines.push(Line::from(vec![Span::styled(
+            "-- Untracked --",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(self.ctx.color_theme.divider_fg),
+        )]));
+        if self.untracked.is_empty() {
+            lines.push(Line::from("  (no untracked files)").fg(Color::DarkGray));
+        } else {
+            for (i, file) in self.untracked.iter().enumerate() {
+                let is_selected =
+                    state.section == UncommittedSection::Untracked && i == state.selected;
                 let style = if is_selected {
                     Style::default().add_modifier(Modifier::REVERSED)
                 } else {
