@@ -49,10 +49,16 @@ impl<'a> ConfigView<'a> {
                     self.selected += 1;
                 }
             }
-            UserEvent::Confirm | UserEvent::NavigateRight => {
+            UserEvent::Confirm => {
                 self.cycle_option();
             }
-            UserEvent::Cancel | UserEvent::Close => {
+            UserEvent::NavigateRight => {
+                self.cycle_option();
+            }
+            UserEvent::NavigateLeft => {
+                self.cycle_option_prev();
+            }
+            UserEvent::Cancel | UserEvent::Close | UserEvent::Config => {
                 self.tx.send(AppEvent::CloseConfig);
             }
             UserEvent::PageDown => {
@@ -77,6 +83,50 @@ impl<'a> ConfigView<'a> {
             }
             _ => {}
         }
+    }
+
+    fn cycle_option_prev(&mut self) {
+        let mut core = self.ctx.core_config.clone();
+        let mut ui = self.ctx.ui_config.clone();
+
+        match self.selected {
+            0 => {
+                let current = core.graph_style();
+                let prev = match current {
+                    GraphStyle::Rounded => GraphStyle::Smooth,
+                    GraphStyle::Angular => GraphStyle::Rounded,
+                    GraphStyle::Smooth => GraphStyle::Angular,
+                };
+                core.set_graph_style(prev);
+            }
+            1 => {
+                let prev = match ui.common.diff_mode {
+                    DiffMode::Enhanced => DiffMode::Raw,
+                    DiffMode::Raw => DiffMode::Enhanced,
+                };
+                ui.common.set_diff_mode(prev);
+            }
+            2 => {
+                ui.common.set_mouse_enabled(!ui.common.mouse_enabled);
+            }
+            3 => {
+                let current = core.protocol().unwrap_or(ImageProtocolType::Auto);
+                let prev = match current {
+                    ImageProtocolType::Auto => ImageProtocolType::KittyUnicode,
+                    ImageProtocolType::Kitty => ImageProtocolType::Auto,
+                    ImageProtocolType::Iterm => ImageProtocolType::Kitty,
+                    ImageProtocolType::Sixel => ImageProtocolType::Iterm,
+                    ImageProtocolType::KittyUnicode => ImageProtocolType::Sixel,
+                };
+                core.set_protocol(prev);
+            }
+            _ => {}
+        }
+
+        if let Err(e) = save(&core, &ui) {
+            self.tx.send(AppEvent::NotifyError(e.to_string()));
+        }
+        self.before.refresh();
     }
 
     fn cycle_option(&mut self) {
@@ -125,12 +175,34 @@ impl<'a> ConfigView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .title(" Configuration ")
-            .title_alignment(Alignment::Center)
-            .padding(Padding::new(2, 2, 2, 2));
+            .padding(Padding::new(2, 2, 1, 1));
         let inner = block.inner(area);
         f.render_widget(block, area);
 
+        // Title left-aligned
+        let title = Line::from(vec![
+            Span::styled("Configuration", Style::default().add_modifier(Modifier::BOLD)),
+        ]);
+        let title_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        };
+        f.render_widget(Paragraph::new(title), title_area);
+
+        // Separator line
+        let sep_area = Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        };
+        let sep_style = Style::default().fg(self.ctx.color_theme.border);
+        let sep_line = Line::from("─".repeat(inner.width as usize)).style(sep_style);
+        f.render_widget(Paragraph::new(sep_line), sep_area);
+
+        // Items list
         let items = vec![
             ("Graph Style", graph_style_display(self.ctx.core_config.graph_style())),
             ("Diff Mode", diff_mode_display(self.ctx.ui_config.common.diff_mode)),
@@ -154,14 +226,26 @@ impl<'a> ConfigView<'a> {
             })
             .collect();
 
+        let list_area = Rect {
+            x: inner.x,
+            y: inner.y + 2,
+            width: inner.width,
+            height: inner.height - 3,
+        };
         let paragraph = Paragraph::new(lines);
-        f.render_widget(paragraph, inner);
+        f.render_widget(paragraph, list_area);
 
+        // Footer hint
         let hint = Line::from(vec![
-            Span::raw("Press "),
-            Span::styled("Enter/l", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to cycle, "),
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" / "),
+            Span::styled("←", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" / "),
+            Span::styled("→", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" for cycle, "),
             Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" / "),
+            Span::styled("p", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" to close"),
         ]);
         let hint_area = Rect {

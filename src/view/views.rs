@@ -118,6 +118,10 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn is_config_active(&self) -> bool {
+        matches!(self, View::Config(_))
+    }
+
     pub fn of_list(
         commit_list_state: CommitListState<'a>,
         ctx: Rc<AppContext>,

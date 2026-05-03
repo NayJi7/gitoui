@@ -453,18 +453,46 @@ impl App<'_> {
         let dim_separator = Style::default().fg(Color::Rgb(59, 66, 97));
         let dim_text = Style::default().fg(Color::Rgb(86, 95, 137));
         let is_search_active = self.view.is_search_active();
+        let is_config_active = self.view.is_config_active();
         let show_enhanced = matches!(
             &self.app_status.status_line,
             StatusLine::None | StatusLine::NotificationInfo(_)
-        ) && !is_search_active;
-        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None) || is_search_active;
+        ) && !is_search_active && !is_config_active;
+        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None) || is_search_active || is_config_active;
 
         let status_area = if show_shortcuts {
             let right_constraint = if is_search_active {
                 Constraint::Length(40)
+            } else if is_config_active {
+                Constraint::Length(50)
             } else {
                 Constraint::Length(35)
             };
+            let [left_area, right_area] = Layout::horizontal([
+                Constraint::Min(0),
+                right_constraint,
+            ]).areas(area);
+
+            let shortcut_text = if is_search_active {
+                "n:next  N:prev  Esc:clear  Enter:apply"
+            } else if is_config_active {
+                "Enter/←/→ for cycle, escape/p to close"
+            } else {
+                "q:quit  ?:help  r:refresh"
+            };
+            let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
+            let shortcut_line = Line::from(shortcut_spans);
+            let shortcut_paragraph = Paragraph::new(shortcut_line)
+                .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+                .alignment(Alignment::Right)
+                .block(Block::default().padding(Padding::horizontal(1)));
+
+            f.render_widget(shortcut_paragraph, right_area);
+
+            left_area
+        } else {
+            area
+        };
             let [left_area, right_area] = Layout::horizontal([
                 Constraint::Min(0),
                 right_constraint,
