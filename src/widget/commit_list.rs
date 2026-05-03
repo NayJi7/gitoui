@@ -1340,7 +1340,7 @@ impl CommitList<'_> {
         spans.insert(0, Span::raw(" "));
         spans.push(Span::raw(" "));
         let mut line = Line::from(spans);
-        if i == state.selected && state.hovered_row != Some(i) {
+        if i == state.selected && state.hovered_branch.is_none() && state.hovered_tag.is_none() {
             line = line
                 .bg(self.ctx.color_theme.list_selected_bg)
                 .fg(self.ctx.color_theme.list_selected_fg);
@@ -1458,26 +1458,31 @@ fn refs_spans<'a>(
         let name_spans = refs_matches
             .get(*name)
             .map(|pos| {
+                let modifier = if is_hovered {
+                    Modifier::BOLD | Modifier::UNDERLINED | Modifier::REVERSED
+                } else {
+                    Modifier::BOLD
+                };
                 highlighted_spans(
                     (*name).into(),
                     pos.clone(),
                     *fg,
-                    if is_hovered {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::BOLD
-                    },
+                    modifier,
                     color_theme,
                     false,
                 )
             })
             .unwrap_or_else(|| {
-                let modifier = if is_hovered {
-                    Modifier::BOLD | Modifier::UNDERLINED
+                let style = if is_hovered {
+                    Style::default()
+                        .fg(*fg)
+                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::UNDERLINED)
+                        .add_modifier(Modifier::REVERSED)
                 } else {
-                    Modifier::BOLD
+                    Style::default().fg(*fg).add_modifier(Modifier::BOLD)
                 };
-                vec![Span::styled(*name, Style::default().fg(*fg).add_modifier(modifier))]
+                vec![Span::styled(*name, style)]
             });
 
         for span in &name_spans {
