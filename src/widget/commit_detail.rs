@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
@@ -124,12 +124,17 @@ impl StatefulWidget for CommitDetail<'_> {
     type State = CommitDetailState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        // Leave space on the right for the action bar overlay (width 32 + 1 padding)
+        let action_bar_width = 33u16;
+        let content_width = area.width.saturating_sub(action_bar_width);
+        let content_area = Rect::new(area.x, area.y, content_width, area.height);
+
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(content_area);
 
-        let (mut label_lines, mut value_lines, changes_start) = self.contents(area);
+        let (mut label_lines, mut value_lines, changes_start) = self.contents(content_area);
 
-        let content_area_height = area.height as usize - 1; // minus the top border
+        let content_area_height = content_area.height as usize - 1; // minus the top border
         self.update_state(state, value_lines.len(), content_area_height, changes_start);
 
         // Apply selection highlight to the selected file line
@@ -195,14 +200,6 @@ impl CommitDetail<'_> {
         let overlay_x = area.right().saturating_sub(overlay_width + 1);
         let overlay_y = area.top() + 1;
         let overlay_area = Rect::new(overlay_x, overlay_y, overlay_width, overlay_height);
-
-        // Draw background to make it readable over content
-        for y in overlay_area.top()..overlay_area.bottom() {
-            for x in overlay_area.left()..overlay_area.right() {
-                let cell = &mut buf[(x, y)];
-                cell.set_style(Style::default().bg(Color::Rgb(30, 34, 50)));
-            }
-        }
 
         // Draw border
         let block = Block::default()
