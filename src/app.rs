@@ -16,15 +16,16 @@ use rustc_hash::FxHashMap;
 use crate::{
     color::{ColorTheme, GraphColorSet},
     config::{save, CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
-    event::{AppEvent, EventController, Sender, UserEvent, UserEventWithCount},
+    event::{AppEvent, DialogKind, EventController, GitAction, Sender, UserEvent, UserEventWithCount},
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{diff::DiffEntry, Commit, CommitHash, FileChange, Head, Ref, Repository},
+    git::{actions, diff::DiffEntry, status::UncommittedChanges, Commit, CommitHash, FileChange, Head, Ref, Repository},
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
+    widget::{branch_detail::BranchMetadata, tag_detail::TagMetadata},
     widget::commit_list::{CommitInfo, CommitListState},
 };
 use ratatui::style::Color;
@@ -391,18 +392,27 @@ impl App<'_> {
                 AppEvent::NotifyError(msg) => {
                     self.error_notification(msg);
                 }
-                // Phase 2 - Git Actions (TODO: implement handlers)
-                AppEvent::OpenDialog(_kind) => {}
-                AppEvent::CloseDialog => {}
-                AppEvent::DialogConfirm => {}
-                AppEvent::DialogCancel => {}
+                // Phase 2 - Git Actions
+                AppEvent::OpenDialog(kind) => self.open_dialog(kind),
+                AppEvent::CloseDialog => self.close_dialog(),
+                AppEvent::DialogConfirm => self.dialog_confirm(),
+                AppEvent::DialogCancel => self.close_dialog(),
                 AppEvent::DialogInput(_input) => {}
-                AppEvent::ExecuteGitAction { .. } => {}
-                AppEvent::OpenBranchDetail { .. } => {}
-                AppEvent::OpenTagDetail { .. } => {}
-                AppEvent::StageFile { .. } => {}
-                AppEvent::UnstageFile { .. } => {}
-                AppEvent::DiscardFile { .. } => {}
+                AppEvent::ExecuteGitAction { target, action } => {
+                    self.execute_git_action(target, action);
+                }
+                AppEvent::OpenBranchDetail { branch_name } => {
+                    self.open_branch_detail(branch_name);
+                }
+                AppEvent::OpenTagDetail { tag_name } => {
+                    self.open_tag_detail(tag_name);
+                }
+                AppEvent::OpenUncommitted => {
+                    self.open_uncommitted();
+                }
+                AppEvent::StageFile { file } => self.stage_file(file),
+                AppEvent::UnstageFile { file } => self.unstage_file(file),
+                AppEvent::DiscardFile { file } => self.discard_file(file),
             }
         }
     }
@@ -1130,6 +1140,212 @@ impl App<'_> {
             Err(msg) => {
                 self.ec.send(AppEvent::NotifyError(msg));
             }
+        }
+    }
+
+    // Phase 2 - Dialog management
+    fn open_dialog(&mut self, kind: DialogKind) {
+        let before = std::mem::take(&mut self.view);
+        self.view = View::Dialog(Box::new(crate::view::dialog::DialogView::new(
+            before,
+            kind,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn close_dialog(&mut self) {
+        if let View::Dialog(mut dialog) = std::mem::take(&mut self.view) {
+            self.view = dialog.take_before_view();
+        }
+    }
+
+    fn dialog_confirm(&mut self) {
+        // DialogConfirm is handled by the DialogView itself via handle_event
+        // This method is called when the dialog sends DialogConfirm event
+        // In practice, DialogView sends ExecuteGitAction directly on Confirm
+    }
+
+    // Phase 2 - Git Actions execution
+    fn execute_git_action(&mut self, target: String, action: GitAction) {
+        let repo_path = self.repository.path();
+        let result = match action {
+            GitAction::Checkout => {
+                if target.starts_with("refs/stash") {
+                    actions::checkout_commit(repo_path, &target)
+                } else {
+                    actions::checkout_commit(repo_path, &target)
+                }
+            }
+            GitAction::CreateBranch { name, checkout } => {
+                actions::create_branch_at(repo_path, &name, &target, checkout)
+            }
+            GitAction::AddTag { name, annotated, message } => {
+                let msg = if annotated { message.as_deref() } else { None };
+                actions::create_tag(repo_path, &name, &target, msg)
+            }
+            GitAction::CherryPick { no_commit, record_origin } => {
+                actions::cherry_pick(repo_path, &target, no_commit, record_origin)
+            }
+            GitAction::Revert => actions::revert_commit(repo_path, &target),
+            GitAction::Drop => actions::drop_commit(repo_path, &target),
+            GitAction::Merge { no_ff, squash, no_commit } => {
+                actions::merge_commit(repo_path, &target, no_ff, squash, no_commit)
+            }
+            GitAction::Rebase { ignore_date, interactive } => {
+                actions::rebase_onto(repo_path, &target, ignore_date, interactive)
+            }
+            GitAction::Reset { mode } => actions::reset(repo_path, &target, &mode),
+            GitAction::DeleteBranch { force } => actions::delete_branch(repo_path, &target, force),
+            GitAction::RenameBranch { new_name } => actions::rename_branch(repo_path, &target, &new_name),
+            GitAction::PushBranch { force } => actions::push_branch(repo_path, &target, force),
+            GitAction::PullBranch { rebase } => {
+                if rebase {
+                    actions::pull_branch(repo_path, &target)
+                } else {
+                    actions::pull_branch(repo_path, &target)
+                }
+            }
+            GitAction::Fetch => actions::fetch(repo_path),
+            GitAction::DeleteTag => actions::delete_tag(repo_path, &target),
+            GitAction::PushTag => actions::push_commit(repo_path, &target),
+            GitAction::ApplyStash => actions::apply_stash(repo_path, &target),
+            GitAction::PopStash => actions::pop_stash(repo_path, &target),
+            GitAction::DropStash => actions::drop_stash(repo_path, &target),
+            GitAction::CreateBranchFromStash { branch_name } => {
+                actions::create_branch_from_stash(repo_path, &branch_name, &target)
+            }
+            GitAction::StageFile { file } => actions::stage_file(repo_path, &file),
+            GitAction::StageAll => actions::stage_all(repo_path),
+            GitAction::UnstageFile { file } => actions::unstage_file(repo_path, &file),
+            GitAction::UnstageAll => actions::unstage_all(repo_path),
+            GitAction::DiscardFile { file } => actions::discard_file(repo_path, &file),
+            GitAction::DiscardAll => actions::discard_all(repo_path),
+            GitAction::Stash { message } => actions::stash(repo_path, message.as_deref()),
+            GitAction::Commit { message } => actions::commit(repo_path, &message),
+            GitAction::CleanUntracked => actions::clean_untracked(repo_path),
+            GitAction::Push => actions::push_commit(repo_path, &target),
+            GitAction::CreateArchive => {
+                // git archive branch > branch.zip
+                std::process::Command::new("git")
+                    .current_dir(repo_path)
+                    .args(["archive", "--format=zip", "-o", &format!("{}.zip", target), &target])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .map_err(|e| format!("Failed to create archive: {}", e))
+            }
+        };
+
+        match result {
+            Ok(msg) => {
+                self.close_dialog();
+                if !msg.is_empty() {
+                    self.ec.send(AppEvent::NotifySuccess(msg));
+                } else {
+                    self.ec.send(AppEvent::NotifySuccess("Operation completed successfully".into()));
+                }
+                self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                    list_context: crate::view::ListRefreshViewContext {
+                        commit_hash: String::new(),
+                        selected: 0,
+                        height: 20,
+                        scroll_to_top: false,
+                    },
+                }));
+            }
+            Err(msg) => {
+                self.ec.send(AppEvent::NotifyError(msg));
+            }
+        }
+    }
+
+    fn open_branch_detail(&mut self, branch_name: String) {
+        let repo_path = self.repository.path();
+        let is_remote = branch_name.contains('/');
+        let upstream = actions::branch_upstream(repo_path, &branch_name).ok();
+        let ahead = actions::branch_ahead_count(repo_path, &branch_name).unwrap_or_default();
+        let behind = actions::branch_behind_count(repo_path, &branch_name).unwrap_or_default();
+        let (tip_hash, tip_subject) = actions::branch_tip_info(repo_path, &branch_name)
+            .map(|s| {
+                let mut parts = s.splitn(2, ' ');
+                (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string())
+            })
+            .unwrap_or_default();
+        let metadata = BranchMetadata {
+            branch_name: branch_name.clone(),
+            is_remote,
+            tip_hash,
+            tip_subject,
+            tip_author: String::new(),
+            tip_date: String::new(),
+            upstream,
+            ahead,
+            behind,
+        };
+        self.view = View::BranchDetail(Box::new(crate::view::branch_detail::BranchDetailView::new(
+            branch_name,
+            metadata,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn open_tag_detail(&mut self, tag_name: String) {
+        let repo_path = self.repository.path();
+        let metadata = TagMetadata {
+            tag_name: tag_name.clone(),
+            tag_type: "Tag".to_string(),
+            target_hash: String::new(),
+            target_subject: String::new(),
+            tagger: None,
+            date: None,
+            message: None,
+        };
+        self.view = View::TagDetail(Box::new(crate::view::tag_detail::TagDetailView::new(
+            tag_name,
+            metadata,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn open_uncommitted(&mut self) {
+        let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
+        let convert = |f: &crate::git::status::FileStatus| crate::widget::uncommitted::UncommittedFile {
+            status: f.status.clone(),
+            path: f.path.clone(),
+            old_path: f.old_path.clone(),
+            additions: 0,
+            deletions: 0,
+        };
+        let staged: Vec<_> = changes.staged.iter().map(convert).collect();
+        let unstaged: Vec<_> = changes.unstaged.iter().map(convert).collect();
+        self.view = View::Uncommitted(Box::new(crate::view::uncommitted::UncommittedView::new(
+            unstaged,
+            staged,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn stage_file(&mut self, file: String) {
+        match actions::stage_file(self.repository.path(), &file) {
+            Ok(msg) => self.ec.send(AppEvent::NotifySuccess(msg)),
+            Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
+        }
+    }
+
+    fn unstage_file(&mut self, file: String) {
+        match actions::unstage_file(self.repository.path(), &file) {
+            Ok(msg) => self.ec.send(AppEvent::NotifySuccess(msg)),
+            Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
+        }
+    }
+
+    fn discard_file(&mut self, file: String) {
+        match actions::discard_file(self.repository.path(), &file) {
+            Ok(msg) => self.ec.send(AppEvent::NotifySuccess(msg)),
+            Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
         }
     }
 }
