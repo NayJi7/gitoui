@@ -716,9 +716,17 @@ impl App<'_> {
     }
 
     fn close_detail(&mut self) {
-        if let View::Detail(ref mut view) = self.view {
-            let commit_list_state = view.take_list_state();
-            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        match self.view {
+            View::Detail(ref mut view) => {
+                let commit_list_state = view.take_list_state();
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+            View::BranchDetail(ref mut view) => {
+                if let Some(commit_list_state) = view.take_list_state() {
+                    self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1261,6 +1269,12 @@ impl App<'_> {
     }
 
     fn open_branch_detail(&mut self, branch_name: String) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
         let repo_path = self.repository.path();
         let is_remote = branch_name.contains('/');
         let upstream = actions::branch_upstream(repo_path, &branch_name).ok();
@@ -1286,6 +1300,7 @@ impl App<'_> {
         self.view = View::BranchDetail(Box::new(crate::view::branch_detail::BranchDetailView::new(
             branch_name,
             metadata,
+            commit_list_state,
             self.ctx.clone(),
             self.ec.sender(),
         )));

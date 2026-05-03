@@ -6,7 +6,7 @@ use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, GitAction, Sender, UserEvent, UserEventWithCount},
     widget::branch_detail::{BranchDetail, BranchDetailState, BranchMetadata},
-    widget::commit_list::CommitListState,
+    widget::commit_list::{CommitList, CommitListState},
 };
 
 #[derive(Debug)]
@@ -23,11 +23,12 @@ impl<'a> BranchDetailView<'a> {
     pub fn new(
         _branch_name: String,
         metadata: BranchMetadata,
+        commit_list_state: Option<CommitListState<'a>>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
         Self {
-            commit_list_state: None,
+            commit_list_state,
             branch_detail_state: BranchDetailState::default(),
             metadata,
             ctx,
@@ -102,12 +103,34 @@ impl<'a> BranchDetailView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        let detail_height = (area.height - 1).min(self.ctx.ui_config.detail.height);
+        let [list_area, detail_area] =
+            ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(detail_height),
+            ]).areas(area);
+
+        if let Some(ref mut list_state) = self.commit_list_state {
+            let commit_list = CommitList::new(self.ctx.clone());
+            f.render_stateful_widget(commit_list, list_area, list_state);
+        }
+
         let branch_detail = BranchDetail::new(&self.metadata, self.ctx.clone());
-        f.render_stateful_widget(branch_detail, area, &mut self.branch_detail_state);
-        self.detail_area = Some(area);
+        f.render_stateful_widget(branch_detail, detail_area, &mut self.branch_detail_state);
+        self.detail_area = Some(detail_area);
     }
 
-    pub fn update_layout(&mut self, _area: Rect) {}
+    pub fn update_layout(&mut self, area: Rect) {
+        let detail_height = (area.height - 1).min(self.ctx.ui_config.detail.height);
+        let [list_area, _] =
+            ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(detail_height),
+            ]).areas(area);
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.update_height(list_area.height as usize);
+        }
+    }
 }
 
 impl<'a> BranchDetailView<'a> {
