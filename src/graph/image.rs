@@ -693,16 +693,9 @@ pub fn calc_graph_row_image(
     let mut img_buf = image::ImageBuffer::new(image_width, image_height);
 
     draw_background(&mut img_buf, image_params);
-    if head {
-        draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
-    } else if is_stash {
-        draw_stash_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
-    } else if is_uncommitted {
-        draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
-    } else {
-        draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
-    }
 
+    // Draw edges FIRST so that commit circles are rendered on top (matching VS Code Git Graph
+    // where SVG circles have higher z-index than path elements).
     let edge_color = |edge: &Edge| -> image::Rgba<u8> {
         if is_uncommitted {
             commit_color
@@ -748,45 +741,9 @@ pub fn calc_graph_row_image(
             }
         }
         GraphStyle::Smooth => {
-            // Build set of edges to skip (rendered by Bezier curves instead)
-            let mut skip_edges: FxHashSet<(EdgeType, usize)> = FxHashSet::default();
-            for seg in branch_segments {
-                let (min_x, max_x) = if seg.source_pos_x < seg.target_pos_x {
-                    (seg.source_pos_x, seg.target_pos_x)
-                } else {
-                    (seg.target_pos_x, seg.source_pos_x)
-                };
-                if pos_y == seg.source_pos_y {
-                    if seg.is_branch {
-                        skip_edges.insert((EdgeType::Right, seg.source_pos_x));
-                        skip_edges.insert((EdgeType::Left, seg.source_pos_x));
-                    }
-                    for x in (min_x + 1)..max_x {
-                        skip_edges.insert((EdgeType::Horizontal, x));
-                    }
-                    skip_edges.insert((EdgeType::RightBottom, seg.target_pos_x));
-                    skip_edges.insert((EdgeType::LeftBottom, seg.target_pos_x));
-                }
-                if pos_y == seg.target_pos_y {
-                    skip_edges.insert((EdgeType::RightTop, seg.source_pos_x));
-                    skip_edges.insert((EdgeType::LeftTop, seg.source_pos_x));
-                    for x in (min_x + 1)..max_x {
-                        skip_edges.insert((EdgeType::Horizontal, x));
-                    }
-                    skip_edges.insert((EdgeType::Right, seg.target_pos_x));
-                    skip_edges.insert((EdgeType::Left, seg.target_pos_x));
-                }
-                if !seg.is_branch {
-                    if pos_y == seg.source_pos_y {
-                        skip_edges.insert((EdgeType::Up, seg.source_pos_x));
-                    }
-                    if pos_y == seg.target_pos_y {
-                        skip_edges.insert((EdgeType::Down, seg.target_pos_x));
-                    }
-                }
-            }
-
-            // Draw Bezier curves for all segments intersecting this row
+            // Draw Bezier S-curves for all branch segments intersecting this row.
+            // Bezier handles all horizontal transitions; we never draw corner/horizontal
+            // edges so there is no visual noise on top of the curves.
             for seg in branch_segments {
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
                 let max_y = seg.target_pos_y.max(seg.source_pos_y);
@@ -794,7 +751,6 @@ pub fn calc_graph_row_image(
                     let color_override = if is_uncommitted {
                         Some(commit_color)
                     } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-                        // Segment that connects to the uncommitted row (pos_y=0) on the uncommitted lane
                         if pos_y <= head_y
                             && (seg.source_pos_y == 0 || seg.target_pos_y == 0)
                             && (seg.source_pos_x == lane_x || seg.target_pos_x == lane_x)
@@ -812,14 +768,25 @@ pub fn calc_graph_row_image(
                 }
             }
 
-            // Draw remaining edges not part of branch segments
+            // Only keep straight vertical edges (pass-through and same-column Up/Down stubs).
+            // All corner and horizontal edges are replaced by Bezier curves above.
             for edge in edges {
-                if skip_edges.contains(&(edge.edge_type, edge.pos_x)) {
-                    continue;
+                if edge.edge_type.is_vertically_related() {
+                    draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge));
                 }
-                draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge));
             }
         }
+    }
+
+    // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
+    if head {
+        draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    } else if is_stash {
+        draw_stash_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
+    } else if is_uncommitted {
+        draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
+    } else {
+        draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     }
 
     let bytes = build_image(&img_buf, image_width, image_height);
@@ -1162,45 +1129,46 @@ fn draw_smooth_bezier_segment(
     let cell_width = image_params.width as i32;
     let cell_height = image_params.height as i32;
     let image_height = cell_height;
-    let circle_outer_radius = image_params.circle_outer_radius as i32;
 
     // Convert grid coordinates to absolute pixel coordinates
     // x: center of the lane cell
     let x1 = segment.source_pos_x as i32 * cell_width + cell_width / 2;
     let x2 = segment.target_pos_x as i32 * cell_width + cell_width / 2;
 
-    // y: relative to current row's top edge
-    let y1_offset = (segment.source_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
-    let y2_offset = (segment.target_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
+    // y: center of each commit's row, relative to current row's top edge.
+    // Like VS Code Git Graph: draw center-to-center; the circle node is rendered on top.
+    let y1 = (segment.source_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
+    let y2 = (segment.target_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
 
-    // For branch (first parent): start from bottom of commit circle, end at center of child
-    // For merge (non-first parent): start from center of source, end at top of child commit circle
-    let y1 = if segment.is_branch {
-        y1_offset + circle_outer_radius
-    } else {
-        y1_offset
-    };
-    let y2 = if !segment.is_branch {
-        y2_offset - circle_outer_radius
-    } else {
-        y2_offset
-    };
+    // Exact VS Code Git Graph formula: d = grid.y * 0.8, no clamping.
+    // Allowing d > pixel_distance/2 is intentional — it produces the S-curve overshoot.
+    let d = (cell_height as f32 * 0.8) as i32;
 
-    // VS Code Git Graph: d = grid.y * 0.8, clamped to half the pixel distance
-    let pixel_distance = (y1 - y2).abs();
-    let d = ((cell_height as f32 * 0.8).min(pixel_distance as f32 * 0.45)) as i32;
+    let color = color_override.unwrap_or_else(|| image_params.edge_color(segment.color_index));
+    let radius = (image_params.line_width as i32).max(1) / 2;
 
-    // Control points: exit vertically from start, arrive vertically at end
+    // Same-column segments are straight vertical lines (VS Code Git Graph: 'L x2, y2')
+    if x1 == x2 {
+        let x = x1;
+        let y_start = y1.max(0);
+        let y_end = y2.min(image_height - 1);
+        for py in y_start..=y_end {
+            draw_filled_circle(img_buf, x, py, radius, color);
+        }
+        return;
+    }
+
+    // Control points: exit source vertically (cp1), arrive at target vertically (cp2).
+    // Matches VS Code Git Graph: C x1,(y1+d) x2,(y2-d) x2,y2
     let cp1x = x1;
     let cp1y = y1 + d;
     let cp2x = x2;
     let cp2y = y2 - d;
 
-    let color = color_override.unwrap_or_else(|| image_params.edge_color(segment.color_index));
-    let radius = (image_params.line_width as i32).max(1) / 2;
-
-    // Sample points along the Bezier curve, clipping to current row
-    let steps = 200;
+    // Sample points along the Bezier curve.
+    // Always connect consecutive samples with draw_thick_line; put_pixel_safe clips to
+    // the row boundary. This prevents gaps where the curve crosses the top/bottom edge.
+    let steps = 256;
     let mut prev_px: Option<(i32, i32)> = None;
 
     for i in 0..=steps {
@@ -1215,15 +1183,17 @@ fn draw_smooth_bezier_segment(
             + 3.0 * mt*t*t * cp2y as f32
             + t*t*t * y2 as f32) as i32;
 
-        if py >= 0 && py < image_height {
-            draw_filled_circle(img_buf, px, py, radius, color);
+        // Only bother drawing when near the visible area (avoid iterating over many off-screen pixels)
+        let near = py >= -(cell_height) && py < image_height + cell_height;
+        if near {
             if let Some((ppx, ppy)) = prev_px {
-                if ppy >= 0 && ppy < image_height {
-                    draw_thick_line(img_buf, ppx, ppy, px, py, radius, color);
-                }
+                draw_thick_line(img_buf, ppx, ppy, px, py, radius, color);
+            }
+            if py >= 0 && py < image_height {
+                draw_filled_circle(img_buf, px, py, radius, color);
             }
         }
-        prev_px = Some((px, py));
+        prev_px = if near { Some((px, py)) } else { None };
     }
 }
 
