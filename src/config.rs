@@ -1,8 +1,10 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
+use chrono::{DateTime, FixedOffset, Local};
 use garde::Validate;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
@@ -15,6 +17,104 @@ use crate::{
     keybind::KeyBind,
     CommitOrderType, GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection, Result,
 };
+
+/// Predefined date/time formats for the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, SmartDefault)]
+pub enum DateTimeFormat {
+    /// DD/MM/YYYY - HH:MM (default)
+    #[default]
+    DDMMYYYY_HHMM,
+    /// DD/MM/YYYY
+    DDMMYYYY,
+    /// MM/DD/YYYY HH:MM
+    MMDDYYYY_HHMM,
+    /// YYYY/MM/DD HH:MM
+    YYYYMMDD_HHMM,
+    /// ISO 8601: YYYY-MM-DD HH:MM:SS ±HHMM
+    ISO,
+    /// YYYY-MM-DD HH:MM
+    YYYYMMDD_HHMM_DASH,
+}
+
+impl DateTimeFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DateTimeFormat::DDMMYYYY_HHMM => "%d/%m/%Y - %H:%M",
+            DateTimeFormat::DDMMYYYY => "%d/%m/%Y",
+            DateTimeFormat::MMDDYYYY_HHMM => "%m/%d/%Y %H:%M",
+            DateTimeFormat::YYYYMMDD_HHMM => "%Y/%m/%d %H:%M",
+            DateTimeFormat::ISO => "%Y-%m-%d %H:%M:%S %z",
+            DateTimeFormat::YYYYMMDD_HHMM_DASH => "%Y-%m-%d %H:%M",
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            DateTimeFormat::DDMMYYYY_HHMM => "DD/MM/YYYY - HH:MM",
+            DateTimeFormat::DDMMYYYY => "DD/MM/YYYY",
+            DateTimeFormat::MMDDYYYY_HHMM => "MM/DD/YYYY HH:MM",
+            DateTimeFormat::YYYYMMDD_HHMM => "YYYY/MM/DD HH:MM",
+            DateTimeFormat::ISO => "ISO 8601",
+            DateTimeFormat::YYYYMMDD_HHMM_DASH => "YYYY-MM-DD HH:MM",
+        }
+    }
+
+    pub fn format(&self, dt: &DateTime<FixedOffset>, local: bool) -> String {
+        if local {
+            dt.with_timezone(&Local).format(self.as_str()).to_string()
+        } else {
+            dt.format(self.as_str()).to_string()
+        }
+    }
+
+    pub fn cycle_next(&self) -> Self {
+        match self {
+            DateTimeFormat::DDMMYYYY_HHMM => DateTimeFormat::DDMMYYYY,
+            DateTimeFormat::DDMMYYYY => DateTimeFormat::MMDDYYYY_HHMM,
+            DateTimeFormat::MMDDYYYY_HHMM => DateTimeFormat::YYYYMMDD_HHMM,
+            DateTimeFormat::YYYYMMDD_HHMM => DateTimeFormat::ISO,
+            DateTimeFormat::ISO => DateTimeFormat::YYYYMMDD_HHMM_DASH,
+            DateTimeFormat::YYYYMMDD_HHMM_DASH => DateTimeFormat::DDMMYYYY_HHMM,
+        }
+    }
+
+    pub fn cycle_prev(&self) -> Self {
+        match self {
+            DateTimeFormat::DDMMYYYY_HHMM => DateTimeFormat::YYYYMMDD_HHMM_DASH,
+            DateTimeFormat::DDMMYYYY => DateTimeFormat::DDMMYYYY_HHMM,
+            DateTimeFormat::MMDDYYYY_HHMM => DateTimeFormat::DDMMYYYY,
+            DateTimeFormat::YYYYMMDD_HHMM => DateTimeFormat::MMDDYYYY_HHMM,
+            DateTimeFormat::ISO => DateTimeFormat::YYYYMMDD_HHMM,
+            DateTimeFormat::YYYYMMDD_HHMM_DASH => DateTimeFormat::ISO,
+        }
+    }
+}
+
+impl FromStr for DateTimeFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "ddmmyyyy_hhmm" => Ok(DateTimeFormat::DDMMYYYY_HHMM),
+            "ddmmyyyy" => Ok(DateTimeFormat::DDMMYYYY),
+            "mmddyyyy_hhmm" => Ok(DateTimeFormat::MMDDYYYY_HHMM),
+            "yyyymmdd_hhmm" => Ok(DateTimeFormat::YYYYMMDD_HHMM),
+            "iso" => Ok(DateTimeFormat::ISO),
+            "yyyymmdd_hhmm_dash" => Ok(DateTimeFormat::YYYYMMDD_HHMM_DASH),
+            _ => Err(format!("Unknown date_time_format: {}", s)),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DateTimeFormat {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        DateTimeFormat::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
 
 const XDG_CONFIG_HOME_ENV_NAME: &str = "XDG_CONFIG_HOME";
 const DEFAULT_CONFIG_DIR: &str = ".config";
@@ -137,6 +237,10 @@ pub struct CoreOptionConfig {
     pub load_more_count: usize,
     #[default = "base16-ocean.dark"]
     pub syntax_theme: String,
+    #[default(DateTimeFormat::DDMMYYYY_HHMM)]
+    pub date_time_format: DateTimeFormat,
+    #[default = true]
+    pub date_time_local: bool,
 }
 
 #[optional(derives = [Deserialize])]
@@ -450,6 +554,18 @@ impl CoreConfig {
     pub fn set_protocol(&mut self, protocol: crate::ImageProtocolType) {
         self.option.protocol = Some(protocol);
     }
+    pub fn date_time_format(&self) -> DateTimeFormat {
+        self.option.date_time_format
+    }
+    pub fn set_date_time_format(&mut self, format: DateTimeFormat) {
+        self.option.date_time_format = format;
+    }
+    pub fn date_time_local(&self) -> bool {
+        self.option.date_time_local
+    }
+    pub fn set_date_time_local(&mut self, local: bool) {
+        self.option.date_time_local = local;
+    }
 }
 
 impl UiCommonConfig {
@@ -516,6 +632,17 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
 
     set_nested_string(&mut doc, &["core", "option", "syntax_theme"], &core.option.syntax_theme);
 
+    set_nested_string(&mut doc, &["core", "option", "date_time_format"], match core.option.date_time_format {
+        DateTimeFormat::DDMMYYYY_HHMM => "ddmmyyyy_hhmm",
+        DateTimeFormat::DDMMYYYY => "ddmmyyyy",
+        DateTimeFormat::MMDDYYYY_HHMM => "mmddyyyy_hhmm",
+        DateTimeFormat::YYYYMMDD_HHMM => "yyyymmdd_hhmm",
+        DateTimeFormat::ISO => "iso",
+        DateTimeFormat::YYYYMMDD_HHMM_DASH => "yyyymmdd_hhmm_dash",
+    });
+
+    set_nested_bool(&mut doc, &["core", "option", "date_time_local"], core.option.date_time_local);
+
     let toml_string = toml::to_string_pretty(&doc)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&path, toml_string)
@@ -565,6 +692,8 @@ mod tests {
                     initial_load_count: 500,
                     load_more_count: 200,
                     syntax_theme: "base16-ocean.dark".into(),
+                    date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
+                    date_time_local: true,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,
@@ -701,6 +830,8 @@ mod tests {
                     initial_load_count: 500,
                     load_more_count: 200,
                     syntax_theme: "base16-ocean.dark".into(),
+                    date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
+                    date_time_local: true,
                 },
                 search: CoreSearchConfig {
                     ignore_case: true,
@@ -817,6 +948,8 @@ mod tests {
                     initial_load_count: 500,
                     load_more_count: 200,
                     syntax_theme: "base16-ocean.dark".into(),
+                    date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
+                    date_time_local: true,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,

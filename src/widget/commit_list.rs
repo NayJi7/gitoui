@@ -1191,15 +1191,10 @@ impl CommitList<'_> {
                 }
                 let commit = commit_info.commit.unwrap();
                 let date = &commit.author_date;
-                let date_str = if self.ctx.ui_config.list.date_local {
-                    let local = date.with_timezone(&chrono::Local);
-                    local
-                        .format(&self.ctx.ui_config.list.date_format)
-                        .to_string()
-                } else {
-                    date.format(&self.ctx.ui_config.list.date_format)
-                        .to_string()
-                };
+                let date_str = self.ctx.core_config.date_time_format().format(
+                    date,
+                    self.ctx.core_config.date_time_local(),
+                );
                 self.to_commit_list_item(
                     i,
                     vec![date_str.fg(self.ctx.color_theme.list_date_fg)],

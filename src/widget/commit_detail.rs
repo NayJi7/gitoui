@@ -213,15 +213,10 @@ impl CommitDetail<'_> {
         email: &'a str,
         date: &'a DateTime<FixedOffset>,
     ) -> Vec<Line<'a>> {
-        let date_str = if self.ctx.ui_config.detail.date_local {
-            let local = date.with_timezone(&chrono::Local);
-            local
-                .format(&self.ctx.ui_config.detail.date_format)
-                .to_string()
-        } else {
-            date.format(&self.ctx.ui_config.detail.date_format)
-                .to_string()
-        };
+        let date_str = self.ctx.core_config.date_time_format().format(
+            date,
+            self.ctx.core_config.date_time_local(),
+        );
         vec![
             Line::from(vec![
                 name.fg(self.ctx.color_theme.detail_name_fg),

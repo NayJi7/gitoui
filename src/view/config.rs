@@ -52,7 +52,7 @@ impl<'a> ConfigView<'a> {
                 }
             }
             UserEvent::NavigateDown | UserEvent::SelectDown => {
-                if self.selected < 4 {
+                if self.selected < 5 {
                     self.selected += 1;
                 }
             }
@@ -70,7 +70,7 @@ impl<'a> ConfigView<'a> {
             }
             UserEvent::PageDown => {
                 for _ in 0..count {
-                    if self.selected < 4 {
+                    if self.selected < 5 {
                         self.selected += 1;
                     }
                 }
@@ -86,7 +86,7 @@ impl<'a> ConfigView<'a> {
                 self.selected = 0;
             }
             UserEvent::GoToBottom => {
-                self.selected = 4;
+                self.selected = 5;
             }
             _ => {}
         }
@@ -130,6 +130,10 @@ impl<'a> ConfigView<'a> {
                 let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
                 let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
                 self.core_config.option.syntax_theme = themes[prev_idx].to_string();
+            }
+            5 => {
+                let prev = self.core_config.date_time_format().cycle_prev();
+                self.core_config.set_date_time_format(prev);
             }
             _ => {}
         }
@@ -177,6 +181,10 @@ impl<'a> ConfigView<'a> {
                 let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
                 let next_idx = (idx + 1) % themes.len();
                 self.core_config.option.syntax_theme = themes[next_idx].to_string();
+            }
+            5 => {
+                let next = self.core_config.date_time_format().cycle_next();
+                self.core_config.set_date_time_format(next);
             }
             _ => {}
         }
@@ -234,6 +242,7 @@ impl<'a> ConfigView<'a> {
             ("Mouse", mouse_display(self.ui_config.common.mouse_enabled)),
             ("Image Protocol", protocol_display(self.core_config.protocol())),
             ("Syntax Theme", self.core_config.option.syntax_theme.clone()),
+            ("Date Format", self.core_config.date_time_format().display_name().to_string()),
         ];
 
         let lines: Vec<Line> = items
@@ -263,6 +272,7 @@ impl<'a> ConfigView<'a> {
             "Enable mouse support for clicking and scrolling.",
             "Terminal image protocol used for rendering commit graph images.",
             "Color theme for syntax highlighting in code diffs.",
+            "Date and time display format for commits in the list and detail views.",
         ];
 
         let mut right_lines: Vec<Line> = vec![
