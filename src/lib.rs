@@ -168,6 +168,7 @@ pub fn run() -> Result<()> {
 
         let graph_color_set = color::GraphColorSet::new(&graph_config.color);
 
+        let mouse_enabled = ui_config.common.mouse_enabled;
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
@@ -193,11 +194,13 @@ pub fn run() -> Result<()> {
 
         if terminal.is_none() {
             terminal = Some(ratatui::init());
-            ratatui::crossterm::execute!(
-                std::io::stdout(),
-                ratatui::crossterm::event::EnableMouseCapture
-            )
-            .unwrap();
+            if mouse_enabled {
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::EnableMouseCapture
+                )
+                .unwrap();
+            }
         }
 
         let mut app = App::new(

@@ -4,6 +4,7 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 
 use crate::{
     app::AppContext,
+    config::save,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::CommitHash,
     view::{ListRefreshViewContext, RefreshViewContext},
@@ -45,11 +46,21 @@ impl<'a> ListView<'a> {
                     self.clear_search_query();
                 }
                 UserEvent::IgnoreCaseToggle => {
-                    self.as_mut_list_state().toggle_ignore_case();
+                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_ignore_case() {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
                     self.update_search_query();
                 }
                 UserEvent::FuzzyToggle => {
-                    self.as_mut_list_state().toggle_fuzzy();
+                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_fuzzy() {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
                     self.update_search_query();
                 }
                 _ => {
@@ -144,6 +155,10 @@ impl<'a> ListView<'a> {
                     self.clear_search_query();
                 }
                 UserEvent::Confirm => {
+                    if let SearchState::Applied { .. } = self.as_list_state().search_state() {
+                        self.as_mut_list_state().cancel_search();
+                        self.clear_search_query();
+                    }
                     self.tx.send(AppEvent::OpenDetail);
                 }
                 UserEvent::RefList => {
@@ -169,6 +184,28 @@ impl<'a> ListView<'a> {
                     self.as_mut_list_state().select_prev_match();
                     self.update_matched_message();
                 }
+                UserEvent::IgnoreCaseToggle => {
+                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_ignore_case() {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
+                    self.update_matched_message();
+                }
+                UserEvent::FuzzyToggle => {
+                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_fuzzy() {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
+                    self.update_matched_message();
+                }
+                UserEvent::Cancel => {
+                    self.as_mut_list_state().cancel_search();
+                    self.clear_search_query();
+                }
                 _ => {}
             }
             // Do not return here
@@ -181,7 +218,8 @@ impl<'a> ListView<'a> {
     }
 
     pub fn update_layout(&mut self, area: Rect) {
-        self.as_mut_list_state().update_height(area.height as usize);
+        let height = if area.height >= 2 { area.height - 2 } else { area.height };
+        self.as_mut_list_state().update_height(height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
@@ -293,6 +331,10 @@ impl<'a> ListView<'a> {
                 let clicked_index = offset + row;
                 if clicked_index < list_state.total() {
                     list_state.select(clicked_index);
+                    if list_state.search_state().is_active() {
+                        list_state.cancel_search();
+                        self.clear_search_query();
+                    }
                     let _ = self.tx.send(AppEvent::OpenDetail);
                 }
             }

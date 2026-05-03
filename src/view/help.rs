@@ -168,6 +168,14 @@ impl<'a> HelpView<'a> {
         self.before.is_search_active()
     }
 
+    pub fn is_search_querying(&self) -> bool {
+        self.before.is_search_querying()
+    }
+
+    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
+        self.before.search_case_fuzzy()
+    }
+
     fn scroll_down(&mut self) {
         self.offset = self.offset.saturating_add(1);
     }
@@ -265,7 +273,7 @@ fn build_lines(
         (vec![UserEvent::Cancel], "Cancel search".into()),
         (vec![UserEvent::GoToNext], "Go to next search match".into()),
         (vec![UserEvent::GoToPrevious], "Go to previous search match".into()),
-        (vec![UserEvent::IgnoreCaseToggle], "Toggle ignore case".into()),
+        (vec![UserEvent::IgnoreCaseToggle], "Toggle case sensitive".into()),
         (vec![UserEvent::FuzzyToggle], "Toggle fuzzy match".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit short hash".into()),

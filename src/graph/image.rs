@@ -719,6 +719,9 @@ pub fn calc_graph_row_image(
                     | EdgeType::LeftBottom => {
                         draw_smooth_corner_edge(&mut img_buf, edge, image_params);
                     }
+                    EdgeType::Right | EdgeType::Left | EdgeType::Horizontal => {
+                        draw_smooth_horizontal_edge(&mut img_buf, edge, image_params);
+                    }
                     _ => {
                         draw_edge(&mut img_buf, edge, image_params, drawing_pixels);
                     }
@@ -1055,31 +1058,73 @@ fn draw_smooth_corner_edge(
     let center_y = cell_height / 2;
     let color = image_params.edge_color(edge.associated_line_pos_x);
 
-    let (x0, y0, x1, y1) = match edge.edge_type {
-        EdgeType::RightBottom => (x_offset + center_x, 0, x_offset, center_y),
-        EdgeType::LeftBottom => (x_offset + center_x, 0, x_offset + cell_width, center_y),
-        EdgeType::RightTop => (x_offset, center_y, x_offset + center_x, cell_height),
-        EdgeType::LeftTop => (x_offset + cell_width, center_y, x_offset + center_x, cell_height),
-        _ => return,
-    };
+    // VS Code Git Graph style: control point distance proportional to cell size
+    let d = (cell_width.min(cell_height) as f32 * 0.5).max(3.0) as i32;
 
-    draw_cubic_bezier(img_buf, x0, y0, x1, y1, color);
+    match edge.edge_type {
+        EdgeType::RightBottom => {
+            // From left-middle to top-center, horizontal tangent at start, vertical at end
+            let x0 = x_offset;
+            let y0 = center_y;
+            let x1 = x_offset + center_x;
+            let y1 = 0;
+            draw_cubic_bezier(
+                img_buf, x0, y0, x0 + d, y0, x1, y1 - d, x1, y1, color, image_params.line_width,
+            );
+        }
+        EdgeType::LeftBottom => {
+            // From right-middle to top-center, horizontal tangent at start, vertical at end
+            let x0 = x_offset + cell_width;
+            let y0 = center_y;
+            let x1 = x_offset + center_x;
+            let y1 = 0;
+            draw_cubic_bezier(
+                img_buf, x0, y0, x0 - d, y0, x1, y1 - d, x1, y1, color, image_params.line_width,
+            );
+        }
+        EdgeType::RightTop => {
+            // From left-middle to bottom-center, horizontal tangent at start, vertical at end
+            let x0 = x_offset;
+            let y0 = center_y;
+            let x1 = x_offset + center_x;
+            let y1 = cell_height;
+            draw_cubic_bezier(
+                img_buf, x0, y0, x0 + d, y0, x1, y1 + d, x1, y1, color, image_params.line_width,
+            );
+        }
+        EdgeType::LeftTop => {
+            // From right-middle to bottom-center, horizontal tangent at start, vertical at end
+            let x0 = x_offset + cell_width;
+            let y0 = center_y;
+            let x1 = x_offset + center_x;
+            let y1 = cell_height;
+            draw_cubic_bezier(
+                img_buf, x0, y0, x0 - d, y0, x1, y1 + d, x1, y1, color, image_params.line_width,
+            );
+        }
+        _ => return,
+    }
 }
 
 fn draw_cubic_bezier(
     img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
     x0: i32,
     y0: i32,
+    cp1x: i32,
+    cp1y: i32,
+    cp2x: i32,
+    cp2y: i32,
     x1: i32,
     y1: i32,
     color: image::Rgba<u8>,
+    line_width: u16,
 ) {
-    let cp1x = x0 + (x1 - x0) / 2;
-    let cp1y = y0;
-    let cp2x = x0 + (x1 - x0) / 2;
-    let cp2y = y1;
+    let steps = 80;
+    let radius = (line_width as i32).max(1) / 2;
 
-    let steps = 60;
+    let mut prev_x = x0;
+    let mut prev_y = y0;
+
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
         let t2 = t * t;
@@ -1097,9 +1142,87 @@ fn draw_cubic_bezier(
             + 3.0 * mt * t2 * cp2y as f32
             + t3 * y1 as f32) as i32;
 
-        put_pixel_safe(img_buf, px, py, color);
-        put_pixel_safe(img_buf, px + 1, py, color);
-        put_pixel_safe(img_buf, px, py + 1, color);
+        if i > 0 {
+            draw_thick_line(img_buf, prev_x, prev_y, px, py, radius, color);
+        }
+        draw_filled_circle(img_buf, px, py, radius, color);
+
+        prev_x = px;
+        prev_y = py;
+    }
+}
+
+fn draw_smooth_horizontal_edge(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    edge: &Edge,
+    image_params: &ImageParams,
+) {
+    let cell_width = image_params.width as i32;
+    let x_offset = (edge.pos_x * image_params.width as usize) as i32;
+    let center_x = cell_width / 2;
+    let center_y = image_params.height as i32 / 2;
+    let circle_outer_radius = image_params.circle_outer_radius as i32;
+    let color = image_params.edge_color(edge.associated_line_pos_x);
+
+    let (x0, x1) = match edge.edge_type {
+        EdgeType::Right => (x_offset + center_x + circle_outer_radius, x_offset + cell_width),
+        EdgeType::Left => (x_offset, x_offset + center_x - circle_outer_radius),
+        EdgeType::Horizontal => (x_offset, x_offset + cell_width),
+        _ => return,
+    };
+
+    // Horizontal edges are straight lines in smooth style
+    let radius = (image_params.line_width as i32).max(1) / 2;
+    draw_thick_line(img_buf, x0, center_y, x1, center_y, radius, color);
+}
+
+fn draw_filled_circle(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    cx: i32,
+    cy: i32,
+    r: i32,
+    color: image::Rgba<u8>,
+) {
+    for dy in -r..=r {
+        for dx in -r..=r {
+            if dx * dx + dy * dy <= r * r + r {
+                put_pixel_safe(img_buf, cx + dx, cy + dy, color);
+            }
+        }
+    }
+}
+
+fn draw_thick_line(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    radius: i32,
+    color: image::Rgba<u8>,
+) {
+    let dx = (x1 - x0).abs();
+    let dy = (y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx - dy;
+    let mut x = x0;
+    let mut y = y0;
+
+    loop {
+        draw_filled_circle(img_buf, x, y, radius, color);
+        if x == x1 && y == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 > -dy {
+            err -= dy;
+            x += sx;
+        }
+        if e2 < dx {
+            err += dx;
+            y += sy;
+        }
     }
 }
 

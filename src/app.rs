@@ -55,7 +55,7 @@ pub struct RefreshRequest {
     pub context: RefreshViewContext,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppContext {
     pub keybind: KeyBind,
     pub core_config: CoreConfig,
@@ -205,8 +205,11 @@ impl App<'_> {
                         StatusLine::NotificationInfo(_)
                         | StatusLine::NotificationSuccess(_)
                         | StatusLine::NotificationWarn(_) => {
-                            // Clear message and pass key input as is
-                            self.clear_status_line();
+                            // Clear message and pass key input as is,
+                            // but preserve search match messages
+                            if !self.view.is_search_active() {
+                                self.clear_status_line();
+                            }
                         }
                         StatusLine::NotificationError(_) => {
                             // Clear message and cancel key input
@@ -453,6 +456,7 @@ impl App<'_> {
         let dim_separator = Style::default().fg(Color::Rgb(59, 66, 97));
         let dim_text = Style::default().fg(Color::Rgb(86, 95, 137));
         let is_search_active = self.view.is_search_active();
+        let is_search_querying = self.view.is_search_querying();
         let is_config_active = self.view.is_config_active();
         let show_enhanced = matches!(
             &self.app_status.status_line,
@@ -461,8 +465,10 @@ impl App<'_> {
         let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None) || is_search_active || is_config_active;
 
         let status_area = if show_shortcuts {
-            let right_constraint = if is_search_active {
-                Constraint::Length(40)
+            let right_constraint = if is_search_querying {
+                Constraint::Length(16)
+            } else if is_search_active {
+                Constraint::Length(56)
             } else if is_config_active {
                 Constraint::Length(50)
             } else {
@@ -473,12 +479,26 @@ impl App<'_> {
                 right_constraint,
             ]).areas(area);
 
-            let shortcut_text = if is_search_active {
-                "n:next  N:prev  Esc:clear  Enter:apply"
+            let shortcut_text: String = if is_search_querying {
+                "Esc: cancel".into()
+            } else if is_search_active {
+                let (ignore_case, fuzzy) = self.view.search_case_fuzzy().unwrap_or((false, false));
+                // ON = case-sensitive (ignore_case=false), OFF = case-insensitive (ignore_case=true)
+                let case_str = if ignore_case { "[OFF]" } else { "[ON]" };
+                let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
+                format!("s:case {case_str}  z:fuzzy {fuzzy_str}  n:next  N:prev  Esc:clear")
             } else if is_config_active {
-                "Enter/←/→ for cycle, escape/p to close"
+                "Enter / ← → to cycle, Esc / p to close".into()
             } else {
-                "q:quit  ?:help  r:refresh"
+                match &self.view {
+                    View::List(_) => "q:quit  ?:help  r:refresh".into(),
+                    View::Diff(_) => "Esc:close".into(),
+                    View::Detail(_) => "Esc:close".into(),
+                    View::Refs(_) => "Esc:close".into(),
+                    View::Help(_) => "Esc:close".into(),
+                    View::UserCommand(_) => "Esc:close".into(),
+                    _ => "q:quit  ?:help  r:refresh".into(),
+                }
             };
             let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
             let shortcut_line = Line::from(shortcut_spans);
@@ -489,29 +509,20 @@ impl App<'_> {
 
             f.render_widget(shortcut_paragraph, right_area);
 
-            left_area
-        } else {
-            area
-        };
-            let [left_area, right_area] = Layout::horizontal([
-                Constraint::Min(0),
-                right_constraint,
-            ]).areas(area);
-
-            let shortcut_text = if is_search_active {
-                "n:next  N:prev  Esc:clear  Enter:apply"
+            if is_config_active {
+                let config_hint = Line::from(vec![Span::styled(
+                    "Changes are applied to your config.toml",
+                    dim_text,
+                )]);
+                let config_hint_paragraph = Paragraph::new(config_hint)
+                    .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+                    .block(Block::default().padding(Padding::horizontal(1)));
+                f.render_widget(config_hint_paragraph, left_area);
+                // We still need a valid area for the rest, use a zero-height area
+                Rect::new(left_area.x, left_area.y, 0, left_area.height)
             } else {
-                "q:quit  ?:help  r:refresh"
-            };
-            let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
-            let shortcut_line = Line::from(shortcut_spans);
-            let shortcut_paragraph = Paragraph::new(shortcut_line)
-                .style(Style::default().bg(Color::Rgb(36, 40, 59)))
-                .alignment(Alignment::Right)
-                .block(Block::default().padding(Padding::horizontal(1)));
-            f.render_widget(shortcut_paragraph, right_area);
-
-            left_area
+                left_area
+            }
         } else {
             area
         };
@@ -905,7 +916,36 @@ impl App<'_> {
 
     fn close_config(&mut self) {
         if let View::Config(ref mut view) = self.view {
+            let core = view.core_config().clone();
+            let ui = view.ui_config().clone();
+            let old_mouse = self.ctx.ui_config.common.mouse_enabled;
             self.view = view.take_before_view();
+            let ctx = Rc::make_mut(&mut self.ctx);
+            ctx.core_config = core;
+            ctx.ui_config = ui.clone();
+            let new_mouse = ui.common.mouse_enabled;
+            if old_mouse != new_mouse {
+                let _ = if new_mouse {
+                    ratatui::crossterm::execute!(
+                        std::io::stdout(),
+                        ratatui::crossterm::event::EnableMouseCapture
+                    )
+                } else {
+                    ratatui::crossterm::execute!(
+                        std::io::stdout(),
+                        ratatui::crossterm::event::DisableMouseCapture
+                    )
+                };
+            }
+            // Force full app refresh so config changes (graph style, protocol, etc.) take effect
+            self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                list_context: crate::view::ListRefreshViewContext {
+                    commit_hash: String::new(),
+                    selected: 0,
+                    height: 20,
+                    scroll_to_top: false,
+                },
+            }));
         }
     }
 

@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
-    config::{save, DiffMode},
+    config::{save, CoreConfig, DiffMode, UiConfig},
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     view::View,
     GraphStyle, ImageProtocolType,
@@ -23,15 +23,21 @@ pub struct ConfigView<'a> {
     selected: usize,
     ctx: Rc<AppContext>,
     tx: Sender,
+    core_config: CoreConfig,
+    ui_config: UiConfig,
 }
 
 impl<'a> ConfigView<'a> {
     pub fn new(before: View<'a>, ctx: Rc<AppContext>, tx: Sender) -> Self {
+        let core_config = ctx.core_config.clone();
+        let ui_config = ctx.ui_config.clone();
         Self {
             before,
             selected: 0,
             ctx,
             tx,
+            core_config,
+            ui_config,
         }
     }
 
@@ -86,31 +92,28 @@ impl<'a> ConfigView<'a> {
     }
 
     fn cycle_option_prev(&mut self) {
-        let mut core = self.ctx.core_config.clone();
-        let mut ui = self.ctx.ui_config.clone();
-
         match self.selected {
             0 => {
-                let current = core.graph_style();
+                let current = self.core_config.graph_style();
                 let prev = match current {
                     GraphStyle::Rounded => GraphStyle::Smooth,
                     GraphStyle::Angular => GraphStyle::Rounded,
                     GraphStyle::Smooth => GraphStyle::Angular,
                 };
-                core.set_graph_style(prev);
+                self.core_config.set_graph_style(prev);
             }
             1 => {
-                let prev = match ui.common.diff_mode {
+                let prev = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::Enhanced,
                 };
-                ui.common.set_diff_mode(prev);
+                self.ui_config.common.set_diff_mode(prev);
             }
             2 => {
-                ui.common.set_mouse_enabled(!ui.common.mouse_enabled);
+                self.ui_config.common.set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
             3 => {
-                let current = core.protocol().unwrap_or(ImageProtocolType::Auto);
+                let current = self.core_config.protocol().unwrap_or(ImageProtocolType::Auto);
                 let prev = match current {
                     ImageProtocolType::Auto => ImageProtocolType::KittyUnicode,
                     ImageProtocolType::Kitty => ImageProtocolType::Auto,
@@ -118,43 +121,39 @@ impl<'a> ConfigView<'a> {
                     ImageProtocolType::Sixel => ImageProtocolType::Iterm,
                     ImageProtocolType::KittyUnicode => ImageProtocolType::Sixel,
                 };
-                core.set_protocol(prev);
+                self.core_config.set_protocol(prev);
             }
             _ => {}
         }
 
-        if let Err(e) = save(&core, &ui) {
+        if let Err(e) = save(&self.core_config, &self.ui_config) {
             self.tx.send(AppEvent::NotifyError(e.to_string()));
         }
-        self.before.refresh();
     }
 
     fn cycle_option(&mut self) {
-        let mut core = self.ctx.core_config.clone();
-        let mut ui = self.ctx.ui_config.clone();
-
         match self.selected {
             0 => {
-                let current = core.graph_style();
+                let current = self.core_config.graph_style();
                 let next = match current {
                     GraphStyle::Rounded => GraphStyle::Angular,
                     GraphStyle::Angular => GraphStyle::Smooth,
                     GraphStyle::Smooth => GraphStyle::Rounded,
                 };
-                core.set_graph_style(next);
+                self.core_config.set_graph_style(next);
             }
             1 => {
-                let next = match ui.common.diff_mode {
+                let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::Enhanced,
                 };
-                ui.common.set_diff_mode(next);
+                self.ui_config.common.set_diff_mode(next);
             }
             2 => {
-                ui.common.set_mouse_enabled(!ui.common.mouse_enabled);
+                self.ui_config.common.set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
             3 => {
-                let current = core.protocol().unwrap_or(ImageProtocolType::Auto);
+                let current = self.core_config.protocol().unwrap_or(ImageProtocolType::Auto);
                 let next = match current {
                     ImageProtocolType::Auto => ImageProtocolType::Kitty,
                     ImageProtocolType::Kitty => ImageProtocolType::Iterm,
@@ -162,15 +161,14 @@ impl<'a> ConfigView<'a> {
                     ImageProtocolType::Sixel => ImageProtocolType::KittyUnicode,
                     ImageProtocolType::KittyUnicode => ImageProtocolType::Auto,
                 };
-                core.set_protocol(next);
+                self.core_config.set_protocol(next);
             }
             _ => {}
         }
 
-        if let Err(e) = save(&core, &ui) {
+        if let Err(e) = save(&self.core_config, &self.ui_config) {
             self.tx.send(AppEvent::NotifyError(e.to_string()));
         }
-        self.before.refresh();
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
@@ -198,25 +196,26 @@ impl<'a> ConfigView<'a> {
             width: inner.width,
             height: 1,
         };
-        let sep_style = Style::default().fg(self.ctx.color_theme.border);
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
         let sep_line = Line::from("─".repeat(inner.width as usize)).style(sep_style);
         f.render_widget(Paragraph::new(sep_line), sep_area);
 
         // Items list
         let items = vec![
-            ("Graph Style", graph_style_display(self.ctx.core_config.graph_style())),
-            ("Diff Mode", diff_mode_display(self.ctx.ui_config.common.diff_mode)),
-            ("Mouse", mouse_display(self.ctx.ui_config.common.mouse_enabled)),
-            ("Image Protocol", protocol_display(self.ctx.core_config.protocol())),
+            ("Graph Style", graph_style_display(self.core_config.graph_style())),
+            ("Diff Mode", diff_mode_display(self.ui_config.common.diff_mode)),
+            ("Mouse", mouse_display(self.ui_config.common.mouse_enabled)),
+            ("Image Protocol", protocol_display(self.core_config.protocol())),
         ];
 
         let lines: Vec<Line> = items
             .iter()
             .enumerate()
             .map(|(i, (name, value))| {
+                let display = format!("< {} >", value);
                 let spans = vec![
                     Span::raw(format!("{:<20}", name)),
-                    Span::styled(value, Style::default().fg(self.ctx.color_theme.fg)),
+                    Span::styled(display, Style::default().fg(self.ctx.color_theme.fg)),
                 ];
                 let mut line = Line::from(spans);
                 if i == self.selected {
@@ -234,27 +233,25 @@ impl<'a> ConfigView<'a> {
         };
         let paragraph = Paragraph::new(lines);
         f.render_widget(paragraph, list_area);
+    }
 
-        // Footer hint
-        let hint = Line::from(vec![
-            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" / "),
-            Span::styled("←", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" / "),
-            Span::styled("→", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" for cycle, "),
-            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" / "),
-            Span::styled("p", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to close"),
-        ]);
-        let hint_area = Rect {
-            x: inner.x,
-            y: inner.y + inner.height - 1,
-            width: inner.width,
-            height: 1,
-        };
-        f.render_widget(Paragraph::new(hint), hint_area);
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        let inner_y = 3; // block padding top + title + sep
+        let item_y_start = inner_y;
+        let item_idx = (row as usize).saturating_sub(item_y_start);
+        if item_idx < 4 {
+            self.selected = item_idx;
+            self.cycle_option();
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
+        let inner_y = 3;
+        let item_y_start = inner_y;
+        let item_idx = (row as usize).saturating_sub(item_y_start);
+        if item_idx < 4 {
+            self.selected = item_idx;
+        }
     }
 }
 
@@ -269,6 +266,22 @@ impl<'a> ConfigView<'a> {
 
     pub fn is_search_active(&self) -> bool {
         self.before.is_search_active()
+    }
+
+    pub fn is_search_querying(&self) -> bool {
+        self.before.is_search_querying()
+    }
+
+    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
+        self.before.search_case_fuzzy()
+    }
+
+    pub fn core_config(&self) -> &CoreConfig {
+        &self.core_config
+    }
+
+    pub fn ui_config(&self) -> &UiConfig {
+        &self.ui_config
     }
 }
 

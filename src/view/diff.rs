@@ -415,7 +415,7 @@ impl<'a> DiffView<'a> {
                     match diff_line.line_type {
                         DiffLineType::Addition => {
                             let line_num =
-                                format!("{:>4}", diff_line.new_line_no.unwrap_or(0));
+                                format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
                             lines.extend(wrap_diff_line(
                                 &diff_line.content,
                                 &line_num,
@@ -427,7 +427,7 @@ impl<'a> DiffView<'a> {
                         }
                         DiffLineType::Deletion => {
                             let line_num =
-                                format!("{:>4}", diff_line.old_line_no.unwrap_or(0));
+                                format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
                             lines.extend(wrap_diff_line(
                                 &diff_line.content,
                                 &line_num,
@@ -439,7 +439,7 @@ impl<'a> DiffView<'a> {
                         }
                         DiffLineType::Context => {
                             let line_num =
-                                format!("{:>4}", diff_line.old_line_no.unwrap_or(0));
+                                format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
                             lines.extend(wrap_diff_line(
                                 &diff_line.content,
                                 &line_num,
@@ -627,7 +627,7 @@ fn wrap_diff_line(
     available_width: u16,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let line_num_width = 6; // "1234 │ " = 6 chars
+    let line_num_width = 7; // "1234 │ " = 7 chars
     let content_width = available_width.saturating_sub(line_num_width) as usize;
 
     if content_width == 0 {

@@ -509,6 +509,9 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
 
     set_nested_bool(&mut doc, &["ui", "common", "mouse_enabled"], ui.common.mouse_enabled);
 
+    set_nested_bool(&mut doc, &["core", "search", "ignore_case"], core.search.ignore_case);
+    set_nested_bool(&mut doc, &["core", "search", "fuzzy"], core.search.fuzzy);
+
     let toml_string = toml::to_string_pretty(&doc)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&path, toml_string)
@@ -559,7 +562,7 @@ mod tests {
                     load_more_count: 200,
                 },
                 search: CoreSearchConfig {
-                    ignore_case: false,
+                    ignore_case: true,
                     fuzzy: false,
                 },
                 user_command: CoreUserCommandConfig {
@@ -695,7 +698,7 @@ mod tests {
                 },
                 search: CoreSearchConfig {
                     ignore_case: true,
-                    fuzzy: true,
+                    fuzzy: false,
                 },
                 user_command: CoreUserCommandConfig {
                     commands: FxHashMap::from_iter([
@@ -809,7 +812,7 @@ mod tests {
                     load_more_count: 200,
                 },
                 search: CoreSearchConfig {
-                    ignore_case: false,
+                    ignore_case: true,
                     fuzzy: false,
                 },
                 user_command: CoreUserCommandConfig {

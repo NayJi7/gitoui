@@ -90,12 +90,22 @@ pub enum SearchState {
     Applied {
         match_index: usize,
         total_match: usize,
+        ignore_case: bool,
+        fuzzy: bool,
     },
 }
 
 impl SearchState {
     pub fn is_active(&self) -> bool {
         !matches!(self, SearchState::Inactive)
+    }
+
+    pub fn is_applied(&self) -> bool {
+        matches!(self, SearchState::Applied { .. })
+    }
+
+    pub fn is_querying(&self) -> bool {
+        matches!(self, SearchState::Searching { .. })
     }
 }
 
@@ -579,6 +589,18 @@ impl<'a> CommitListState<'a> {
         self.search_state
     }
 
+    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
+        match self.search_state {
+            SearchState::Searching {
+                ignore_case, fuzzy, ..
+            }
+            | SearchState::Applied {
+                ignore_case, fuzzy, ..
+            } => Some((ignore_case, fuzzy)),
+            _ => None,
+        }
+    }
+
     pub fn start_search(&mut self) {
         if let SearchState::Inactive | SearchState::Applied { .. } = self.search_state {
             self.search_state = SearchState::Searching {
@@ -615,7 +637,13 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn apply_search(&mut self) {
-        if let SearchState::Searching { match_index, .. } = self.search_state {
+        if let SearchState::Searching {
+            match_index,
+            ignore_case,
+            fuzzy,
+            ..
+        } = self.search_state
+        {
             if self.search_input.value().is_empty() {
                 self.search_state = SearchState::Inactive;
             } else {
@@ -623,6 +651,8 @@ impl<'a> CommitListState<'a> {
                 self.search_state = SearchState::Applied {
                     match_index,
                     total_match,
+                    ignore_case,
+                    fuzzy,
                 };
             }
         }
@@ -636,7 +666,9 @@ impl<'a> CommitListState<'a> {
         }
     }
 
-    pub fn toggle_ignore_case(&mut self) {
+    pub fn toggle_ignore_case(&mut self) -> Option<(bool, bool)> {
+        let mut is_applied = false;
+        let mut start_index = self.current_selected_index();
         if let SearchState::Searching {
             ignore_case,
             transient_message,
@@ -644,26 +676,53 @@ impl<'a> CommitListState<'a> {
         } = &mut self.search_state
         {
             *ignore_case = !*ignore_case;
+            // In UI: ON = case-sensitive (ignore_case=false), OFF = case-insensitive (ignore_case=true)
             *transient_message = if *ignore_case {
-                TransientMessage::IgnoreCaseOn
-            } else {
                 TransientMessage::IgnoreCaseOff
+            } else {
+                TransientMessage::IgnoreCaseOn
             };
         }
-
-        if let SearchState::Searching {
-            start_index,
+        if let SearchState::Applied {
+            match_index,
             ignore_case,
             fuzzy,
             ..
-        } = self.search_state
+        } = &mut self.search_state
         {
-            self.update_search_matches(ignore_case, fuzzy);
-            self.select_current_or_next_match_index(start_index);
+            *ignore_case = !*ignore_case;
+            is_applied = true;
+            start_index = *match_index;
         }
+
+        let (ignore_case, fuzzy) = match self.search_state {
+            SearchState::Searching {
+                ignore_case,
+                fuzzy,
+                ..
+            }
+            | SearchState::Applied {
+                ignore_case,
+                fuzzy,
+                ..
+            } => (ignore_case, fuzzy),
+            _ => return None,
+        };
+        self.update_search_matches(ignore_case, fuzzy);
+        self.select_current_or_next_match_index(start_index);
+        if is_applied {
+            let total_match = self.search_matches.iter().filter(|m| m.matched()).count();
+            if let SearchState::Applied { match_index, .. } = &mut self.search_state {
+                *match_index = start_index.min(total_match.saturating_sub(1));
+            }
+        }
+        self.default_ignore_case = ignore_case;
+        Some((ignore_case, fuzzy))
     }
 
-    pub fn toggle_fuzzy(&mut self) {
+    pub fn toggle_fuzzy(&mut self) -> Option<(bool, bool)> {
+        let mut is_applied = false;
+        let mut start_index = self.current_selected_index();
         if let SearchState::Searching {
             fuzzy,
             transient_message,
@@ -677,17 +736,41 @@ impl<'a> CommitListState<'a> {
                 TransientMessage::FuzzyOff
             };
         }
-
-        if let SearchState::Searching {
-            start_index,
+        if let SearchState::Applied {
+            match_index,
             ignore_case,
             fuzzy,
             ..
-        } = self.search_state
+        } = &mut self.search_state
         {
-            self.update_search_matches(ignore_case, fuzzy);
-            self.select_current_or_next_match_index(start_index);
+            *fuzzy = !*fuzzy;
+            is_applied = true;
+            start_index = *match_index;
         }
+
+        let (ignore_case, fuzzy) = match self.search_state {
+            SearchState::Searching {
+                ignore_case,
+                fuzzy,
+                ..
+            }
+            | SearchState::Applied {
+                ignore_case,
+                fuzzy,
+                ..
+            } => (ignore_case, fuzzy),
+            _ => return None,
+        };
+        self.update_search_matches(ignore_case, fuzzy);
+        self.select_current_or_next_match_index(start_index);
+        if is_applied {
+            let total_match = self.search_matches.iter().filter(|m| m.matched()).count();
+            if let SearchState::Applied { match_index, .. } = &mut self.search_state {
+                *match_index = start_index.min(total_match.saturating_sub(1));
+            }
+        }
+        self.default_fuzzy = fuzzy;
+        Some((ignore_case, fuzzy))
     }
 
     pub fn search_query_string(&self) -> Option<String> {
@@ -730,8 +813,8 @@ impl<'a> CommitListState<'a> {
         {
             match transient_message {
                 TransientMessage::None => None,
-                TransientMessage::IgnoreCaseOn => Some("Ignore case: ON ".to_string()),
-                TransientMessage::IgnoreCaseOff => Some("Ignore case: OFF".to_string()),
+                TransientMessage::IgnoreCaseOn => Some("Case: ON ".to_string()),
+                TransientMessage::IgnoreCaseOff => Some("Case: OFF".to_string()),
                 TransientMessage::FuzzyOn => Some("Fuzzy match: ON ".to_string()),
                 TransientMessage::FuzzyOff => Some("Fuzzy match: OFF".to_string()),
             }

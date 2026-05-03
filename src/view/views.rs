@@ -118,6 +118,32 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn is_search_querying(&self) -> bool {
+        match self {
+            View::Default => false,
+            View::List(view) => view.as_list_state().search_state().is_querying(),
+            View::Detail(view) => view.as_list_state().search_state().is_querying(),
+            View::Diff(view) => view.as_list_state().search_state().is_querying(),
+            View::UserCommand(view) => view.as_list_state().search_state().is_querying(),
+            View::Refs(view) => view.as_list_state().search_state().is_querying(),
+            View::Help(view) => view.is_search_querying(),
+            View::Config(view) => view.is_search_querying(),
+        }
+    }
+
+    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
+        match self {
+            View::Default => None,
+            View::List(view) => view.as_list_state().search_case_fuzzy(),
+            View::Detail(view) => view.as_list_state().search_case_fuzzy(),
+            View::Diff(view) => view.as_list_state().search_case_fuzzy(),
+            View::UserCommand(view) => view.as_list_state().search_case_fuzzy(),
+            View::Refs(view) => view.as_list_state().search_case_fuzzy(),
+            View::Help(view) => view.search_case_fuzzy(),
+            View::Config(view) => view.search_case_fuzzy(),
+        }
+    }
+
     pub fn is_config_active(&self) -> bool {
         matches!(self, View::Config(_))
     }
@@ -204,6 +230,7 @@ impl<'a> View<'a> {
             View::Diff(view) => view.handle_click(col, row),
             View::UserCommand(view) => view.handle_click(col, row),
             View::Refs(view) => view.handle_click(col, row),
+            View::Config(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -213,6 +240,7 @@ impl<'a> View<'a> {
             View::List(view) => view.handle_mouse_move(col, row),
             View::Detail(view) => view.handle_mouse_move(col, row),
             View::Refs(view) => view.handle_mouse_move(col, row),
+            View::Config(view) => view.handle_mouse_move(col, row),
             _ => {}
         }
     }

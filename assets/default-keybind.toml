@@ -29,8 +29,8 @@ go_to_previous = ["shift-n"]
 confirm = ["enter"]
 ref_list = ["tab"]
 search = ["f"]
-ignore_case_toggle = ["ctrl-g"]
-fuzzy_toggle = ["ctrl-x"]
+ignore_case_toggle = ["s"]
+fuzzy_toggle = ["z"]
 refresh = ["shift-r"]
 
 # copy part of information, ex: copy the short commit hash not all
