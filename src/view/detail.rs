@@ -303,23 +303,11 @@ impl<'a> DetailView<'a> {
             return;
         }
 
-        // Check if click is in action bar overlay (top-right, width 32)
+        // Check if click is in action bar area (right 40%)
         if let Some(detail_area) = self.detail_area {
-            let overlay_width = 32u16;
-            let overlay_x = detail_area.right().saturating_sub(overlay_width + 1);
-            let overlay_y = detail_area.y + 1;
-            let num_actions = if matches!(self.commit.commit_type, crate::git::CommitType::Stash) {
-                crate::widget::commit_detail::STASH_ACTIONS.len()
-            } else {
-                crate::widget::commit_detail::COMMIT_ACTIONS.len()
-            };
-            let overlay_height = (num_actions as u16 + 2).min(detail_area.height.saturating_sub(2));
-            let overlay_y_usize = overlay_y as usize;
-            let overlay_height_usize = overlay_height as usize;
-            if col >= overlay_x && col < overlay_x + overlay_width
-                && row >= overlay_y_usize && row < overlay_y_usize + overlay_height_usize
-            {
-                let action_bar_row = row.saturating_sub(overlay_y_usize);
+            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= action_bar_x && row >= detail_area.y as usize {
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(1);
                 if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
                     self.execute_action(action_idx);
                 }
@@ -350,23 +338,11 @@ impl<'a> DetailView<'a> {
             return;
         }
 
-        // Check if hover is in action bar overlay (top-right, width 32)
+        // Check if hover is in action bar area (right 40%)
         if let Some(detail_area) = self.detail_area {
-            let overlay_width = 32u16;
-            let overlay_x = detail_area.right().saturating_sub(overlay_width + 1);
-            let overlay_y = detail_area.y + 1;
-            let num_actions = if matches!(self.commit.commit_type, crate::git::CommitType::Stash) {
-                crate::widget::commit_detail::STASH_ACTIONS.len()
-            } else {
-                crate::widget::commit_detail::COMMIT_ACTIONS.len()
-            };
-            let overlay_height = (num_actions as u16 + 2).min(detail_area.height.saturating_sub(2));
-            let overlay_y_usize = overlay_y as usize;
-            let overlay_height_usize = overlay_height as usize;
-            if col >= overlay_x && col < overlay_x + overlay_width
-                && row >= overlay_y_usize && row < overlay_y_usize + overlay_height_usize
-            {
-                let action_bar_row = row.saturating_sub(overlay_y_usize);
+            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= action_bar_x && row >= detail_area.y as usize {
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(1);
                 self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
                 return;
             } else {

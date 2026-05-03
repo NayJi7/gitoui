@@ -5,12 +5,13 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
+    widget::commit_list::{CommitList, CommitListState},
     widget::tag_detail::{TagDetail, TagDetailState, TagMetadata},
 };
 
 #[derive(Debug)]
 pub struct TagDetailView<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
+    commit_list_state: Option<CommitListState<'a>>,
     tag_detail_state: TagDetailState,
     metadata: TagMetadata,
     ctx: Rc<AppContext>,
@@ -19,9 +20,15 @@ pub struct TagDetailView<'a> {
 }
 
 impl<'a> TagDetailView<'a> {
-    pub fn new(_tag_name: String, metadata: TagMetadata, ctx: Rc<AppContext>, tx: Sender) -> Self {
+    pub fn new(
+        _tag_name: String,
+        metadata: TagMetadata,
+        commit_list_state: Option<CommitListState<'a>>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            commit_list_state,
             tag_detail_state: TagDetailState::default(),
             metadata,
             ctx,
@@ -57,12 +64,40 @@ impl<'a> TagDetailView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        let detail_height = if self.commit_list_state.is_some() {
+            (area.height - 1).min(10)
+        } else {
+            area.height.min(10)
+        };
+        let [list_area, detail_area] =
+            ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(detail_height),
+            ])
+            .areas(area);
+
+        if let Some(ref mut list_state) = self.commit_list_state {
+            let commit_list = CommitList::new(self.ctx.clone());
+            f.render_stateful_widget(commit_list, list_area, list_state);
+        }
+
         let tag_detail = TagDetail::new(&self.metadata, self.ctx.clone());
-        f.render_stateful_widget(tag_detail, area, &mut self.tag_detail_state);
-        self.detail_area = Some(area);
+        f.render_stateful_widget(tag_detail, detail_area, &mut self.tag_detail_state);
+        self.detail_area = Some(detail_area);
     }
 
-    pub fn update_layout(&mut self, _area: Rect) {}
+    pub fn update_layout(&mut self, area: Rect) {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            let detail_height = (area.height - 1).min(10);
+            let [list_area, _] =
+                ratatui::layout::Layout::vertical([
+                    ratatui::layout::Constraint::Min(0),
+                    ratatui::layout::Constraint::Length(detail_height),
+                ])
+                .areas(area);
+            list_state.update_height(list_area.height as usize);
+        }
+    }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         if let Some(detail_area) = self.detail_area {
@@ -85,6 +120,36 @@ impl<'a> TagDetailView<'a> {
             } else {
                 self.tag_detail_state.hovered_action = None;
             }
+        }
+    }
+
+    pub fn take_list_state(&mut self) -> Option<CommitListState<'a>> {
+        self.commit_list_state.take()
+    }
+
+    pub fn set_list_state(&mut self, state: CommitListState<'a>) {
+        self.commit_list_state = Some(state);
+    }
+
+    pub fn prepare_graph_uploads(&mut self) {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.ensure_visible_graph_uploaded();
+        }
+    }
+
+    pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.drain_pending_graph_uploads()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
+        if let Some(ref list_state) = self.commit_list_state {
+            list_state.graph_image_ids_sorted()
+        } else {
+            Vec::new()
         }
     }
 

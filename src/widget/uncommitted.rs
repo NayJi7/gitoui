@@ -128,7 +128,7 @@ impl<'a> StatefulWidget for UncommittedWidget<'a> {
 impl<'a> UncommittedWidget<'a> {
     fn render_files(&self, area: Rect, buf: &mut Buffer, state: &UncommittedState) {
         let block = Block::default()
-            .borders(Borders::TOP | Borders::RIGHT)
+            .borders(Borders::TOP)
             .style(Style::default().fg(self.ctx.color_theme.divider_fg))
             .padding(Padding::new(1, 1, 0, 0));
         let inner = block.inner(area);

@@ -124,10 +124,8 @@ impl StatefulWidget for CommitDetail<'_> {
     type State = CommitDetailState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        // Leave space on the right for the action bar overlay (width 32 + 1 padding)
-        let action_bar_width = 33u16;
-        let content_width = area.width.saturating_sub(action_bar_width);
-        let content_area = Rect::new(area.x, area.y, content_width, area.height);
+        let [content_area, action_bar_area] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
 
         let [labels_area, value_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(content_area);
@@ -152,9 +150,7 @@ impl StatefulWidget for CommitDetail<'_> {
 
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
-
-        // Render action bar as floating overlay on top-right
-        self.render_action_bar_overlay(area, buf, state);
+        self.render_action_bar(action_bar_area, buf, state);
     }
 }
 
@@ -183,31 +179,19 @@ impl CommitDetail<'_> {
         paragraph.render(area, buf);
     }
 
-    fn render_action_bar_overlay(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
+    fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
+        let block = Block::default()
+            .borders(Borders::TOP | Borders::LEFT)
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
+            .padding(Padding::new(1, 1, 0, 0));
+        let inner = block.inner(area);
+        block.render(area, buf);
+
         let actions = if self.is_stash() {
             STASH_ACTIONS
         } else {
             COMMIT_ACTIONS
         };
-
-        // Calculate overlay size
-        let overlay_width = 32u16;
-        let overlay_height = (actions.len() as u16 + 2).min(area.height.saturating_sub(2));
-        if overlay_height < 3 {
-            return; // Not enough space
-        }
-
-        let overlay_x = area.right().saturating_sub(overlay_width + 1);
-        let overlay_y = area.top() + 1;
-        let overlay_area = Rect::new(overlay_x, overlay_y, overlay_width, overlay_height);
-
-        // Draw border
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 1, 0, 0));
-        let inner = block.inner(overlay_area);
-        block.render(overlay_area, buf);
 
         let mut lines = Vec::new();
         for (i, (label, key)) in actions.iter().enumerate() {

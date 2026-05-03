@@ -726,6 +726,11 @@ impl App<'_> {
                     self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
                 }
             }
+            View::TagDetail(ref mut view) => {
+                if let Some(commit_list_state) = view.take_list_state() {
+                    self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                }
+            }
             _ => {}
         }
     }
@@ -1307,6 +1312,12 @@ impl App<'_> {
     }
 
     fn open_tag_detail(&mut self, tag_name: String) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
         let repo_path = self.repository.path();
         let metadata = TagMetadata {
             tag_name: tag_name.clone(),
@@ -1320,6 +1331,7 @@ impl App<'_> {
         self.view = View::TagDetail(Box::new(crate::view::tag_detail::TagDetailView::new(
             tag_name,
             metadata,
+            commit_list_state,
             self.ctx.clone(),
             self.ec.sender(),
         )));

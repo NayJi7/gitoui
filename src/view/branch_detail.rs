@@ -103,7 +103,7 @@ impl<'a> BranchDetailView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        let detail_height = (area.height - 1).min(self.ctx.ui_config.detail.height);
+        let detail_height = (area.height - 1).min(12);
         let [list_area, detail_area] =
             ratatui::layout::Layout::vertical([
                 ratatui::layout::Constraint::Min(0),
@@ -121,7 +121,7 @@ impl<'a> BranchDetailView<'a> {
     }
 
     pub fn update_layout(&mut self, area: Rect) {
-        let detail_height = (area.height - 1).min(self.ctx.ui_config.detail.height);
+        let detail_height = (area.height - 1).min(12);
         let [list_area, _] =
             ratatui::layout::Layout::vertical([
                 ratatui::layout::Constraint::Min(0),
@@ -144,6 +144,28 @@ impl<'a> BranchDetailView<'a> {
 
     pub fn refresh(&self) {
         // Metadata refresh is handled by the app when re-opening the view
+    }
+
+    pub fn prepare_graph_uploads(&mut self) {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.ensure_visible_graph_uploaded();
+        }
+    }
+
+    pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.drain_pending_graph_uploads()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
+        if let Some(ref list_state) = self.commit_list_state {
+            list_state.graph_image_ids_sorted()
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {

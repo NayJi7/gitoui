@@ -95,8 +95,8 @@ impl<'a> View<'a> {
             View::Help(_) => {}
             View::Config(_) => {}
             View::Dialog(_) => {}
-            View::BranchDetail(_) => {}
-            View::TagDetail(_) => {}
+            View::BranchDetail(view) => view.prepare_graph_uploads(),
+            View::TagDetail(view) => view.prepare_graph_uploads(),
             View::Uncommitted(_) => {}
         }
     }
@@ -112,8 +112,8 @@ impl<'a> View<'a> {
             View::Help(_) => Vec::new(),
             View::Config(_) => Vec::new(),
             View::Dialog(_) => Vec::new(),
-            View::BranchDetail(_) => Vec::new(),
-            View::TagDetail(_) => Vec::new(),
+            View::BranchDetail(view) => view.drain_pending_graph_uploads(),
+            View::TagDetail(view) => view.drain_pending_graph_uploads(),
             View::Uncommitted(_) => Vec::new(),
         }
     }
@@ -129,8 +129,8 @@ impl<'a> View<'a> {
             View::Help(view) => view.graph_image_ids_sorted(),
             View::Config(view) => view.graph_image_ids_sorted(),
             View::Dialog(_) => Vec::new(),
-            View::BranchDetail(_) => Vec::new(),
-            View::TagDetail(_) => Vec::new(),
+            View::BranchDetail(view) => view.graph_image_ids_sorted(),
+            View::TagDetail(view) => view.graph_image_ids_sorted(),
             View::Uncommitted(_) => Vec::new(),
         }
     }
