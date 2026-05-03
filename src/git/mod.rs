@@ -33,11 +33,12 @@ impl From<&str> for CommitHash {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum CommitType {
     #[default]
     Commit,
     Stash,
+    Uncommitted,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -141,7 +142,46 @@ impl Repository {
             return Err("no commits in the repository".into());
         }
 
-        let commits = merge_stashes_to_commits(commits, stashes);
+        let mut commits = merge_stashes_to_commits(commits, stashes);
+
+        let uncommitted_changes = status::UncommittedChanges::load(path).ok();
+        if let Some(changes) = &uncommitted_changes {
+            if changes.is_dirty() {
+                let fake_hash = CommitHash("0000000000000000000000000000000000000000".to_string());
+                let parent_hash = match &head {
+                    Head::Detached { target } => Some(target.clone()),
+                    Head::Branch { name } => {
+                        ref_map.values().flatten().find_map(|r| match r {
+                            Ref::Branch { name: branch_name, target } if branch_name == name => Some(target.clone()),
+                            _ => None,
+                        })
+                    }
+                    Head::None => None,
+                };
+                let parent_commit_hashes = if let Some(h) = parent_hash {
+                    vec![h]
+                } else {
+                    vec![]
+                };
+
+                let fake_commit = Commit {
+                    commit_hash: fake_hash.clone(),
+                    parent_commit_hashes,
+                    author_name: "".to_string(),
+                    author_email: "".to_string(),
+                    author_date: chrono::Local::now().fixed_offset(),
+                    committer_name: "".to_string(),
+                    committer_email: "".to_string(),
+                    committer_date: chrono::Local::now().fixed_offset(),
+                    subject: "Uncommitted changes".to_string(),
+                    body: "".to_string(),
+                    commit_type: CommitType::Uncommitted,
+                };
+
+                commits.insert(0, fake_commit);
+            }
+        }
+
         let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect();
 
         let (parents_map, children_map) = build_commits_maps(&commits);
@@ -149,8 +189,6 @@ impl Repository {
 
         let stash_ref_map = load_stashes_as_refs(path);
         merge_ref_maps(&mut ref_map, stash_ref_map);
-
-        let uncommitted_changes = status::UncommittedChanges::load(path).ok();
 
         Ok(Self::new(
             path.to_path_buf(),

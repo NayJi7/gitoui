@@ -403,7 +403,7 @@ fn stash_tree_nodes_to_tree_items(
     let mut items = Vec::new();
     for node in nodes {
         let line = Line::from(vec![
-            Span::raw("📦 ").fg(color_theme.list_ref_stash_fg).bold(),
+            Span::raw("⌧ ").fg(color_theme.list_ref_stash_fg).bold(),
             Span::raw(node.name).fg(color_theme.list_ref_stash_fg).bold(),
         ]);
         items.push(tree_item_with_line(node.identifier, line, Vec::new()));

@@ -353,7 +353,7 @@ impl CommitDetail<'_> {
                     self.ctx.color_theme.detail_ref_tag_fg,
                 ),
                 Ref::Stash { name, .. } => (
-                    "📦 ",
+                    "⌧	 ",
                     name.as_str(),
                     self.ctx.color_theme.list_ref_stash_fg,
                 ),

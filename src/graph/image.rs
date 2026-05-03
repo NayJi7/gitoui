@@ -35,11 +35,9 @@ pub enum GraphImageWidthMode {
 #[derive(Debug)]
 pub struct GraphImageManager<'a> {
     prepared_image_map: FxHashMap<CommitHash, PreparedImage>,
-    uncommitted_image: Option<PreparedImage>,
     image_ids: FxHashSet<u32>,
     pending_uploads: Vec<String>,
     head_commit_hash: Option<CommitHash>,
-    has_uncommitted: bool,
 
     graph: &'a Graph<'a>,
     cell_width_type: CellWidthType,
@@ -65,11 +63,9 @@ impl<'a> GraphImageManager<'a> {
 
         GraphImageManager {
             prepared_image_map: FxHashMap::default(),
-            uncommitted_image: None,
             image_ids: FxHashSet::default(),
             pending_uploads: Vec::default(),
             head_commit_hash: None,
-            has_uncommitted: false,
             graph,
             cell_width_type,
             graph_style,
@@ -95,7 +91,6 @@ impl<'a> GraphImageManager<'a> {
 
     pub fn clear_prepared_images(&mut self) {
         self.prepared_image_map.clear();
-        self.uncommitted_image = None;
         self.image_ids.clear();
         self.pending_uploads.clear();
     }
@@ -109,13 +104,6 @@ impl<'a> GraphImageManager<'a> {
         let head = is_head;
         let image_id = graph_image_id(self.session_nonce, commit_hash, head);
 
-        // Si has_uncommitted et c'est HEAD, dessiner un edge UP en gris pour connecter à l'uncommitted
-        let uncommitted_up_color = if self.has_uncommitted && is_head {
-            Some(image::Rgba([0x80, 0x80, 0x80, 0xff]))
-        } else {
-            None
-        };
-
         let graph_row_image = build_single_graph_row_image(
             self.graph,
             &self.image_params,
@@ -124,7 +112,6 @@ impl<'a> GraphImageManager<'a> {
             self.image_width_mode,
             commit_hash,
             head,
-            uncommitted_up_color,
         );
         let mut image =
             graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
@@ -133,36 +120,6 @@ impl<'a> GraphImageManager<'a> {
         }
         self.prepared_image_map.insert(commit_hash.clone(), image);
         self.image_ids.insert(image_id);
-    }
-
-    pub fn ensure_uploaded_uncommitted(&mut self, graph_color: ratatui::style::Color) {
-        if self.uncommitted_image.is_some() {
-            return;
-        }
-        let image_id = self.session_nonce ^ 0xFFFF_FFFF;
-        let cell_count = match self.image_width_mode {
-            GraphImageWidthMode::Compact => 1,
-            GraphImageWidthMode::Fixed => self.graph.max_pos_x + 1,
-        };
-        let graph_row_image = calc_hollow_circle_graph_row_image(
-            0,
-            cell_count,
-            &self.image_params,
-            &self.drawing_pixels,
-            graph_color,
-            true, // draw_down_edge
-        );
-        let mut image =
-            graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
-        if let Some(upload_data) = image.take_upload_data() {
-            self.pending_uploads.push(upload_data);
-        }
-        self.image_ids.insert(image_id);
-        self.uncommitted_image = Some(image);
-    }
-
-    pub fn prepared_image_uncommitted(&self) -> &PreparedImage {
-        self.uncommitted_image.as_ref().unwrap()
     }
 
     pub fn head_commit_hash(&self) -> Option<&CommitHash> {
@@ -176,34 +133,10 @@ impl<'a> GraphImageManager<'a> {
         self.head_commit_hash = commit_hash.cloned();
     }
 
-    pub fn set_has_uncommitted(&mut self, has_uncommitted: bool) {
-        if self.has_uncommitted == has_uncommitted {
-            return;
-        }
-        self.has_uncommitted = has_uncommitted;
-        // Invalider HEAD car son rendu change (cercle plein vs vide)
-        let head_hash = self.head_commit_hash.clone();
-        if let Some(ref hash) = head_hash {
-            self.invalidate(hash);
-        }
-    }
-
     pub fn invalidate(&mut self, commit_hash: &CommitHash) {
         self.prepared_image_map.remove(commit_hash);
         self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, true));
         self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, false));
-    }
-
-    pub fn invalidate_uncommitted(&mut self) {
-        self.uncommitted_image = None;
-        let id = self.session_nonce ^ 0xFFFF_FFFF;
-        self.image_ids.remove(&id);
-        // Réinitialiser has_uncommitted et invalider HEAD
-        self.has_uncommitted = false;
-        let head_hash = self.head_commit_hash.clone();
-        if let Some(ref hash) = head_hash {
-            self.invalidate(hash);
-        }
     }
 }
 
@@ -327,7 +260,6 @@ fn build_single_graph_row_image(
     image_width_mode: GraphImageWidthMode,
     commit_hash: &CommitHash,
     head: bool,
-    uncommitted_up_color: Option<image::Rgba<u8>>,
 ) -> GraphRowImage {
     let (pos_x, pos_y) = graph.commit_pos_map[&commit_hash];
     let edges = &graph.edges[pos_y];
@@ -335,7 +267,10 @@ fn build_single_graph_row_image(
     // Determine if this is a stash commit and get its color
     // We need to find the commit object in graph.commits
     let commit = graph.commits.iter().find(|c| c.commit_hash == *commit_hash).unwrap();
-    let is_stash = matches!(commit.commit_type, crate::git::CommitType::Stash);
+    let is_stash = matches!(
+        commit.commit_type,
+        crate::git::CommitType::Stash | crate::git::CommitType::Uncommitted
+    );
     let commit_color = image_params.edge_color(pos_x);
 
     let max_pos_x = match image_width_mode {
@@ -352,12 +287,11 @@ fn build_single_graph_row_image(
         image_params,
         drawing_pixels,
         graph_style,
+        &graph.branch_segments,
+        pos_y,
         head,
         is_stash,
         commit_color,
-        uncommitted_up_color,
-        &graph.branch_segments,
-        pos_y,
     )
 }
 
@@ -724,12 +658,11 @@ pub fn calc_graph_row_image(
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
     graph_style: GraphStyle,
+    branch_segments: &[crate::graph::calc::BranchSegment],
+    pos_y: usize,
     head: bool,
     is_stash: bool,
     commit_color: image::Rgba<u8>,
-    uncommitted_up_color: Option<image::Rgba<u8>>,
-    branch_segments: &[crate::graph::calc::BranchSegment],
-    pos_y: usize,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -814,7 +747,7 @@ pub fn calc_graph_row_image(
                 let max_y = seg.target_pos_y.max(seg.source_pos_y);
                 if pos_y >= min_y && pos_y <= max_y {
                     draw_smooth_bezier_segment(
-                        &mut img_buf, seg, pos_y, image_params, cell_count,
+                        &mut img_buf, &seg, pos_y, image_params, cell_count,
                     );
                 }
             }
@@ -825,25 +758,6 @@ pub fn calc_graph_row_image(
                     continue;
                 }
                 draw_edge(&mut img_buf, edge, image_params, drawing_pixels);
-            }
-        }
-    }
-
-    // Dessiner l'edge UP artificiel pour connecter à l'uncommitted (en gris)
-    if let Some(color) = uncommitted_up_color {
-        let x_offset = (commit_pos_x * image_params.width as usize) as i32;
-        let center_x = x_offset + (image_params.width as i32 / 2);
-        let circle_center_y = (image_params.height / 2) as i32;
-        let circle_outer_radius = image_params.circle_outer_radius as i32;
-        let line_width = image_params.line_width as i32;
-        let x_start = center_x - line_width / 2;
-
-        for y in 0..(circle_center_y - circle_outer_radius) {
-            for x in x_start..(x_start + line_width) {
-                if x >= 0 && x < img_buf.width() as i32 && y >= 0 && y < img_buf.height() as i32 {
-                    let pixel = img_buf.get_pixel_mut(x as u32, y as u32);
-                    *pixel = color;
-                }
             }
         }
     }
@@ -883,47 +797,6 @@ fn draw_stash_commit(
     let center_y = (image_params.height / 2) as i32;
     let dot_radius = (image_params.line_width as i32).max(1);
     draw_filled_circle(img_buf, center_x, center_y, dot_radius, color);
-}
-
-fn calc_hollow_circle_graph_row_image(
-    commit_pos_x: usize,
-    cell_count: usize,
-    image_params: &ImageParams,
-    drawing_pixels: &DrawingPixels,
-    graph_color: ratatui::style::Color,
-    draw_down_edge: bool,
-) -> GraphRowImage {
-    let image_width = (image_params.width as usize * cell_count) as u32;
-    let image_height = image_params.height as u32;
-
-    let mut img_buf = image::ImageBuffer::new(image_width, image_height);
-
-    draw_background(&mut img_buf, image_params);
-    let color = ratatui_color_to_rgba(graph_color);
-    draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels, color);
-
-    if draw_down_edge {
-        // Dessiner une ligne verticale qui part du bas du cercle jusqu'au bas de l'image
-        let x_offset = (commit_pos_x * image_params.width as usize) as i32;
-        let center_x = x_offset + (image_params.width as i32 / 2);
-        let circle_center_y = (image_params.height / 2) as i32;
-        let circle_outer_radius = image_params.circle_outer_radius as i32;
-        let line_width = image_params.line_width as i32;
-        let x_start = center_x - line_width / 2;
-
-        for y in (circle_center_y + circle_outer_radius)..(image_params.height as i32) {
-            for x in x_start..(x_start + line_width) {
-                if x >= 0 && x < img_buf.width() as i32 && y >= 0 && y < img_buf.height() as i32 {
-                    let pixel = img_buf.get_pixel_mut(x as u32, y as u32);
-                    *pixel = color;
-                }
-            }
-        }
-    }
-
-    let bytes = build_image(&img_buf, image_width, image_height);
-
-    GraphRowImage { bytes, cell_count }
 }
 
 fn draw_hollow_circle(

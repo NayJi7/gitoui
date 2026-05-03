@@ -33,9 +33,9 @@ pub fn uncommitted_commit_hash() -> CommitHash {
 
 #[derive(Debug)]
 pub struct CommitInfo<'a> {
-    commit: Option<&'a Commit>,
+    pub commit: &'a Commit,
     refs: Vec<&'a Ref>,
-    graph_color: Color,
+    pub graph_color: Color,
     pub is_uncommitted: bool,
     pub uncommitted_staged: usize,
     pub uncommitted_unstaged: usize,
@@ -46,7 +46,7 @@ pub struct CommitInfo<'a> {
 impl<'a> CommitInfo<'a> {
     pub fn new(commit: &'a Commit, refs: Vec<&'a Ref>, graph_color: Color) -> Self {
         Self {
-            commit: Some(commit),
+            commit,
             refs,
             graph_color,
             is_uncommitted: false,
@@ -58,6 +58,7 @@ impl<'a> CommitInfo<'a> {
     }
 
     pub fn new_uncommitted(
+        commit: &'a Commit,
         graph_color: Color,
         staged: usize,
         unstaged: usize,
@@ -65,7 +66,7 @@ impl<'a> CommitInfo<'a> {
         last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
     ) -> Self {
         Self {
-            commit: None,
+            commit,
             refs: vec![],
             graph_color,
             is_uncommitted: true,
@@ -76,7 +77,7 @@ impl<'a> CommitInfo<'a> {
         }
     }
 
-    pub fn commit(&self) -> Option<&'a Commit> {
+    pub fn commit(&self) -> &'a Commit {
         self.commit
     }
 }
@@ -244,7 +245,6 @@ pub struct CommitListState<'a> {
     graph_cell_width: u16,
     head: &'a Head,
     head_commit_hash: Option<CommitHash>,
-    uncommitted_hash: CommitHash,
 
     ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
     branch_color_map: FxHashMap<String, Color>,
@@ -282,19 +282,14 @@ impl<'a> CommitListState<'a> {
         let has_uncommitted = commits.first().map_or(false, |c| c.is_uncommitted);
         let commit_hash_set = commits
             .iter()
-            .filter_map(|c| c.commit.map(|commit| &commit.commit_hash))
+            .filter_map(|c| Some(&c.commit.commit_hash))
             .collect();
-        let uncommitted_hash = if has_uncommitted {
-            uncommitted_commit_hash()
-        } else {
-            CommitHash::default()
-        };
         let head_commit_hash = match head {
             Head::Detached { target } => Some(target.clone()),
             Head::Branch { name } => ref_name_to_commit_index_map
                 .get(name.as_str())
                 .and_then(|&index| commits.get(index))
-                .and_then(|info| info.commit.map(|c| c.commit_hash.clone())),
+                .map(|info| info.commit.commit_hash.clone()),
             Head::None => None,
         };
         CommitListState {
@@ -304,7 +299,6 @@ impl<'a> CommitListState<'a> {
             graph_cell_width,
             head,
             head_commit_hash,
-            uncommitted_hash,
             ref_name_to_commit_index_map,
             branch_color_map,
             search_state: SearchState::Inactive,
@@ -343,25 +337,14 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn ensure_visible_graph_uploaded(&mut self) {
-        let has_uncommitted = self.commits.first().map_or(false, |c| c.is_uncommitted);
-        self.graph_image_manager.set_has_uncommitted(has_uncommitted);
-
         let current_head_hash = self.head_commit_hash.clone();
         let manager_head = self.graph_image_manager.head_commit_hash().cloned();
         if manager_head.as_ref() != current_head_hash.as_ref() {
             if let Some(old) = manager_head {
-                if old == self.uncommitted_hash {
-                    self.graph_image_manager.invalidate_uncommitted();
-                } else {
-                    self.graph_image_manager.invalidate(&old);
-                }
+                self.graph_image_manager.invalidate(&old);
             }
             if let Some(new) = &current_head_hash {
-                if *new == self.uncommitted_hash {
-                    self.graph_image_manager.invalidate_uncommitted();
-                } else {
-                    self.graph_image_manager.invalidate(new);
-                }
+                self.graph_image_manager.invalidate(new);
             }
             self.graph_image_manager
                 .set_head_commit_hash(current_head_hash.as_ref());
@@ -372,13 +355,8 @@ impl<'a> CommitListState<'a> {
             .skip(self.offset)
             .take(self.height)
             .for_each(|commit_info| {
-                if let Some(commit) = commit_info.commit {
-                    self.graph_image_manager
-                        .ensure_uploaded(&commit.commit_hash);
-                } else if commit_info.is_uncommitted {
-                    self.graph_image_manager
-                        .ensure_uploaded_uncommitted(commit_info.graph_color);
-                }
+                self.graph_image_manager
+                    .ensure_uploaded(&commit_info.commit.commit_hash);
             });
     }
 
@@ -422,7 +400,8 @@ impl<'a> CommitListState<'a> {
     pub fn selected_commit_parent_hash(&self) -> Option<&CommitHash> {
         self.commits[self.current_selected_index()]
             .commit
-            .and_then(|c| c.parent_commit_hashes.first())
+            .parent_commit_hashes
+            .first()
     }
 
     pub fn select_prev(&mut self) {
@@ -558,14 +537,12 @@ impl<'a> CommitListState<'a> {
 
     pub fn selected_commit_hash(&self) -> &CommitHash {
         let info = &self.commits[self.current_selected_index()];
-        info.commit
-            .map(|c| &c.commit_hash)
-            .unwrap_or(&self.uncommitted_hash)
+        &info.commit.commit_hash
     }
 
     pub fn selected_commit_subject(&self) -> Option<&str> {
         let info = &self.commits[self.current_selected_index()];
-        info.commit.map(|c| c.subject.as_str())
+        Some(info.commit.subject.as_str())
     }
 
     pub fn is_uncommitted_selected(&self) -> bool {
@@ -605,16 +582,14 @@ impl<'a> CommitListState<'a> {
             return;
         }
         for (i, commit_info) in self.commits.iter().enumerate() {
-            if let Some(commit) = commit_info.commit {
-                if commit.commit_hash == *commit_hash {
-                    if self.total > self.height {
-                        self.selected = 0;
-                        self.offset = i;
-                    } else {
-                        self.selected = i;
-                    }
-                    break;
+            if commit_info.commit.commit_hash == *commit_hash {
+                if self.total > self.height {
+                    self.selected = 0;
+                    self.offset = i;
+                } else {
+                    self.selected = i;
                 }
+                break;
             }
         }
     }
@@ -763,14 +738,10 @@ impl<'a> CommitListState<'a> {
 
         let (ignore_case, fuzzy) = match self.search_state {
             SearchState::Searching {
-                ignore_case,
-                fuzzy,
-                ..
+                ignore_case, fuzzy, ..
             }
             | SearchState::Applied {
-                ignore_case,
-                fuzzy,
-                ..
+                ignore_case, fuzzy, ..
             } => (ignore_case, fuzzy),
             _ => return None,
         };
@@ -816,14 +787,10 @@ impl<'a> CommitListState<'a> {
 
         let (ignore_case, fuzzy) = match self.search_state {
             SearchState::Searching {
-                ignore_case,
-                fuzzy,
-                ..
+                ignore_case, fuzzy, ..
             }
             | SearchState::Applied {
-                ignore_case,
-                fuzzy,
-                ..
+                ignore_case, fuzzy, ..
             } => (ignore_case, fuzzy),
             _ => return None,
         };
@@ -894,11 +861,7 @@ impl<'a> CommitListState<'a> {
         let mut match_index = 1;
         for (i, commit_info) in self.commits.iter().enumerate() {
             let m = &mut self.search_matches[i];
-            if let Some(commit) = commit_info.commit {
-                m.set(commit, commit_info.refs.as_slice(), &matcher);
-            } else {
-                m.clear();
-            }
+            m.set(commit_info.commit, commit_info.refs.as_slice(), &matcher);
             if m.matched() {
                 m.match_index = match_index;
                 match_index += 1;
@@ -954,12 +917,13 @@ impl<'a> CommitListState<'a> {
         }
     }
 
-    fn prepared_image(&self, commit_info: &'a CommitInfo, _visible_row_index: usize) -> &PreparedImage {
-        if let Some(commit) = commit_info.commit {
-            self.graph_image_manager.prepared_image(&commit.commit_hash)
-        } else {
-            self.graph_image_manager.prepared_image_uncommitted()
-        }
+    fn prepared_image(
+        &self,
+        commit_info: &'a CommitInfo,
+        _visible_row_index: usize,
+    ) -> &PreparedImage {
+        self.graph_image_manager
+            .prepared_image(&commit_info.commit.commit_hash)
     }
 }
 
@@ -1126,7 +1090,13 @@ impl CommitList<'_> {
             return;
         }
         let mut items: Vec<ListItem> = Vec::new();
-        for (i, commit_info) in state.commits.iter().skip(state.offset).take(state.height).enumerate() {
+        for (i, commit_info) in state
+            .commits
+            .iter()
+            .skip(state.offset)
+            .take(state.height)
+            .enumerate()
+        {
             if commit_info.is_uncommitted {
                 items.push(self.render_uncommitted_subject(i, commit_info, state));
                 continue;
@@ -1155,7 +1125,7 @@ impl CommitList<'_> {
 
             let ref_spans_width: usize = spans.iter().map(|s| s.width()).sum();
             let max_width = max_width.saturating_sub(ref_spans_width);
-            let commit = commit_info.commit.unwrap();
+            let commit = commit_info.commit;
             if max_width > ELLIPSIS.len() {
                 let truncate = console::measure_text_width(&commit.subject) > max_width;
                 let subject = if truncate {
@@ -1200,7 +1170,7 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = commit_info.commit.unwrap();
+                let commit = commit_info.commit;
                 let truncate = console::measure_text_width(&commit.author_name) > max_width;
                 let name = if truncate {
                     console::truncate_str(&commit.author_name, max_width, ELLIPSIS).to_string()
@@ -1210,7 +1180,7 @@ impl CommitList<'_> {
                 let spans =
                     if let Some(pos) = state.search_matches[state.offset + i].author_name.clone() {
                         highlighted_spans(
-                (*name).into(),
+                            (*name).into(),
                             pos,
                             self.ctx.color_theme.list_name_fg,
                             Modifier::empty(),
@@ -1240,7 +1210,7 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = commit_info.commit.unwrap();
+                let commit = commit_info.commit;
                 let hash = commit.commit_hash.as_short_hash();
                 let spans =
                     if let Some(pos) = state.search_matches[state.offset + i].commit_hash.clone() {
@@ -1273,10 +1243,10 @@ impl CommitList<'_> {
                         .uncommitted_last_modified
                         .as_ref()
                         .map(|dt| {
-                            self.ctx.core_config.date_time_format().format(
-                                dt,
-                                self.ctx.core_config.date_time_local(),
-                            )
+                            self.ctx
+                                .core_config
+                                .date_time_format()
+                                .format(dt, self.ctx.core_config.date_time_local())
                         })
                         .unwrap_or_else(|| "-".to_string());
                     return self.to_commit_list_item(
@@ -1285,12 +1255,13 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = commit_info.commit.unwrap();
+                let commit = commit_info.commit;
                 let date = &commit.author_date;
-                let date_str = self.ctx.core_config.date_time_format().format(
-                    date,
-                    self.ctx.core_config.date_time_local(),
-                );
+                let date_str = self
+                    .ctx
+                    .core_config
+                    .date_time_format()
+                    .format(date, self.ctx.core_config.date_time_local());
                 self.to_commit_list_item(
                     i,
                     vec![date_str.fg(self.ctx.color_theme.list_date_fg)],
@@ -1323,8 +1294,12 @@ impl CommitList<'_> {
             + commit_info.uncommitted_unstaged
             + commit_info.uncommitted_untracked;
         let spans: Vec<Span> = vec![
-            Span::raw("Uncommitted Changes").fg(self.ctx.color_theme.fg).add_modifier(Modifier::BOLD),
-            Span::raw(format!(" ({})", total)).fg(self.ctx.color_theme.fg).add_modifier(Modifier::BOLD),
+            Span::raw("Uncommitted Changes")
+                .fg(self.ctx.color_theme.fg)
+                .add_modifier(Modifier::BOLD),
+            Span::raw(format!(" ({})", total))
+                .fg(self.ctx.color_theme.fg)
+                .add_modifier(Modifier::BOLD),
         ];
         self.to_commit_list_item(i, spans, state)
     }
@@ -1371,7 +1346,7 @@ fn refs_spans<'a>(
         if let Ref::Stash { name, .. } = refs[0] {
             return (
                 vec![
-                    Span::raw("📦 ").fg(color_theme.list_ref_stash_fg).bold(),
+                    Span::raw("⌧ ").fg(color_theme.list_ref_stash_fg).bold(),
                     Span::raw(name).fg(color_theme.list_ref_stash_fg).bold(),
                     Span::raw(" "),
                 ],
@@ -1412,7 +1387,10 @@ fn refs_spans<'a>(
                                 .and_then(|(_, branch)| branch_color_map.get(branch).copied())
                         })
                         .unwrap_or(color_theme.list_ref_remote_branch_fg);
-                    let base = name.split_once('/').map(|(_, b)| b).unwrap_or(name.as_str());
+                    let base = name
+                        .split_once('/')
+                        .map(|(_, b)| b)
+                        .unwrap_or(name.as_str());
                     remote_branches.push((name.as_str(), base, fg));
                 }
                 Ref::Tag { name, .. } => {
@@ -1425,9 +1403,10 @@ fn refs_spans<'a>(
 
         let mut merged_remotes: FxHashSet<usize> = FxHashSet::default();
         for (local_name, local_fg) in &local_branches {
-            let matching_remote = remote_branches.iter().enumerate().find(|(ri, (_, base, _))| {
-                *base == *local_name && !merged_remotes.contains(ri)
-            });
+            let matching_remote = remote_branches
+                .iter()
+                .enumerate()
+                .find(|(ri, (_, base, _))| *base == *local_name && !merged_remotes.contains(ri));
             if let Some((ri, (remote_name, _, _))) = matching_remote {
                 merged_remotes.insert(ri);
                 let remote_prefix = remote_name.split_once('/').map(|(p, _)| p).unwrap_or("");
@@ -1450,14 +1429,12 @@ fn refs_spans<'a>(
     }
 
     if let Head::Detached { target } = head {
-        if let Some(commit) = commit_info.commit {
-            if commit.commit_hash == *target {
-                spans.push(Span::raw("HEAD").fg(color_theme.list_head_fg).bold());
-                current_width += 4;
-                if !ref_infos.is_empty() {
-                    spans.push(Span::raw(", ").fg(color_theme.list_ref_paren_fg).bold());
-                    current_width += 2;
-                }
+        if commit_info.commit.commit_hash == *target {
+            spans.push(Span::raw("౷ HEAD").fg(color_theme.list_head_fg).bold());
+            current_width += 4;
+            if !ref_infos.is_empty() {
+                spans.push(Span::raw(", ").fg(color_theme.list_ref_paren_fg).bold());
+                current_width += 2;
             }
         }
     }

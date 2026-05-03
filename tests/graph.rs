@@ -1483,10 +1483,11 @@ fn build_graph_image(
                 image_params,
                 drawing_pixels,
                 graph_style,
-                false,
-                None,
-                &[],
+                vec![],
                 0,
+                false,
+                false,
+                image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
             );
             (edges.clone(), graph_row_image)
         })

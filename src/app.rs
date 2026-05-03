@@ -128,29 +128,23 @@ impl<'a> App<'a> {
                 }
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
                 let graph_color = graph_color_set.get(pos_x).to_ratatui_color();
-                CommitInfo::new(commit, refs, graph_color)
+                if commit.commit_type == crate::git::CommitType::Uncommitted {
+                    let changes = repository.uncommitted_changes().unwrap();
+                    let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
+                    CommitInfo::new_uncommitted(
+                        commit,
+                        graph_color,
+                        changes.staged.len(),
+                        changes.unstaged.len(),
+                        changes.untracked.len(),
+                        last_modified,
+                    )
+                } else {
+                    CommitInfo::new(commit, refs, graph_color)
+                }
             })
             .collect();
-        let mut commits: Vec<CommitInfo> = commits;
 
-        if let Some(changes) = repository.uncommitted_changes() {
-            if changes.is_dirty() {
-                let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
-                let uncommitted_info = CommitInfo::new_uncommitted(
-                    Color::Gray,
-                    changes.staged.len(),
-                    changes.unstaged.len(),
-                    changes.untracked.len(),
-                    last_modified,
-                );
-                commits.insert(0, uncommitted_info);
-                let mut shifted_map = FxHashMap::default();
-                for (name, idx) in &ref_name_to_commit_index_map {
-                    shifted_map.insert(*name, *idx + 1);
-                }
-                ref_name_to_commit_index_map = shifted_map;
-            }
-        }
         let graph_cell_width = match cell_width_type {
             CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
             CellWidthType::Single => (graph.max_pos_x + 1) as u16,
