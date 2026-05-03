@@ -308,9 +308,6 @@ impl App<'_> {
                     self.clear_image(Some(terminal))?;
                     self.open_detail();
                 }
-                AppEvent::OpenUncommitted => {
-                    self.info_notification("Uncommitted Changes view coming soon...".into());
-                }
                 AppEvent::CloseDetail => {
                     terminal.clear()?;
                     self.close_detail();

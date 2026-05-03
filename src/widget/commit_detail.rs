@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
@@ -124,15 +124,12 @@ impl StatefulWidget for CommitDetail<'_> {
     type State = CommitDetailState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let [metadata_area, action_bar_area] =
-            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
-
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(metadata_area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(area);
 
-        let (mut label_lines, mut value_lines, changes_start) = self.contents(metadata_area);
+        let (mut label_lines, mut value_lines, changes_start) = self.contents(area);
 
-        let content_area_height = metadata_area.height as usize - 1; // minus the top border
+        let content_area_height = area.height as usize - 1; // minus the top border
         self.update_state(state, value_lines.len(), content_area_height, changes_start);
 
         // Apply selection highlight to the selected file line
@@ -151,8 +148,8 @@ impl StatefulWidget for CommitDetail<'_> {
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
 
-        // Render action bar
-        self.render_action_bar(action_bar_area, buf, state);
+        // Render action bar as floating overlay on top-right
+        self.render_action_bar_overlay(area, buf, state);
     }
 }
 
@@ -181,19 +178,39 @@ impl CommitDetail<'_> {
         paragraph.render(area, buf);
     }
 
-    fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
-        let block = Block::default()
-            .borders(Borders::TOP | Borders::LEFT)
-            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 1, 0, 0));
-        let inner = block.inner(area);
-        block.render(area, buf);
-
+    fn render_action_bar_overlay(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
         let actions = if self.is_stash() {
             STASH_ACTIONS
         } else {
             COMMIT_ACTIONS
         };
+
+        // Calculate overlay size
+        let overlay_width = 32u16;
+        let overlay_height = (actions.len() as u16 + 2).min(area.height.saturating_sub(2));
+        if overlay_height < 3 {
+            return; // Not enough space
+        }
+
+        let overlay_x = area.right().saturating_sub(overlay_width + 1);
+        let overlay_y = area.top() + 1;
+        let overlay_area = Rect::new(overlay_x, overlay_y, overlay_width, overlay_height);
+
+        // Draw background to make it readable over content
+        for y in overlay_area.top()..overlay_area.bottom() {
+            for x in overlay_area.left()..overlay_area.right() {
+                let cell = &mut buf[(x, y)];
+                cell.set_style(Style::default().bg(Color::Rgb(30, 34, 50)));
+            }
+        }
+
+        // Draw border
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.ctx.color_theme.divider_fg))
+            .padding(Padding::new(1, 1, 0, 0));
+        let inner = block.inner(overlay_area);
+        block.render(overlay_area, buf);
 
         let mut lines = Vec::new();
         for (i, (label, key)) in actions.iter().enumerate() {
