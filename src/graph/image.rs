@@ -264,14 +264,17 @@ fn build_single_graph_row_image(
     let (pos_x, pos_y) = graph.commit_pos_map[&commit_hash];
     let edges = &graph.edges[pos_y];
 
-    // Determine if this is a stash commit and get its color
-    // We need to find the commit object in graph.commits
+    // Determine render style based on commit type
     let commit = graph.commits.iter().find(|c| c.commit_hash == *commit_hash).unwrap();
-    let is_stash = matches!(
-        commit.commit_type,
-        crate::git::CommitType::Stash | crate::git::CommitType::Uncommitted
-    );
-    let commit_color = image_params.edge_color(pos_x);
+    let is_stash = matches!(commit.commit_type, crate::git::CommitType::Stash);
+    let is_uncommitted = matches!(commit.commit_type, crate::git::CommitType::Uncommitted);
+    
+    // Uncommitted uses grey color, others use branch color
+    let commit_color = if is_uncommitted {
+        image::Rgba([0x80, 0x80, 0x80, 0xff]) // Grey
+    } else {
+        image_params.edge_color(pos_x)
+    };
 
     let max_pos_x = match image_width_mode {
         GraphImageWidthMode::Compact => edges.iter().map(|e| e.pos_x).fold(pos_x, usize::max),
@@ -291,6 +294,7 @@ fn build_single_graph_row_image(
         pos_y,
         head,
         is_stash,
+        is_uncommitted,
         commit_color,
     )
 }
@@ -662,6 +666,7 @@ pub fn calc_graph_row_image(
     pos_y: usize,
     head: bool,
     is_stash: bool,
+    is_uncommitted: bool,
     commit_color: image::Rgba<u8>,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
@@ -674,6 +679,8 @@ pub fn calc_graph_row_image(
         draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     } else if is_stash {
         draw_stash_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
+    } else if is_uncommitted {
+        draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
     } else {
         draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     }
