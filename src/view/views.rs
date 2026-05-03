@@ -97,7 +97,7 @@ impl<'a> View<'a> {
             View::Dialog(_) => {}
             View::BranchDetail(view) => view.prepare_graph_uploads(),
             View::TagDetail(view) => view.prepare_graph_uploads(),
-            View::Uncommitted(_) => {}
+            View::Uncommitted(view) => view.prepare_graph_uploads(),
         }
     }
 
@@ -114,7 +114,7 @@ impl<'a> View<'a> {
             View::Dialog(_) => Vec::new(),
             View::BranchDetail(view) => view.drain_pending_graph_uploads(),
             View::TagDetail(view) => view.drain_pending_graph_uploads(),
-            View::Uncommitted(_) => Vec::new(),
+            View::Uncommitted(view) => view.drain_pending_graph_uploads(),
         }
     }
 
@@ -131,7 +131,7 @@ impl<'a> View<'a> {
             View::Dialog(_) => Vec::new(),
             View::BranchDetail(view) => view.graph_image_ids_sorted(),
             View::TagDetail(view) => view.graph_image_ids_sorted(),
-            View::Uncommitted(_) => Vec::new(),
+            View::Uncommitted(view) => view.graph_image_ids_sorted(),
         }
     }
 
@@ -284,6 +284,9 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.handle_click(col, row),
             View::Refs(view) => view.handle_click(col, row),
             View::Config(view) => view.handle_click(col, row),
+            View::BranchDetail(view) => view.handle_click(col, row),
+            View::TagDetail(view) => view.handle_click(col, row),
+            View::Uncommitted(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -294,6 +297,9 @@ impl<'a> View<'a> {
             View::Detail(view) => view.handle_mouse_move(col, row),
             View::Refs(view) => view.handle_mouse_move(col, row),
             View::Config(view) => view.handle_mouse_move(col, row),
+            View::BranchDetail(view) => view.handle_mouse_move(col, row),
+            View::TagDetail(view) => view.handle_mouse_move(col, row),
+            View::Uncommitted(view) => view.handle_mouse_move(col, row),
             _ => {}
         }
     }

@@ -310,7 +310,21 @@ impl App<'_> {
                 }
                 AppEvent::CloseDetail => {
                     terminal.clear()?;
-                    self.close_detail();
+                    if !self.close_detail() {
+                        // No commit list state available (e.g. opened from Refs panel)
+                        // Force a full refresh to rebuild the list view
+                        self.cleanup_graph_images()?;
+                        return Ok(Ret::Refresh(RefreshRequest {
+                            context: RefreshViewContext::List {
+                                list_context: crate::view::ListRefreshViewContext {
+                                    commit_hash: String::new(),
+                                    selected: 0,
+                                    height: 0,
+                                    scroll_to_top: true,
+                                },
+                            },
+                        }));
+                    }
                 }
                 AppEvent::OpenUserCommand(n) => {
                     self.clear_image(Some(terminal))?;
@@ -715,23 +729,38 @@ impl App<'_> {
         );
     }
 
-    fn close_detail(&mut self) {
+    fn close_detail(&mut self) -> bool {
         match self.view {
             View::Detail(ref mut view) => {
                 let commit_list_state = view.take_list_state();
                 self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                true
             }
             View::BranchDetail(ref mut view) => {
                 if let Some(commit_list_state) = view.take_list_state() {
                     self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    true
+                } else {
+                    false
                 }
             }
             View::TagDetail(ref mut view) => {
                 if let Some(commit_list_state) = view.take_list_state() {
                     self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    true
+                } else {
+                    false
                 }
             }
-            _ => {}
+            View::Uncommitted(ref mut view) => {
+                if let Some(commit_list_state) = view.take_list_state() {
+                    self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     }
 
@@ -1338,6 +1367,12 @@ impl App<'_> {
     }
 
     fn open_uncommitted(&mut self) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
         let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
         let convert = |f: &crate::git::status::FileStatus| crate::widget::uncommitted::UncommittedFile {
             status: f.status.clone(),
@@ -1351,6 +1386,7 @@ impl App<'_> {
         self.view = View::Uncommitted(Box::new(crate::view::uncommitted::UncommittedView::new(
             unstaged,
             staged,
+            commit_list_state,
             self.ctx.clone(),
             self.ec.sender(),
         )));

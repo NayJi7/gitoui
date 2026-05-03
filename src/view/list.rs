@@ -159,7 +159,11 @@ impl<'a> ListView<'a> {
                         self.as_mut_list_state().cancel_search();
                         self.clear_search_query();
                     }
-                    self.tx.send(AppEvent::OpenDetail);
+                    if self.as_list_state().is_uncommitted_selected() {
+                        self.tx.send(AppEvent::OpenUncommitted);
+                    } else {
+                        self.tx.send(AppEvent::OpenDetail);
+                    }
                 }
                 UserEvent::RefList => {
                     self.tx.send(AppEvent::OpenRefs);

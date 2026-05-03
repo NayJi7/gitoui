@@ -95,6 +95,8 @@ impl TagDetail<'_> {
         block.render(area, buf);
 
         let mut lines = Vec::new();
+        lines.push(Line::from("Git Actions").add_modifier(Modifier::BOLD));
+        lines.push(Line::from("───".fg(self.ctx.color_theme.divider_fg)));
         for (i, (label, key)) in TAG_ACTIONS.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
