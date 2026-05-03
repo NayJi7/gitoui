@@ -4,11 +4,13 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 
 use crate::{
     app::AppContext,
-    event::{Sender, UserEventWithCount},
+    event::{DialogKind, Sender, UserEventWithCount},
     git::{Commit, FileChange, Ref},
     view::{
-        config::ConfigView, detail::DetailView, diff::DiffView, help::HelpView, list::ListView,
-        refs::RefsView, user_command::UserCommandView,
+        branch_detail::BranchDetailView, config::ConfigView, detail::DetailView,
+        dialog::DialogView, diff::DiffView, help::HelpView, list::ListView,
+        refs::RefsView, tag_detail::TagDetailView, uncommitted::UncommittedView,
+        user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -24,6 +26,10 @@ pub enum View<'a> {
     Refs(Box<RefsView<'a>>),
     Help(Box<HelpView<'a>>),
     Config(Box<ConfigView<'a>>),
+    Dialog(Box<DialogView<'a>>),
+    BranchDetail(Box<BranchDetailView<'a>>),
+    TagDetail(Box<TagDetailView<'a>>),
+    Uncommitted(Box<UncommittedView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -37,6 +43,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.handle_event(event_with_count, key_event),
             View::Help(view) => view.handle_event(event_with_count, key_event),
             View::Config(view) => view.handle_event(event_with_count, key_event),
+            View::Dialog(view) => view.handle_event(event_with_count, key_event),
+            View::BranchDetail(view) => view.handle_event(event_with_count, key_event),
+            View::TagDetail(view) => view.handle_event(event_with_count, key_event),
+            View::Uncommitted(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -50,6 +60,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.render(f, area),
             View::Help(view) => view.render(f, area),
             View::Config(view) => view.render(f, area),
+            View::Dialog(view) => view.render(f, area),
+            View::BranchDetail(view) => view.render(f, area),
+            View::TagDetail(view) => view.render(f, area),
+            View::Uncommitted(view) => view.render(f, area),
         }
     }
 
@@ -63,6 +77,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.update_layout(area),
             View::Help(_) => {}
             View::Config(_) => {}
+            View::Dialog(_) => {}
+            View::BranchDetail(view) => view.update_layout(area),
+            View::TagDetail(view) => view.update_layout(area),
+            View::Uncommitted(view) => view.update_layout(area),
         }
     }
 
@@ -76,6 +94,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.prepare_graph_uploads(),
             View::Help(_) => {}
             View::Config(_) => {}
+            View::Dialog(_) => {}
+            View::BranchDetail(_) => {}
+            View::TagDetail(_) => {}
+            View::Uncommitted(_) => {}
         }
     }
 
@@ -89,6 +111,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.drain_pending_graph_uploads(),
             View::Help(_) => Vec::new(),
             View::Config(_) => Vec::new(),
+            View::Dialog(_) => Vec::new(),
+            View::BranchDetail(_) => Vec::new(),
+            View::TagDetail(_) => Vec::new(),
+            View::Uncommitted(_) => Vec::new(),
         }
     }
 
@@ -102,6 +128,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.graph_image_ids_sorted(),
             View::Help(view) => view.graph_image_ids_sorted(),
             View::Config(view) => view.graph_image_ids_sorted(),
+            View::Dialog(_) => Vec::new(),
+            View::BranchDetail(_) => Vec::new(),
+            View::TagDetail(_) => Vec::new(),
+            View::Uncommitted(_) => Vec::new(),
         }
     }
 
@@ -115,6 +145,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.as_list_state().search_state().is_active(),
             View::Help(view) => view.is_search_active(),
             View::Config(view) => view.is_search_active(),
+            View::Dialog(view) => view.take_before_view().is_search_active(),
+            View::BranchDetail(_) => false,
+            View::TagDetail(_) => false,
+            View::Uncommitted(_) => false,
         }
     }
 
@@ -128,6 +162,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.as_list_state().search_state().is_querying(),
             View::Help(view) => view.is_search_querying(),
             View::Config(view) => view.is_search_querying(),
+            View::Dialog(view) => view.take_before_view().is_search_querying(),
+            View::BranchDetail(_) => false,
+            View::TagDetail(_) => false,
+            View::Uncommitted(_) => false,
         }
     }
 
@@ -141,6 +179,10 @@ impl<'a> View<'a> {
             View::Refs(view) => view.as_list_state().search_case_fuzzy(),
             View::Help(view) => view.search_case_fuzzy(),
             View::Config(view) => view.search_case_fuzzy(),
+            View::Dialog(view) => view.take_before_view().search_case_fuzzy(),
+            View::BranchDetail(_) => None,
+            View::TagDetail(_) => None,
+            View::Uncommitted(_) => None,
         }
     }
 

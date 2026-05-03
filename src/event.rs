@@ -46,6 +46,90 @@ pub enum AppEvent {
     NotifySuccess(String),
     NotifyWarn(String),
     NotifyError(String),
+    // Phase 2 - Git Actions
+    OpenDialog(DialogKind),
+    CloseDialog,
+    DialogConfirm,
+    DialogCancel,
+    DialogInput(String),
+    ExecuteGitAction { target: String, action: GitAction },
+    OpenBranchDetail { branch_name: String },
+    OpenTagDetail { tag_name: String },
+    StageFile { file: String },
+    UnstageFile { file: String },
+    DiscardFile { file: String },
+}
+
+#[derive(Debug, Clone)]
+pub enum DialogKind {
+    // Commit actions
+    AddTag { target: String },
+    CreateBranch { target: String },
+    Checkout { target: String, is_branch: bool },
+    CherryPick { target: String },
+    Revert { target: String },
+    Drop { target: String },
+    Merge { target: String, is_branch: bool },
+    Rebase { target: String },
+    Reset { target: String },
+    // Branch actions
+    RenameBranch { branch: String },
+    DeleteBranch { branch: String, is_remote: bool },
+    PushBranch { branch: String },
+    PullBranch { branch: String },
+    // Tag actions
+    DeleteTag { tag: String },
+    PushTag { tag: String },
+    // Stash actions
+    CreateBranchFromStash { stash_ref: String },
+    // Uncommitted actions
+    StashWithMessage,
+    CommitWithMessage,
+    CleanUntracked,
+    // Confirmations
+    ConfirmDiscardFile { file: String },
+    ConfirmDiscardAll,
+    ConfirmStageAll,
+    ConfirmUnstageAll,
+}
+
+#[derive(Debug, Clone)]
+pub enum GitAction {
+    // Commit actions
+    Checkout,
+    CreateBranch { name: String, checkout: bool },
+    AddTag { name: String, annotated: bool, message: Option<String> },
+    CherryPick { no_commit: bool, record_origin: bool },
+    Revert,
+    Drop,
+    Merge { no_ff: bool, squash: bool, no_commit: bool },
+    Rebase { ignore_date: bool, interactive: bool },
+    Reset { mode: String },
+    // Branch actions
+    DeleteBranch { force: bool },
+    RenameBranch { new_name: String },
+    PushBranch { force: bool },
+    PullBranch { rebase: bool },
+    Fetch,
+    // Tag actions
+    DeleteTag,
+    PushTag,
+    // Stash actions
+    ApplyStash,
+    PopStash,
+    DropStash,
+    CreateBranchFromStash { branch_name: String },
+    // Uncommitted actions
+    StageFile { file: String },
+    StageAll,
+    UnstageFile { file: String },
+    UnstageAll,
+    DiscardFile { file: String },
+    DiscardAll,
+    Stash { message: Option<String> },
+    Commit { message: String },
+    CleanUntracked,
+    Push,
 }
 
 #[derive(Clone)]
