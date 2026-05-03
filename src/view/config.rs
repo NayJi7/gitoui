@@ -26,6 +26,8 @@ pub struct ConfigView<'a> {
     tx: Sender,
     core_config: CoreConfig,
     ui_config: UiConfig,
+    editing_text: bool,
+    editing_value: String,
 }
 
 impl<'a> ConfigView<'a> {
@@ -39,10 +41,17 @@ impl<'a> ConfigView<'a> {
             tx,
             core_config,
             ui_config,
+            editing_text: false,
+            editing_value: String::new(),
         }
     }
 
-    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
+        if self.editing_text {
+            self.handle_text_edit_event(event_with_count, key);
+            return;
+        }
+
         let event = event_with_count.event;
         let count = event_with_count.count;
         match event {
@@ -52,25 +61,37 @@ impl<'a> ConfigView<'a> {
                 }
             }
             UserEvent::NavigateDown | UserEvent::SelectDown => {
-                if self.selected < 5 {
+                if self.selected < 7 {
                     self.selected += 1;
                 }
             }
             UserEvent::Confirm => {
-                self.cycle_option();
+                if self.selected >= 6 {
+                    self.start_text_edit();
+                } else {
+                    self.cycle_option();
+                }
             }
             UserEvent::NavigateRight => {
-                self.cycle_option();
+                if self.selected >= 6 {
+                    self.start_text_edit();
+                } else {
+                    self.cycle_option();
+                }
             }
             UserEvent::NavigateLeft => {
-                self.cycle_option_prev();
+                if self.selected >= 6 {
+                    self.start_text_edit();
+                } else {
+                    self.cycle_option_prev();
+                }
             }
             UserEvent::Cancel | UserEvent::Close | UserEvent::Config => {
                 self.tx.send(AppEvent::CloseConfig);
             }
             UserEvent::PageDown => {
                 for _ in 0..count {
-                    if self.selected < 5 {
+                    if self.selected < 7 {
                         self.selected += 1;
                     }
                 }
@@ -86,10 +107,66 @@ impl<'a> ConfigView<'a> {
                 self.selected = 0;
             }
             UserEvent::GoToBottom => {
-                self.selected = 5;
+                self.selected = 7;
             }
             _ => {}
         }
+    }
+
+    fn start_text_edit(&mut self) {
+        let current_value = match self.selected {
+            6 => self.core_config.user_name().unwrap_or("").to_string(),
+            7 => self.core_config.user_email().unwrap_or("").to_string(),
+            _ => return,
+        };
+        self.editing_text = true;
+        self.editing_value = current_value;
+    }
+
+    fn handle_text_edit_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
+        use ratatui::crossterm::event::KeyCode;
+        let event = event_with_count.event;
+        match event {
+            UserEvent::Confirm => {
+                self.finish_text_edit();
+                return;
+            }
+            UserEvent::Cancel => {
+                self.cancel_text_edit();
+                return;
+            }
+            _ => {}
+        }
+        match key.code {
+            KeyCode::Char(c) => {
+                self.editing_value.push(c);
+            }
+            KeyCode::Backspace => {
+                self.editing_value.pop();
+            }
+            _ => {}
+        }
+    }
+
+    fn finish_text_edit(&mut self) {
+        self.editing_text = false;
+        let value = if self.editing_value.trim().is_empty() {
+            None
+        } else {
+            Some(self.editing_value.clone())
+        };
+        match self.selected {
+            6 => self.core_config.set_user_name(value),
+            7 => self.core_config.set_user_email(value),
+            _ => {}
+        }
+        if let Err(e) = save(&self.core_config, &self.ui_config) {
+            self.tx.send(AppEvent::NotifyError(e.to_string()));
+        }
+    }
+
+    fn cancel_text_edit(&mut self) {
+        self.editing_text = false;
     }
 
     fn cycle_option_prev(&mut self) {
@@ -243,13 +320,21 @@ impl<'a> ConfigView<'a> {
             ("Image Protocol", protocol_display(self.core_config.protocol())),
             ("Syntax Theme", self.core_config.option.syntax_theme.clone()),
             ("Date Format", self.core_config.date_time_format().display_name().to_string()),
+            ("Git Name", self.core_config.user_name().map(|s| s.to_string()).unwrap_or_else(|| "(from git)".into())),
+            ("Git Email", self.core_config.user_email().map(|s| s.to_string()).unwrap_or_else(|| "(from git)".into())),
         ];
 
         let lines: Vec<Line> = items
             .iter()
             .enumerate()
             .map(|(i, (name, value))| {
-                let display = format!("< {} >", value);
+                let display = if self.editing_text && i == self.selected {
+                    format!("[ {} ]", self.editing_value)
+                } else if i >= 6 {
+                    format!("[ {} ]", value)
+                } else {
+                    format!("< {} >", value)
+                };
                 let spans = vec![
                     Span::raw(format!("{:<18}", name)),
                     Span::styled(display, Style::default().fg(self.ctx.color_theme.fg)),
@@ -266,13 +351,17 @@ impl<'a> ConfigView<'a> {
         f.render_widget(paragraph, left_area);
 
         // Description / preview (right column)
-        let descriptions = [
-            "Controls how commit connection lines are rendered in the graph.",
-            "Enhanced shows contextual line numbers; Raw shows plain git diff output.",
-            "Enable mouse support for clicking and scrolling.",
-            "Terminal image protocol used for rendering commit graph images.",
-            "Color theme for syntax highlighting in code diffs.",
-            "Date and time display format for commits in the list and detail views.",
+        let git_name = &self.ctx.git_user_name;
+        let git_email = &self.ctx.git_user_email;
+        let descriptions: Vec<String> = vec![
+            "Controls how commit connection lines are rendered in the graph.".into(),
+            "Enhanced shows contextual line numbers; Raw shows plain git diff output.".into(),
+            "Enable mouse support for clicking and scrolling.".into(),
+            "Terminal image protocol used for rendering commit graph images.".into(),
+            "Color theme for syntax highlighting in code diffs.".into(),
+            "Date and time display format for commits in the list and detail views.".into(),
+            format!("Override git user.name for commits.\n\nCurrent git config: '{}'", git_name),
+            format!("Override git user.email for commits.\n\nCurrent git config: '{}'", git_email),
         ];
 
         let mut right_lines: Vec<Line> = vec![
@@ -280,8 +369,10 @@ impl<'a> ConfigView<'a> {
                 Span::styled("Description", Style::default().add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
-            Line::from(descriptions[self.selected]),
         ];
+        for line in descriptions[self.selected].lines() {
+            right_lines.push(Line::from(line));
+        }
 
         match self.selected {
             4 => {
@@ -319,15 +410,25 @@ impl<'a> ConfigView<'a> {
 
         let right_paragraph = Paragraph::new(right_lines);
         f.render_widget(right_paragraph, right_area);
+
+        if self.editing_text && self.selected >= 6 {
+            let cursor_x = left_area.x + 18 + 2 + self.editing_value.len() as u16;
+            let cursor_y = left_area.y + self.selected as u16;
+            f.set_cursor_position((cursor_x, cursor_y));
+        }
     }
 
-    pub fn handle_click(&mut self, col: u16, row: u16) {
+    pub fn handle_click(&mut self, _col: u16, row: u16) {
         let inner_y = 3; // block padding top + title + sep
         let item_y_start = inner_y;
         let item_idx = (row as usize).saturating_sub(item_y_start);
-        if item_idx < 5 {
+        if item_idx < 8 {
             self.selected = item_idx;
-            self.cycle_option();
+            if self.selected >= 6 {
+                self.start_text_edit();
+            } else {
+                self.cycle_option();
+            }
         }
     }
 
@@ -335,7 +436,7 @@ impl<'a> ConfigView<'a> {
         let inner_y = 3;
         let item_y_start = inner_y;
         let item_idx = (row as usize).saturating_sub(item_y_start);
-        if item_idx < 5 {
+        if item_idx < 8 && !self.editing_text {
             self.selected = item_idx;
         }
     }
@@ -368,6 +469,10 @@ impl<'a> ConfigView<'a> {
 
     pub fn ui_config(&self) -> &UiConfig {
         &self.ui_config
+    }
+
+    pub fn is_editing_text(&self) -> bool {
+        self.editing_text
     }
 }
 

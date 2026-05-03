@@ -3,7 +3,8 @@ use std::rc::Rc;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style, Stylize},
+    style::{Color, Style, Stylize},
+    text::{Line, Span},
     widgets::{Block, Borders, Padding, StatefulWidget},
 };
 use semver::Version;
@@ -16,10 +17,10 @@ const TREE_REMOTE_ROOT_IDENT: &str = "__remotes__";
 const TREE_TAG_ROOT_IDENT: &str = "__tags__";
 const TREE_STASH_ROOT_IDENT: &str = "__stashes__";
 
-const TREE_BRANCH_ROOT_TEXT: &str = "Branches";
-const TREE_REMOTE_ROOT_TEXT: &str = "Remotes";
-const TREE_TAG_ROOT_TEXT: &str = "Tags";
-const TREE_STASH_ROOT_TEXT: &str = "Stashes";
+const TREE_BRANCH_ROOT_TEXT: &str = "◈ Local";
+const TREE_REMOTE_ROOT_TEXT: &str = "⇄ Remotes";
+const TREE_TAG_ROOT_TEXT: &str = "# Tags";
+const TREE_STASH_ROOT_TEXT: &str = "≡ Stashes";
 
 #[derive(Debug, Default)]
 pub struct RefListState {
@@ -42,6 +43,14 @@ impl RefListState {
 
     pub fn select_prev(&mut self) {
         self.tree_state.key_up();
+    }
+
+    pub fn scroll_down(&mut self, lines: usize) {
+        self.tree_state.scroll_down(lines);
+    }
+
+    pub fn scroll_up(&mut self, lines: usize) {
+        self.tree_state.scroll_up(lines);
     }
 
     pub fn select_first(&mut self) {
@@ -121,7 +130,7 @@ pub struct RefList {
 
 impl RefList {
     pub fn new(refs: &[Ref], ctx: Rc<AppContext>) -> RefList {
-        let items = build_ref_tree_items(refs, &ctx.color_theme);
+        let items = build_ref_tree_items(refs, &ctx);
         RefList { items, ctx }
     }
 }
@@ -150,7 +159,10 @@ impl StatefulWidget for RefList {
     }
 }
 
-fn build_ref_tree_items(refs: &[Ref], color_theme: &ColorTheme) -> Vec<TreeItem<'static, String>> {
+fn build_ref_tree_items(refs: &[Ref], ctx: &AppContext) -> Vec<TreeItem<'static, String>> {
+    let color_theme = &ctx.color_theme;
+    let branch_color_map = &ctx.branch_color_map;
+
     let mut branch_refs = Vec::new();
     let mut remote_refs = Vec::new();
     let mut tag_refs = Vec::new();
@@ -175,10 +187,10 @@ fn build_ref_tree_items(refs: &[Ref], color_theme: &ColorTheme) -> Vec<TreeItem<
     sort_tag_tree_nodes(&mut tag_nodes);
     sort_stash_tree_nodes(&mut stash_nodes);
 
-    let branch_items = ref_tree_nodes_to_tree_items(branch_nodes, color_theme);
-    let remote_items = ref_tree_nodes_to_tree_items(remote_nodes, color_theme);
-    let tag_items = ref_tree_nodes_to_tree_items(tag_nodes, color_theme);
-    let stash_items = ref_tree_nodes_to_tree_items(stash_nodes, color_theme);
+    let branch_items = branch_tree_nodes_to_tree_items(branch_nodes, branch_color_map, color_theme);
+    let remote_items = remote_tree_nodes_to_tree_items(remote_nodes, branch_color_map, color_theme, 0);
+    let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme);
+    let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
     vec![
         tree_item(
@@ -262,18 +274,107 @@ fn refs_to_ref_tree_nodes(ref_names: Vec<String>) -> Vec<RefTreeNode> {
     nodes
 }
 
-fn ref_tree_nodes_to_tree_items(
+fn branch_tree_nodes_to_tree_items(
+    nodes: Vec<RefTreeNode>,
+    branch_color_map: &rustc_hash::FxHashMap<String, Color>,
+    color_theme: &ColorTheme,
+) -> Vec<TreeItem<'static, String>> {
+    let mut items = Vec::new();
+    for node in nodes {
+        if node.children.is_empty() {
+            let fg = branch_color_map
+                .get(&node.identifier)
+                .copied()
+                .unwrap_or(color_theme.list_ref_branch_fg);
+            let line = Line::from(vec![
+                Span::raw("⎇ ").fg(fg).bold(),
+                Span::raw(node.name).fg(fg).bold(),
+            ]);
+            items.push(tree_item_with_line(node.identifier, line, Vec::new()));
+        } else {
+            let children = branch_tree_nodes_to_tree_items(node.children, branch_color_map, color_theme);
+            let line = Line::from(vec![
+                Span::raw("⎇ ").fg(color_theme.list_ref_branch_fg).bold(),
+                Span::raw(node.name).fg(color_theme.list_ref_branch_fg).bold(),
+            ]);
+            items.push(tree_item_with_line(node.identifier, line, children));
+        }
+    }
+    items
+}
+
+fn remote_tree_nodes_to_tree_items(
+    nodes: Vec<RefTreeNode>,
+    branch_color_map: &rustc_hash::FxHashMap<String, Color>,
+    color_theme: &ColorTheme,
+    depth: usize,
+) -> Vec<TreeItem<'static, String>> {
+    let mut items = Vec::new();
+    for node in nodes {
+        if node.children.is_empty() {
+            // Feuille = branche distante
+            let fg = branch_color_map
+                .get(&node.identifier)
+                .copied()
+                .unwrap_or(color_theme.list_ref_remote_branch_fg);
+            let line = Line::from(vec![
+                Span::raw("⎇ ").fg(fg).bold(),
+                Span::raw(node.name).fg(fg).bold(),
+            ]);
+            items.push(tree_item_with_line(node.identifier, line, Vec::new()));
+        } else {
+            let children = remote_tree_nodes_to_tree_items(node.children, branch_color_map, color_theme, depth + 1);
+            let line = if depth == 0 {
+                // Premier niveau = nom du remote (ex: "origin") → pas de logo
+                Line::from(vec![Span::raw(node.name).fg(color_theme.fg)])
+            } else {
+                // Niveaux suivants → logo branche
+                Line::from(vec![
+                    Span::raw("⎇ ").fg(color_theme.list_ref_remote_branch_fg).bold(),
+                    Span::raw(node.name).fg(color_theme.list_ref_remote_branch_fg).bold(),
+                ])
+            };
+            items.push(tree_item_with_line(node.identifier, line, children));
+        }
+    }
+    items
+}
+
+fn tag_tree_nodes_to_tree_items(
     nodes: Vec<RefTreeNode>,
     color_theme: &ColorTheme,
 ) -> Vec<TreeItem<'static, String>> {
     let mut items = Vec::new();
     for node in nodes {
         if node.children.is_empty() {
-            items.push(tree_leaf_item(node.identifier, node.name, color_theme));
+            let line = Line::from(vec![
+                Span::raw("🏷 ").fg(color_theme.list_ref_tag_fg).bold(),
+                Span::raw(node.name).fg(color_theme.list_ref_tag_fg).bold(),
+            ]);
+            items.push(tree_item_with_line(node.identifier, line, Vec::new()));
         } else {
-            let children = ref_tree_nodes_to_tree_items(node.children, color_theme);
-            items.push(tree_item(node.identifier, node.name, children, color_theme));
+            let children = tag_tree_nodes_to_tree_items(node.children, color_theme);
+            let line = Line::from(vec![
+                Span::raw("🏷 ").fg(color_theme.list_ref_tag_fg).bold(),
+                Span::raw(node.name).fg(color_theme.list_ref_tag_fg).bold(),
+            ]);
+            items.push(tree_item_with_line(node.identifier, line, children));
         }
+    }
+    items
+}
+
+fn stash_tree_nodes_to_tree_items(
+    nodes: Vec<RefTreeNode>,
+    color_theme: &ColorTheme,
+) -> Vec<TreeItem<'static, String>> {
+    let mut items = Vec::new();
+    for node in nodes {
+        let line = Line::from(vec![
+            Span::raw("📦 ").fg(color_theme.list_ref_stash_fg).bold(),
+            Span::raw(node.name).fg(color_theme.list_ref_stash_fg).bold(),
+        ]);
+        items.push(tree_item_with_line(node.identifier, line, Vec::new()));
     }
     items
 }
@@ -323,10 +424,10 @@ fn tree_item(
     TreeItem::new(identifier, name.fg(color_theme.fg), children).unwrap()
 }
 
-fn tree_leaf_item(
+fn tree_item_with_line(
     identifier: String,
-    name: String,
-    color_theme: &ColorTheme,
+    line: Line<'static>,
+    children: Vec<TreeItem<'static, String>>,
 ) -> TreeItem<'static, String> {
-    tree_item(identifier, name, Vec::new(), color_theme)
+    TreeItem::new(identifier, line, children).unwrap()
 }

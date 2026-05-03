@@ -241,6 +241,8 @@ pub struct CoreOptionConfig {
     pub date_time_format: DateTimeFormat,
     #[default = true]
     pub date_time_local: bool,
+    pub user_name: Option<String>,
+    pub user_email: Option<String>,
 }
 
 #[optional(derives = [Deserialize])]
@@ -566,6 +568,18 @@ impl CoreConfig {
     pub fn set_date_time_local(&mut self, local: bool) {
         self.option.date_time_local = local;
     }
+    pub fn user_name(&self) -> Option<&str> {
+        self.option.user_name.as_deref()
+    }
+    pub fn set_user_name(&mut self, name: Option<String>) {
+        self.option.user_name = name;
+    }
+    pub fn user_email(&self) -> Option<&str> {
+        self.option.user_email.as_deref()
+    }
+    pub fn set_user_email(&mut self, email: Option<String>) {
+        self.option.user_email = email;
+    }
 }
 
 impl UiCommonConfig {
@@ -643,6 +657,9 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
 
     set_nested_bool(&mut doc, &["core", "option", "date_time_local"], core.option.date_time_local);
 
+    set_nested_option_string(&mut doc, &["core", "option", "user_name"], &core.option.user_name);
+    set_nested_option_string(&mut doc, &["core", "option", "user_email"], &core.option.user_email);
+
     let toml_string = toml::to_string_pretty(&doc)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&path, toml_string)
@@ -672,6 +689,25 @@ fn set_nested_bool(doc: &mut toml::Table, keys: &[&str], value: bool) {
     table.insert(keys.last().unwrap().to_string(), toml::Value::Boolean(value));
 }
 
+fn set_nested_option_string(doc: &mut toml::Table, keys: &[&str], value: &Option<String>) {
+    let mut table = doc;
+    for key in &keys[..keys.len() - 1] {
+        table = table.entry(key.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+            .as_table_mut()
+            .unwrap();
+    }
+    let last_key = keys.last().unwrap().to_string();
+    match value {
+        Some(v) => {
+            table.insert(last_key, toml::Value::String(v.clone()));
+        }
+        None => {
+            table.remove(&last_key);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,6 +730,8 @@ mod tests {
                     syntax_theme: "base16-ocean.dark".into(),
                     date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
                     date_time_local: true,
+                    user_name: None,
+                    user_email: None,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,
@@ -832,6 +870,8 @@ mod tests {
                     syntax_theme: "base16-ocean.dark".into(),
                     date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
                     date_time_local: true,
+                    user_name: None,
+                    user_email: None,
                 },
                 search: CoreSearchConfig {
                     ignore_case: true,
@@ -863,20 +903,20 @@ mod tests {
                             },
                         ),
                         (
-                            "3".into(),
-                            UserCommand {
-                                name: "open vim".into(),
-                                r#type: UserCommandType::Suspend,
-                                commands: vec!["vim".into()],
-                                refresh: false,
-                            },
-                        ),
-                        (
                             "10".into(),
                             UserCommand {
                                 name: "echo world".into(),
                                 r#type: UserCommandType::Inline,
                                 commands: vec!["echo".into(), "world".into()],
+                                refresh: false,
+                            },
+                        ),
+                        (
+                            "3".into(),
+                            UserCommand {
+                                name: "open vim".into(),
+                                r#type: UserCommandType::Suspend,
+                                commands: vec!["vim".into()],
                                 refresh: false,
                             },
                         ),
@@ -950,6 +990,8 @@ mod tests {
                     syntax_theme: "base16-ocean.dark".into(),
                     date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
                     date_time_local: true,
+                    user_name: None,
+                    user_email: None,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,

@@ -254,29 +254,39 @@ impl CommitDetail<'_> {
     }
 
     fn refs_line(&self) -> Line<'_> {
-        let ref_spans = self.refs.iter().filter_map(|r| match r {
-            Ref::Branch { name, .. } => Some(
-                Span::raw(name)
-                    .fg(self.ctx.color_theme.detail_ref_branch_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Ref::RemoteBranch { name, .. } => Some(
-                Span::raw(name)
-                    .fg(self.ctx.color_theme.detail_ref_remote_branch_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Ref::Tag { name, .. } => Some(
-                Span::raw(name)
-                    .fg(self.ctx.color_theme.detail_ref_tag_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Ref::Stash { .. } => None,
-        });
+        let ref_spans: Vec<Vec<Span>> = self.refs.iter().filter_map(|r| {
+            let (icon, name, fg) = match r {
+                Ref::Branch { name, .. } => (
+                    "⎇ ",
+                    name.as_str(),
+                    self.ctx.color_theme.detail_ref_branch_fg,
+                ),
+                Ref::RemoteBranch { name, .. } => (
+                    "⎇ ",
+                    name.as_str(),
+                    self.ctx.color_theme.detail_ref_remote_branch_fg,
+                ),
+                Ref::Tag { name, .. } => (
+                    "🏷 ",
+                    name.as_str(),
+                    self.ctx.color_theme.detail_ref_tag_fg,
+                ),
+                Ref::Stash { name, .. } => (
+                    "📦 ",
+                    name.as_str(),
+                    self.ctx.color_theme.list_ref_stash_fg,
+                ),
+            };
+            Some(vec![
+                Span::raw(icon).fg(fg).add_modifier(Modifier::BOLD),
+                Span::raw(name).fg(fg).add_modifier(Modifier::BOLD),
+            ])
+        }).collect();
 
         let mut spans = Vec::new();
-        for (i, ref_span) in ref_spans.enumerate() {
-            spans.push(ref_span);
-            if i < self.refs.len() - 1 {
+        for (i, ref_span_vec) in ref_spans.iter().enumerate() {
+            spans.extend(ref_span_vec.clone());
+            if i < ref_spans.len() - 1 {
                 spans.push(Span::raw(" "));
             }
         }

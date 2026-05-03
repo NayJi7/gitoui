@@ -331,11 +331,16 @@ impl<'a> ListView<'a> {
                 let clicked_index = offset + row;
                 if clicked_index < list_state.total() {
                     list_state.select(clicked_index);
+                    let is_uncommitted = list_state.is_uncommitted_selected();
                     if list_state.search_state().is_active() {
                         list_state.cancel_search();
                         self.clear_search_query();
                     }
-                    let _ = self.tx.send(AppEvent::OpenDetail);
+                    if is_uncommitted {
+                        let _ = self.tx.send(AppEvent::OpenUncommitted);
+                    } else {
+                        let _ = self.tx.send(AppEvent::OpenDetail);
+                    }
                 }
             }
         }

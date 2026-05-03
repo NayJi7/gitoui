@@ -40,6 +40,8 @@ pub struct CommitInfo<'a> {
     pub uncommitted_staged: usize,
     pub uncommitted_unstaged: usize,
     pub uncommitted_untracked: usize,
+    /// Date de dernière modification des fichiers uncommitted (Option<DateTime<FixedOffset>>)
+    pub uncommitted_last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 impl<'a> CommitInfo<'a> {
@@ -52,6 +54,7 @@ impl<'a> CommitInfo<'a> {
             uncommitted_staged: 0,
             uncommitted_unstaged: 0,
             uncommitted_untracked: 0,
+            uncommitted_last_modified: None,
         }
     }
 
@@ -60,6 +63,7 @@ impl<'a> CommitInfo<'a> {
         staged: usize,
         unstaged: usize,
         untracked: usize,
+        last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
     ) -> Self {
         Self {
             commit: None,
@@ -69,6 +73,7 @@ impl<'a> CommitInfo<'a> {
             uncommitted_staged: staged,
             uncommitted_unstaged: unstaged,
             uncommitted_untracked: untracked,
+            uncommitted_last_modified: last_modified,
         }
     }
 
@@ -321,6 +326,9 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn ensure_visible_graph_uploaded(&mut self) {
+        let has_uncommitted = self.commits.first().map_or(false, |c| c.is_uncommitted);
+        self.graph_image_manager.set_has_uncommitted(has_uncommitted);
+
         let current_head_hash = self.head_commit_hash.clone();
         let manager_head = self.graph_image_manager.head_commit_hash().cloned();
         if manager_head.as_ref() != current_head_hash.as_ref() {
@@ -537,6 +545,11 @@ impl<'a> CommitListState<'a> {
     pub fn selected_commit_subject(&self) -> Option<&str> {
         let info = &self.commits[self.current_selected_index()];
         info.commit.map(|c| c.subject.as_str())
+    }
+
+    pub fn is_uncommitted_selected(&self) -> bool {
+        let info = &self.commits[self.current_selected_index()];
+        info.is_uncommitted
     }
 
     fn current_selected_index(&self) -> usize {
@@ -1110,7 +1123,7 @@ impl CommitList<'_> {
                 if commit_info.is_uncommitted {
                     return self.to_commit_list_item(
                         i,
-                        vec!["".fg(self.ctx.color_theme.list_name_fg)],
+                        vec!["/".fg(self.ctx.color_theme.list_name_fg)],
                         state,
                     );
                 }
@@ -1150,7 +1163,7 @@ impl CommitList<'_> {
                 if commit_info.is_uncommitted {
                     return self.to_commit_list_item(
                         i,
-                        vec!["".fg(self.ctx.color_theme.list_hash_fg)],
+                        vec!["/".fg(self.ctx.color_theme.list_hash_fg)],
                         state,
                     );
                 }
@@ -1183,9 +1196,19 @@ impl CommitList<'_> {
             .rendering_commit_info_iter(state)
             .map(|(i, commit_info)| {
                 if commit_info.is_uncommitted {
+                    let date_str = commit_info
+                        .uncommitted_last_modified
+                        .as_ref()
+                        .map(|dt| {
+                            self.ctx.core_config.date_time_format().format(
+                                dt,
+                                self.ctx.core_config.date_time_local(),
+                            )
+                        })
+                        .unwrap_or_else(|| "-".to_string());
                     return self.to_commit_list_item(
                         i,
-                        vec!["".fg(self.ctx.color_theme.list_date_fg)],
+                        vec![date_str.fg(self.ctx.color_theme.list_date_fg)],
                         state,
                     );
                 }
@@ -1223,26 +1246,13 @@ impl CommitList<'_> {
         commit_info: &CommitInfo,
         state: &CommitListState,
     ) -> ListItem<'a> {
-        let mut spans: Vec<Span> = vec![
-            Span::raw("(").fg(Color::Yellow).bold(),
+        let total = commit_info.uncommitted_staged
+            + commit_info.uncommitted_unstaged
+            + commit_info.uncommitted_untracked;
+        let spans: Vec<Span> = vec![
+            Span::raw("Uncommitted Changes").fg(self.ctx.color_theme.fg).add_modifier(Modifier::BOLD),
+            Span::raw(format!(" ({})", total)).fg(self.ctx.color_theme.fg).add_modifier(Modifier::BOLD),
         ];
-        if commit_info.uncommitted_staged > 0 {
-            spans.push(Span::raw(format!("{} staged", commit_info.uncommitted_staged)).fg(Color::Green).bold());
-        }
-        if commit_info.uncommitted_unstaged > 0 {
-            if commit_info.uncommitted_staged > 0 {
-                spans.push(Span::raw(" \u{00b7} ").fg(Color::Yellow));
-            }
-            spans.push(Span::raw(format!("{} unstaged", commit_info.uncommitted_unstaged)).fg(Color::Rgb(0xff, 0xa5, 0x00)).bold());
-        }
-        if commit_info.uncommitted_untracked > 0 {
-            if commit_info.uncommitted_staged > 0 || commit_info.uncommitted_unstaged > 0 {
-                spans.push(Span::raw(" \u{00b7} ").fg(Color::Yellow));
-            }
-            spans.push(Span::raw(format!("{} untracked", commit_info.uncommitted_untracked)).fg(Color::DarkGray).bold());
-        }
-        spans.push(Span::raw(") ").fg(Color::Yellow).bold());
-        spans.push(Span::raw("Uncommitted Changes").fg(Color::Yellow).bold());
         self.to_commit_list_item(i, spans, state)
     }
 
@@ -1277,6 +1287,7 @@ fn refs_spans<'a>(
     if refs.len() == 1 {
         if let Ref::Stash { name, .. } = refs[0] {
             return vec![
+                Span::raw("📦 ").fg(color_theme.list_ref_stash_fg).bold(),
                 Span::raw(name).fg(color_theme.list_ref_stash_fg).bold(),
                 Span::raw(" "),
             ];
@@ -1291,7 +1302,7 @@ fn refs_spans<'a>(
                     .get(name)
                     .copied()
                     .unwrap_or(color_theme.list_ref_branch_fg);
-                Some((name, fg))
+                Some((name, fg, "branch"))
             }
             Ref::RemoteBranch { name, .. } => {
                 let fg = branch_color_map
@@ -1302,16 +1313,28 @@ fn refs_spans<'a>(
                             .and_then(|(_, branch)| branch_color_map.get(branch).copied())
                     })
                     .unwrap_or(color_theme.list_ref_remote_branch_fg);
-                Some((name, fg))
+                Some((name, fg, "remote"))
             }
             Ref::Tag { name, .. } => {
                 let fg = color_theme.list_ref_tag_fg;
-                Some((name, fg))
+                Some((name, fg, "tag"))
             }
             Ref::Stash { .. } => None,
         })
-        .map(|(name, fg)| {
-            let spans = refs_matches
+        .map(|(name, fg, ref_type)| {
+            let mut spans = Vec::new();
+
+            match ref_type {
+                "branch" | "remote" => {
+                    spans.push(Span::raw("⎇ ").fg(fg).bold());
+                }
+                "tag" => {
+                    spans.push(Span::raw("🏷 ").fg(fg).bold());
+                }
+                _ => {}
+            }
+
+            let name_spans = refs_matches
                 .get(name)
                 .map(|pos| {
                     highlighted_spans(
@@ -1324,6 +1347,7 @@ fn refs_spans<'a>(
                     )
                 })
                 .unwrap_or_else(|| vec![Span::raw(name).fg(fg).bold()]);
+            spans.extend(name_spans);
             (spans, name)
         })
         .collect();
@@ -1406,23 +1430,25 @@ fn calc_cell_widths(
     for col in columns {
         match col {
             UserListColumnType::Graph => {
-                graph_cell_width = graph_width;
+                graph_cell_width = graph_width.max(5);
             }
             UserListColumnType::Marker => {
                 marker_cell_width = 1;
             }
             UserListColumnType::Name => {
-                name_cell_width = name_width + pad;
+                name_cell_width = (name_width + pad).max(9);
             }
             UserListColumnType::Hash => {
-                hash_cell_width = 7 + pad;
+                hash_cell_width = (7 + pad).max(3);
             }
             UserListColumnType::Date => {
-                date_cell_width = date_width + pad;
+                date_cell_width = (date_width + pad).max(4);
             }
             UserListColumnType::Subject => {}
         }
     }
+
+    let subject_min_width = subject_min_width.max(14);
 
     let mut total_width = graph_cell_width
         + marker_cell_width

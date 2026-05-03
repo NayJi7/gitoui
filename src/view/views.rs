@@ -268,6 +268,13 @@ impl<'a> View<'a> {
             View::Config(_) => {}
         }
     }
+
+    pub fn is_input_active(&self) -> bool {
+        match self {
+            View::Config(view) => view.is_editing_text(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

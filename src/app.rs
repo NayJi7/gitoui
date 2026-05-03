@@ -15,8 +15,8 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     color::{ColorTheme, GraphColorSet},
-    config::{CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
-    event::{AppEvent, EventController, UserEvent, UserEventWithCount},
+    config::{save, CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
+    event::{AppEvent, EventController, Sender, UserEvent, UserEventWithCount},
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
@@ -62,6 +62,24 @@ pub struct AppContext {
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
     pub image_protocol: ImageProtocol,
+    pub git_user_name: String,
+    pub git_user_email: String,
+    pub branch_color_map: FxHashMap<String, Color>,
+}
+
+impl Default for AppContext {
+    fn default() -> Self {
+        Self {
+            keybind: KeyBind::default(),
+            core_config: CoreConfig::default(),
+            ui_config: UiConfig::default(),
+            color_theme: ColorTheme::default(),
+            image_protocol: ImageProtocol::Iterm2,
+            git_user_name: String::new(),
+            git_user_email: String::new(),
+            branch_color_map: FxHashMap::default(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -111,11 +129,13 @@ impl<'a> App<'a> {
 
         if let Some(changes) = repository.uncommitted_changes() {
             if changes.is_dirty() {
+                let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
                 let uncommitted_info = CommitInfo::new_uncommitted(
-                    Color::Yellow,
+                    Color::Gray,
                     changes.staged.len(),
                     changes.unstaged.len(),
                     changes.untracked.len(),
+                    last_modified,
                 );
                 commits.insert(0, uncommitted_info);
                 let mut shifted_map = FxHashMap::default();
@@ -151,6 +171,13 @@ impl<'a> App<'a> {
                 _ => {}
             }
         }
+        // Update ctx with branch_color_map for use in footer and other widgets
+        let ctx = {
+            let mut ctx_mut = (*ctx).clone();
+            ctx_mut.branch_color_map = branch_color_map.clone();
+            Rc::new(ctx_mut)
+        };
+
         let mut commit_list_state = CommitListState::new(
             commits,
             graph_image_manager,
@@ -248,6 +275,13 @@ impl App<'_> {
                                     UserEventWithCount::from_event(UserEvent::Unknown),
                                     key,
                                 );
+                            } else if self.view.is_input_active() {
+                                // Config text edit mode: pass all key events
+                                self.app_status.numeric_prefix.clear();
+                                self.view.handle_event(
+                                    UserEventWithCount::from_event(UserEvent::Unknown),
+                                    key,
+                                );
                             } else if let KeyCode::Char(c) = key.code {
                                 // Accumulate numeric prefix
                                 if c.is_ascii_digit()
@@ -272,6 +306,9 @@ impl App<'_> {
                 AppEvent::OpenDetail => {
                     self.clear_image(Some(terminal))?;
                     self.open_detail();
+                }
+                AppEvent::OpenUncommitted => {
+                    self.info_notification("Uncommitted Changes view coming soon...".into());
                 }
                 AppEvent::CloseDetail => {
                     terminal.clear()?;
@@ -529,18 +566,22 @@ impl App<'_> {
         if show_enhanced {
             match self.repository.head() {
                 Head::Branch { name } => {
+                    let branch_color = self.ctx.branch_color_map
+                        .get(name)
+                        .copied()
+                        .unwrap_or(Color::Rgb(122, 162, 247));
                     spans.push(Span::styled(
                         "HEAD → ",
                         Style::default().fg(Color::Rgb(125, 207, 255)).add_modifier(Modifier::BOLD),
                     ));
                     spans.push(Span::styled(
-                        "● ",
-                        Style::default().fg(Color::Rgb(122, 162, 247)),
+                        "⎇ ",
+                        Style::default().fg(branch_color),
                     ));
                     spans.push(Span::styled(
                         name.clone(),
                         Style::default()
-                            .fg(Color::Rgb(122, 162, 247))
+                            .fg(branch_color)
                             .add_modifier(Modifier::BOLD),
                     ));
                 }

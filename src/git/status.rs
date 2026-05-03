@@ -1,11 +1,16 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::SystemTime;
+
+use chrono::{DateTime, Local};
 
 #[derive(Debug, Clone, Default)]
 pub struct UncommittedChanges {
     pub staged: Vec<FileStatus>,
     pub unstaged: Vec<FileStatus>,
     pub untracked: Vec<FileStatus>,
+    /// Date de dernière modification parmi tous les fichiers uncommitted
+    pub last_modified: Option<DateTime<Local>>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +118,30 @@ impl UncommittedChanges {
                 }
             }
         }
+
+        // Calculer la date de dernière modification parmi tous les fichiers
+        let mut max_mtime: Option<SystemTime> = None;
+        for file_status in changes.staged.iter().chain(&changes.unstaged).chain(&changes.untracked) {
+            // Ignorer les fichiers supprimés (n'existent plus sur le disque)
+            if matches!(file_status.status, StatusType::Deleted) {
+                continue;
+            }
+            let file_path = repo_path.join(&file_status.path);
+            if let Ok(metadata) = std::fs::metadata(&file_path) {
+                if let Ok(mtime) = metadata.modified() {
+                    max_mtime = Some(match max_mtime {
+                        Some(prev) if prev > mtime => prev,
+                        _ => mtime,
+                    });
+                }
+            }
+        }
+        changes.last_modified = max_mtime.map(|mtime| {
+            let duration = mtime.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+            DateTime::from_timestamp(duration.as_secs() as i64, 0)
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(|| Local::now())
+        });
 
         Ok(changes)
     }

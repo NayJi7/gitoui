@@ -170,12 +170,27 @@ pub fn run() -> Result<()> {
         let graph_color_set = color::GraphColorSet::new(&graph_config.color);
 
         let mouse_enabled = ui_config.common.mouse_enabled;
+        let git_user_name = std::process::Command::new("git")
+            .args(["config", "user.name"])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
+            .unwrap_or_else(|| "Not set".into());
+        let git_user_email = std::process::Command::new("git")
+            .args(["config", "user.email"])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
+            .unwrap_or_else(|| "Not set".into());
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
             ui_config,
             color_theme,
             image_protocol,
+            git_user_name,
+            git_user_email,
+            branch_color_map: rustc_hash::FxHashMap::default(),
         });
 
         let repository = git::Repository::load(Path::new("."), order, max_count)?;

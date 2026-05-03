@@ -39,6 +39,7 @@ pub struct GraphImageManager<'a> {
     image_ids: FxHashSet<u32>,
     pending_uploads: Vec<String>,
     head_commit_hash: Option<CommitHash>,
+    has_uncommitted: bool,
 
     graph: &'a Graph<'a>,
     cell_width_type: CellWidthType,
@@ -68,6 +69,7 @@ impl<'a> GraphImageManager<'a> {
             image_ids: FxHashSet::default(),
             pending_uploads: Vec::default(),
             head_commit_hash: None,
+            has_uncommitted: false,
             graph,
             cell_width_type,
             graph_style,
@@ -95,8 +97,18 @@ impl<'a> GraphImageManager<'a> {
         if self.prepared_image_map.contains_key(commit_hash) {
             return;
         }
-        let head = self.head_commit_hash.as_ref() == Some(commit_hash);
+        let is_head = self.head_commit_hash.as_ref() == Some(commit_hash);
+        // Quand il y a des uncommitted changes, HEAD est dessiné comme un commit normal (cercle plein)
+        let head = is_head && !self.has_uncommitted;
         let image_id = graph_image_id(self.session_nonce, commit_hash, head);
+
+        // Si has_uncommitted et c'est HEAD, dessiner un edge UP en gris pour connecter à l'uncommitted
+        let uncommitted_up_color = if self.has_uncommitted && is_head {
+            Some(image::Rgba([0x80, 0x80, 0x80, 0xff]))
+        } else {
+            None
+        };
+
         let graph_row_image = build_single_graph_row_image(
             self.graph,
             &self.image_params,
@@ -105,6 +117,7 @@ impl<'a> GraphImageManager<'a> {
             self.image_width_mode,
             commit_hash,
             head,
+            uncommitted_up_color,
         );
         let mut image =
             graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
@@ -115,7 +128,7 @@ impl<'a> GraphImageManager<'a> {
         self.image_ids.insert(image_id);
     }
 
-    pub fn ensure_uploaded_uncommitted(&mut self, _graph_color: ratatui::style::Color) {
+    pub fn ensure_uploaded_uncommitted(&mut self, graph_color: ratatui::style::Color) {
         if self.uncommitted_image.is_some() {
             return;
         }
@@ -129,6 +142,8 @@ impl<'a> GraphImageManager<'a> {
             cell_count,
             &self.image_params,
             &self.drawing_pixels,
+            graph_color,
+            true, // draw_down_edge
         );
         let mut image =
             graph_row_image.prepare(self.cell_width_type, self.image_protocol, image_id);
@@ -154,6 +169,18 @@ impl<'a> GraphImageManager<'a> {
         self.head_commit_hash = commit_hash.cloned();
     }
 
+    pub fn set_has_uncommitted(&mut self, has_uncommitted: bool) {
+        if self.has_uncommitted == has_uncommitted {
+            return;
+        }
+        self.has_uncommitted = has_uncommitted;
+        // Invalider HEAD car son rendu change (cercle plein vs vide)
+        let head_hash = self.head_commit_hash.clone();
+        if let Some(ref hash) = head_hash {
+            self.invalidate(hash);
+        }
+    }
+
     pub fn invalidate(&mut self, commit_hash: &CommitHash) {
         self.prepared_image_map.remove(commit_hash);
         self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, true));
@@ -164,6 +191,12 @@ impl<'a> GraphImageManager<'a> {
         self.uncommitted_image = None;
         let id = self.session_nonce ^ 0xFFFF_FFFF;
         self.image_ids.remove(&id);
+        // Réinitialiser has_uncommitted et invalider HEAD
+        self.has_uncommitted = false;
+        let head_hash = self.head_commit_hash.clone();
+        if let Some(ref hash) = head_hash {
+            self.invalidate(hash);
+        }
     }
 }
 
@@ -287,6 +320,7 @@ fn build_single_graph_row_image(
     image_width_mode: GraphImageWidthMode,
     commit_hash: &CommitHash,
     head: bool,
+    uncommitted_up_color: Option<image::Rgba<u8>>,
 ) -> GraphRowImage {
     let (pos_x, pos_y) = graph.commit_pos_map[&commit_hash];
     let edges = &graph.edges[pos_y];
@@ -306,6 +340,7 @@ fn build_single_graph_row_image(
         drawing_pixels,
         graph_style,
         head,
+        uncommitted_up_color,
     )
 }
 
@@ -673,6 +708,7 @@ pub fn calc_graph_row_image(
     drawing_pixels: &DrawingPixels,
     graph_style: GraphStyle,
     head: bool,
+    uncommitted_up_color: Option<image::Rgba<u8>>,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -730,9 +766,45 @@ pub fn calc_graph_row_image(
         }
     }
 
+    // Dessiner l'edge UP artificiel pour connecter à l'uncommitted (en gris)
+    if let Some(color) = uncommitted_up_color {
+        let x_offset = (commit_pos_x * image_params.width as usize) as i32;
+        let center_x = x_offset + (image_params.width as i32 / 2);
+        let circle_center_y = (image_params.height / 2) as i32;
+        let circle_outer_radius = image_params.circle_outer_radius as i32;
+        let line_width = image_params.line_width as i32;
+        let x_start = center_x - line_width / 2;
+
+        for y in 0..(circle_center_y - circle_outer_radius) {
+            for x in x_start..(x_start + line_width) {
+                if x >= 0 && x < img_buf.width() as i32 && y >= 0 && y < img_buf.height() as i32 {
+                    let pixel = img_buf.get_pixel_mut(x as u32, y as u32);
+                    *pixel = color;
+                }
+            }
+        }
+    }
+
     let bytes = build_image(&img_buf, image_width, image_height);
 
     GraphRowImage { bytes, cell_count }
+}
+
+fn ratatui_color_to_rgba(color: ratatui::style::Color) -> image::Rgba<u8> {
+    match color {
+        ratatui::style::Color::Rgb(r, g, b) => image::Rgba([r, g, b, 0xff]),
+        ratatui::style::Color::Gray => image::Rgba([0x80, 0x80, 0x80, 0xff]),
+        ratatui::style::Color::DarkGray => image::Rgba([0x40, 0x40, 0x40, 0xff]),
+        ratatui::style::Color::White => image::Rgba([0xff, 0xff, 0xff, 0xff]),
+        ratatui::style::Color::Black => image::Rgba([0x00, 0x00, 0x00, 0xff]),
+        ratatui::style::Color::Red => image::Rgba([0xff, 0x00, 0x00, 0xff]),
+        ratatui::style::Color::Green => image::Rgba([0x00, 0xff, 0x00, 0xff]),
+        ratatui::style::Color::Yellow => image::Rgba([0xff, 0xff, 0x00, 0xff]),
+        ratatui::style::Color::Blue => image::Rgba([0x00, 0x00, 0xff, 0xff]),
+        ratatui::style::Color::Magenta => image::Rgba([0xff, 0x00, 0xff, 0xff]),
+        ratatui::style::Color::Cyan => image::Rgba([0x00, 0xff, 0xff, 0xff]),
+        _ => image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
+    }
 }
 
 fn calc_hollow_circle_graph_row_image(
@@ -740,6 +812,8 @@ fn calc_hollow_circle_graph_row_image(
     cell_count: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    graph_color: ratatui::style::Color,
+    draw_down_edge: bool,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -747,7 +821,27 @@ fn calc_hollow_circle_graph_row_image(
     let mut img_buf = image::ImageBuffer::new(image_width, image_height);
 
     draw_background(&mut img_buf, image_params);
-    draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    let color = ratatui_color_to_rgba(graph_color);
+    draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels, color);
+
+    if draw_down_edge {
+        // Dessiner une ligne verticale qui part du bas du cercle jusqu'au bas de l'image
+        let x_offset = (commit_pos_x * image_params.width as usize) as i32;
+        let center_x = x_offset + (image_params.width as i32 / 2);
+        let circle_center_y = (image_params.height / 2) as i32;
+        let circle_outer_radius = image_params.circle_outer_radius as i32;
+        let line_width = image_params.line_width as i32;
+        let x_start = center_x - line_width / 2;
+
+        for y in (circle_center_y + circle_outer_radius)..(image_params.height as i32) {
+            for x in x_start..(x_start + line_width) {
+                if x >= 0 && x < img_buf.width() as i32 && y >= 0 && y < img_buf.height() as i32 {
+                    let pixel = img_buf.get_pixel_mut(x as u32, y as u32);
+                    *pixel = color;
+                }
+            }
+        }
+    }
 
     let bytes = build_image(&img_buf, image_width, image_height);
 
@@ -759,9 +853,9 @@ fn draw_hollow_circle(
     circle_pos_x: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
-    let color = image::Rgba([0xc0, 0xca, 0xf5, 0xff]);
 
     for (x, y) in &drawing_pixels.circle_edge {
         let x = (*x + x_offset) as u32;
@@ -1519,6 +1613,7 @@ mod tests {
                     &drawing_pixels,
                     graph_style,
                     head,
+                    None,
                 )
             })
             .collect();

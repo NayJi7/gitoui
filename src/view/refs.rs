@@ -67,6 +67,16 @@ impl<'a> RefsView<'a> {
                 }
                 self.update_commit_list_selected();
             }
+            UserEvent::ScrollDown => {
+                for _ in 0..count {
+                    self.ref_list_state.scroll_down(3);
+                }
+            }
+            UserEvent::ScrollUp => {
+                for _ in 0..count {
+                    self.ref_list_state.scroll_up(3);
+                }
+            }
             UserEvent::GoToTop => {
                 self.ref_list_state.select_first();
                 self.update_commit_list_selected();

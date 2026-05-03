@@ -22,6 +22,7 @@ pub enum AppEvent {
     Resize(usize, usize),
     Quit,
     OpenDetail,
+    OpenUncommitted,
     CloseDetail,
     OpenUserCommand(usize),
     CloseUserCommand,
