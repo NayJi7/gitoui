@@ -315,6 +315,16 @@ pub enum UserEvent {
     ShortCopy,
     FullCopy,
     Unknown,
+    // Phase 2 - Commit actions
+    AddTag,
+    CreateBranch,
+    Checkout,
+    CherryPick,
+    Revert,
+    Drop,
+    Merge,
+    Rebase,
+    Reset,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -378,6 +388,15 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "config" => Ok(UserEvent::Config),
                         "short_copy" => Ok(UserEvent::ShortCopy),
                         "full_copy" => Ok(UserEvent::FullCopy),
+                        "add_tag" => Ok(UserEvent::AddTag),
+                        "create_branch" => Ok(UserEvent::CreateBranch),
+                        "checkout" => Ok(UserEvent::Checkout),
+                        "cherry_pick" => Ok(UserEvent::CherryPick),
+                        "revert" => Ok(UserEvent::Revert),
+                        "drop" => Ok(UserEvent::Drop),
+                        "merge" => Ok(UserEvent::Merge),
+                        "rebase" => Ok(UserEvent::Rebase),
+                        "reset" => Ok(UserEvent::Reset),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

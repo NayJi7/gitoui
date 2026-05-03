@@ -19,6 +19,7 @@ pub struct CommitDetailState {
     height: usize,
     offset: usize,
     pub selected_file: usize,
+    pub hovered_action: Option<usize>,
 }
 
 impl CommitDetailState {
@@ -98,16 +99,31 @@ impl<'a> CommitDetail<'a> {
     }
 }
 
+pub const COMMIT_ACTIONS: &[(&str, char)] = &[
+    ("Add Tag", 't'),
+    ("Create Branch", 'b'),
+    ("Checkout", 'o'),
+    ("Cherry Pick", 'p'),
+    ("Revert", 'r'),
+    ("Drop", 'd'),
+    ("Merge into current", 'm'),
+    ("Rebase current on", 'e'),
+    ("Reset current to", 's'),
+];
+
 impl StatefulWidget for CommitDetail<'_> {
     type State = CommitDetailState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let [metadata_area, action_bar_area] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
+
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(metadata_area);
 
-        let (mut label_lines, mut value_lines, changes_start) = self.contents(area);
+        let (mut label_lines, mut value_lines, changes_start) = self.contents(metadata_area);
 
-        let content_area_height = area.height as usize - 1; // minus the top border
+        let content_area_height = metadata_area.height as usize - 1; // minus the top border
         self.update_state(state, value_lines.len(), content_area_height, changes_start);
 
         // Apply selection highlight to the selected file line
@@ -125,6 +141,9 @@ impl StatefulWidget for CommitDetail<'_> {
 
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
+
+        // Render action bar
+        self.render_action_bar(action_bar_area, buf, state);
     }
 }
 
@@ -151,6 +170,34 @@ impl CommitDetail<'_> {
                     .padding(Padding::new(1, 2, 0, 0)),
             );
         paragraph.render(area, buf);
+    }
+
+    fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
+        let block = Block::default()
+            .borders(Borders::TOP | Borders::LEFT)
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
+            .padding(Padding::new(1, 1, 0, 0));
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        let mut lines = Vec::new();
+        for (i, (label, key)) in COMMIT_ACTIONS.iter().enumerate() {
+            let is_hovered = state.hovered_action == Some(i);
+            let style = if is_hovered {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            let key_style = style.add_modifier(Modifier::BOLD);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}", label), style),
+                Span::styled(format!(" ({})", key), key_style),
+            ]));
+        }
+
+        let paragraph = Paragraph::new(lines)
+            .style(Style::default().fg(self.ctx.color_theme.fg));
+        paragraph.render(inner, buf);
     }
 
     fn contents(&self, area: Rect) -> (Vec<Line<'_>>, Vec<Line<'_>>, usize) {

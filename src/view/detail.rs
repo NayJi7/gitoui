@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
-    event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
     git::{Commit, FileChange, Ref, Repository},
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::{
@@ -29,6 +29,7 @@ pub struct DetailView<'a> {
     ctx: Rc<AppContext>,
     tx: Sender,
     list_height: usize,
+    detail_area: Option<Rect>,
 }
 
 impl<'a> DetailView<'a> {
@@ -49,6 +50,7 @@ impl<'a> DetailView<'a> {
             ctx,
             tx,
             list_height: 0,
+            detail_area: None,
         }
     }
 
@@ -133,12 +135,40 @@ impl<'a> DetailView<'a> {
             UserEvent::Refresh => {
                 self.refresh();
             }
+            UserEvent::AddTag => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::CreateBranch => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::Checkout => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: self.commit.commit_hash.as_str().into(), is_branch: false }));
+            }
+            UserEvent::CherryPick => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::Revert => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::Drop => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::Merge => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: self.commit.commit_hash.as_str().into(), is_branch: false }));
+            }
+            UserEvent::Rebase => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::Reset => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() }));
+            }
             _ => {}
         }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let [list_area, detail_area] = self.split_areas(area);
+        self.detail_area = Some(detail_area);
 
         let commit_list = CommitList::new(self.ctx.clone());
         f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
@@ -234,11 +264,23 @@ impl<'a> DetailView<'a> {
         self.tx.send(AppEvent::Refresh(context));
     }
 
-    pub fn handle_click(&mut self, _col: u16, row: u16) {
+    pub fn handle_click(&mut self, col: u16, row: u16) {
         let row = row as usize;
         if row < self.list_height {
             // Ignore clicks in the commit list pane when in detail view
             return;
+        }
+
+        // Check if click is in action bar area
+        if let Some(detail_area) = self.detail_area {
+            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= action_bar_x {
+                let action_bar_row = row.saturating_sub(self.list_height + 1);
+                if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
+                    self.execute_action(action_idx);
+                }
+                return;
+            }
         }
 
         let detail_local_row = row - self.list_height;
@@ -257,11 +299,23 @@ impl<'a> DetailView<'a> {
         }
     }
 
-    pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         let row = row as usize;
         if row < self.list_height {
             // Ignore mouse movement in the commit list pane
             return;
+        }
+
+        // Check if hover is in action bar area
+        if let Some(detail_area) = self.detail_area {
+            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= action_bar_x {
+                let action_bar_row = row.saturating_sub(self.list_height + 1);
+                self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
+                return;
+            } else {
+                self.commit_detail_state.hovered_action = None;
+            }
         }
 
         let detail_local_row = row - self.list_height;
@@ -277,6 +331,33 @@ impl<'a> DetailView<'a> {
             let file_idx = hover_line - changes_start;
             if file_idx != self.commit_detail_state.selected_file {
                 self.commit_detail_state.selected_file = file_idx;
+            }
+        }
+    }
+
+    fn action_index_at_row(&self, action_bar_row: usize) -> Option<usize> {
+        use crate::widget::commit_detail::COMMIT_ACTIONS;
+        if action_bar_row < COMMIT_ACTIONS.len() {
+            Some(action_bar_row)
+        } else {
+            None
+        }
+    }
+
+    fn execute_action(&self, action_idx: usize) {
+        use crate::widget::commit_detail::COMMIT_ACTIONS;
+        if let Some((_, key)) = COMMIT_ACTIONS.get(action_idx) {
+            match *key {
+                't' => self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: self.commit.commit_hash.as_str().into() })),
+                'b' => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: self.commit.commit_hash.as_str().into() })),
+                'o' => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
+                'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: self.commit.commit_hash.as_str().into() })),
+                'r' => self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: self.commit.commit_hash.as_str().into() })),
+                'd' => self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: self.commit.commit_hash.as_str().into() })),
+                'm' => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
+                'e' => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: self.commit.commit_hash.as_str().into() })),
+                's' => self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() })),
+                _ => {}
             }
         }
     }

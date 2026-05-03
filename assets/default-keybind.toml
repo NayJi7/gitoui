@@ -39,3 +39,14 @@ config = ["p"]
 # copy part of information, ex: copy the short commit hash not all
 short_copy = ["c"]
 full_copy = ["shift-c"]
+
+# Phase 2 - Commit detail actions
+add_tag = ["t"]
+create_branch = ["b"]
+checkout = ["o"]
+cherry_pick = ["p"]
+revert = ["r"]
+drop = ["d"]
+merge = ["m"]
+rebase = ["e"]
+reset = ["s"]
