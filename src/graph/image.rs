@@ -1123,78 +1123,110 @@ fn draw_smooth_bezier_segment(
     segment: &crate::graph::calc::BranchSegment,
     row_y: usize,
     image_params: &ImageParams,
-    cell_count: usize,
+    _cell_count: usize,
     color_override: Option<image::Rgba<u8>>,
 ) {
-    let cell_width = image_params.width as i32;
-    let cell_height = image_params.height as i32;
-    let image_height = cell_height;
-
-    // Convert grid coordinates to absolute pixel coordinates
-    // x: center of the lane cell
-    let x1 = segment.source_pos_x as i32 * cell_width + cell_width / 2;
-    let x2 = segment.target_pos_x as i32 * cell_width + cell_width / 2;
-
-    // y: center of each commit's row, relative to current row's top edge.
-    // Like VS Code Git Graph: draw center-to-center; the circle node is rendered on top.
-    let y1 = (segment.source_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
-    let y2 = (segment.target_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
-
-    // Exact VS Code Git Graph formula: d = grid.y * 0.8, no clamping.
-    // Allowing d > pixel_distance/2 is intentional — it produces the S-curve overshoot.
-    let d = (cell_height as f32 * 0.8) as i32;
+    let cell_width = image_params.width as f32;
+    let cell_height = image_params.height as f32;
+    let image_height = image_params.height as i32;
 
     let color = color_override.unwrap_or_else(|| image_params.edge_color(segment.color_index));
     let radius = (image_params.line_width as i32).max(1) / 2;
 
-    // Same-column segments are straight vertical lines (VS Code Git Graph: 'L x2, y2')
-    if x1 == x2 {
-        let x = x1;
-        let y_start = y1.max(0);
-        let y_end = y2.min(image_height - 1);
-        for py in y_start..=y_end {
-            draw_filled_circle(img_buf, x, py, radius, color);
+    let source_x_px = segment.source_pos_x as f32 * cell_width + cell_width / 2.0;
+    let target_x_px = segment.target_pos_x as f32 * cell_width + cell_width / 2.0;
+
+    let source_y_abs = segment.source_pos_y as f32;
+    let target_y_abs = segment.target_pos_y as f32;
+    let row_y_abs = row_y as f32;
+
+    let row_top_abs = row_y_abs * cell_height;
+    let row_bot_abs = (row_y_abs + 1.0) * cell_height;
+
+    let source_center_abs = source_y_abs * cell_height + cell_height / 2.0;
+    let target_center_abs = target_y_abs * cell_height + cell_height / 2.0;
+
+    let d = cell_height * 0.8;
+
+    let full_cp1x = source_x_px;
+    let full_cp1y = source_center_abs + d;
+    let full_cp2x = target_x_px;
+    let full_cp2y = target_center_abs - d;
+
+    let x_at_top = eval_bezier_x(
+        source_x_px, full_cp1x, full_cp2x, target_x_px,
+        row_top_abs, source_center_abs, full_cp1y, full_cp2y, target_center_abs,
+    );
+    let x_at_bot = eval_bezier_x(
+        source_x_px, full_cp1x, full_cp2x, target_x_px,
+        row_bot_abs, source_center_abs, full_cp1y, full_cp2y, target_center_abs,
+    );
+
+    let x_in = x_at_top as i32;
+    let x_out = x_at_bot as i32;
+
+    if x_in == x_out {
+        for py in 0..image_height {
+            draw_filled_circle(img_buf, x_in, py, radius, color);
         }
-        return;
-    }
+    } else {
+        let d_local = (cell_height * 0.6) as i32;
+        let cp1x = x_in;
+        let cp1y = d_local;
+        let cp2x = x_out;
+        let cp2y = image_height - d_local;
 
-    // Control points: exit source vertically (cp1), arrive at target vertically (cp2).
-    // Matches VS Code Git Graph: C x1,(y1+d) x2,(y2-d) x2,y2
-    let cp1x = x1;
-    let cp1y = y1 + d;
-    let cp2x = x2;
-    let cp2y = y2 - d;
+        let steps = 128;
+        let mut prev_px: Option<(i32, i32)> = None;
 
-    // Sample points along the Bezier curve.
-    // Always connect consecutive samples with draw_thick_line; put_pixel_safe clips to
-    // the row boundary. This prevents gaps where the curve crosses the top/bottom edge.
-    let steps = 256;
-    let mut prev_px: Option<(i32, i32)> = None;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let mt = 1.0 - t;
+            let px = (mt*mt*mt * x_in as f32
+                + 3.0 * mt*mt*t * cp1x as f32
+                + 3.0 * mt*t*t * cp2x as f32
+                + t*t*t * x_out as f32) as i32;
+            let py = (mt*mt*mt * 0.0f32
+                + 3.0 * mt*mt*t * cp1y as f32
+                + 3.0 * mt*t*t * cp2y as f32
+                + t*t*t * image_height as f32) as i32;
 
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let mt = 1.0 - t;
-        let px = (mt*mt*mt * x1 as f32
-            + 3.0 * mt*mt*t * cp1x as f32
-            + 3.0 * mt*t*t * cp2x as f32
-            + t*t*t * x2 as f32) as i32;
-        let py = (mt*mt*mt * y1 as f32
-            + 3.0 * mt*mt*t * cp1y as f32
-            + 3.0 * mt*t*t * cp2y as f32
-            + t*t*t * y2 as f32) as i32;
-
-        // Only bother drawing when near the visible area (avoid iterating over many off-screen pixels)
-        let near = py >= -(cell_height) && py < image_height + cell_height;
-        if near {
             if let Some((ppx, ppy)) = prev_px {
                 draw_thick_line(img_buf, ppx, ppy, px, py, radius, color);
             }
-            if py >= 0 && py < image_height {
-                draw_filled_circle(img_buf, px, py, radius, color);
-            }
+            draw_filled_circle(img_buf, px, py, radius, color);
+            prev_px = Some((px, py));
         }
-        prev_px = if near { Some((px, py)) } else { None };
     }
+}
+
+fn eval_bezier_x(
+    p0x: f32, p1x: f32, p2x: f32, p3x: f32,
+    y_target: f32,
+    p0y: f32, p1y: f32, p2y: f32, p3y: f32,
+) -> f32 {
+    let y_start = p0y;
+    let y_end = p3y;
+    let increasing = y_start <= y_end;
+    let mut lo = 0.0f32;
+    let mut hi = 1.0f32;
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        let y = eval_cubic(p0y, p1y, p2y, p3y, mid);
+        if (y < y_target) == increasing {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let t = (lo + hi) / 2.0;
+    eval_cubic(p0x, p1x, p2x, p3x, t)
+}
+
+#[inline]
+fn eval_cubic(a: f32, b: f32, c: f32, d: f32, t: f32) -> f32 {
+    let mt = 1.0 - t;
+    mt*mt*mt * a + 3.0 * mt*mt*t * b + 3.0 * mt*t*t * c + t*t*t * d
 }
 
 fn draw_filled_circle(
