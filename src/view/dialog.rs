@@ -38,6 +38,8 @@ impl<'a> DialogView<'a> {
             DialogKind::StashWithMessage => (vec![false], 0), // include untracked
             DialogKind::CommitWithMessage => (vec![false], 0), // amend
             DialogKind::CleanUntracked => (vec![], 0),
+            DialogKind::ConfirmPopStash { .. } => (vec![], 0),
+            DialogKind::ConfirmDropStash { .. } => (vec![], 0),
             _ => (vec![], 0),
         };
         Self { before, kind, input_value: String::new(), dropdown_selected, checkboxes, ctx, tx }
@@ -223,6 +225,12 @@ impl<'a> DialogView<'a> {
             DialogKind::CleanUntracked => {
                 (String::new(), GitAction::CleanUntracked)
             }
+            DialogKind::ConfirmPopStash { stash_ref } => {
+                (stash_ref.clone(), GitAction::PopStash)
+            }
+            DialogKind::ConfirmDropStash { stash_ref } => {
+                (stash_ref.clone(), GitAction::DropStash)
+            }
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }
@@ -370,7 +378,7 @@ impl<'a> DialogView<'a> {
                 let force = if self.checkboxes.get(0).copied().unwrap_or(false) { "[x]" } else { "[ ]" };
                 lines.push(Line::from(format!("{} Force with lease (--force-with-lease)", force)));
             }
-            DialogKind::CreateBranchFromStash { target, stash_ref } => {
+            DialogKind::CreateBranchFromStash { target: _, stash_ref } => {
                 lines.push(Line::from(vec![Span::styled("Create Branch from Stash", Style::default().add_modifier(Modifier::BOLD))]));
                 lines.push(Line::from(format!("Stash: {}", stash_ref)));
                 lines.push(Line::from(""));
@@ -433,6 +441,17 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(vec![Span::styled("Clean Untracked Files", Style::default().add_modifier(Modifier::BOLD))]));
                 lines.push(Line::from(""));
                 lines.push(Line::from("Remove all untracked files and directories?"));
+                lines.push(Line::from("This action cannot be undone."));
+            }
+            DialogKind::ConfirmPopStash { stash_ref } => {
+                lines.push(Line::from(vec![Span::styled("Pop Stash", Style::default().add_modifier(Modifier::BOLD))]));
+                lines.push(Line::from(""));
+                lines.push(Line::from(format!("Apply and remove stash '{}' ?", stash_ref)));
+            }
+            DialogKind::ConfirmDropStash { stash_ref } => {
+                lines.push(Line::from(vec![Span::styled("Drop Stash", Style::default().add_modifier(Modifier::BOLD))]));
+                lines.push(Line::from(""));
+                lines.push(Line::from(format!("Permanently remove stash '{}' ?", stash_ref)));
                 lines.push(Line::from("This action cannot be undone."));
             }
         }

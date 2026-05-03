@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
-    git::{Commit, FileChange, Ref, Repository},
+    git::{Commit, CommitType, FileChange, Ref, Repository},
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::{
         commit_detail::{CommitDetail, CommitDetailState},
@@ -161,6 +161,38 @@ impl<'a> DetailView<'a> {
             }
             UserEvent::Reset => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() }));
+            }
+            UserEvent::ApplyStash => {
+                self.tx.send(AppEvent::ExecuteGitAction {
+                    target: self.commit.commit_hash.as_str().into(),
+                    action: crate::event::GitAction::ApplyStash,
+                });
+            }
+            UserEvent::PopStash => {
+                if let Some(stash_ref) = self.stash_ref() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash { stash_ref }));
+                }
+            }
+            UserEvent::DropStash => {
+                if let Some(stash_ref) = self.stash_ref() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash { stash_ref }));
+                }
+            }
+            UserEvent::CreateBranchFromStash => {
+                if let Some(stash_ref) = self.stash_ref() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
+                        target: self.commit.commit_hash.as_str().into(),
+                        stash_ref,
+                    }));
+                }
+            }
+            UserEvent::CopyStashName => {
+                if let Some(stash_ref) = self.stash_ref() {
+                    self.copy_to_clipboard("Stash name".into(), stash_ref);
+                }
+            }
+            UserEvent::CopyStashHash => {
+                self.copy_commit_hash();
             }
             _ => {}
         }
@@ -336,8 +368,9 @@ impl<'a> DetailView<'a> {
     }
 
     fn action_index_at_row(&self, action_bar_row: usize) -> Option<usize> {
-        use crate::widget::commit_detail::COMMIT_ACTIONS;
-        if action_bar_row < COMMIT_ACTIONS.len() {
+        use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
+        let actions = if self.is_stash() { STASH_ACTIONS } else { COMMIT_ACTIONS };
+        if action_bar_row < actions.len() {
             Some(action_bar_row)
         } else {
             None
@@ -345,21 +378,70 @@ impl<'a> DetailView<'a> {
     }
 
     fn execute_action(&self, action_idx: usize) {
-        use crate::widget::commit_detail::COMMIT_ACTIONS;
-        if let Some((_, key)) = COMMIT_ACTIONS.get(action_idx) {
-            match *key {
-                't' => self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: self.commit.commit_hash.as_str().into() })),
-                'b' => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: self.commit.commit_hash.as_str().into() })),
-                'o' => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
-                'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: self.commit.commit_hash.as_str().into() })),
-                'r' => self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: self.commit.commit_hash.as_str().into() })),
-                'd' => self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: self.commit.commit_hash.as_str().into() })),
-                'm' => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
-                'e' => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: self.commit.commit_hash.as_str().into() })),
-                's' => self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() })),
-                _ => {}
+        use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
+        let actions = if self.is_stash() { STASH_ACTIONS } else { COMMIT_ACTIONS };
+        if let Some((_, key)) = actions.get(action_idx) {
+            if self.is_stash() {
+                match *key {
+                    'y' => self.tx.send(AppEvent::ExecuteGitAction {
+                        target: self.commit.commit_hash.as_str().into(),
+                        action: crate::event::GitAction::ApplyStash,
+                    }),
+                    'P' => {
+                        if let Some(stash_ref) = self.stash_ref() {
+                            self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash { stash_ref }));
+                        }
+                    }
+                    'D' => {
+                        if let Some(stash_ref) = self.stash_ref() {
+                            self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash { stash_ref }));
+                        }
+                    }
+                    'B' => {
+                        if let Some(stash_ref) = self.stash_ref() {
+                            self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
+                                target: self.commit.commit_hash.as_str().into(),
+                                stash_ref,
+                            }));
+                        }
+                    }
+                    'I' => {
+                        if let Some(stash_ref) = self.stash_ref() {
+                            self.copy_to_clipboard("Stash name".into(), stash_ref);
+                        }
+                    }
+                    'O' => self.copy_commit_hash(),
+                    _ => {}
+                }
+            } else {
+                match *key {
+                    't' => self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: self.commit.commit_hash.as_str().into() })),
+                    'b' => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: self.commit.commit_hash.as_str().into() })),
+                    'o' => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
+                    'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: self.commit.commit_hash.as_str().into() })),
+                    'r' => self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: self.commit.commit_hash.as_str().into() })),
+                    'd' => self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: self.commit.commit_hash.as_str().into() })),
+                    'm' => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
+                    'e' => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: self.commit.commit_hash.as_str().into() })),
+                    's' => self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() })),
+                    _ => {}
+                }
             }
         }
+    }
+
+    fn is_stash(&self) -> bool {
+        matches!(self.commit.commit_type, CommitType::Stash)
+    }
+
+    fn stash_ref(&self) -> Option<String> {
+        self.refs.iter().find_map(|r| {
+            if let Ref::Stash { name, .. } = r {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
     }
 
     fn open_selected_file_diff(&self) {

@@ -184,3 +184,38 @@ pub fn fetch(path: &Path) -> GitResult {
 pub fn clean_untracked(path: &Path) -> GitResult {
     run_git(path, &["clean", "-fd"])
 }
+
+// --- Branch Metadata ---
+
+pub fn branch_upstream(path: &Path, branch: &str) -> GitResult {
+    run_git(path, &["rev-parse", "--abbrev-ref", &format!("{}@{{upstream}}", branch)])
+}
+
+pub fn branch_ahead_count(path: &Path, branch: &str) -> GitResult {
+    run_git(path, &["rev-list", "--count", &format!("@{{upstream}}..{}", branch)])
+}
+
+pub fn branch_behind_count(path: &Path, branch: &str) -> GitResult {
+    run_git(path, &["rev-list", "--count", &format!("{}..@{{upstream}}", branch)])
+}
+
+pub fn branch_tip_info(path: &Path, branch: &str) -> GitResult {
+    run_git(path, &["log", "-1", "--format=%H %s", branch])
+}
+
+// --- Tag Metadata ---
+
+pub fn tag_metadata(path: &Path, tag: &str) -> GitResult {
+    run_git(
+        path,
+        &[
+            "for-each-ref",
+            "--format=%(objecttype)%x00%(objectname)%x00%(*objectname)%x00%(taggername)%x00%(taggeremail)%x00%(taggerdate:iso-strict)%x00%(contents:subject)",
+            &format!("refs/tags/{}", tag),
+        ],
+    )
+}
+
+pub fn tag_target_info(path: &Path, tag: &str) -> GitResult {
+    run_git(path, &["log", "-1", "--format=%H %s", tag])
+}

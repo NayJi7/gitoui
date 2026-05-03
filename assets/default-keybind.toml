@@ -50,3 +50,36 @@ drop = ["d"]
 merge = ["m"]
 rebase = ["e"]
 reset = ["s"]
+
+# Phase 2 - Branch detail actions
+rename_branch = ["r"]
+delete_branch = ["D"]
+push_branch = ["p"]
+pull_branch = ["l"]
+create_archive = ["a"]
+unselect_branch = ["u"]
+copy_branch_name = ["c"]
+
+# Phase 2 - Tag detail actions
+delete_tag = ["D"]
+push_tag = ["p"]
+copy_tag_name = ["c"]
+
+# Phase 2 - Uncommitted actions
+stage = ["a"]
+stage_all = ["A"]
+unstage = ["u"]
+unstage_all = ["U"]
+discard = ["x"]
+discard_all = ["X"]
+stash = ["i"]
+commit = ["w"]
+clean_untracked = ["v"]
+
+# Phase 2 - Stash actions
+apply_stash = ["y"]
+pop_stash = ["P"]
+drop_stash = ["D"]
+create_branch_from_stash = ["B"]
+copy_stash_name = ["I"]
+copy_stash_hash = ["O"]

@@ -320,12 +320,22 @@ impl<'a> ListView<'a> {
         }
     }
 
-    pub fn handle_click(&mut self, _col: u16, row: u16) {
+    pub fn handle_click(&mut self, col: u16, row: u16) {
         if let Some(list_state) = self.commit_list_state.as_mut() {
             let header_height = 2u16;
             if row < header_height {
                 return;
             }
+
+            if let Some(branch_name) = list_state.branch_at_position(col, row) {
+                self.tx.send(AppEvent::OpenBranchDetail { branch_name });
+                return;
+            }
+            if let Some(tag_name) = list_state.tag_at_position(col, row) {
+                self.tx.send(AppEvent::OpenTagDetail { tag_name });
+                return;
+            }
+
             let (_, offset, height) = list_state.current_list_status();
             let row = (row - header_height) as usize;
             if row < height {
@@ -347,19 +357,34 @@ impl<'a> ListView<'a> {
         }
     }
 
-    pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         if let Some(list_state) = self.commit_list_state.as_mut() {
             let header_height = 2u16;
             if row < header_height {
+                list_state.set_hovered_branch(None);
+                list_state.set_hovered_tag(None);
+                list_state.set_hovered_row(None);
                 return;
             }
             let (selected, offset, height) = list_state.current_list_status();
-            let row = (row - header_height) as usize;
-            if row < height {
-                let hover_idx = offset + row;
-                let current_selected = offset + selected;
-                if hover_idx != current_selected {
-                    list_state.select(hover_idx);
+            let visible_row = (row - header_height) as usize;
+
+            if let Some(branch_name) = list_state.branch_at_position(col, row) {
+                list_state.set_hovered_branch(Some(branch_name));
+                list_state.set_hovered_row(Some(visible_row));
+            } else if let Some(tag_name) = list_state.tag_at_position(col, row) {
+                list_state.set_hovered_tag(Some(tag_name));
+                list_state.set_hovered_row(Some(visible_row));
+            } else {
+                list_state.set_hovered_branch(None);
+                list_state.set_hovered_tag(None);
+                list_state.set_hovered_row(None);
+                if visible_row < height {
+                    let hover_idx = offset + visible_row;
+                    let current_selected = offset + selected;
+                    if hover_idx != current_selected {
+                        list_state.select(hover_idx);
+                    }
                 }
             }
         }

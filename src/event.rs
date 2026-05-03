@@ -91,6 +91,8 @@ pub enum DialogKind {
     ConfirmDiscardAll,
     ConfirmStageAll,
     ConfirmUnstageAll,
+    ConfirmPopStash { stash_ref: String },
+    ConfirmDropStash { stash_ref: String },
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +113,7 @@ pub enum GitAction {
     PushBranch { force: bool },
     PullBranch { rebase: bool },
     Fetch,
+    CreateArchive,
     // Tag actions
     DeleteTag,
     PushTag,
@@ -325,6 +328,35 @@ pub enum UserEvent {
     Merge,
     Rebase,
     Reset,
+    // Phase 2 - Uncommitted actions
+    Stage,
+    StageAll,
+    Unstage,
+    UnstageAll,
+    Discard,
+    DiscardAll,
+    Stash,
+    Commit,
+    CleanUntracked,
+    // Phase 2 - Branch actions
+    RenameBranch,
+    DeleteBranch,
+    PushBranch,
+    PullBranch,
+    CreateArchive,
+    UnselectBranch,
+    CopyBranchName,
+    // Phase 2 - Tag actions
+    DeleteTag,
+    PushTag,
+    CopyTagName,
+    // Phase 2 - Stash actions
+    ApplyStash,
+    PopStash,
+    DropStash,
+    CreateBranchFromStash,
+    CopyStashName,
+    CopyStashHash,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -397,6 +429,31 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "merge" => Ok(UserEvent::Merge),
                         "rebase" => Ok(UserEvent::Rebase),
                         "reset" => Ok(UserEvent::Reset),
+                        "stage" => Ok(UserEvent::Stage),
+                        "stage_all" => Ok(UserEvent::StageAll),
+                        "unstage" => Ok(UserEvent::Unstage),
+                        "unstage_all" => Ok(UserEvent::UnstageAll),
+                        "discard" => Ok(UserEvent::Discard),
+                        "discard_all" => Ok(UserEvent::DiscardAll),
+                        "stash" => Ok(UserEvent::Stash),
+                        "commit" => Ok(UserEvent::Commit),
+                        "clean_untracked" => Ok(UserEvent::CleanUntracked),
+                        "rename_branch" => Ok(UserEvent::RenameBranch),
+                        "delete_branch" => Ok(UserEvent::DeleteBranch),
+                        "push_branch" => Ok(UserEvent::PushBranch),
+                        "pull_branch" => Ok(UserEvent::PullBranch),
+                        "create_archive" => Ok(UserEvent::CreateArchive),
+                        "unselect_branch" => Ok(UserEvent::UnselectBranch),
+                        "copy_branch_name" => Ok(UserEvent::CopyBranchName),
+                        "delete_tag" => Ok(UserEvent::DeleteTag),
+                        "push_tag" => Ok(UserEvent::PushTag),
+                        "copy_tag_name" => Ok(UserEvent::CopyTagName),
+                        "apply_stash" => Ok(UserEvent::ApplyStash),
+                        "pop_stash" => Ok(UserEvent::PopStash),
+                        "drop_stash" => Ok(UserEvent::DropStash),
+                        "create_branch_from_stash" => Ok(UserEvent::CreateBranchFromStash),
+                        "copy_stash_name" => Ok(UserEvent::CopyStashName),
+                        "copy_stash_hash" => Ok(UserEvent::CopyStashHash),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

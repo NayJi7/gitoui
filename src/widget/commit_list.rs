@@ -228,6 +228,15 @@ impl SearchMatcher {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RefHitArea {
+    pub row: u16,
+    pub col_start: u16,
+    pub col_end: u16,
+    pub name: String,
+    pub is_tag: bool,
+}
+
 #[derive(Debug)]
 pub struct CommitListState<'a> {
     commits: Vec<CommitInfo<'a>>,
@@ -252,6 +261,11 @@ pub struct CommitListState<'a> {
 
     default_ignore_case: bool,
     default_fuzzy: bool,
+
+    pub ref_hit_areas: Vec<RefHitArea>,
+    pub hovered_branch: Option<String>,
+    pub hovered_tag: Option<String>,
+    pub hovered_row: Option<usize>,
 }
 
 impl<'a> CommitListState<'a> {
@@ -303,6 +317,10 @@ impl<'a> CommitListState<'a> {
             height: 0,
             default_ignore_case,
             default_fuzzy,
+            ref_hit_areas: Vec::new(),
+            hovered_branch: None,
+            hovered_tag: None,
+            hovered_row: None,
         }
     }
 
@@ -612,6 +630,38 @@ impl<'a> CommitListState<'a> {
             } => Some((ignore_case, fuzzy)),
             _ => None,
         }
+    }
+
+    pub fn branch_at_position(&self, col: u16, row: u16) -> Option<String> {
+        self.ref_hit_areas.iter().find_map(|hit| {
+            if !hit.is_tag && hit.row == row && col >= hit.col_start && col < hit.col_end {
+                Some(hit.name.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn tag_at_position(&self, col: u16, row: u16) -> Option<String> {
+        self.ref_hit_areas.iter().find_map(|hit| {
+            if hit.is_tag && hit.row == row && col >= hit.col_start && col < hit.col_end {
+                Some(hit.name.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn set_hovered_branch(&mut self, branch: Option<String>) {
+        self.hovered_branch = branch;
+    }
+
+    pub fn set_hovered_tag(&mut self, tag: Option<String>) {
+        self.hovered_tag = tag;
+    }
+
+    pub fn set_hovered_row(&mut self, row: Option<usize>) {
+        self.hovered_row = row;
     }
 
     pub fn start_search(&mut self) {
@@ -932,6 +982,8 @@ impl<'a> StatefulWidget for CommitList<'a> {
             return;
         }
 
+        state.ref_hit_areas.clear();
+
         let (header_area, rows_area) = if area.height >= 2 {
             (
                 Some(Rect::new(area.x, area.y, area.width, 2)),
@@ -1054,61 +1106,83 @@ impl CommitList<'_> {
         if area.is_empty() {
             return;
         }
+        use crate::git::CommitType;
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
-            .map(|(_, commit_info)| ListItem::new("│".fg(commit_info.graph_color)))
+            .map(|(_, commit_info)| {
+                let marker = if commit_info.commit().map_or(false, |c| matches!(c.commit_type, CommitType::Stash)) {
+                    "◉"
+                } else {
+                    "│"
+                };
+                ListItem::new(marker.fg(commit_info.graph_color))
+            })
             .collect();
         Widget::render(List::new(items), area, buf)
     }
 
-    fn render_subject(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
+    fn render_subject(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
         }
-        let items: Vec<ListItem> = self
-            .rendering_commit_info_iter(state)
-            .map(|(i, commit_info)| {
-                if commit_info.is_uncommitted {
-                    return self.render_uncommitted_subject(i, commit_info, state);
-                }
-                let mut spans = refs_spans(
-                    commit_info,
-                    state.head,
-                    &state.search_matches[state.offset + i].refs,
-                    &self.ctx.color_theme,
-                    &state.branch_color_map,
-                );
-                let ref_spans_width: usize = spans.iter().map(|s| s.width()).sum();
-                let max_width = max_width.saturating_sub(ref_spans_width);
-                let commit = commit_info.commit.unwrap();
-                if max_width > ELLIPSIS.len() {
-                    let truncate = console::measure_text_width(&commit.subject) > max_width;
-                    let subject = if truncate {
-                        console::truncate_str(&commit.subject, max_width, ELLIPSIS).to_string()
+        let mut items: Vec<ListItem> = Vec::new();
+        for (i, commit_info) in state.commits.iter().skip(state.offset).take(state.height).enumerate() {
+            if commit_info.is_uncommitted {
+                items.push(self.render_uncommitted_subject(i, commit_info, state));
+                continue;
+            }
+            let (mut spans, hit_areas) = refs_spans(
+                commit_info,
+                state.head,
+                &state.search_matches[state.offset + i].refs,
+                &self.ctx.color_theme,
+                &state.branch_color_map,
+                state.hovered_branch.as_deref(),
+                state.hovered_tag.as_deref(),
+            );
+
+            // Store hit areas with absolute positions
+            let base_x = area.x + 1; // +1 for leading space in to_commit_list_item
+            for hit in hit_areas {
+                state.ref_hit_areas.push(RefHitArea {
+                    row: area.y + i as u16,
+                    col_start: base_x + hit.start as u16,
+                    col_end: base_x + hit.end as u16,
+                    name: hit.name,
+                    is_tag: hit.is_tag,
+                });
+            }
+
+            let ref_spans_width: usize = spans.iter().map(|s| s.width()).sum();
+            let max_width = max_width.saturating_sub(ref_spans_width);
+            let commit = commit_info.commit.unwrap();
+            if max_width > ELLIPSIS.len() {
+                let truncate = console::measure_text_width(&commit.subject) > max_width;
+                let subject = if truncate {
+                    console::truncate_str(&commit.subject, max_width, ELLIPSIS).to_string()
+                } else {
+                    commit.subject.to_string()
+                };
+
+                let sub_spans =
+                    if let Some(pos) = state.search_matches[state.offset + i].subject.clone() {
+                        highlighted_spans(
+                            subject.into(),
+                            pos,
+                            self.ctx.color_theme.list_subject_fg,
+                            Modifier::empty(),
+                            &self.ctx.color_theme,
+                            truncate,
+                        )
                     } else {
-                        commit.subject.to_string()
+                        vec![subject.fg(self.ctx.color_theme.list_subject_fg)]
                     };
 
-                    let sub_spans =
-                        if let Some(pos) = state.search_matches[state.offset + i].subject.clone() {
-                            highlighted_spans(
-                                subject.into(),
-                                pos,
-                                self.ctx.color_theme.list_subject_fg,
-                                Modifier::empty(),
-                                &self.ctx.color_theme,
-                                truncate,
-                            )
-                        } else {
-                            vec![subject.fg(self.ctx.color_theme.list_subject_fg)]
-                        };
-
-                    spans.extend(sub_spans)
-                }
-                self.to_commit_list_item(i, spans, state)
-            })
-            .collect();
+                spans.extend(sub_spans)
+            }
+            items.push(self.to_commit_list_item(i, spans, state));
+        }
         Widget::render(List::new(items), area, buf);
     }
 
@@ -1137,7 +1211,7 @@ impl CommitList<'_> {
                 let spans =
                     if let Some(pos) = state.search_matches[state.offset + i].author_name.clone() {
                         highlighted_spans(
-                            name.into(),
+                (*name).into(),
                             pos,
                             self.ctx.color_theme.list_name_fg,
                             Modifier::empty(),
@@ -1266,7 +1340,7 @@ impl CommitList<'_> {
         spans.insert(0, Span::raw(" "));
         spans.push(Span::raw(" "));
         let mut line = Line::from(spans);
-        if i == state.selected {
+        if i == state.selected && state.hovered_row != Some(i) {
             line = line
                 .bg(self.ctx.color_theme.list_selected_bg)
                 .fg(self.ctx.color_theme.list_selected_fg);
@@ -1275,34 +1349,55 @@ impl CommitList<'_> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RefHitAreaRel {
+    pub start: usize,
+    pub end: usize,
+    pub name: String,
+    pub is_tag: bool,
+}
+
 fn refs_spans<'a>(
     commit_info: &'a CommitInfo,
     head: &'a Head,
     refs_matches: &'a FxHashMap<String, SearchMatchPosition>,
     color_theme: &'a ColorTheme,
     branch_color_map: &'a FxHashMap<String, Color>,
-) -> Vec<Span<'a>> {
+    hovered_branch: Option<&str>,
+    hovered_tag: Option<&str>,
+) -> (Vec<Span<'a>>, Vec<RefHitAreaRel>) {
     let refs = &commit_info.refs;
 
     if refs.len() == 1 {
         if let Ref::Stash { name, .. } = refs[0] {
-            return vec![
-                Span::raw("📦 ").fg(color_theme.list_ref_stash_fg).bold(),
-                Span::raw(name).fg(color_theme.list_ref_stash_fg).bold(),
-                Span::raw(" "),
-            ];
+            return (
+                vec![
+                    Span::raw("📦 ").fg(color_theme.list_ref_stash_fg).bold(),
+                    Span::raw(name).fg(color_theme.list_ref_stash_fg).bold(),
+                    Span::raw(" "),
+                ],
+                vec![],
+            );
         }
     }
 
-    let ref_spans: Vec<(Vec<Span>, &String)> = refs
-        .iter()
-        .filter_map(|r| match r {
+    let mut spans = Vec::new();
+    let mut hit_areas = Vec::new();
+    let mut current_width = 0;
+
+    spans.push(Span::raw("(").fg(color_theme.list_ref_paren_fg).bold());
+    current_width += 1;
+
+    // Collect ref info first
+    let mut ref_infos: Vec<(&'a str, Color, bool)> = Vec::new();
+    for r in refs.iter() {
+        match r {
             Ref::Branch { name, .. } => {
                 let fg = branch_color_map
                     .get(name)
                     .copied()
                     .unwrap_or(color_theme.list_ref_branch_fg);
-                Some((name, fg, "branch"))
+                ref_infos.push((name, fg, false));
             }
             Ref::RemoteBranch { name, .. } => {
                 let fg = branch_color_map
@@ -1313,78 +1408,106 @@ fn refs_spans<'a>(
                             .and_then(|(_, branch)| branch_color_map.get(branch).copied())
                     })
                     .unwrap_or(color_theme.list_ref_remote_branch_fg);
-                Some((name, fg, "remote"))
+                ref_infos.push((name, fg, false));
             }
             Ref::Tag { name, .. } => {
                 let fg = color_theme.list_ref_tag_fg;
-                Some((name, fg, "tag"))
+                ref_infos.push((name, fg, true));
             }
-            Ref::Stash { .. } => None,
-        })
-        .map(|(name, fg, ref_type)| {
-            let mut spans = Vec::new();
-
-            match ref_type {
-                "branch" | "remote" => {
-                    spans.push(Span::raw("⎇ ").fg(fg).bold());
-                }
-                "tag" => {
-                    spans.push(Span::raw("🏷 ").fg(fg).bold());
-                }
-                _ => {}
-            }
-
-            let name_spans = refs_matches
-                .get(name)
-                .map(|pos| {
-                    highlighted_spans(
-                        name.into(),
-                        pos.clone(),
-                        fg,
-                        Modifier::BOLD,
-                        color_theme,
-                        false,
-                    )
-                })
-                .unwrap_or_else(|| vec![Span::raw(name).fg(fg).bold()]);
-            spans.extend(name_spans);
-            (spans, name)
-        })
-        .collect();
-
-    let mut spans = vec![Span::raw("(").fg(color_theme.list_ref_paren_fg).bold()];
+            Ref::Stash { .. } => {}
+        }
+    }
 
     if let Head::Detached { target } = head {
         if let Some(commit) = commit_info.commit {
             if commit.commit_hash == *target {
                 spans.push(Span::raw("HEAD").fg(color_theme.list_head_fg).bold());
-                if !ref_spans.is_empty() {
+                current_width += 4;
+                if !ref_infos.is_empty() {
                     spans.push(Span::raw(", ").fg(color_theme.list_ref_paren_fg).bold());
+                    current_width += 2;
                 }
             }
         }
     }
 
-    for (i, ss) in ref_spans.into_iter().enumerate() {
-        let (ref_spans, ref_name) = ss;
-        if let Head::Branch { name } = head {
-            if ref_name == name {
+    for (i, (name, fg, is_tag)) in ref_infos.iter().enumerate() {
+        if let Head::Branch { name: head_name } = head {
+            if *name == head_name {
                 spans.push(Span::raw("HEAD -> ").fg(color_theme.list_head_fg).bold());
+                current_width += 8;
             }
         }
-        spans.extend(ref_spans);
-        if i < refs.len() - 1 {
+
+        let is_hovered = if *is_tag {
+            hovered_tag == Some(*name)
+        } else {
+            hovered_branch == Some(*name)
+        };
+
+        let icon = if *is_tag {
+            Span::raw("🏷 ").fg(*fg).bold()
+        } else {
+            Span::raw("⎇ ").fg(*fg).bold()
+        };
+        let icon_width = icon.width();
+        spans.push(icon);
+        current_width += icon_width;
+
+        let name_start = current_width;
+        let name_spans = refs_matches
+            .get(*name)
+            .map(|pos| {
+                highlighted_spans(
+                    (*name).into(),
+                    pos.clone(),
+                    *fg,
+                    if is_hovered {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::BOLD
+                    },
+                    color_theme,
+                    false,
+                )
+            })
+            .unwrap_or_else(|| {
+                let modifier = if is_hovered {
+                    Modifier::BOLD | Modifier::UNDERLINED
+                } else {
+                    Modifier::BOLD
+                };
+                vec![Span::styled(*name, Style::default().fg(*fg).add_modifier(modifier))]
+            });
+
+        for span in &name_spans {
+            current_width += span.width();
+        }
+        spans.extend(name_spans);
+
+        hit_areas.push(RefHitAreaRel {
+            start: name_start,
+            end: current_width,
+            name: (*name).to_string(),
+            is_tag: *is_tag,
+        });
+
+        if i < ref_infos.len() - 1 {
             spans.push(Span::raw(", ").fg(color_theme.list_ref_paren_fg).bold());
+            current_width += 2;
         }
     }
 
     spans.push(Span::raw(") ").fg(color_theme.list_ref_paren_fg).bold());
+    current_width += 2;
 
     if spans.len() == 2 {
-        spans.clear(); // contains only "(" and ")", so clear it
+        // Only "(" and ")"
+        spans.clear();
+        hit_areas.clear();
     }
 
-    spans
+    (spans, hit_areas)
 }
 
 fn highlighted_spans(

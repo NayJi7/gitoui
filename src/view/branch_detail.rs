@@ -1,19 +1,210 @@
 use std::rc::Rc;
+
 use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
-use crate::{app::AppContext, event::{AppEvent, Sender, UserEventWithCount}, git::{Commit, FileChange, Ref}, view::{ListRefreshViewContext, RefreshViewContext}, widget::commit_list::CommitListState};
+
+use crate::{
+    app::AppContext,
+    event::{AppEvent, DialogKind, GitAction, Sender, UserEvent, UserEventWithCount},
+    widget::branch_detail::{BranchDetail, BranchDetailState, BranchMetadata},
+    widget::commit_list::CommitListState,
+};
 
 #[derive(Debug)]
 pub struct BranchDetailView<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
+    commit_list_state: Option<CommitListState<'a>>,
+    branch_detail_state: BranchDetailState,
+    metadata: BranchMetadata,
     ctx: Rc<AppContext>,
     tx: Sender,
+    detail_area: Option<Rect>,
 }
 
 impl<'a> BranchDetailView<'a> {
-    pub fn new(branch_name: String, ctx: Rc<AppContext>, tx: Sender) -> Self {
-        Self { _phantom: std::marker::PhantomData, ctx, tx }
+    pub fn new(
+        _branch_name: String,
+        metadata: BranchMetadata,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        Self {
+            commit_list_state: None,
+            branch_detail_state: BranchDetailState::default(),
+            metadata,
+            ctx,
+            tx,
+            detail_area: None,
+        }
     }
-    pub fn handle_event(&mut self, _event_with_count: UserEventWithCount, _key_event: KeyEvent) {}
-    pub fn render(&mut self, _f: &mut Frame, _area: Rect) {}
+
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
+        let event = event_with_count.event;
+        match event {
+            UserEvent::Cancel | UserEvent::Close => {
+                self.tx.send(AppEvent::CloseDetail);
+            }
+            UserEvent::Checkout => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                    target: self.metadata.branch_name.clone(),
+                    is_branch: true,
+                }));
+            }
+            UserEvent::RenameBranch => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::RenameBranch {
+                    branch: self.metadata.branch_name.clone(),
+                }));
+            }
+            UserEvent::DeleteBranch => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteBranch {
+                    branch: self.metadata.branch_name.clone(),
+                    is_remote: self.metadata.is_remote,
+                }));
+            }
+            UserEvent::Merge => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                    target: self.metadata.branch_name.clone(),
+                    is_branch: true,
+                }));
+            }
+            UserEvent::Rebase => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase {
+                    target: self.metadata.branch_name.clone(),
+                }));
+            }
+            UserEvent::PushBranch => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
+                    branch: self.metadata.branch_name.clone(),
+                }));
+            }
+            UserEvent::PullBranch => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::PullBranch {
+                    branch: self.metadata.branch_name.clone(),
+                }));
+            }
+            UserEvent::CreateArchive => {
+                self.tx.send(AppEvent::ExecuteGitAction {
+                    target: self.metadata.branch_name.clone(),
+                    action: GitAction::CreateArchive,
+                });
+            }
+            UserEvent::UnselectBranch => {
+                self.tx.send(AppEvent::NotifyInfo(
+                    "Unselect branch not yet implemented".into(),
+                ));
+            }
+            UserEvent::CopyBranchName => {
+                self.tx.send(AppEvent::CopyToClipboard {
+                    name: "Branch Name".into(),
+                    value: self.metadata.branch_name.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        let branch_detail = BranchDetail::new(&self.metadata, self.ctx.clone());
+        f.render_stateful_widget(branch_detail, area, &mut self.branch_detail_state);
+        self.detail_area = Some(area);
+    }
+
     pub fn update_layout(&mut self, _area: Rect) {}
+}
+
+impl<'a> BranchDetailView<'a> {
+    pub fn take_list_state(&mut self) -> Option<CommitListState<'a>> {
+        self.commit_list_state.take()
+    }
+
+    pub fn set_list_state(&mut self, state: CommitListState<'a>) {
+        self.commit_list_state = Some(state);
+    }
+
+    pub fn refresh(&self) {
+        // Metadata refresh is handled by the app when re-opening the view
+    }
+
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        if let Some(detail_area) = self.detail_area {
+            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= action_bar_x && row >= detail_area.y {
+                let action_bar_row = (row - detail_area.y).saturating_sub(1) as usize;
+                if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
+                    self.execute_action(action_idx);
+                }
+            }
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        if let Some(detail_area) = self.detail_area {
+            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= action_bar_x && row >= detail_area.y {
+                let action_bar_row = (row - detail_area.y).saturating_sub(1) as usize;
+                self.branch_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
+            } else {
+                self.branch_detail_state.hovered_action = None;
+            }
+        }
+    }
+
+    fn action_index_at_row(&self, action_bar_row: usize) -> Option<usize> {
+        let actions = if self.metadata.is_remote {
+            crate::widget::branch_detail::REMOTE_BRANCH_ACTIONS
+        } else {
+            crate::widget::branch_detail::LOCAL_BRANCH_ACTIONS
+        };
+        if action_bar_row < actions.len() {
+            Some(action_bar_row)
+        } else {
+            None
+        }
+    }
+
+    fn execute_action(&self, action_idx: usize) {
+        let actions = if self.metadata.is_remote {
+            crate::widget::branch_detail::REMOTE_BRANCH_ACTIONS
+        } else {
+            crate::widget::branch_detail::LOCAL_BRANCH_ACTIONS
+        };
+        if let Some((_, key)) = actions.get(action_idx) {
+            match *key {
+                'o' => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                    target: self.metadata.branch_name.clone(),
+                    is_branch: true,
+                })),
+                'r' => self.tx.send(AppEvent::OpenDialog(DialogKind::RenameBranch {
+                    branch: self.metadata.branch_name.clone(),
+                })),
+                'D' => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteBranch {
+                    branch: self.metadata.branch_name.clone(),
+                    is_remote: self.metadata.is_remote,
+                })),
+                'm' => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                    target: self.metadata.branch_name.clone(),
+                    is_branch: true,
+                })),
+                'e' => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase {
+                    target: self.metadata.branch_name.clone(),
+                })),
+                'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
+                    branch: self.metadata.branch_name.clone(),
+                })),
+                'l' => self.tx.send(AppEvent::OpenDialog(DialogKind::PullBranch {
+                    branch: self.metadata.branch_name.clone(),
+                })),
+                'a' => self.tx.send(AppEvent::ExecuteGitAction {
+                    target: self.metadata.branch_name.clone(),
+                    action: GitAction::CreateArchive,
+                }),
+                'u' => self.tx.send(AppEvent::NotifyInfo(
+                    "Unselect branch not yet implemented".into(),
+                )),
+                'c' => self.tx.send(AppEvent::CopyToClipboard {
+                    name: "Branch Name".into(),
+                    value: self.metadata.branch_name.clone(),
+                }),
+                _ => {}
+            }
+        }
+    }
 }

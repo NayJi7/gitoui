@@ -111,6 +111,15 @@ pub const COMMIT_ACTIONS: &[(&str, char)] = &[
     ("Reset current to", 's'),
 ];
 
+pub const STASH_ACTIONS: &[(&str, char)] = &[
+    ("Apply Stash", 'y'),
+    ("Pop Stash", 'P'),
+    ("Drop Stash", 'D'),
+    ("Create Branch from Stash", 'B'),
+    ("Copy Stash Name", 'I'),
+    ("Copy Stash Hash", 'O'),
+];
+
 impl StatefulWidget for CommitDetail<'_> {
     type State = CommitDetailState;
 
@@ -180,8 +189,14 @@ impl CommitDetail<'_> {
         let inner = block.inner(area);
         block.render(area, buf);
 
+        let actions = if self.is_stash() {
+            STASH_ACTIONS
+        } else {
+            COMMIT_ACTIONS
+        };
+
         let mut lines = Vec::new();
-        for (i, (label, key)) in COMMIT_ACTIONS.iter().enumerate() {
+        for (i, (label, key)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -198,6 +213,11 @@ impl CommitDetail<'_> {
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg));
         paragraph.render(inner, buf);
+    }
+
+    fn is_stash(&self) -> bool {
+        use crate::git::CommitType;
+        matches!(self.commit.commit_type, CommitType::Stash)
     }
 
     fn contents(&self, area: Rect) -> (Vec<Line<'_>>, Vec<Line<'_>>, usize) {
