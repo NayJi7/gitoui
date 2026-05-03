@@ -296,7 +296,6 @@ fn build_single_graph_row_image(
         is_stash,
         is_uncommitted,
         commit_color,
-        &graph.commits,
     )
 }
 
@@ -669,7 +668,6 @@ pub fn calc_graph_row_image(
     is_stash: bool,
     is_uncommitted: bool,
     commit_color: image::Rgba<u8>,
-    commits: &[&crate::git::Commit],
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -756,7 +754,7 @@ pub fn calc_graph_row_image(
                 let max_y = seg.target_pos_y.max(seg.source_pos_y);
                 if pos_y >= min_y && pos_y <= max_y {
                     draw_smooth_bezier_segment(
-                        &mut img_buf, seg, pos_y, image_params, cell_count, &commits,
+                        &mut img_buf, &seg, pos_y, image_params, cell_count,
                     );
                 }
             }
@@ -1106,7 +1104,6 @@ fn draw_smooth_bezier_segment(
     row_y: usize,
     image_params: &ImageParams,
     cell_count: usize,
-    commits: &[&crate::git::Commit],
 ) {
     let cell_width = image_params.width as i32;
     let cell_height = image_params.height as i32;
@@ -1145,13 +1142,7 @@ fn draw_smooth_bezier_segment(
     let cp2x = x2;
     let cp2y = y2 - d;
 
-    let uses_grey = commits[segment.source_pos_y].commit_type == crate::git::CommitType::Uncommitted 
-                  || commits[segment.target_pos_y].commit_type == crate::git::CommitType::Uncommitted;
-    let color = if uses_grey {
-        image::Rgba([59, 66, 97, 0xff]) // Grey-blue like Uncommitted
-    } else {
-        image_params.edge_color(segment.color_index)
-    };
+    let color = image_params.edge_color(segment.color_index);
     let radius = (image_params.line_width as i32).max(1) / 2;
 
     // Sample points along the Bezier curve, clipping to current row
