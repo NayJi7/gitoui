@@ -4,12 +4,23 @@ use crate::git::{Commit, CommitHash, Repository};
 
 type CommitPosMap<'a> = FxHashMap<&'a CommitHash, (usize, usize)>;
 
+#[derive(Debug, Clone)]
+pub struct BranchSegment {
+    pub source_pos_x: usize,
+    pub target_pos_x: usize,
+    pub source_pos_y: usize,
+    pub target_pos_y: usize,
+    pub color_index: usize,
+    pub is_branch: bool,
+}
+
 #[derive(Debug)]
 pub struct Graph<'a> {
     pub commits: Vec<&'a Commit>,
     pub commit_pos_map: CommitPosMap<'a>,
     pub edges: Vec<Vec<Edge>>,
     pub max_pos_x: usize,
+    pub branch_segments: Vec<BranchSegment>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,13 +64,14 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
     let commits = repository.all_commits();
 
     let commit_pos_map = calc_commit_positions(&commits, repository);
-    let (graph_edges, max_pos_x) = calc_edges(&commit_pos_map, &commits, repository);
+    let (graph_edges, max_pos_x, branch_segments) = calc_edges(&commit_pos_map, &commits, repository);
 
     Graph {
         commits,
         commit_pos_map,
         edges: graph_edges,
         max_pos_x,
+        branch_segments,
     }
 }
 
@@ -168,9 +180,10 @@ fn calc_edges(
     commit_pos_map: &CommitPosMap,
     commits: &[&Commit],
     repository: &Repository,
-) -> (Vec<Vec<Edge>>, usize) {
+) -> (Vec<Vec<Edge>>, usize, Vec<BranchSegment>) {
     let mut max_pos_x = 0;
     let mut edges: Vec<Vec<WrappedEdge>> = vec![vec![]; commits.len()];
+    let mut branch_segments: Vec<BranchSegment> = Vec::new();
 
     for commit in commits {
         let (pos_x, pos_y) = commit_pos_map[&commit.commit_hash];
@@ -190,6 +203,14 @@ fn calc_edges(
                 let child_first_parent_hash = &commits[child_pos_y].parent_commit_hashes[0];
                 if *child_first_parent_hash == *hash {
                     // branch
+                    branch_segments.push(BranchSegment {
+                        source_pos_x: pos_x,
+                        target_pos_x: child_pos_x,
+                        source_pos_y: pos_y,
+                        target_pos_y: child_pos_y,
+                        color_index: pos_x,
+                        is_branch: true,
+                    });
                     if pos_x < child_pos_x {
                         edges[pos_y].push(WrappedEdge::new(
                             EdgeType::Right,
@@ -334,6 +355,14 @@ fn calc_edges(
 
                     if overlap {
                         // detour
+                        branch_segments.push(BranchSegment {
+                            source_pos_x: pos_x,
+                            target_pos_x: child_pos_x,
+                            source_pos_y: pos_y,
+                            target_pos_y: child_pos_y,
+                            color_index: pos_x,
+                            is_branch: false,
+                        });
                         edges[pos_y].push(WrappedEdge::new(EdgeType::Right, pos_x, pos_x, hash));
                         for x in (pos_x + 1)..new_pos_x {
                             edges[pos_y].push(WrappedEdge::new(
@@ -382,6 +411,14 @@ fn calc_edges(
                             max_pos_x = new_pos_x;
                         }
                     } else {
+                        branch_segments.push(BranchSegment {
+                            source_pos_x: pos_x,
+                            target_pos_x: child_pos_x,
+                            source_pos_y: pos_y,
+                            target_pos_y: child_pos_y,
+                            color_index: pos_x,
+                            is_branch: false,
+                        });
                         edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
                         for y in ((child_pos_y + 1)..pos_y).rev() {
                             edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
@@ -449,5 +486,5 @@ fn calc_edges(
         })
         .collect();
 
-    (edges, max_pos_x)
+    (edges, max_pos_x, branch_segments)
 }

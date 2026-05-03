@@ -1485,6 +1485,8 @@ fn build_graph_image(
                 graph_style,
                 false,
                 None,
+                &[],
+                0,
             );
             (edges.clone(), graph_row_image)
         })
