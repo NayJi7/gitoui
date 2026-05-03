@@ -164,6 +164,10 @@ impl<'a> HelpView<'a> {
         self.before.graph_image_ids_sorted()
     }
 
+    pub fn is_search_active(&self) -> bool {
+        self.before.is_search_active()
+    }
+
     fn scroll_down(&mut self) {
         self.offset = self.offset.saturating_add(1);
     }

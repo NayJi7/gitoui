@@ -138,35 +138,44 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub fn run() -> Result<()> {
     let args = Args::parse();
-    let (core_config, ui_config, graph_config, color_theme, keybind_patch) = config::load()?;
-    let keybind = keybind::KeyBind::new(keybind_patch);
-
-    let max_count = args.max_count;
-    let image_protocol = args.protocol.or(core_config.option.protocol).into();
-    let order = args.order.or(core_config.option.order).into();
-    let graph_width = args.graph_width.or(core_config.option.graph_width);
-    let graph_style = args.graph_style.or(core_config.option.graph_style).into();
-    let graph_image_width_mode = graph_config.row_image_width;
-    let initial_selection = args
-        .initial_selection
-        .or(core_config.option.initial_selection)
-        .into();
-
-    let graph_color_set = color::GraphColorSet::new(&graph_config.color);
-
-    let ctx = Rc::new(app::AppContext {
-        keybind,
-        core_config,
-        ui_config,
-        color_theme,
-        image_protocol,
-    });
 
     let ec = event::EventController::init();
     let mut refresh_view_context = None;
     let mut terminal = None;
 
     let ret = loop {
+        let (core_config, ui_config, graph_config, color_theme, keybind_patch) = match config::load()
+        {
+            Ok(config) => config,
+            Err(e) if terminal.is_none() => break Err(e),
+            Err(e) => {
+                eprintln!("Failed to reload config: {}", e);
+                continue;
+            }
+        };
+        let keybind = keybind::KeyBind::new(keybind_patch);
+
+        let max_count = args.max_count;
+        let image_protocol = args.protocol.or(core_config.option.protocol).into();
+        let order = args.order.or(core_config.option.order).into();
+        let graph_width = args.graph_width.or(core_config.option.graph_width);
+        let graph_style = args.graph_style.or(core_config.option.graph_style).into();
+        let graph_image_width_mode = graph_config.row_image_width;
+        let initial_selection = args
+            .initial_selection
+            .or(core_config.option.initial_selection)
+            .into();
+
+        let graph_color_set = color::GraphColorSet::new(&graph_config.color);
+
+        let ctx = Rc::new(app::AppContext {
+            keybind,
+            core_config,
+            ui_config,
+            color_theme,
+            image_protocol,
+        });
+
         let repository = git::Repository::load(Path::new("."), order, max_count)?;
 
         let graph = graph::calc_graph(&repository);
@@ -212,7 +221,7 @@ pub fn run() -> Result<()> {
                 continue;
             }
             Err(e) => {
-                break Err(e);
+                break Err(Box::new(e));
             }
         }
     };

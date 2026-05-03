@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -159,7 +159,7 @@ impl<'a> DiffView<'a> {
                 .take(content_area.height as usize)
                 .collect();
 
-            let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+            let paragraph = Paragraph::new(visible_lines);
             f.render_widget(paragraph, content_area);
         } else {
             let visible_lines: Vec<Line> = lines
@@ -168,7 +168,7 @@ impl<'a> DiffView<'a> {
                 .take(diff_area.height as usize)
                 .collect();
 
-            let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+            let paragraph = Paragraph::new(visible_lines);
             f.render_widget(paragraph, diff_area);
         }
     }
@@ -207,7 +207,7 @@ impl<'a> DiffView<'a> {
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
         let available_height = area.height;
-        let content_lines = self.count_diff_lines();
+        let content_lines = self.count_diff_lines(area.width);
 
         let min_diff_height = (available_height * 2) / 3;
         let ideal_diff_height = if content_lines > min_diff_height as usize {
@@ -228,15 +228,15 @@ impl<'a> DiffView<'a> {
         .areas(area)
     }
 
-    fn count_diff_lines(&self) -> usize {
-        let dummy_area = Rect::new(0, 0, 1000, 1);
+    fn count_diff_lines(&self, width: u16) -> usize {
+        let dummy_area = Rect::new(0, 0, width, 1);
         self.build_diff_lines(&dummy_area).len()
     }
 
     fn build_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
         match self.ctx.ui_config.common.diff_mode {
             DiffMode::Raw => self.build_raw_diff_lines(diff_area),
-            DiffMode::Enhanced => self.build_enhanced_diff_lines(),
+            DiffMode::Enhanced => self.build_enhanced_diff_lines(diff_area.width),
         }
     }
 
@@ -246,65 +246,96 @@ impl<'a> DiffView<'a> {
 
         for entry in &self.diff_entries {
             if let Some(path) = &entry.new_path {
-                lines.push(Line::from(Span::styled(
-                    format!("--- {}", path),
-                    Style::default()
-                        .fg(self.ctx.color_theme.detail_hash_fg)
-                        .add_modifier(Modifier::DIM),
-                )));
+                for chunk in wrap_text(&format!("--- {}", path), width) {
+                    lines.push(Line::from(Span::styled(
+                        chunk.to_string(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.detail_hash_fg)
+                            .add_modifier(Modifier::DIM),
+                    )));
+                }
             } else if let Some(path) = &entry.old_path {
-                lines.push(Line::from(Span::styled(
-                    format!("--- {}", path),
-                    Style::default()
-                        .fg(self.ctx.color_theme.detail_hash_fg)
-                        .add_modifier(Modifier::DIM),
-                )));
+                for chunk in wrap_text(&format!("--- {}", path), width) {
+                    lines.push(Line::from(Span::styled(
+                        chunk.to_string(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.detail_hash_fg)
+                            .add_modifier(Modifier::DIM),
+                    )));
+                }
             }
 
             if let Some(path) = &entry.new_path {
-                lines.push(Line::from(Span::styled(
-                    format!("+++ {}", path),
-                    Style::default()
-                        .fg(self.ctx.color_theme.detail_hash_fg)
-                        .add_modifier(Modifier::DIM),
-                )));
+                for chunk in wrap_text(&format!("+++ {}", path), width) {
+                    lines.push(Line::from(Span::styled(
+                        chunk.to_string(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.detail_hash_fg)
+                            .add_modifier(Modifier::DIM),
+                    )));
+                }
             }
 
             for hunk in &entry.hunks {
                 for diff_line in &hunk.lines {
-                    let line = match diff_line.line_type {
-                        DiffLineType::Context => Line::from(Span::styled(
-                            format!(" {}", diff_line.content),
-                            Style::default().fg(self.ctx.color_theme.fg),
-                        )),
-                        DiffLineType::Addition => Line::from(Span::styled(
-                            format!("+{}", diff_line.content),
-                            Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
-                        )),
-                        DiffLineType::Deletion => Line::from(Span::styled(
-                            format!("-{}", diff_line.content),
-                            Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
-                        )),
-                        DiffLineType::HunkHeader => Line::from(Span::styled(
-                            truncate_line(&diff_line.content, width),
-                            Style::default()
-                                .fg(self.ctx.color_theme.detail_hash_fg)
-                                .add_modifier(Modifier::DIM),
-                        )),
-                        DiffLineType::FileHeader => Line::from(Span::styled(
-                            diff_line.content.clone(),
-                            Style::default()
-                                .fg(self.ctx.color_theme.detail_hash_fg)
-                                .add_modifier(Modifier::DIM),
-                        )),
-                        DiffLineType::BinaryNote => Line::from(Span::styled(
-                            format!(" {}", diff_line.content),
-                            Style::default()
-                                .fg(self.ctx.color_theme.fg)
-                                .add_modifier(Modifier::DIM),
-                        )),
-                    };
-                    lines.push(line);
+                    match diff_line.line_type {
+                        DiffLineType::Context => {
+                            for chunk in wrap_text(&format!(" {}", diff_line.content), width) {
+                                lines.push(Line::from(Span::styled(
+                                    chunk.to_string(),
+                                    Style::default().fg(self.ctx.color_theme.fg),
+                                )));
+                            }
+                        }
+                        DiffLineType::Addition => {
+                            for chunk in wrap_text(&format!("+{}", diff_line.content), width) {
+                                lines.push(Line::from(Span::styled(
+                                    chunk.to_string(),
+                                    Style::default()
+                                        .fg(self.ctx.color_theme.detail_file_change_add_fg),
+                                )));
+                            }
+                        }
+                        DiffLineType::Deletion => {
+                            for chunk in wrap_text(&format!("-{}", diff_line.content), width) {
+                                lines.push(Line::from(Span::styled(
+                                    chunk.to_string(),
+                                    Style::default()
+                                        .fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                                )));
+                            }
+                        }
+                        DiffLineType::HunkHeader => {
+                            for chunk in wrap_text(&diff_line.content, width) {
+                                lines.push(Line::from(Span::styled(
+                                    chunk.to_string(),
+                                    Style::default()
+                                        .fg(self.ctx.color_theme.detail_hash_fg)
+                                        .add_modifier(Modifier::DIM),
+                                )));
+                            }
+                        }
+                        DiffLineType::FileHeader => {
+                            for chunk in wrap_text(&diff_line.content, width) {
+                                lines.push(Line::from(Span::styled(
+                                    chunk.to_string(),
+                                    Style::default()
+                                        .fg(self.ctx.color_theme.detail_hash_fg)
+                                        .add_modifier(Modifier::DIM),
+                                )));
+                            }
+                        }
+                        DiffLineType::BinaryNote => {
+                            for chunk in wrap_text(&format!(" {}", diff_line.content), width) {
+                                lines.push(Line::from(Span::styled(
+                                    chunk.to_string(),
+                                    Style::default()
+                                        .fg(self.ctx.color_theme.fg)
+                                        .add_modifier(Modifier::DIM),
+                                )));
+                            }
+                        }
+                    }
                 }
             }
 
@@ -314,7 +345,7 @@ impl<'a> DiffView<'a> {
         lines
     }
 
-    fn build_enhanced_diff_lines(&self) -> Vec<Line<'static>> {
+    fn build_enhanced_diff_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
         for (entry_idx, entry) in self.diff_entries.iter().enumerate() {
@@ -369,12 +400,14 @@ impl<'a> DiffView<'a> {
 
                 // Hunk header
                 if let Some(header_line) = hunk.lines.first() {
-                    lines.push(Line::from(vec![Span::styled(
-                        header_line.content.clone(),
-                        Style::default()
-                            .fg(Color::Rgb(86, 95, 137))
-                            .add_modifier(Modifier::ITALIC),
-                    )]));
+                    for chunk in wrap_text(&header_line.content, width as usize) {
+                        lines.push(Line::from(vec![Span::styled(
+                            chunk.to_string(),
+                            Style::default()
+                                .fg(Color::Rgb(86, 95, 137))
+                                .add_modifier(Modifier::ITALIC),
+                        )]));
+                    }
                 }
 
                 // Context/addition/deletion lines
@@ -383,68 +416,46 @@ impl<'a> DiffView<'a> {
                         DiffLineType::Addition => {
                             let line_num =
                                 format!("{:>4}", diff_line.new_line_no.unwrap_or(0));
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    line_num,
-                                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                                ),
-                                Span::styled(
-                                    " │ ",
-                                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                                ),
-                                Span::styled(
-                                    diff_line.content.clone(),
-                                    Style::default()
-                                        .fg(Color::Rgb(158, 206, 106))
-                                        .bg(Color::Rgb(29, 43, 59)),
-                                ),
-                            ]));
+                            lines.extend(wrap_diff_line(
+                                &diff_line.content,
+                                &line_num,
+                                Style::default()
+                                    .fg(Color::Rgb(158, 206, 106))
+                                    .bg(Color::Rgb(29, 43, 59)),
+                                width,
+                            ));
                         }
                         DiffLineType::Deletion => {
                             let line_num =
                                 format!("{:>4}", diff_line.old_line_no.unwrap_or(0));
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    line_num,
-                                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                                ),
-                                Span::styled(
-                                    " │ ",
-                                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                                ),
-                                Span::styled(
-                                    diff_line.content.clone(),
-                                    Style::default()
-                                        .fg(Color::Rgb(247, 118, 142))
-                                        .bg(Color::Rgb(59, 29, 43)),
-                                ),
-                            ]));
+                            lines.extend(wrap_diff_line(
+                                &diff_line.content,
+                                &line_num,
+                                Style::default()
+                                    .fg(Color::Rgb(247, 118, 142))
+                                    .bg(Color::Rgb(59, 29, 43)),
+                                width,
+                            ));
                         }
                         DiffLineType::Context => {
                             let line_num =
                                 format!("{:>4}", diff_line.old_line_no.unwrap_or(0));
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    line_num,
-                                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                                ),
-                                Span::styled(
-                                    " │ ",
-                                    Style::default().fg(Color::Rgb(59, 66, 97)),
-                                ),
-                                Span::styled(
-                                    diff_line.content.clone(),
-                                    Style::default().fg(Color::Rgb(192, 202, 245)),
-                                ),
-                            ]));
+                            lines.extend(wrap_diff_line(
+                                &diff_line.content,
+                                &line_num,
+                                Style::default().fg(Color::Rgb(192, 202, 245)),
+                                width,
+                            ));
                         }
                         DiffLineType::BinaryNote => {
-                            lines.push(Line::from(vec![Span::styled(
-                                diff_line.content.clone(),
-                                Style::default()
-                                    .fg(Color::Rgb(192, 202, 245))
-                                    .add_modifier(Modifier::DIM),
-                            )]));
+                            for chunk in wrap_text(&diff_line.content, width as usize) {
+                                lines.push(Line::from(vec![Span::styled(
+                                    chunk.to_string(),
+                                    Style::default()
+                                        .fg(Color::Rgb(192, 202, 245))
+                                        .add_modifier(Modifier::DIM),
+                                )]));
+                            }
                         }
                         _ => {}
                     }
@@ -565,10 +576,127 @@ impl<'a> DiffView<'a> {
     }
 }
 
-fn truncate_line(s: &str, max_width: usize) -> String {
-    if max_width > 0 && s.len() > max_width {
-        s[..max_width].to_string()
-    } else {
-        s.to_string()
+fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.chars().count() <= max_width {
+            lines.push(remaining);
+            break;
+        }
+
+        let char_indices: Vec<(usize, char)> =
+            remaining.char_indices().take(max_width + 1).collect();
+        let mut break_at = max_width;
+
+        while break_at > 0 {
+            if char_indices[break_at - 1].1.is_ascii_whitespace() {
+                break;
+            }
+            break_at -= 1;
+        }
+
+        if break_at == 0 {
+            break_at = max_width;
+        }
+
+        let byte_break = if break_at < char_indices.len() {
+            char_indices[break_at].0
+        } else {
+            remaining.len()
+        };
+
+        let (before, after) = remaining.split_at(byte_break);
+        if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
+            lines.push(before.trim_end());
+            remaining = after.trim_start();
+        } else {
+            lines.push(before);
+            remaining = after;
+        }
     }
+
+    lines
+}
+
+fn wrap_diff_line(
+    content: &str,
+    line_num_str: &str,
+    content_style: Style,
+    available_width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let line_num_width = 6; // "1234 │ " = 6 chars
+    let content_width = available_width.saturating_sub(line_num_width) as usize;
+
+    if content_width == 0 {
+        lines.push(Line::from(vec![
+            Span::styled(
+                line_num_str.to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            ),
+            Span::styled(content.to_string(), content_style),
+        ]));
+        return lines;
+    }
+
+    let mut remaining = content;
+    let mut first = true;
+
+    while !remaining.is_empty() {
+        let (chunk, rest) = if remaining.chars().count() > content_width {
+            let char_indices: Vec<(usize, char)> =
+                remaining.char_indices().take(content_width + 1).collect();
+            let mut break_at = content_width;
+
+            while break_at > 0 {
+                if char_indices[break_at - 1].1.is_ascii_whitespace() {
+                    break;
+                }
+                break_at -= 1;
+            }
+
+            if break_at == 0 {
+                break_at = content_width;
+            }
+
+            let byte_break = if break_at < char_indices.len() {
+                char_indices[break_at].0
+            } else {
+                remaining.len()
+            };
+
+            let (before, after) = remaining.split_at(byte_break);
+            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
+                (before.trim_end(), after.trim_start())
+            } else {
+                (before, after)
+            }
+        } else {
+            (remaining, "")
+        };
+
+        let num_span = if first {
+            Span::styled(
+                line_num_str.to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
+        } else {
+            Span::styled(
+                "     │ ".to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
+        };
+
+        lines.push(Line::from(vec![
+            num_span,
+            Span::styled(chunk.to_string(), content_style),
+        ]));
+
+        remaining = rest;
+        first = false;
+    }
+
+    lines
 }

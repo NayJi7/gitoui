@@ -152,6 +152,9 @@ impl<'a> ListView<'a> {
                 UserEvent::Refresh => {
                     self.refresh();
                 }
+                UserEvent::Config => {
+                    self.tx.send(AppEvent::OpenConfig);
+                }
                 _ => {}
             }
         }

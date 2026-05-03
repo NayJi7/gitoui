@@ -34,5 +34,8 @@ fuzzy_toggle = ["ctrl-x"]
 refresh = ["shift-r"]
 
 # copy part of information, ex: copy the short commit hash not all
+config = ["p"]
+
+# copy part of information, ex: copy the short commit hash not all
 short_copy = ["c"]
 full_copy = ["shift-c"]

@@ -1,5 +1,6 @@
 mod views;
 
+mod config;
 mod detail;
 mod diff;
 mod help;

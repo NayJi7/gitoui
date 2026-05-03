@@ -7,8 +7,8 @@ use crate::{
     event::{Sender, UserEventWithCount},
     git::{Commit, FileChange, Ref},
     view::{
-        detail::DetailView, diff::DiffView, help::HelpView, list::ListView, refs::RefsView,
-        user_command::UserCommandView,
+        config::ConfigView, detail::DetailView, diff::DiffView, help::HelpView, list::ListView,
+        refs::RefsView, user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -23,6 +23,7 @@ pub enum View<'a> {
     UserCommand(Box<UserCommandView<'a>>),
     Refs(Box<RefsView<'a>>),
     Help(Box<HelpView<'a>>),
+    Config(Box<ConfigView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -35,6 +36,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.handle_event(event_with_count, key_event),
             View::Refs(view) => view.handle_event(event_with_count, key_event),
             View::Help(view) => view.handle_event(event_with_count, key_event),
+            View::Config(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -47,6 +49,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.render(f, area),
             View::Refs(view) => view.render(f, area),
             View::Help(view) => view.render(f, area),
+            View::Config(view) => view.render(f, area),
         }
     }
 
@@ -59,6 +62,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.update_layout(area),
             View::Refs(view) => view.update_layout(area),
             View::Help(_) => {}
+            View::Config(_) => {}
         }
     }
 
@@ -71,6 +75,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.prepare_graph_uploads(),
             View::Refs(view) => view.prepare_graph_uploads(),
             View::Help(_) => {}
+            View::Config(_) => {}
         }
     }
 
@@ -83,6 +88,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.drain_pending_graph_uploads(),
             View::Refs(view) => view.drain_pending_graph_uploads(),
             View::Help(_) => Vec::new(),
+            View::Config(_) => Vec::new(),
         }
     }
 
@@ -95,6 +101,20 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.graph_image_ids_sorted(),
             View::Refs(view) => view.graph_image_ids_sorted(),
             View::Help(view) => view.graph_image_ids_sorted(),
+            View::Config(view) => view.graph_image_ids_sorted(),
+        }
+    }
+
+    pub fn is_search_active(&self) -> bool {
+        match self {
+            View::Default => false,
+            View::List(view) => view.as_list_state().search_state().is_active(),
+            View::Detail(view) => view.as_list_state().search_state().is_active(),
+            View::Diff(view) => view.as_list_state().search_state().is_active(),
+            View::UserCommand(view) => view.as_list_state().search_state().is_active(),
+            View::Refs(view) => view.as_list_state().search_state().is_active(),
+            View::Help(view) => view.is_search_active(),
+            View::Config(view) => view.is_search_active(),
         }
     }
 
@@ -169,12 +189,17 @@ impl<'a> View<'a> {
         View::Help(Box::new(HelpView::new(before, ctx, tx)))
     }
 
+    pub fn of_config(before: View<'a>, ctx: Rc<AppContext>, tx: Sender) -> Self {
+        View::Config(Box::new(ConfigView::new(before, ctx, tx)))
+    }
+
     pub fn handle_click(&mut self, col: u16, row: u16) {
         match self {
             View::List(view) => view.handle_click(col, row),
             View::Detail(view) => view.handle_click(col, row),
             View::Diff(view) => view.handle_click(col, row),
             View::UserCommand(view) => view.handle_click(col, row),
+            View::Refs(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -183,6 +208,7 @@ impl<'a> View<'a> {
         match self {
             View::List(view) => view.handle_mouse_move(col, row),
             View::Detail(view) => view.handle_mouse_move(col, row),
+            View::Refs(view) => view.handle_mouse_move(col, row),
             _ => {}
         }
     }
@@ -196,6 +222,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.refresh(),
             View::Refs(view) => view.refresh(),
             View::Help(_) => {}
+            View::Config(_) => {}
         }
     }
 }

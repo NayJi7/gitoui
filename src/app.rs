@@ -296,6 +296,14 @@ impl App<'_> {
                     terminal.clear()?;
                     self.close_help();
                 }
+                AppEvent::OpenConfig => {
+                    self.clear_image(None)?;
+                    self.open_config();
+                }
+                AppEvent::CloseConfig => {
+                    terminal.clear()?;
+                    self.close_config();
+                }
                 AppEvent::OpenDiff => {
                     self.clear_image(Some(terminal))?;
                     self.open_diff();
@@ -353,7 +361,7 @@ impl App<'_> {
 
     fn prepare_render(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
         let area: Rect = terminal.size()?.into();
-        let [view_area, _] = split_app_areas(area);
+        let [view_area, _, _] = split_app_areas(area);
         self.update_state(view_area);
         self.view.update_layout(view_area);
         self.view.prepare_graph_uploads();
@@ -383,7 +391,7 @@ impl App<'_> {
             .fg(self.ctx.color_theme.fg);
         f.render_widget(base, f.area());
 
-        let [view_area, status_line_area] = split_app_areas(f.area());
+        let [view_area, _gap, status_line_area] = split_app_areas(f.area());
 
         self.update_state(view_area);
 
@@ -444,19 +452,30 @@ impl App<'_> {
 
         let dim_separator = Style::default().fg(Color::Rgb(59, 66, 97));
         let dim_text = Style::default().fg(Color::Rgb(86, 95, 137));
+        let is_search_active = self.view.is_search_active();
         let show_enhanced = matches!(
             &self.app_status.status_line,
             StatusLine::None | StatusLine::NotificationInfo(_)
-        );
-        let is_normal_mode = matches!(&self.app_status.status_line, StatusLine::None);
+        ) && !is_search_active;
+        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None) || is_search_active;
 
-        let status_area = if is_normal_mode {
+        let status_area = if show_shortcuts {
+            let right_constraint = if is_search_active {
+                Constraint::Length(40)
+            } else {
+                Constraint::Length(35)
+            };
             let [left_area, right_area] = Layout::horizontal([
                 Constraint::Min(0),
-                Constraint::Length(35),
+                right_constraint,
             ]).areas(area);
 
-            let shortcut_spans = vec![Span::styled("q:quit  ?:help  r:refresh", dim_text)];
+            let shortcut_text = if is_search_active {
+                "n:next  N:prev  Esc:clear  Enter:apply"
+            } else {
+                "q:quit  ?:help  r:refresh"
+            };
+            let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
             let shortcut_line = Line::from(shortcut_spans);
             let shortcut_paragraph = Paragraph::new(shortcut_line)
                 .style(Style::default().bg(Color::Rgb(36, 40, 59)))
@@ -550,8 +569,13 @@ impl App<'_> {
     }
 }
 
-fn split_app_areas(area: Rect) -> [Rect; 2] {
-    Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area)
+fn split_app_areas(area: Rect) -> [Rect; 3] {
+    Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1), // gap between commit list and status bar
+        Constraint::Length(1), // status bar
+    ])
+    .areas(area)
 }
 
 impl App<'_> {
@@ -842,6 +866,17 @@ impl App<'_> {
 
     fn close_help(&mut self) {
         if let View::Help(ref mut view) = self.view {
+            self.view = view.take_before_view();
+        }
+    }
+
+    fn open_config(&mut self) {
+        let before = std::mem::take(&mut self.view);
+        self.view = View::of_config(before, self.ctx.clone(), self.ec.sender());
+    }
+
+    fn close_config(&mut self) {
+        if let View::Config(ref mut view) = self.view {
             self.view = view.take_before_view();
         }
     }

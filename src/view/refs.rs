@@ -126,7 +126,7 @@ impl<'a> RefsView<'a> {
         self.commit_list_state.as_mut().unwrap()
     }
 
-    fn as_list_state(&self) -> &CommitListState<'a> {
+    pub fn as_list_state(&self) -> &CommitListState<'a> {
         self.commit_list_state.as_ref().unwrap()
     }
 
@@ -181,5 +181,17 @@ impl<'a> RefsView<'a> {
     pub fn reset_refs_with(&mut self, refs_context: RefsRefreshViewContext) {
         self.ref_list_state
             .reset_tree_status(refs_context.selected, refs_context.opened);
+    }
+
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        if self.ref_list_state.handle_click(col, row) {
+            self.update_commit_list_selected();
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        if self.ref_list_state.handle_mouse_move(col, row) {
+            self.update_commit_list_selected();
+        }
     }
 }

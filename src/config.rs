@@ -287,7 +287,7 @@ pub struct UiConfig {
     pub refs: UiRefsConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DiffMode {
     #[default]
@@ -350,7 +350,7 @@ pub struct UiListConfig {
     #[default = "%d/%m/%Y - %H:%M"]
     pub date_format: String,
     #[garde(range(min = 0))]
-    #[default = 16]
+    #[default = 20]
     pub date_width: u16,
     #[garde(skip)]
     #[default = true]
@@ -435,6 +435,109 @@ pub struct GraphColorConfig {
     pub background: String,
 }
 
+impl CoreConfig {
+    pub fn graph_style(&self) -> crate::GraphStyle {
+        self.option.graph_style.unwrap_or(crate::GraphStyle::Rounded)
+    }
+    pub fn set_graph_style(&mut self, style: crate::GraphStyle) {
+        self.option.graph_style = Some(style);
+    }
+    pub fn protocol(&self) -> Option<crate::ImageProtocolType> {
+        self.option.protocol
+    }
+    pub fn set_protocol(&mut self, protocol: crate::ImageProtocolType) {
+        self.option.protocol = Some(protocol);
+    }
+}
+
+impl UiCommonConfig {
+    pub fn diff_mode(&self) -> DiffMode {
+        self.diff_mode
+    }
+    pub fn set_diff_mode(&mut self, mode: DiffMode) {
+        self.diff_mode = mode;
+    }
+    pub fn mouse_enabled(&self) -> bool {
+        self.mouse_enabled
+    }
+    pub fn set_mouse_enabled(&mut self, enabled: bool) {
+        self.mouse_enabled = enabled;
+    }
+}
+
+pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
+    let path = config_file_path().ok_or("Could not determine config path")?;
+
+    let mut doc = if path.exists() {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+        content.parse::<toml::Table>()
+            .map_err(|e| format!("Failed to parse config: {}", e))?
+    } else {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+        toml::Table::new()
+    };
+
+    if let Some(style) = core.option.graph_style {
+        set_nested_string(&mut doc, &["core", "option", "graph_style"],
+            match style {
+                crate::GraphStyle::Rounded => "rounded",
+                crate::GraphStyle::Angular => "angular",
+                crate::GraphStyle::Smooth => "smooth",
+            });
+    }
+
+    if let Some(protocol) = core.option.protocol {
+        set_nested_string(&mut doc, &["core", "option", "protocol"],
+            match protocol {
+                crate::ImageProtocolType::Auto => "auto",
+                crate::ImageProtocolType::Iterm => "iterm",
+                crate::ImageProtocolType::Kitty => "kitty",
+                crate::ImageProtocolType::KittyUnicode => "kitty-unicode",
+                crate::ImageProtocolType::Sixel => "sixel",
+            });
+    }
+
+    set_nested_string(&mut doc, &["ui", "common", "diff_mode"],
+        match ui.common.diff_mode {
+            DiffMode::Enhanced => "enhanced",
+            DiffMode::Raw => "raw",
+        });
+
+    set_nested_bool(&mut doc, &["ui", "common", "mouse_enabled"], ui.common.mouse_enabled);
+
+    let toml_string = toml::to_string_pretty(&doc)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&path, toml_string)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+    Ok(())
+}
+
+fn set_nested_string(doc: &mut toml::Table, keys: &[&str], value: &str) {
+    let mut table = doc;
+    for key in &keys[..keys.len() - 1] {
+        table = table.entry(key.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+            .as_table_mut()
+            .unwrap();
+    }
+    table.insert(keys.last().unwrap().to_string(), toml::Value::String(value.to_string()));
+}
+
+fn set_nested_bool(doc: &mut toml::Table, keys: &[&str], value: bool) {
+    let mut table = doc;
+    for key in &keys[..keys.len() - 1] {
+        table = table.entry(key.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+            .as_table_mut()
+            .unwrap();
+    }
+    table.insert(keys.last().unwrap().to_string(), toml::Value::Boolean(value));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,7 +602,7 @@ mod tests {
                     ],
                     subject_min_width: 20,
                     date_format: "%d/%m/%Y - %H:%M".into(),
-                    date_width: 16,
+                    date_width: 20,
                     date_local: true,
                     name_width: 20,
                 },
@@ -749,7 +852,7 @@ mod tests {
                     ],
                     subject_min_width: 20,
                     date_format: "%Y/%m/%d".into(),
-                    date_width: 16,
+                    date_width: 20,
                     date_local: true,
                     name_width: 20,
                 },

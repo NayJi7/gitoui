@@ -94,6 +94,12 @@ pub enum SearchState {
 }
 
 impl SearchState {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, SearchState::Inactive)
+    }
+}
+
+impl SearchState {
     fn update_match_index(&mut self, index: usize) {
         match self {
             SearchState::Searching { match_index, .. } => *match_index = index,
@@ -687,7 +693,7 @@ impl<'a> CommitListState<'a> {
     pub fn search_query_string(&self) -> Option<String> {
         if let SearchState::Searching { .. } = self.search_state {
             let query = self.search_input.value();
-            Some(format!("/{query}"))
+            Some(format!("Search: {query}"))
         } else {
             None
         }
@@ -714,7 +720,7 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn search_query_cursor_position(&self) -> u16 {
-        self.search_input.visual_cursor() as u16 + 1 // add 1 for "/"
+        self.search_input.visual_cursor() as u16 + 8 // add 8 for "Search: "
     }
 
     pub fn transient_message_string(&self) -> Option<String> {

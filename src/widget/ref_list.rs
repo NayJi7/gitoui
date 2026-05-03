@@ -96,6 +96,22 @@ impl RefListState {
             self.tree_state.open(node);
         }
     }
+
+    pub fn handle_click(&mut self, col: u16, row: u16) -> bool {
+        let position = ratatui::layout::Position::new(col, row);
+        self.tree_state.click_at(position)
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
+        let position = ratatui::layout::Position::new(col, row);
+        if let Some(identifier) = self.tree_state.rendered_at(position) {
+            let identifier = identifier.to_vec();
+            if self.tree_state.selected() != identifier.as_slice() {
+                return self.tree_state.select(identifier);
+            }
+        }
+        false
+    }
 }
 
 pub struct RefList {
