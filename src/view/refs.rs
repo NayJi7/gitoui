@@ -122,8 +122,43 @@ impl<'a> RefsView<'a> {
         let commit_list = CommitList::new(self.ctx.clone());
         f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
 
+        // Split refs area into header (2 lines) and ref list
+        let [header_area, refs_list_area] =
+            ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Min(0),
+            ]).areas(refs_area);
+
+        self.render_refs_header(f, header_area);
+
         let ref_list = RefList::new(&self.refs, self.ctx.clone());
-        f.render_stateful_widget(ref_list, refs_area, &mut self.ref_list_state);
+        f.render_stateful_widget(ref_list, refs_list_area, &mut self.ref_list_state);
+    }
+
+    fn render_refs_header(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+        use ratatui::{
+            style::{Color, Modifier, Style},
+            text::{Line, Span},
+            widgets::Paragraph,
+        };
+
+        let header_text = "Refs";
+        let style = Style::default()
+            .fg(Color::Rgb(86, 95, 137))
+            .add_modifier(Modifier::BOLD);
+        let line = Line::from(Span::styled(header_text.to_string(), style));
+        let para = Paragraph::new(line);
+        f.render_widget(para, ratatui::layout::Rect::new(area.x, area.y, area.width, 1));
+
+        // Draw separator line below header
+        let sep_style = Style::default().fg(Color::Rgb(59, 66, 97));
+        let sep_span = Span::styled(
+            "─".repeat(area.width as usize),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        );
+        let sep_line = Line::from(sep_span);
+        let sep_para = Paragraph::new(sep_line);
+        f.render_widget(sep_para, ratatui::layout::Rect::new(area.x, area.y + 1, area.width, 1));
     }
 
     pub fn update_layout(&mut self, area: Rect) {
