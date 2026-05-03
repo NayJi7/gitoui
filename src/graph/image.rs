@@ -93,6 +93,13 @@ impl<'a> GraphImageManager<'a> {
         std::mem::take(&mut self.pending_uploads)
     }
 
+    pub fn clear_prepared_images(&mut self) {
+        self.prepared_image_map.clear();
+        self.uncommitted_image = None;
+        self.image_ids.clear();
+        self.pending_uploads.clear();
+    }
+
     pub fn ensure_uploaded(&mut self, commit_hash: &CommitHash) {
         if self.prepared_image_map.contains_key(commit_hash) {
             return;

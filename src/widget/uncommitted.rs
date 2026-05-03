@@ -63,6 +63,52 @@ impl UncommittedState {
         }
     }
 
+    pub fn select_next_global(&mut self, unstaged_len: usize, staged_len: usize, untracked_len: usize) {
+        let total = unstaged_len + staged_len + untracked_len;
+        if total == 0 {
+            return;
+        }
+        let current_global = match self.section {
+            UncommittedSection::Unstaged => self.selected,
+            UncommittedSection::Staged => unstaged_len + self.selected,
+            UncommittedSection::Untracked => unstaged_len + staged_len + self.selected,
+        };
+        let next_global = (current_global + 1).min(total.saturating_sub(1));
+        if next_global < unstaged_len {
+            self.section = UncommittedSection::Unstaged;
+            self.selected = next_global;
+        } else if next_global < unstaged_len + staged_len {
+            self.section = UncommittedSection::Staged;
+            self.selected = next_global - unstaged_len;
+        } else {
+            self.section = UncommittedSection::Untracked;
+            self.selected = next_global - unstaged_len - staged_len;
+        }
+    }
+
+    pub fn select_prev_global(&mut self, unstaged_len: usize, staged_len: usize, untracked_len: usize) {
+        let total = unstaged_len + staged_len + untracked_len;
+        if total == 0 {
+            return;
+        }
+        let current_global = match self.section {
+            UncommittedSection::Unstaged => self.selected,
+            UncommittedSection::Staged => unstaged_len + self.selected,
+            UncommittedSection::Untracked => unstaged_len + staged_len + self.selected,
+        };
+        let prev_global = current_global.saturating_sub(1);
+        if prev_global < unstaged_len {
+            self.section = UncommittedSection::Unstaged;
+            self.selected = prev_global;
+        } else if prev_global < unstaged_len + staged_len {
+            self.section = UncommittedSection::Staged;
+            self.selected = prev_global - unstaged_len;
+        } else {
+            self.section = UncommittedSection::Untracked;
+            self.selected = prev_global - unstaged_len - staged_len;
+        }
+    }
+
     pub fn switch_section(&mut self) {
         self.section = match self.section {
             UncommittedSection::Unstaged => UncommittedSection::Staged,
@@ -138,7 +184,7 @@ impl<'a> UncommittedWidget<'a> {
         let block = Block::default()
             .borders(Borders::TOP)
             .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 1, 0, 0));
+            .padding(Padding::new(1, 2, 0, 0));
         let inner = block.inner(area);
         block.render(area, buf);
 

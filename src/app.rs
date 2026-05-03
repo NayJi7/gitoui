@@ -556,7 +556,7 @@ impl App<'_> {
                     View::Dialog(_) => "Enter:confirm Esc:cancel".into(),
                     View::BranchDetail(_) => "c:copy-name o:checkout Esc:close".into(),
                     View::TagDetail(_) => "c:copy-name p:push Esc:close".into(),
-                    View::Uncommitted(_) => "a:stage u:unstage x:discard A:stage-all U:unstage-all X:discard-all".into(),
+                    View::Uncommitted(_) => self.view.uncommitted_footer_hint().unwrap_or_else(|| "Esc:close".into()),
                     _ => "f:search ?:help q:quit r:refresh".into(),
                 }
             };
@@ -702,7 +702,9 @@ impl App<'_> {
         self.app_status.view_area = view_area;
     }
 
-    fn clear_image(&self, terminal: Option<&mut DefaultTerminal>) -> Result<(), std::io::Error> {
+    fn clear_image(&mut self, terminal: Option<&mut DefaultTerminal>) -> Result<(), std::io::Error> {
+        // Clear prepared images so they get re-uploaded after terminal clear
+        self.view.clear_graph_images();
         // Sometimes the first image fails to render after a full screen clear
         // As a workaround, the first area is preserved when a full clear is not required
         if let Some(t) = terminal {

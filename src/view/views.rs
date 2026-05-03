@@ -101,6 +101,20 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn clear_graph_images(&mut self) {
+        match self {
+            View::List(view) => view.clear_graph_images(),
+            View::Detail(view) => view.clear_graph_images(),
+            View::Diff(view) => view.clear_graph_images(),
+            View::UserCommand(view) => view.clear_graph_images(),
+            View::Refs(view) => view.clear_graph_images(),
+            View::BranchDetail(view) => view.clear_graph_images(),
+            View::TagDetail(view) => view.clear_graph_images(),
+            View::Uncommitted(view) => view.clear_graph_images(),
+            _ => {}
+        }
+    }
+
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
         match self {
             View::Default => Vec::new(),
@@ -193,6 +207,13 @@ impl<'a> View<'a> {
     pub fn diff_footer_hint(&self) -> Option<String> {
         match self {
             View::Diff(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn uncommitted_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Uncommitted(view) => Some(view.footer_hint()),
             _ => None,
         }
     }

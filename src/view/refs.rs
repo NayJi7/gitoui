@@ -173,6 +173,10 @@ impl<'a> RefsView<'a> {
     pub fn prepare_graph_uploads(&mut self) {
         self.as_mut_list_state().ensure_visible_graph_uploaded();
     }
+
+    pub fn clear_graph_images(&mut self) {
+        self.as_mut_list_state().clear_graph_images();
+    }
 }
 
 impl<'a> RefsView<'a> {

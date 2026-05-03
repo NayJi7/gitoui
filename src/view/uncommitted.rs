@@ -53,37 +53,44 @@ impl<'a> UncommittedView<'a> {
         match event {
             UserEvent::NavigateDown => {
                 for _ in 0..count {
-                    let total = self.state.total_in_section(self.unstaged.len(), self.staged.len(), self.untracked.len());
-                    self.state.select_next(total);
+                    self.state.select_next_global(self.unstaged.len(), self.staged.len(), self.untracked.len());
                 }
             }
             UserEvent::NavigateUp => {
                 for _ in 0..count {
-                    self.state.select_prev();
+                    self.state.select_prev_global(self.unstaged.len(), self.staged.len(), self.untracked.len());
                 }
             }
             UserEvent::NavigateRight | UserEvent::NavigateLeft => {
                 self.state.switch_section();
             }
             UserEvent::Stage => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
-                    self.tx.send(AppEvent::StageFile {
-                        file: file.path.clone(),
-                    });
+                if matches!(self.state.section, UncommittedSection::Unstaged | UncommittedSection::Untracked) {
+                    if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                        self.tx.send(AppEvent::StageFile {
+                            file: file.path.clone(),
+                        });
+                    }
                 }
             }
             UserEvent::StageAll => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
+                if !self.unstaged.is_empty() || !self.untracked.is_empty() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
+                }
             }
             UserEvent::Unstage => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
-                    self.tx.send(AppEvent::UnstageFile {
-                        file: file.path.clone(),
-                    });
+                if self.state.section == UncommittedSection::Staged {
+                    if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                        self.tx.send(AppEvent::UnstageFile {
+                            file: file.path.clone(),
+                        });
+                    }
                 }
             }
             UserEvent::UnstageAll => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
+                if !self.staged.is_empty() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
+                }
             }
             UserEvent::Discard => {
                 if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
@@ -93,7 +100,9 @@ impl<'a> UncommittedView<'a> {
                 }
             }
             UserEvent::DiscardAll => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
+                if !self.unstaged.is_empty() || !self.staged.is_empty() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
+                }
             }
             UserEvent::Stash => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
@@ -205,6 +214,34 @@ impl<'a> UncommittedView<'a> {
                 };
                 return;
             }
+
+            let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+            if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
+                let local_row = row.saturating_sub(detail_area.y + 1) as usize;
+                let unstaged_count = self.unstaged.len().max(1) + 2;
+                let staged_count = self.staged.len().max(1) + 2;
+                if local_row < unstaged_count {
+                    self.state.section = UncommittedSection::Unstaged;
+                    let file_row = local_row.saturating_sub(1);
+                    if file_row < self.unstaged.len() {
+                        self.state.selected = file_row;
+                    }
+                } else if local_row < unstaged_count + staged_count {
+                    self.state.section = UncommittedSection::Staged;
+                    let file_row = local_row.saturating_sub(unstaged_count + 1);
+                    if file_row < self.staged.len() {
+                        self.state.selected = file_row;
+                    }
+                } else {
+                    self.state.section = UncommittedSection::Untracked;
+                    let file_row = local_row.saturating_sub(unstaged_count + staged_count + 1);
+                    if file_row < self.untracked.len() {
+                        self.state.selected = file_row;
+                    }
+                }
+                self.state.hovered_action = None;
+                return;
+            }
         }
         self.state.hovered_action = None;
     }
@@ -223,6 +260,12 @@ impl<'a> UncommittedView<'a> {
         }
     }
 
+    pub fn clear_graph_images(&mut self) {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.clear_graph_images();
+        }
+    }
+
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.drain_pending_graph_uploads()
@@ -237,5 +280,34 @@ impl<'a> UncommittedView<'a> {
         } else {
             Vec::new()
         }
+    }
+
+    pub fn footer_hint(&self) -> String {
+        let has_unstaged = !self.unstaged.is_empty() || !self.untracked.is_empty();
+        let has_staged = !self.staged.is_empty();
+        let can_stage = has_unstaged;
+        let can_unstage = has_staged;
+        let can_discard = has_unstaged || has_staged;
+        let mut parts = Vec::new();
+        if can_stage {
+            parts.push("a:stage".to_string());
+            if has_unstaged || !self.untracked.is_empty() {
+                parts.push("A:stage-all".to_string());
+            }
+        }
+        if can_unstage {
+            parts.push("u:unstage".to_string());
+            if has_staged {
+                parts.push("U:unstage-all".to_string());
+            }
+        }
+        if can_discard {
+            parts.push("x:discard".to_string());
+            if has_unstaged || has_staged {
+                parts.push("X:discard-all".to_string());
+            }
+        }
+        parts.push("Esc:close".to_string());
+        parts.join(" ")
     }
 }

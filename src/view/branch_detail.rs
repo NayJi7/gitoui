@@ -152,6 +152,12 @@ impl<'a> BranchDetailView<'a> {
         }
     }
 
+    pub fn clear_graph_images(&mut self) {
+        if let Some(ref mut list_state) = self.commit_list_state {
+            list_state.clear_graph_images();
+        }
+    }
+
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.drain_pending_graph_uploads()
