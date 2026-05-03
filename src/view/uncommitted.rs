@@ -9,6 +9,7 @@ use ratatui::{
 use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
+    git::status::StatusType,
     widget::commit_list::{CommitList, CommitListState},
     widget::uncommitted::{UncommittedFile, UncommittedSection, UncommittedState, UncommittedWidget},
 };
@@ -18,9 +19,9 @@ pub struct UncommittedView<'a> {
     commit_list_state: Option<CommitListState<'a>>,
     ctx: Rc<AppContext>,
     tx: Sender,
-    unstaged: Vec<UncommittedFile>,
-    staged: Vec<UncommittedFile>,
-    untracked: Vec<UncommittedFile>,
+    pub unstaged: Vec<UncommittedFile>,
+    pub staged: Vec<UncommittedFile>,
+    pub untracked: Vec<UncommittedFile>,
     state: UncommittedState,
     detail_area: Option<Rect>,
 }
@@ -113,6 +114,19 @@ impl<'a> UncommittedView<'a> {
             UserEvent::CleanUntracked => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
             }
+            UserEvent::Confirm => {
+                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                    if file.status != StatusType::Untracked && file.status != StatusType::Deleted {
+                        let is_staged = self.state.section == crate::widget::uncommitted::UncommittedSection::Staged;
+                        self.tx.send(AppEvent::OpenUncommittedDiff {
+                            file_path: file.path.clone(),
+                            is_staged,
+                        });
+                    } else if file.status == StatusType::Deleted {
+                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                    }
+                }
+            }
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
             }
@@ -188,6 +202,19 @@ impl<'a> UncommittedView<'a> {
                 } else if local_row >= untracked_files_start && local_row < untracked_files_start + self.untracked.len() {
                     self.state.section = UncommittedSection::Untracked;
                     self.state.selected = local_row - untracked_files_start;
+                }
+            }
+            
+            // Open diff for the selected file
+            if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                if file.status != StatusType::Untracked && file.status != StatusType::Deleted {
+                    let is_staged = self.state.section == crate::widget::uncommitted::UncommittedSection::Staged;
+                    self.tx.send(AppEvent::OpenUncommittedDiff {
+                        file_path: file.path.clone(),
+                        is_staged,
+                    });
+                } else if file.status == StatusType::Deleted {
+                    self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
                 }
             }
         }

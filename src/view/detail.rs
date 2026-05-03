@@ -384,52 +384,54 @@ impl<'a> DetailView<'a> {
     fn execute_action(&self, action_idx: usize) {
         use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
         let actions = if self.is_stash() { STASH_ACTIONS } else { COMMIT_ACTIONS };
-        if let Some((_, key)) = actions.get(action_idx) {
-            if self.is_stash() {
-                match *key {
-                    'y' => self.tx.send(AppEvent::ExecuteGitAction {
-                        target: self.commit.commit_hash.as_str().into(),
-                        action: crate::event::GitAction::ApplyStash,
-                    }),
-                    'P' => {
-                        if let Some(stash_ref) = self.stash_ref() {
-                            self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash { stash_ref }));
-                        }
+        if action_idx >= actions.len() {
+            return;
+        }
+        let hash = self.commit.commit_hash.as_str().into();
+        if self.is_stash() {
+            match action_idx {
+                0 => self.tx.send(AppEvent::ExecuteGitAction {
+                    target: hash,
+                    action: crate::event::GitAction::ApplyStash,
+                }),
+                1 => {
+                    if let Some(stash_ref) = self.stash_ref() {
+                        self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash { stash_ref }));
                     }
-                    'D' => {
-                        if let Some(stash_ref) = self.stash_ref() {
-                            self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash { stash_ref }));
-                        }
-                    }
-                    'B' => {
-                        if let Some(stash_ref) = self.stash_ref() {
-                            self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
-                                target: self.commit.commit_hash.as_str().into(),
-                                stash_ref,
-                            }));
-                        }
-                    }
-                    'I' => {
-                        if let Some(stash_ref) = self.stash_ref() {
-                            self.copy_to_clipboard("Stash name".into(), stash_ref);
-                        }
-                    }
-                    'O' => self.copy_commit_hash(),
-                    _ => {}
                 }
-            } else {
-                match *key {
-                    't' => self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: self.commit.commit_hash.as_str().into() })),
-                    'b' => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: self.commit.commit_hash.as_str().into() })),
-                    'o' => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
-                    'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: self.commit.commit_hash.as_str().into() })),
-                    'r' => self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: self.commit.commit_hash.as_str().into() })),
-                    'd' => self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: self.commit.commit_hash.as_str().into() })),
-                    'm' => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: self.commit.commit_hash.as_str().into(), is_branch: false })),
-                    'e' => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: self.commit.commit_hash.as_str().into() })),
-                    's' => self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() })),
-                    _ => {}
+                2 => {
+                    if let Some(stash_ref) = self.stash_ref() {
+                        self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash { stash_ref }));
+                    }
                 }
+                3 => {
+                    if let Some(stash_ref) = self.stash_ref() {
+                        self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
+                            target: hash,
+                            stash_ref,
+                        }));
+                    }
+                }
+                4 => {
+                    if let Some(stash_ref) = self.stash_ref() {
+                        self.copy_to_clipboard("Stash name".into(), stash_ref);
+                    }
+                }
+                5 => self.copy_commit_hash(),
+                _ => {}
+            }
+        } else {
+            match action_idx {
+                0 => self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: hash })),
+                1 => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: hash })),
+                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: hash, is_branch: false })),
+                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: hash })),
+                4 => self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: hash })),
+                5 => self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: hash })),
+                6 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: hash, is_branch: false })),
+                7 => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: hash })),
+                8 => self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: hash })),
+                _ => {}
             }
         }
     }
@@ -450,14 +452,23 @@ impl<'a> DetailView<'a> {
 
     fn open_selected_file_diff(&self) {
         if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
-            let file_path = match change {
-                FileChange::Add { path, .. } | FileChange::Modify { path, .. } | FileChange::Delete { path, .. } => path.clone(),
-                FileChange::Move { to, .. } => to.clone(),
-            };
-            let _ = self.tx.send(AppEvent::OpenFileDiff {
-                hash: self.commit.commit_hash.as_str().to_string(),
-                file_path,
-            });
+            match change {
+                FileChange::Add { path, .. } | FileChange::Modify { path, .. } => {
+                    let _ = self.tx.send(AppEvent::OpenFileDiff {
+                        hash: self.commit.commit_hash.as_str().to_string(),
+                        file_path: path.clone(),
+                    });
+                }
+                FileChange::Move { to, .. } => {
+                    let _ = self.tx.send(AppEvent::OpenFileDiff {
+                        hash: self.commit.commit_hash.as_str().to_string(),
+                        file_path: to.clone(),
+                    });
+                }
+                FileChange::Delete { .. } => {
+                    let _ = self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                }
+            }
         }
     }
 

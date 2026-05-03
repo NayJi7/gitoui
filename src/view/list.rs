@@ -305,7 +305,7 @@ impl<'a> ListView<'a> {
     pub fn refresh(&self) {
         let list_state = self.as_list_state();
         let list_context = ListRefreshViewContext::from(list_state);
-        let context = RefreshViewContext::List { list_context };
+        let context = RefreshViewContext::List { list_context, pending_notification: None };
         self.tx.send(AppEvent::Refresh(context));
     }
 

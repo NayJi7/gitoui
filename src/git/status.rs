@@ -100,11 +100,19 @@ impl UncommittedChanges {
                     }
                 }
             } else if let Some(rest) = line.strip_prefix("u ") {
-                let parts: Vec<&str> = rest.splitn(11, ' ').collect();
-                if parts.len() >= 11 {
+                let parts: Vec<&str> = rest.splitn(10, ' ').collect();
+                if parts.len() >= 10 {
+                    let xy = parts[0];
+                    let status = if xy.starts_with('D') || xy.ends_with('D') {
+                        StatusType::Deleted
+                    } else if xy.contains('A') {
+                        StatusType::Added
+                    } else {
+                        StatusType::Unmerged
+                    };
                     changes.unstaged.push(FileStatus {
-                        status: StatusType::Unmerged,
-                        path: parts[10].to_string(),
+                        status,
+                        path: parts[9].to_string(),
                         old_path: None,
                     });
                 }

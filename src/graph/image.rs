@@ -699,18 +699,6 @@ pub fn calc_graph_row_image(
     let edge_color = |edge: &Edge| -> image::Rgba<u8> {
         if is_uncommitted {
             commit_color
-        } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-            // Color pass-through edges on the uncommitted lane.
-            // For rows strictly between uncommitted and HEAD: color all lane edges (Up/Down/Vertical).
-            // For HEAD's own row: color only the Up edge (the Down edge goes onward past HEAD).
-            let on_lane = edge.pos_x == lane_x && edge.associated_line_pos_x == lane_x;
-            let in_range = pos_y > 0 && pos_y < head_y;
-            let is_head_up = pos_y == head_y && edge.edge_type == EdgeType::Up;
-            if on_lane && (in_range || is_head_up) {
-                lane_color
-            } else {
-                image_params.edge_color(edge.associated_line_pos_x)
-            }
         } else {
             image_params.edge_color(edge.associated_line_pos_x)
         }
@@ -741,9 +729,16 @@ pub fn calc_graph_row_image(
             }
         }
         GraphStyle::Smooth => {
-            // Draw Bezier S-curves for all branch segments intersecting this row.
-            // Bezier handles all horizontal transitions; we never draw corner/horizontal
-            // edges so there is no visual noise on top of the curves.
+            // Draw vertical edges FIRST (branch-colored), then Bezier curves ON TOP.
+            // The grey Bezier for uncommitted→HEAD overwrites branch-colored verticals on its path,
+            // without bleeding grey into other paths (HEAD→merge etc.) that share the column.
+            for edge in edges {
+                if edge.edge_type.is_vertically_related() {
+                    draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge));
+                }
+            }
+
+            // Bezier S-curves drawn on top of vertical edges
             for seg in branch_segments {
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
                 let max_y = seg.target_pos_y.max(seg.source_pos_y);
@@ -767,15 +762,16 @@ pub fn calc_graph_row_image(
                     );
                 }
             }
-
-            // Only keep straight vertical edges (pass-through and same-column Up/Down stubs).
-            // All corner and horizontal edges are replaced by Bezier curves above.
-            for edge in edges {
-                if edge.edge_type.is_vertically_related() {
-                    draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge));
-                }
-            }
         }
+    }
+
+    // Draw grey overlay for the uncommitted→HEAD segment.
+    // This covers the vertical edges on the uncommitted column with grey,
+    // without bleeding into other paths that share the column.
+    if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
+        draw_uncommitted_overlay(
+            &mut img_buf, lane_x, head_y, pos_y, image_params, lane_color,
+        );
     }
 
     // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
@@ -792,6 +788,37 @@ pub fn calc_graph_row_image(
     let bytes = build_image(&img_buf, image_width, image_height);
 
     GraphRowImage { bytes, cell_count }
+}
+
+fn draw_uncommitted_overlay(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    lane_x: usize,
+    head_y: usize,
+    pos_y: usize,
+    image_params: &ImageParams,
+    color: image::Rgba<u8>,
+) {
+    if pos_y == 0 || pos_y > head_y {
+        return;
+    }
+
+    let cell_width = image_params.width as i32;
+    let cell_height = image_params.height as i32;
+    let x = lane_x as i32 * cell_width + cell_width / 2;
+    let radius = (image_params.line_width as i32).max(1) / 2;
+
+    if pos_y < head_y {
+        for py in 0..cell_height {
+            draw_filled_circle(img_buf, x, py, radius, color);
+        }
+    } else {
+        let center_y = cell_height / 2;
+        let circle_outer_radius = image_params.circle_outer_radius as i32;
+        let y_end = (center_y - circle_outer_radius).max(0);
+        for py in 0..y_end {
+            draw_filled_circle(img_buf, x, py, radius, color);
+        }
+    }
 }
 
 fn ratatui_color_to_rgba(color: ratatui::style::Color) -> image::Rgba<u8> {

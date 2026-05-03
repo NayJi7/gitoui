@@ -274,8 +274,13 @@ impl<'a> UncommittedWidget<'a> {
         let status_color = match file.status {
             StatusType::Added => self.ctx.color_theme.detail_file_change_add_fg,
             StatusType::Modified => self.ctx.color_theme.detail_file_change_modify_fg,
-            StatusType::Deleted => self.ctx.color_theme.detail_file_change_delete_fg,
+            StatusType::Deleted | StatusType::Unmerged => self.ctx.color_theme.detail_file_change_delete_fg,
             _ => self.ctx.color_theme.detail_file_change_move_fg,
+        };
+        let path_style = if matches!(file.status, StatusType::Deleted | StatusType::Unmerged) {
+            style.add_modifier(Modifier::CROSSED_OUT)
+        } else {
+            style
         };
         let add_str = if file.additions > 0 {
             format!(" +{}", file.additions)
@@ -293,7 +298,7 @@ impl<'a> UncommittedWidget<'a> {
                 Style::default().fg(status_color),
             ),
             Span::styled(" ", style),
-            Span::styled(file.path.clone(), style),
+            Span::styled(file.path.clone(), path_style),
             Span::styled(
                 add_str,
                 Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),

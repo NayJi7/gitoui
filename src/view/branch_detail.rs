@@ -217,42 +217,73 @@ impl<'a> BranchDetailView<'a> {
         } else {
             crate::widget::branch_detail::LOCAL_BRANCH_ACTIONS
         };
-        if let Some((_, key)) = actions.get(action_idx) {
-            match *key {
-                'o' => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
-                    target: self.metadata.branch_name.clone(),
+        if action_idx >= actions.len() {
+            return;
+        }
+        let name = self.metadata.branch_name.clone();
+        if self.metadata.is_remote {
+            match action_idx {
+                0 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                    target: name,
                     is_branch: true,
                 })),
-                'r' => self.tx.send(AppEvent::OpenDialog(DialogKind::RenameBranch {
-                    branch: self.metadata.branch_name.clone(),
+                1 => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteBranch {
+                    branch: name,
+                    is_remote: true,
                 })),
-                'D' => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteBranch {
-                    branch: self.metadata.branch_name.clone(),
-                    is_remote: self.metadata.is_remote,
-                })),
-                'm' => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
-                    target: self.metadata.branch_name.clone(),
+                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                    target: name,
                     is_branch: true,
                 })),
-                'e' => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase {
-                    target: self.metadata.branch_name.clone(),
+                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::PullBranch {
+                    branch: name,
                 })),
-                'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
-                    branch: self.metadata.branch_name.clone(),
-                })),
-                'l' => self.tx.send(AppEvent::OpenDialog(DialogKind::PullBranch {
-                    branch: self.metadata.branch_name.clone(),
-                })),
-                'a' => self.tx.send(AppEvent::ExecuteGitAction {
-                    target: self.metadata.branch_name.clone(),
+                4 => self.tx.send(AppEvent::ExecuteGitAction {
+                    target: name,
                     action: GitAction::CreateArchive,
                 }),
-                'u' => self.tx.send(AppEvent::NotifyInfo(
+                5 => self.tx.send(AppEvent::NotifyInfo(
                     "Unselect branch not yet implemented".into(),
                 )),
-                'c' => self.tx.send(AppEvent::CopyToClipboard {
+                6 => self.tx.send(AppEvent::CopyToClipboard {
                     name: "Branch Name".into(),
-                    value: self.metadata.branch_name.clone(),
+                    value: name,
+                }),
+                _ => {}
+            }
+        } else {
+            match action_idx {
+                0 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                    target: name,
+                    is_branch: true,
+                })),
+                1 => self.tx.send(AppEvent::OpenDialog(DialogKind::RenameBranch {
+                    branch: name,
+                })),
+                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteBranch {
+                    branch: name,
+                    is_remote: false,
+                })),
+                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                    target: name,
+                    is_branch: true,
+                })),
+                4 => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase {
+                    target: name,
+                })),
+                5 => self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
+                    branch: name,
+                })),
+                6 => self.tx.send(AppEvent::ExecuteGitAction {
+                    target: name,
+                    action: GitAction::CreateArchive,
+                }),
+                7 => self.tx.send(AppEvent::NotifyInfo(
+                    "Unselect branch not yet implemented".into(),
+                )),
+                8 => self.tx.send(AppEvent::CopyToClipboard {
+                    name: "Branch Name".into(),
+                    value: name,
                 }),
                 _ => {}
             }

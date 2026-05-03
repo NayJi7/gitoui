@@ -15,10 +15,10 @@ pub struct TagDetailState {
     pub hovered_action: Option<usize>,
 }
 
-pub const TAG_ACTIONS: &[(&str, char)] = &[
-    ("Push Tag", 'p'),
-    ("Delete Tag", 'D'),
-    ("Copy Name", 'c'),
+pub const TAG_ACTIONS: &[(&str, &str)] = &[
+    ("Push Tag", "W"),
+    ("Delete Tag", "F"),
+    ("Copy Name", "Y"),
 ];
 
 #[derive(Debug, Clone)]
@@ -106,7 +106,7 @@ impl TagDetail<'_> {
             };
             let key_style = style.add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![
-                Span::styled(format!("{}", label), style),
+                Span::styled(label.to_string(), style),
                 Span::styled(format!(" ({})", key), key_style),
             ]));
         }

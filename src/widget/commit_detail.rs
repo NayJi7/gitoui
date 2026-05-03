@@ -112,25 +112,25 @@ impl<'a> CommitDetail<'a> {
     }
 }
 
-pub const COMMIT_ACTIONS: &[(&str, char)] = &[
-    ("Add Tag", 't'),
-    ("Create Branch", 'b'),
-    ("Checkout", 'o'),
-    ("Cherry Pick", 'p'),
-    ("Revert", 'r'),
-    ("Drop", 'd'),
-    ("Merge into current", 'm'),
-    ("Rebase current on", 'e'),
-    ("Reset current to", 's'),
+pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
+    ("Add Tag", "t"),
+    ("Create Branch", "b"),
+    ("Checkout", "o"),
+    ("Cherry Pick", "P"),
+    ("Revert", "R"),
+    ("Drop", "d"),
+    ("Merge into current", "m"),
+    ("Rebase current on", "e"),
+    ("Reset current to", "S"),
 ];
 
-pub const STASH_ACTIONS: &[(&str, char)] = &[
-    ("Apply Stash", 'y'),
-    ("Pop Stash", 'P'),
-    ("Drop Stash", 'D'),
-    ("Create Branch from Stash", 'B'),
-    ("Copy Stash Name", 'I'),
-    ("Copy Stash Hash", 'O'),
+pub const STASH_ACTIONS: &[(&str, &str)] = &[
+    ("Apply Stash", "y"),
+    ("Pop Stash", "Ctrl-P"),
+    ("Drop Stash", "Ctrl-X"),
+    ("Create Branch from Stash", "Ctrl-N"),
+    ("Copy Stash Name", "Ctrl-I"),
+    ("Copy Stash Hash", "Ctrl-O"),
 ];
 
 impl StatefulWidget for CommitDetail<'_> {
@@ -219,7 +219,7 @@ impl CommitDetail<'_> {
             };
             let key_style = style.add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![
-                Span::styled(format!("{}", label), style),
+                Span::styled(label.to_string(), style),
                 Span::styled(format!(" ({})", key), key_style),
             ]));
         }
@@ -409,10 +409,16 @@ impl CommitDetail<'_> {
                     "D" => self.ctx.color_theme.detail_file_change_delete_fg,
                     _ => self.ctx.color_theme.detail_file_change_move_fg,
                 };
+                let is_deleted = matches!(c, FileChange::Delete { .. });
+                let path_style = if is_deleted {
+                    Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::CROSSED_OUT)
+                } else {
+                    Style::default().fg(self.ctx.color_theme.fg)
+                };
                 Line::from(vec![
                     status.fg(status_color),
                     " ".into(),
-                    path.fg(self.ctx.color_theme.fg),
+                    Span::styled(path, path_style),
                     add_str.fg(self.ctx.color_theme.detail_file_change_add_fg),
                     del_str.fg(self.ctx.color_theme.detail_file_change_delete_fg),
                 ])

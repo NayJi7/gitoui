@@ -22,10 +22,10 @@ use crate::{
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{
-        actions, diff::DiffEntry, status::UncommittedChanges, Commit, CommitHash, FileChange, Head,
-        Ref, Repository,
-    },
+     git::{
+         actions, diff::DiffEntry, status::{StatusType, UncommittedChanges}, Commit, CommitHash, FileChange, Head,
+         Ref, Repository,
+     },
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
     protocol::ImageProtocol,
@@ -93,6 +93,7 @@ struct AppStatus {
     status_line: StatusLine,
     numeric_prefix: String,
     view_area: Rect,
+    notification_timestamp: Option<std::time::Instant>,
 }
 
 #[derive(Debug)]
@@ -219,7 +220,15 @@ impl App<'_> {
         self.clear_image(None)?;
         terminal.clear()?;
 
-        loop {
+         loop {
+            // Clear notifications after 3 seconds
+            if let Some(timestamp) = self.app_status.notification_timestamp {
+                if timestamp.elapsed() >= std::time::Duration::from_secs(3) {
+                    self.clear_status_line();
+                    self.app_status.notification_timestamp = None;
+                }
+            }
+
             self.prepare_render(terminal)?;
             self.flush_pending_graph_uploads()?;
             terminal.draw(|f| self.render(f))?;
@@ -290,9 +299,9 @@ impl App<'_> {
                                     self.app_status.numeric_prefix.push(c);
                                 }
                             }
-                        }
-                    }
-                }
+                         }
+                     }
+                 }
                 AppEvent::Resize(w, h) => {
                     let _ = (w, h);
                 }
@@ -322,6 +331,7 @@ impl App<'_> {
                                     height: 0,
                                     scroll_to_top: true,
                                 },
+                                pending_notification: None,
                             },
                         }));
                     }
@@ -432,6 +442,17 @@ impl App<'_> {
                 AppEvent::StageFile { file } => self.stage_file(file),
                 AppEvent::UnstageFile { file } => self.unstage_file(file),
                 AppEvent::DiscardFile { file } => self.discard_file(file),
+                AppEvent::RefreshUncommitted => {
+                    self.refresh_uncommitted();
+                }
+                AppEvent::OpenUncommittedDiff { file_path, is_staged } => {
+                    self.open_uncommitted_diff(file_path, is_staged);
+                }
+                AppEvent::CloseDiffToUncommitted => {
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
+                    self.close_diff_to_uncommitted();
+                }
             }
         }
     }
@@ -812,7 +833,7 @@ impl App<'_> {
     fn open_file_diff(&mut self, hash: String, file_path: String) {
         let commit_list_state = match self.view {
             View::Detail(ref mut view) => view.take_list_state(),
-            View::Diff(ref mut view) => view.take_list_state(),
+            View::Diff(ref mut view) => view.take_list_state().unwrap(),
             _ => return,
         };
         let all_files = self
@@ -826,7 +847,8 @@ impl App<'_> {
                 | crate::git::FileChange::Delete { path, .. } => path.clone(),
                 crate::git::FileChange::Move { to, .. } => to.clone(),
             })
-            .collect();
+            .collect::<Vec<String>>();
+        let all_files = all_files.into_iter().map(|p| (p, false)).collect();
         match DiffEntry::load_for_file(self.repository.path(), &hash, &file_path) {
             Ok(diff_entry) => {
                 let title = format!("Diff: {}", file_path);
@@ -849,14 +871,14 @@ impl App<'_> {
 
     fn close_diff(&mut self) {
         if let View::Diff(ref mut view) = self.view {
-            let commit_list_state = view.take_list_state();
+            let commit_list_state = view.take_list_state().unwrap();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
         }
     }
 
     fn close_diff_to_detail(&mut self) {
         if let View::Diff(ref mut view) = self.view {
-            let commit_list_state = view.take_list_state();
+            let commit_list_state = view.take_list_state().unwrap();
             let (commit, changes, refs) =
                 selected_commit_details(self.repository, &commit_list_state);
             self.view = View::of_detail(
@@ -867,6 +889,106 @@ impl App<'_> {
                 self.ctx.clone(),
                 self.ec.sender(),
             );
+        }
+    }
+
+    fn open_uncommitted_diff(&mut self, file_path: String, is_staged: bool) {
+        let (commit_list_state, all_files) = match self.view {
+            View::Uncommitted(ref mut view) => {
+                let list_state = view.take_list_state();
+                let staged = &view.staged;
+                let unstaged = &view.unstaged;
+                let all_files: Vec<(String, bool)> = staged
+                    .iter()
+                    .map(|f| (f.path.clone(), true))
+                    .chain(unstaged.iter().map(|f| (f.path.clone(), false)))
+                    .collect();
+                (list_state, all_files)
+            }
+            View::Diff(ref mut view) => {
+                let list_state = view.take_list_state();
+                let all_files = view.all_file_paths().clone();
+                (list_state, all_files)
+            }
+            _ => return,
+        };
+
+        let diff_result = if is_staged {
+            DiffEntry::load_staged_for_file(self.repository.path(), &file_path)
+        } else {
+            DiffEntry::load_unstaged_for_file(self.repository.path(), &file_path)
+        };
+
+        match diff_result {
+            Ok(diff_entry) => {
+                let title = if is_staged {
+                    format!("Diff (staged): {}", file_path)
+                } else {
+                    format!("Diff (unstaged): {}", file_path)
+                };
+                self.view = View::of_uncommitted_diff(
+                    commit_list_state,
+                    vec![diff_entry],
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                    title,
+                    all_files,
+                );
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        }
+    }
+
+    fn close_diff_to_uncommitted(&mut self) {
+        if let View::Diff(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            let repo_path = self.repository.path().to_path_buf();
+            match crate::git::status::UncommittedChanges::load(&repo_path) {
+                Ok(changes) => {
+                    let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                        let diff_result = if is_staged {
+                            DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
+                        } else {
+                            DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
+                        };
+                        
+                        match diff_result {
+                            Ok(diff_entry) => {
+                                let (additions, deletions) = diff_entry.count_additions_and_deletions();
+                                (additions, deletions)
+                            }
+                            Err(_) => (0, 0),
+                        }
+                    };
+                    
+                    let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                        let (additions, deletions) = load_diff_stats(f, is_staged);
+                        crate::widget::uncommitted::UncommittedFile {
+                            status: f.status.clone(),
+                            path: f.path.clone(),
+                            old_path: f.old_path.clone(),
+                            additions,
+                            deletions,
+                        }
+                    };
+                    
+                    self.view = View::Uncommitted(Box::new(
+                        crate::view::uncommitted::UncommittedView::new(
+                            changes.unstaged.iter().map(|f| convert(f, false)).collect(),
+                            changes.staged.iter().map(|f| convert(f, true)).collect(),
+                            changes.untracked.iter().map(|f| convert(f, false)).collect(),
+                            list_state,
+                            self.ctx.clone(),
+                            self.ec.sender(),
+                        )
+                    ));
+                }
+                Err(err) => {
+                    self.ec.send(AppEvent::NotifyError(err));
+                }
+            }
         }
     }
 
@@ -1074,6 +1196,7 @@ impl App<'_> {
                     height: 20,
                     scroll_to_top: false,
                 },
+                pending_notification: None,
             }));
         }
     }
@@ -1084,6 +1207,7 @@ impl App<'_> {
         } else if let View::Diff(ref mut view) = self.view {
             let hash = view
                 .as_list_state()
+                .unwrap()
                 .selected_commit_hash()
                 .as_str()
                 .to_string();
@@ -1105,6 +1229,7 @@ impl App<'_> {
         } else if let View::Diff(ref mut view) = self.view {
             let hash = view
                 .as_list_state()
+                .unwrap()
                 .selected_commit_hash()
                 .as_str()
                 .to_string();
@@ -1126,6 +1251,7 @@ impl App<'_> {
         } else if let View::Diff(ref mut view) = self.view {
             let hash = view
                 .as_list_state()
+                .unwrap()
                 .selected_commit_hash()
                 .as_str()
                 .to_string();
@@ -1146,7 +1272,11 @@ impl App<'_> {
             view.reset_commit_list_with(context.list_context());
         }
         match context {
-            RefreshViewContext::List { .. } => {}
+            RefreshViewContext::List { pending_notification, .. } => {
+                if let Some(msg) = pending_notification {
+                    self.ec.send(AppEvent::NotifySuccess(msg));
+                }
+            }
             RefreshViewContext::Detail { .. } => {
                 self.open_detail();
             }
@@ -1170,6 +1300,7 @@ impl App<'_> {
 
     fn clear_status_line(&mut self) {
         self.app_status.status_line = StatusLine::None;
+        self.app_status.notification_timestamp = None;
     }
 
     fn handle_mouse_event(&mut self, mouse: ratatui::crossterm::event::MouseEvent) {
@@ -1215,18 +1346,22 @@ impl App<'_> {
 
     fn info_notification(&mut self, msg: String) {
         self.app_status.status_line = StatusLine::NotificationInfo(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
     }
 
     fn success_notification(&mut self, msg: String) {
         self.app_status.status_line = StatusLine::NotificationSuccess(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
     }
 
     fn warn_notification(&mut self, msg: String) {
         self.app_status.status_line = StatusLine::NotificationWarn(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
     }
 
     fn error_notification(&mut self, msg: String) {
         self.app_status.status_line = StatusLine::NotificationError(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
     }
 
     fn copy_to_clipboard(&self, name: String, value: String) {
@@ -1353,13 +1488,11 @@ impl App<'_> {
         match result {
             Ok(msg) => {
                 self.close_dialog();
-                if !msg.is_empty() {
-                    self.ec.send(AppEvent::NotifySuccess(msg));
+                let notification = if !msg.is_empty() {
+                    msg
                 } else {
-                    self.ec.send(AppEvent::NotifySuccess(
-                        "Operation completed successfully".into(),
-                    ));
-                }
+                    "Operation completed successfully".into()
+                };
                 self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
                     list_context: crate::view::ListRefreshViewContext {
                         commit_hash: String::new(),
@@ -1367,6 +1500,7 @@ impl App<'_> {
                         height: 20,
                         scroll_to_top: false,
                     },
+                    pending_notification: Some(notification),
                 }));
             }
             Err(msg) => {
@@ -1477,22 +1611,68 @@ impl App<'_> {
 
     fn stage_file(&mut self, file: String) {
         match actions::stage_file(self.repository.path(), &file) {
-            Ok(msg) => self.ec.send(AppEvent::NotifySuccess(msg)),
+            Ok(msg) => {
+                self.ec.send(AppEvent::NotifySuccess(msg));
+                self.ec.send(AppEvent::RefreshUncommitted);
+            }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
         }
     }
 
     fn unstage_file(&mut self, file: String) {
         match actions::unstage_file(self.repository.path(), &file) {
-            Ok(msg) => self.ec.send(AppEvent::NotifySuccess(msg)),
+            Ok(msg) => {
+                self.ec.send(AppEvent::NotifySuccess(msg));
+                self.ec.send(AppEvent::RefreshUncommitted);
+            }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
         }
     }
 
     fn discard_file(&mut self, file: String) {
         match actions::discard_file(self.repository.path(), &file) {
-            Ok(msg) => self.ec.send(AppEvent::NotifySuccess(msg)),
+            Ok(msg) => {
+                self.ec.send(AppEvent::NotifySuccess(msg));
+                self.ec.send(AppEvent::RefreshUncommitted);
+            }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
+        }
+    }
+
+    fn refresh_uncommitted(&mut self) {
+        if let View::Uncommitted(ref mut view) = self.view {
+            let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
+            
+            let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                let diff_result = if is_staged {
+                    DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
+                } else {
+                    DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
+                };
+                
+                match diff_result {
+                    Ok(diff_entry) => {
+                        let (additions, deletions) = diff_entry.count_additions_and_deletions();
+                        (additions, deletions)
+                    }
+                    Err(_) => (0, 0),
+                }
+            };
+            
+            let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                let (additions, deletions) = load_diff_stats(f, is_staged);
+                crate::widget::uncommitted::UncommittedFile {
+                    status: f.status.clone(),
+                    path: f.path.clone(),
+                    old_path: f.old_path.clone(),
+                    additions,
+                    deletions,
+                }
+            };
+            
+            view.staged = changes.staged.iter().map(|f| convert(f, true)).collect();
+            view.unstaged = changes.unstaged.iter().map(|f| convert(f, false)).collect();
+            view.untracked = changes.untracked.iter().map(|f| convert(f, false)).collect();
         }
     }
 }

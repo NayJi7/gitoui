@@ -26,25 +26,29 @@ pub struct DiffView<'a> {
     scroll_offset: usize,
     content_height: usize,
     title: String,
-    commit_hash: String,
-    all_file_paths: Vec<String>,
+        commit_hash: String,
+        all_file_paths: Vec<(String, bool)>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
 }
 
 impl<'a> DiffView<'a> {
+    pub fn all_file_paths(&self) -> &Vec<(String, bool)> {
+        &self.all_file_paths
+    }
+
     pub fn new(
-        commit_list_state: CommitListState<'a>,
+        commit_list_state: Option<CommitListState<'a>>,
         diff_entries: Vec<DiffEntry>,
         ctx: Rc<AppContext>,
         tx: Sender,
         title: String,
         commit_hash: String,
-        all_file_paths: Vec<String>,
+    all_file_paths: Vec<(String, bool)>,
     ) -> DiffView<'a> {
         DiffView {
-            commit_list_state: Some(commit_list_state),
+            commit_list_state,
             diff_entries,
             scroll_offset: 0,
             content_height: 0,
@@ -125,7 +129,11 @@ impl<'a> DiffView<'a> {
                 self.tx.send(AppEvent::OpenHelp);
             }
             UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close => {
-                self.tx.send(AppEvent::CloseDiffToDetail);
+                if self.commit_hash.is_empty() {
+                    self.tx.send(AppEvent::CloseDiffToUncommitted);
+                } else {
+                    self.tx.send(AppEvent::CloseDiffToDetail);
+                }
             }
             UserEvent::Refresh => {
                 self.refresh();
@@ -136,10 +144,17 @@ impl<'a> DiffView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let [list_area, diff_area] = self.split_areas(area);
+        
+        if let Some(ref mut list_state) = self.commit_list_state {
+            let commit_list = CommitList::new(self.ctx.clone());
+            f.render_stateful_widget(commit_list, list_area, list_state);
+            self.render_diff(f, diff_area);
+        } else {
+            self.render_diff(f, area);
+        }
+    }
 
-        let commit_list = CommitList::new(self.ctx.clone());
-        f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
-
+    fn render_diff(&mut self, f: &mut Frame, diff_area: Rect) {
         let lines = self.build_diff_lines(&diff_area);
         self.content_height = lines.len();
 
@@ -217,38 +232,49 @@ impl<'a> DiffView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
-        self.as_mut_list_state()
-            .update_height(list_area.height as usize);
+        if let Some(ref mut state) = self.commit_list_state {
+            state.update_height(list_area.height as usize);
+        }
     }
 
     pub fn prepare_graph_uploads(&mut self) {
-        self.as_mut_list_state().ensure_visible_graph_uploaded();
+        if let Some(ref mut state) = self.commit_list_state {
+            state.ensure_visible_graph_uploaded();
+        }
     }
 
     pub fn clear_graph_images(&mut self) {
-        self.as_mut_list_state().clear_graph_images();
+        if let Some(ref mut state) = self.commit_list_state {
+            state.clear_graph_images();
+        }
     }
 }
 
 impl<'a> DiffView<'a> {
-    pub fn take_list_state(&mut self) -> CommitListState<'a> {
-        self.commit_list_state.take().unwrap()
+    pub fn take_list_state(&mut self) -> Option<CommitListState<'a>> {
+        self.commit_list_state.take()
     }
 
-    fn as_mut_list_state(&mut self) -> &mut CommitListState<'a> {
-        self.commit_list_state.as_mut().unwrap()
+    fn as_mut_list_state(&mut self) -> Option<&mut CommitListState<'a>> {
+        self.commit_list_state.as_mut()
     }
 
-    pub fn as_list_state(&self) -> &CommitListState<'a> {
-        self.commit_list_state.as_ref().unwrap()
+    pub fn as_list_state(&self) -> Option<&CommitListState<'a>> {
+        self.commit_list_state.as_ref()
     }
 
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
-        self.as_mut_list_state().drain_pending_graph_uploads()
+        self.commit_list_state
+            .as_mut()
+            .map(|s| s.drain_pending_graph_uploads())
+            .unwrap_or_default()
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
-        self.as_list_state().graph_image_ids_sorted()
+        self.commit_list_state
+            .as_ref()
+            .map(|s| s.graph_image_ids_sorted())
+            .unwrap_or_default()
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
@@ -546,7 +572,10 @@ impl<'a> DiffView<'a> {
     where
         F: FnOnce(&mut CommitListState<'a>),
     {
-        let state = self.as_mut_list_state();
+        let state = match self.commit_list_state.as_mut() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
         update_fn(state);
         let hash = state.selected_commit_hash();
         let new_entries = DiffEntry::load_for_commit(repo_path, hash.as_str())?;
@@ -601,8 +630,10 @@ impl<'a> DiffView<'a> {
     }
 
     fn copy_commit_hash(&self) {
-        let hash = self.as_list_state().selected_commit_hash();
-        self.copy_to_clipboard("Commit SHA".into(), hash.as_str().into());
+        if let Some(state) = self.commit_list_state.as_ref() {
+            let hash = state.selected_commit_hash();
+            self.copy_to_clipboard("Commit SHA".into(), hash.as_str().into());
+        }
     }
 
     fn copy_to_clipboard(&self, name: String, value: String) {
@@ -613,29 +644,56 @@ impl<'a> DiffView<'a> {
         if self.all_file_paths.len() <= 1 {
             return;
         }
-        let current = self.title.strip_prefix("Diff: ").unwrap_or("");
-        if let Some(idx) = self.all_file_paths.iter().position(|p| p == current) {
+        let is_staged = self.title.contains("(staged)");
+        let current = self.title.strip_prefix("Diff (staged): ")
+            .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
+            .or_else(|| self.title.strip_prefix("Diff: "))
+            .unwrap_or("");
+
+        let position = if self.commit_hash.is_empty() {
+            self.all_file_paths.iter().position(|(p, s)| p == current && *s == is_staged)
+        } else {
+            self.all_file_paths.iter().position(|(p, _)| p == current)
+        };
+
+        if let Some(idx) = position {
             let new_idx = ((idx as isize + delta).rem_euclid(self.all_file_paths.len() as isize)) as usize;
-            let new_path = self.all_file_paths[new_idx].clone();
-            self.tx.send(AppEvent::OpenFileDiff {
-                hash: self.commit_hash.clone(),
-                file_path: new_path,
-            });
+            let (new_path, new_staged) = self.all_file_paths[new_idx].clone();
+            if self.commit_hash.is_empty() {
+                self.tx.send(AppEvent::OpenUncommittedDiff { file_path: new_path, is_staged: new_staged });
+            } else {
+                self.tx.send(AppEvent::OpenFileDiff {
+                    hash: self.commit_hash.clone(),
+                    file_path: new_path,
+                });
+            }
         }
     }
 
     pub fn refresh(&self) {
-        let list_state = self.as_list_state();
-        let list_context = ListRefreshViewContext::from(list_state);
-        let context = RefreshViewContext::Detail { list_context };
-        self.tx.send(AppEvent::Refresh(context));
+        if let Some(list_state) = self.commit_list_state.as_ref() {
+            let list_context = ListRefreshViewContext::from(list_state);
+            let context = RefreshViewContext::Detail { list_context };
+            self.tx.send(AppEvent::Refresh(context));
+        }
     }
 
     pub fn footer_hint(&self) -> String {
         let mut parts = Vec::new();
         if self.all_file_paths.len() > 1 {
-            let current = self.title.strip_prefix("Diff: ").unwrap_or("");
-            if let Some(idx) = self.all_file_paths.iter().position(|p| p == current) {
+            let is_staged = self.title.contains("(staged)");
+            let current = self.title.strip_prefix("Diff (staged): ")
+                .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
+                .or_else(|| self.title.strip_prefix("Diff: "))
+                .unwrap_or("");
+                
+            let position = if self.commit_hash.is_empty() {
+                self.all_file_paths.iter().position(|(p, s)| p == current && *s == is_staged)
+            } else {
+                self.all_file_paths.iter().position(|(p, _)| p == current)
+            };
+
+            if let Some(idx) = position {
                 if idx > 0 {
                     parts.push("←:prev-file");
                 }
@@ -650,10 +708,11 @@ impl<'a> DiffView<'a> {
     }
 
     pub fn handle_click(&mut self, _col: u16, row: u16) {
-        let list_state = self.as_mut_list_state();
-        let (_, offset, height) = list_state.current_list_status();
-        let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
-        list_state.select(clicked_index);
+        if let Some(list_state) = self.as_mut_list_state() {
+            let (_, offset, height) = list_state.current_list_status();
+            let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
+            list_state.select(clicked_index);
+        }
     }
 }
 

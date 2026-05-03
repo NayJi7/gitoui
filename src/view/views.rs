@@ -154,7 +154,7 @@ impl<'a> View<'a> {
             View::Default => false,
             View::List(view) => view.as_list_state().search_state().is_active(),
             View::Detail(view) => view.as_list_state().search_state().is_active(),
-            View::Diff(view) => view.as_list_state().search_state().is_active(),
+            View::Diff(view) => view.as_list_state().map_or(false, |s| s.search_state().is_active()),
             View::UserCommand(view) => view.as_list_state().search_state().is_active(),
             View::Refs(view) => view.as_list_state().search_state().is_active(),
             View::Help(view) => view.is_search_active(),
@@ -171,7 +171,7 @@ impl<'a> View<'a> {
             View::Default => false,
             View::List(view) => view.as_list_state().search_state().is_querying(),
             View::Detail(view) => view.as_list_state().search_state().is_querying(),
-            View::Diff(view) => view.as_list_state().search_state().is_querying(),
+            View::Diff(view) => view.as_list_state().map_or(false, |s| s.search_state().is_querying()),
             View::UserCommand(view) => view.as_list_state().search_state().is_querying(),
             View::Refs(view) => view.as_list_state().search_state().is_querying(),
             View::Help(view) => view.is_search_querying(),
@@ -188,7 +188,7 @@ impl<'a> View<'a> {
             View::Default => None,
             View::List(view) => view.as_list_state().search_case_fuzzy(),
             View::Detail(view) => view.as_list_state().search_case_fuzzy(),
-            View::Diff(view) => view.as_list_state().search_case_fuzzy(),
+            View::Diff(view) => view.as_list_state().and_then(|s| s.search_case_fuzzy()),
             View::UserCommand(view) => view.as_list_state().search_case_fuzzy(),
             View::Refs(view) => view.as_list_state().search_case_fuzzy(),
             View::Help(view) => view.search_case_fuzzy(),
@@ -251,7 +251,26 @@ impl<'a> View<'a> {
         tx: Sender,
         title: String,
         commit_hash: String,
-        all_file_paths: Vec<String>,
+        all_file_paths: Vec<(String, bool)>,
+    ) -> Self {
+        View::Diff(Box::new(DiffView::new(
+            Some(commit_list_state),
+            diff_entries,
+            ctx,
+            tx,
+            title,
+            commit_hash,
+            all_file_paths,
+        )))
+    }
+
+    pub fn of_uncommitted_diff(
+        commit_list_state: Option<CommitListState<'a>>,
+        diff_entries: Vec<crate::git::diff::DiffEntry>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+        title: String,
+        all_file_paths: Vec<(String, bool)>,
     ) -> Self {
         View::Diff(Box::new(DiffView::new(
             commit_list_state,
@@ -259,7 +278,7 @@ impl<'a> View<'a> {
             ctx,
             tx,
             title,
-            commit_hash,
+            String::new(),
             all_file_paths,
         )))
     }
@@ -305,6 +324,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.handle_click(col, row),
             View::Refs(view) => view.handle_click(col, row),
             View::Config(view) => view.handle_click(col, row),
+            View::Dialog(view) => view.handle_click(col, row),
             View::BranchDetail(view) => view.handle_click(col, row),
             View::TagDetail(view) => view.handle_click(col, row),
             View::Uncommitted(view) => view.handle_click(col, row),
@@ -318,6 +338,7 @@ impl<'a> View<'a> {
             View::Detail(view) => view.handle_mouse_move(col, row),
             View::Refs(view) => view.handle_mouse_move(col, row),
             View::Config(view) => view.handle_mouse_move(col, row),
+            View::Dialog(view) => view.handle_mouse_move(col, row),
             View::BranchDetail(view) => view.handle_mouse_move(col, row),
             View::TagDetail(view) => view.handle_mouse_move(col, row),
             View::Uncommitted(view) => view.handle_mouse_move(col, row),
@@ -354,6 +375,7 @@ impl<'a> View<'a> {
 pub enum RefreshViewContext {
     List {
         list_context: ListRefreshViewContext,
+        pending_notification: Option<String>,
     },
     Detail {
         list_context: ListRefreshViewContext,
@@ -374,7 +396,7 @@ pub enum RefreshViewContext {
 impl RefreshViewContext {
     pub fn list_context(&self) -> &ListRefreshViewContext {
         match self {
-            RefreshViewContext::List { list_context }
+            RefreshViewContext::List { list_context, .. }
             | RefreshViewContext::Detail { list_context }
             | RefreshViewContext::Diff { list_context }
             | RefreshViewContext::UserCommand { list_context, .. }

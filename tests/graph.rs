@@ -1489,6 +1489,7 @@ fn build_graph_image(
                 false,
                 false,
                 image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
+                None,
             );
             (edges.clone(), graph_row_image)
         })

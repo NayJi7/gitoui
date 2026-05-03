@@ -168,20 +168,15 @@ impl<'a> TagDetailView<'a> {
     }
 
     fn execute_action(&self, action_idx: usize) {
-        if let Some((_, key)) = crate::widget::tag_detail::TAG_ACTIONS.get(action_idx) {
-            match *key {
-                'p' => self.tx.send(AppEvent::OpenDialog(DialogKind::PushTag {
-                    tag: self.metadata.tag_name.clone(),
-                })),
-                'D' => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteTag {
-                    tag: self.metadata.tag_name.clone(),
-                })),
-                'c' => self.tx.send(AppEvent::CopyToClipboard {
-                    name: "Tag Name".into(),
-                    value: self.metadata.tag_name.clone(),
-                }),
-                _ => {}
-            }
+        let name = self.metadata.tag_name.clone();
+        match action_idx {
+            0 => self.tx.send(AppEvent::OpenDialog(DialogKind::PushTag { tag: name })),
+            1 => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteTag { tag: name })),
+            2 => self.tx.send(AppEvent::CopyToClipboard {
+                name: "Tag Name".into(),
+                value: name,
+            }),
+            _ => {}
         }
     }
 }

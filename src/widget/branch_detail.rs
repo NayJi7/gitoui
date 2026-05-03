@@ -15,26 +15,26 @@ pub struct BranchDetailState {
     pub hovered_action: Option<usize>,
 }
 
-pub const LOCAL_BRANCH_ACTIONS: &[(&str, char)] = &[
-    ("Checkout", 'o'),
-    ("Rename", 'r'),
-    ("Delete", 'D'),
-    ("Merge into current", 'm'),
-    ("Rebase current on", 'e'),
-    ("Push", 'p'),
-    ("Create Archive", 'a'),
-    ("Unselect", 'u'),
-    ("Copy Name", 'c'),
+pub const LOCAL_BRANCH_ACTIONS: &[(&str, &str)] = &[
+    ("Checkout", "o"),
+    ("Rename", "Ctrl-R"),
+    ("Delete", "D"),
+    ("Merge into current", "m"),
+    ("Rebase current on", "e"),
+    ("Push", "Q"),
+    ("Create Archive", "E"),
+    ("Unselect", "T"),
+    ("Copy Name", "V"),
 ];
 
-pub const REMOTE_BRANCH_ACTIONS: &[(&str, char)] = &[
-    ("Checkout", 'o'),
-    ("Delete Remote", 'D'),
-    ("Merge into current", 'm'),
-    ("Pull into current", 'l'),
-    ("Create Archive", 'a'),
-    ("Unselect", 'u'),
-    ("Copy Name", 'c'),
+pub const REMOTE_BRANCH_ACTIONS: &[(&str, &str)] = &[
+    ("Checkout", "o"),
+    ("Delete Remote", "D"),
+    ("Merge into current", "m"),
+    ("Pull into current", "Z"),
+    ("Create Archive", "E"),
+    ("Unselect", "T"),
+    ("Copy Name", "V"),
 ];
 
 #[derive(Debug, Clone)]
@@ -130,7 +130,7 @@ impl BranchDetail<'_> {
             };
             let key_style = style.add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![
-                Span::styled(format!("{}", label), style),
+                Span::styled(label.to_string(), style),
                 Span::styled(format!(" ({})", key), key_style),
             ]));
         }

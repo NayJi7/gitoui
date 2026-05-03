@@ -58,6 +58,9 @@ pub enum AppEvent {
     StageFile { file: String },
     UnstageFile { file: String },
     DiscardFile { file: String },
+    RefreshUncommitted,
+    OpenUncommittedDiff { file_path: String, is_staged: bool },
+    CloseDiffToUncommitted,
 }
 
 #[derive(Debug, Clone)]

@@ -2,7 +2,7 @@ force_quit = ["ctrl-c"]
 quit = ["q"]
 help_toggle = ["?","f1"]
 cancel = ["esc"]
-close = ["backspace"]
+close = []
 
 navigate_up = ["k", "up"]
 navigate_down = ["j", "down"]

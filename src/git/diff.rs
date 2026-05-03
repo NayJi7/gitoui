@@ -63,6 +63,30 @@ impl DiffEntry {
         let entries = parse_diff(&stdout)?;
         entries.into_iter().next().ok_or_else(|| "No diff output".to_string())
     }
+
+    pub fn load_unstaged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
+        let output = Command::new("git")
+            .args(["diff", "--unified=3", "--", file_path])
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("Failed to run git diff: {}", e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let entries = parse_diff(&stdout)?;
+        entries.into_iter().next().ok_or_else(|| "No diff output".to_string())
+    }
+
+    pub fn load_staged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
+        let output = Command::new("git")
+            .args(["diff", "--unified=3", "--cached", "--", file_path])
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("Failed to run git diff: {}", e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let entries = parse_diff(&stdout)?;
+        entries.into_iter().next().ok_or_else(|| "No diff output".to_string())
+    }
 }
 
 fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
@@ -174,4 +198,23 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
     }
 
     Ok(entries)
+}
+
+impl DiffEntry {
+    pub fn count_additions_and_deletions(&self) -> (usize, usize) {
+        let mut additions = 0;
+        let mut deletions = 0;
+        
+        for hunk in &self.hunks {
+            for line in &hunk.lines {
+                match line.line_type {
+                    DiffLineType::Addition => additions += 1,
+                    DiffLineType::Deletion => deletions += 1,
+                    _ => {}
+                }
+            }
+        }
+        
+        (additions, deletions)
+    }
 }
