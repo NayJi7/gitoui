@@ -539,6 +539,10 @@ impl App<'_> {
                     View::Refs(_) => "Esc:close".into(),
                     View::Help(_) => "Esc:close".into(),
                     View::UserCommand(_) => "Esc:close".into(),
+                    View::Dialog(_) => "Enter:confirm Esc:cancel".into(),
+                    View::BranchDetail(_) => "c:copy-name o:checkout Esc:close".into(),
+                    View::TagDetail(_) => "c:copy-name p:push Esc:close".into(),
+                    View::Uncommitted(_) => "a:stage u:unstage x:discard A:stage-all U:unstage-all X:discard-all".into(),
                     _ => "f:search ?:help q:quit r:refresh".into(),
                 }
             };
