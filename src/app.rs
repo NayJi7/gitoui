@@ -20,7 +20,7 @@ use crate::{
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
     },
-    git::{diff::DiffEntry, Commit, FileChange, Head, Ref, Repository},
+    git::{diff::DiffEntry, Commit, CommitHash, FileChange, Head, Ref, Repository},
     graph::{CellWidthType, Graph, GraphImageManager},
     keybind::KeyBind,
     protocol::ImageProtocol,
@@ -307,10 +307,6 @@ impl App<'_> {
                     terminal.clear()?;
                     self.close_config();
                 }
-                AppEvent::OpenDiff => {
-                    self.clear_image(Some(terminal))?;
-                    self.open_diff();
-                }
                 AppEvent::OpenFileDiff { hash, file_path } => {
                     self.clear_image(Some(terminal))?;
                     self.open_file_diff(hash, file_path);
@@ -463,16 +459,19 @@ impl App<'_> {
             StatusLine::None | StatusLine::NotificationInfo(_)
         ) && !is_search_active && !is_config_active;
         let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None) || is_search_active || is_config_active;
+        let is_diff = matches!(&self.view, View::Diff(_));
 
         let status_area = if show_shortcuts {
             let right_constraint = if is_search_querying {
                 Constraint::Length(16)
             } else if is_search_active {
-                Constraint::Length(56)
+                Constraint::Length(58)
             } else if is_config_active {
-                Constraint::Length(50)
+                Constraint::Length(32)
+            } else if is_diff {
+                Constraint::Length(55)
             } else {
-                Constraint::Length(35)
+                Constraint::Length(38)
             };
             let [left_area, right_area] = Layout::horizontal([
                 Constraint::Min(0),
@@ -480,24 +479,24 @@ impl App<'_> {
             ]).areas(area);
 
             let shortcut_text: String = if is_search_querying {
-                "Esc: cancel".into()
+                "Esc:cancel".into()
             } else if is_search_active {
                 let (ignore_case, fuzzy) = self.view.search_case_fuzzy().unwrap_or((false, false));
                 // ON = case-sensitive (ignore_case=false), OFF = case-insensitive (ignore_case=true)
                 let case_str = if ignore_case { "[OFF]" } else { "[ON]" };
                 let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
-                format!("s:case {case_str}  z:fuzzy {fuzzy_str}  n:next  N:prev  Esc:clear")
+                format!("s:case{case_str} z:fuzzy{fuzzy_str} n:next N:prev Esc:clear")
             } else if is_config_active {
-                "Enter / ← → to cycle, Esc / p to close".into()
+                "Enter/←→:cycle Esc:close".into()
             } else {
                 match &self.view {
-                    View::List(_) => "q:quit  ?:help  r:refresh".into(),
-                    View::Diff(_) => "Esc:close".into(),
+                    View::List(_) => "f:search r:refresh ?:help q:quit".into(),
+                    View::Diff(_) => self.view.diff_footer_hint().unwrap_or_else(|| "c:copy-path Esc:close".into()),
                     View::Detail(_) => "Esc:close".into(),
                     View::Refs(_) => "Esc:close".into(),
                     View::Help(_) => "Esc:close".into(),
                     View::UserCommand(_) => "Esc:close".into(),
-                    _ => "q:quit  ?:help  r:refresh".into(),
+                    _ => "f:search ?:help q:quit r:refresh".into(),
                 }
             };
             let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
@@ -659,48 +658,21 @@ impl App<'_> {
         }
     }
 
-    fn open_diff(&mut self) {
-        let commit_list_state = match self.view {
-            View::List(ref mut view) => view.take_list_state(),
-            View::Detail(ref mut view) => view.take_list_state(),
-            View::UserCommand(ref mut view) => view.take_list_state(),
-            _ => return,
-        };
-        let title = commit_list_state
-            .selected_commit_subject()
-            .map(|subject| {
-                let hash = commit_list_state.selected_commit_hash().as_short_hash();
-                let truncated = if subject.len() > 50 {
-                    format!("{}...", &subject[..50])
-                } else {
-                    subject.to_string()
-                };
-                format!("Diff: {} ({})", hash, truncated)
-            })
-            .unwrap_or_default();
-        let hash = commit_list_state.selected_commit_hash();
-        match DiffEntry::load_for_commit(self.repository.path(), hash.as_str()) {
-            Ok(diff_entries) => {
-                self.view = View::of_diff_with_entries(
-                    commit_list_state,
-                    diff_entries,
-                    self.ctx.clone(),
-                    self.ec.sender(),
-                    title,
-                );
-            }
-            Err(err) => {
-                self.ec.send(AppEvent::NotifyError(err));
-                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
-            }
-        }
-    }
-
     fn open_file_diff(&mut self, hash: String, file_path: String) {
         let commit_list_state = match self.view {
             View::Detail(ref mut view) => view.take_list_state(),
+            View::Diff(ref mut view) => view.take_list_state(),
             _ => return,
         };
+        let all_files = self.repository
+            .commit_detail(&CommitHash::from(hash.as_str()))
+            .1
+            .iter()
+            .map(|c| match c {
+                crate::git::FileChange::Add { path, .. } | crate::git::FileChange::Modify { path, .. } | crate::git::FileChange::Delete { path, .. } => path.clone(),
+                crate::git::FileChange::Move { to, .. } => to.clone(),
+            })
+            .collect();
         match DiffEntry::load_for_file(self.repository.path(), &hash, &file_path) {
             Ok(diff_entry) => {
                 let title = format!("Diff: {}", file_path);
@@ -710,6 +682,8 @@ impl App<'_> {
                     self.ctx.clone(),
                     self.ec.sender(),
                     title,
+                    hash,
+                    all_files,
                 );
             }
             Err(err) => {
@@ -1010,7 +984,7 @@ impl App<'_> {
                 self.open_detail();
             }
             RefreshViewContext::Diff { .. } => {
-                self.open_diff();
+                // Diff global removed; only per-file diffs are supported now
             }
             RefreshViewContext::UserCommand {
                 user_command_context,
