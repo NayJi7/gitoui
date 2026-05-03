@@ -40,7 +40,6 @@ pub struct CommitInfo<'a> {
     pub uncommitted_staged: usize,
     pub uncommitted_unstaged: usize,
     pub uncommitted_untracked: usize,
-    /// Date de dernière modification des fichiers uncommitted (Option<DateTime<FixedOffset>>)
     pub uncommitted_last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
@@ -233,7 +232,7 @@ pub struct RefHitArea {
     pub row: u16,
     pub col_start: u16,
     pub col_end: u16,
-    pub name: String,
+    pub names: Vec<String>,
     pub is_tag: bool,
 }
 
@@ -639,7 +638,7 @@ impl<'a> CommitListState<'a> {
     pub fn branch_at_position(&self, col: u16, row: u16) -> Option<String> {
         self.ref_hit_areas.iter().find_map(|hit| {
             if !hit.is_tag && hit.row == row && col >= hit.col_start && col < hit.col_end {
-                Some(hit.name.clone())
+                hit.names.first().cloned()
             } else {
                 None
             }
@@ -649,7 +648,7 @@ impl<'a> CommitListState<'a> {
     pub fn tag_at_position(&self, col: u16, row: u16) -> Option<String> {
         self.ref_hit_areas.iter().find_map(|hit| {
             if hit.is_tag && hit.row == row && col >= hit.col_start && col < hit.col_end {
-                Some(hit.name.clone())
+                hit.names.first().cloned()
             } else {
                 None
             }
@@ -1114,11 +1113,7 @@ impl CommitList<'_> {
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
             .map(|(_, commit_info)| {
-                let marker = if commit_info.commit().map_or(false, |c| matches!(c.commit_type, CommitType::Stash)) {
-                    "◉"
-                } else {
-                    "│"
-                };
+                let marker = "│";
                 ListItem::new(marker.fg(commit_info.graph_color))
             })
             .collect();
@@ -1153,7 +1148,7 @@ impl CommitList<'_> {
                     row: area.y + i as u16,
                     col_start: base_x + hit.start as u16,
                     col_end: base_x + hit.end as u16,
-                    name: hit.name,
+                    names: hit.names,
                     is_tag: hit.is_tag,
                 });
             }
@@ -1357,7 +1352,7 @@ impl CommitList<'_> {
 struct RefHitAreaRel {
     pub start: usize,
     pub end: usize,
-    pub name: String,
+    pub names: Vec<String>,
     pub is_tag: bool,
 }
 
@@ -1393,32 +1388,64 @@ fn refs_spans<'a>(
     current_width += 1;
 
     // Collect ref info first
-    let mut ref_infos: Vec<(&'a str, Color, bool)> = Vec::new();
-    for r in refs.iter() {
-        match r {
-            Ref::Branch { name, .. } => {
-                let fg = branch_color_map
-                    .get(name)
-                    .copied()
-                    .unwrap_or(color_theme.list_ref_branch_fg);
-                ref_infos.push((name, fg, false));
+    let mut ref_infos: Vec<(Vec<&'a str>, Color, bool)> = Vec::new();
+    {
+        let mut local_branches: Vec<(&'a str, Color)> = Vec::new();
+        let mut remote_branches: Vec<(&'a str, &'a str, Color)> = Vec::new();
+        let mut tags: Vec<(&'a str, Color)> = Vec::new();
+
+        for r in refs.iter() {
+            match r {
+                Ref::Branch { name, .. } => {
+                    let fg = branch_color_map
+                        .get(name)
+                        .copied()
+                        .unwrap_or(color_theme.list_ref_branch_fg);
+                    local_branches.push((name.as_str(), fg));
+                }
+                Ref::RemoteBranch { name, .. } => {
+                    let fg = branch_color_map
+                        .get(name)
+                        .copied()
+                        .or_else(|| {
+                            name.split_once('/')
+                                .and_then(|(_, branch)| branch_color_map.get(branch).copied())
+                        })
+                        .unwrap_or(color_theme.list_ref_remote_branch_fg);
+                    let base = name.split_once('/').map(|(_, b)| b).unwrap_or(name.as_str());
+                    remote_branches.push((name.as_str(), base, fg));
+                }
+                Ref::Tag { name, .. } => {
+                    let fg = color_theme.list_ref_tag_fg;
+                    tags.push((name.as_str(), fg));
+                }
+                Ref::Stash { .. } => {}
             }
-            Ref::RemoteBranch { name, .. } => {
-                let fg = branch_color_map
-                    .get(name)
-                    .copied()
-                    .or_else(|| {
-                        name.split_once('/')
-                            .and_then(|(_, branch)| branch_color_map.get(branch).copied())
-                    })
-                    .unwrap_or(color_theme.list_ref_remote_branch_fg);
-                ref_infos.push((name, fg, false));
+        }
+
+        let mut merged_remotes: FxHashSet<usize> = FxHashSet::default();
+        for (local_name, local_fg) in &local_branches {
+            let matching_remote = remote_branches.iter().enumerate().find(|(ri, (_, base, _))| {
+                *base == *local_name && !merged_remotes.contains(ri)
+            });
+            if let Some((ri, (remote_name, _, _))) = matching_remote {
+                merged_remotes.insert(ri);
+                let remote_prefix = remote_name.split_once('/').map(|(p, _)| p).unwrap_or("");
+                let display = format!("{}|{}", local_name, remote_prefix);
+                let fg = *local_fg;
+                ref_infos.push((vec![local_name, remote_name], fg, false));
+                let _ = display;
+            } else {
+                ref_infos.push((vec![local_name], *local_fg, false));
             }
-            Ref::Tag { name, .. } => {
-                let fg = color_theme.list_ref_tag_fg;
-                ref_infos.push((name, fg, true));
+        }
+        for (ri, (remote_name, _, remote_fg)) in remote_branches.iter().enumerate() {
+            if !merged_remotes.contains(&ri) {
+                ref_infos.push((vec![remote_name], *remote_fg, false));
             }
-            Ref::Stash { .. } => {}
+        }
+        for (tag_name, tag_fg) in tags {
+            ref_infos.push((vec![tag_name], tag_fg, true));
         }
     }
 
@@ -1435,18 +1462,25 @@ fn refs_spans<'a>(
         }
     }
 
-    for (i, (name, fg, is_tag)) in ref_infos.iter().enumerate() {
+    for (i, (names, fg, is_tag)) in ref_infos.iter().enumerate() {
+        let display_name = if names.len() == 2 {
+            let remote_prefix = names[1].split_once('/').map(|(p, _)| p).unwrap_or("");
+            format!("{}|{}", names[0], remote_prefix)
+        } else {
+            names[0].to_string()
+        };
+
         if let Head::Branch { name: head_name } = head {
-            if *name == head_name {
+            if names.contains(&head_name.as_str()) {
                 spans.push(Span::raw("HEAD -> ").fg(color_theme.list_head_fg).bold());
                 current_width += 8;
             }
         }
 
         let is_hovered = if *is_tag {
-            hovered_tag == Some(*name)
+            hovered_tag == Some(names[0])
         } else {
-            hovered_branch == Some(*name)
+            hovered_branch.map_or(false, |hb| names.iter().any(|n| *n == hb))
         };
 
         let icon = if *is_tag {
@@ -1478,7 +1512,8 @@ fn refs_spans<'a>(
 
         let name_start = current_width;
         let name_spans = refs_matches
-            .get(*name)
+            .get(display_name.as_str())
+            .or_else(|| refs_matches.get(names[0]))
             .map(|pos| {
                 let modifier = if is_hovered {
                     Modifier::BOLD | Modifier::UNDERLINED | Modifier::REVERSED
@@ -1486,7 +1521,7 @@ fn refs_spans<'a>(
                     Modifier::BOLD
                 };
                 highlighted_spans(
-                    (*name).into(),
+                    Span::raw(&display_name),
                     pos.clone(),
                     *fg,
                     modifier,
@@ -1504,7 +1539,7 @@ fn refs_spans<'a>(
                 } else {
                     Style::default().fg(*fg).add_modifier(Modifier::BOLD)
                 };
-                vec![Span::styled(*name, style)]
+                vec![Span::styled(display_name.clone(), style)]
             });
 
         for span in &name_spans {
@@ -1515,7 +1550,7 @@ fn refs_spans<'a>(
         hit_areas.push(RefHitAreaRel {
             start: name_start,
             end: current_width,
-            name: (*name).to_string(),
+            names: names.iter().map(|s| s.to_string()).collect(),
             is_tag: *is_tag,
         });
 

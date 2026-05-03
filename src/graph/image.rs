@@ -105,8 +105,8 @@ impl<'a> GraphImageManager<'a> {
             return;
         }
         let is_head = self.head_commit_hash.as_ref() == Some(commit_hash);
-        // Quand il y a des uncommitted changes, HEAD est dessiné comme un commit normal (cercle plein)
-        let head = is_head && !self.has_uncommitted;
+        // HEAD est toujours dessiné comme un cercle vide (hollow circle)
+        let head = is_head;
         let image_id = graph_image_id(self.session_nonce, commit_hash, head);
 
         // Si has_uncommitted et c'est HEAD, dessiner un edge UP en gris pour connecter à l'uncommitted
@@ -332,6 +332,12 @@ fn build_single_graph_row_image(
     let (pos_x, pos_y) = graph.commit_pos_map[&commit_hash];
     let edges = &graph.edges[pos_y];
 
+    // Determine if this is a stash commit and get its color
+    // We need to find the commit object in graph.commits
+    let commit = graph.commits.iter().find(|c| c.commit_hash == *commit_hash).unwrap();
+    let is_stash = matches!(commit.commit_type, crate::git::CommitType::Stash);
+    let commit_color = image_params.edge_color(pos_x);
+
     let max_pos_x = match image_width_mode {
         GraphImageWidthMode::Compact => edges.iter().map(|e| e.pos_x).fold(pos_x, usize::max),
         GraphImageWidthMode::Fixed => graph.max_pos_x,
@@ -347,7 +353,11 @@ fn build_single_graph_row_image(
         drawing_pixels,
         graph_style,
         head,
+        is_stash,
+        commit_color,
         uncommitted_up_color,
+        &graph.branch_segments,
+        pos_y,
     )
 }
 
@@ -715,7 +725,11 @@ pub fn calc_graph_row_image(
     drawing_pixels: &DrawingPixels,
     graph_style: GraphStyle,
     head: bool,
+    is_stash: bool,
+    commit_color: image::Rgba<u8>,
     uncommitted_up_color: Option<image::Rgba<u8>>,
+    branch_segments: &[crate::graph::calc::BranchSegment],
+    pos_y: usize,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -725,6 +739,8 @@ pub fn calc_graph_row_image(
     draw_background(&mut img_buf, image_params);
     if head {
         draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+    } else if is_stash {
+        draw_stash_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
     } else {
         draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     }
@@ -754,21 +770,61 @@ pub fn calc_graph_row_image(
             }
         }
         GraphStyle::Smooth => {
-            for edge in edges {
-                match edge.edge_type {
-                    EdgeType::RightTop
-                    | EdgeType::RightBottom
-                    | EdgeType::LeftTop
-                    | EdgeType::LeftBottom => {
-                        draw_smooth_corner_edge(&mut img_buf, edge, image_params);
+            // Build set of edges to skip (rendered by Bezier curves instead)
+            let mut skip_edges: FxHashSet<(EdgeType, usize)> = FxHashSet::default();
+            for seg in branch_segments {
+                let (min_x, max_x) = if seg.source_pos_x < seg.target_pos_x {
+                    (seg.source_pos_x, seg.target_pos_x)
+                } else {
+                    (seg.target_pos_x, seg.source_pos_x)
+                };
+                if pos_y == seg.source_pos_y {
+                    if seg.is_branch {
+                        skip_edges.insert((EdgeType::Right, seg.source_pos_x));
+                        skip_edges.insert((EdgeType::Left, seg.source_pos_x));
                     }
-                    EdgeType::Right | EdgeType::Left | EdgeType::Horizontal => {
-                        draw_smooth_horizontal_edge(&mut img_buf, edge, image_params);
+                    for x in (min_x + 1)..max_x {
+                        skip_edges.insert((EdgeType::Horizontal, x));
                     }
-                    _ => {
-                        draw_edge(&mut img_buf, edge, image_params, drawing_pixels);
+                    skip_edges.insert((EdgeType::RightBottom, seg.target_pos_x));
+                    skip_edges.insert((EdgeType::LeftBottom, seg.target_pos_x));
+                }
+                if pos_y == seg.target_pos_y {
+                    skip_edges.insert((EdgeType::RightTop, seg.source_pos_x));
+                    skip_edges.insert((EdgeType::LeftTop, seg.source_pos_x));
+                    for x in (min_x + 1)..max_x {
+                        skip_edges.insert((EdgeType::Horizontal, x));
+                    }
+                    skip_edges.insert((EdgeType::Right, seg.target_pos_x));
+                    skip_edges.insert((EdgeType::Left, seg.target_pos_x));
+                }
+                if !seg.is_branch {
+                    if pos_y == seg.source_pos_y {
+                        skip_edges.insert((EdgeType::Up, seg.source_pos_x));
+                    }
+                    if pos_y == seg.target_pos_y {
+                        skip_edges.insert((EdgeType::Down, seg.target_pos_x));
                     }
                 }
+            }
+
+            // Draw Bezier curves for all segments intersecting this row
+            for seg in branch_segments {
+                let min_y = seg.target_pos_y.min(seg.source_pos_y);
+                let max_y = seg.target_pos_y.max(seg.source_pos_y);
+                if pos_y >= min_y && pos_y <= max_y {
+                    draw_smooth_bezier_segment(
+                        &mut img_buf, seg, pos_y, image_params, cell_count,
+                    );
+                }
+            }
+
+            // Draw remaining edges not part of branch segments
+            for edge in edges {
+                if skip_edges.contains(&(edge.edge_type, edge.pos_x)) {
+                    continue;
+                }
+                draw_edge(&mut img_buf, edge, image_params, drawing_pixels);
             }
         }
     }
@@ -812,6 +868,21 @@ fn ratatui_color_to_rgba(color: ratatui::style::Color) -> image::Rgba<u8> {
         ratatui::style::Color::Cyan => image::Rgba([0x00, 0xff, 0xff, 0xff]),
         _ => image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
     }
+}
+
+fn draw_stash_commit(
+    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    commit_pos_x: usize,
+    image_params: &ImageParams,
+    drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
+) {
+    draw_hollow_circle(img_buf, commit_pos_x, image_params, drawing_pixels, color);
+    let x_offset = (commit_pos_x * image_params.width as usize) as i32;
+    let center_x = x_offset + (image_params.width as i32 / 2);
+    let center_y = (image_params.height / 2) as i32;
+    let dot_radius = (image_params.line_width as i32).max(1);
+    draw_filled_circle(img_buf, center_x, center_y, dot_radius, color);
 }
 
 fn calc_hollow_circle_graph_row_image(
@@ -1147,134 +1218,79 @@ fn draw_diagonal_connected_edge(
     }
 }
 
-fn draw_smooth_corner_edge(
+fn draw_smooth_bezier_segment(
     img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
-    edge: &Edge,
+    segment: &crate::graph::calc::BranchSegment,
+    row_y: usize,
     image_params: &ImageParams,
+    cell_count: usize,
 ) {
     let cell_width = image_params.width as i32;
     let cell_height = image_params.height as i32;
-    let x_offset = (edge.pos_x * image_params.width as usize) as i32;
-    let center_x = cell_width / 2;
-    let center_y = cell_height / 2;
-    let color = image_params.edge_color(edge.associated_line_pos_x);
+    let image_height = cell_height;
+    let circle_outer_radius = image_params.circle_outer_radius as i32;
 
-    // VS Code Git Graph style: control point distance proportional to cell size
-    let d = (cell_width.min(cell_height) as f32 * 0.5).max(3.0) as i32;
+    // Convert grid coordinates to absolute pixel coordinates
+    // x: center of the lane cell
+    let x1 = segment.source_pos_x as i32 * cell_width + cell_width / 2;
+    let x2 = segment.target_pos_x as i32 * cell_width + cell_width / 2;
 
-    match edge.edge_type {
-        EdgeType::RightBottom => {
-            // From left-middle to top-center, horizontal tangent at start, vertical at end
-            let x0 = x_offset;
-            let y0 = center_y;
-            let x1 = x_offset + center_x;
-            let y1 = 0;
-            draw_cubic_bezier(
-                img_buf, x0, y0, x0 + d, y0, x1, y1 - d, x1, y1, color, image_params.line_width,
-            );
-        }
-        EdgeType::LeftBottom => {
-            // From right-middle to top-center, horizontal tangent at start, vertical at end
-            let x0 = x_offset + cell_width;
-            let y0 = center_y;
-            let x1 = x_offset + center_x;
-            let y1 = 0;
-            draw_cubic_bezier(
-                img_buf, x0, y0, x0 - d, y0, x1, y1 - d, x1, y1, color, image_params.line_width,
-            );
-        }
-        EdgeType::RightTop => {
-            // From left-middle to bottom-center, horizontal tangent at start, vertical at end
-            let x0 = x_offset;
-            let y0 = center_y;
-            let x1 = x_offset + center_x;
-            let y1 = cell_height;
-            draw_cubic_bezier(
-                img_buf, x0, y0, x0 + d, y0, x1, y1 + d, x1, y1, color, image_params.line_width,
-            );
-        }
-        EdgeType::LeftTop => {
-            // From right-middle to bottom-center, horizontal tangent at start, vertical at end
-            let x0 = x_offset + cell_width;
-            let y0 = center_y;
-            let x1 = x_offset + center_x;
-            let y1 = cell_height;
-            draw_cubic_bezier(
-                img_buf, x0, y0, x0 - d, y0, x1, y1 + d, x1, y1, color, image_params.line_width,
-            );
-        }
-        _ => return,
-    }
-}
+    // y: relative to current row's top edge
+    let y1_offset = (segment.source_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
+    let y2_offset = (segment.target_pos_y as i32 - row_y as i32) * cell_height + cell_height / 2;
 
-fn draw_cubic_bezier(
-    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
-    x0: i32,
-    y0: i32,
-    cp1x: i32,
-    cp1y: i32,
-    cp2x: i32,
-    cp2y: i32,
-    x1: i32,
-    y1: i32,
-    color: image::Rgba<u8>,
-    line_width: u16,
-) {
-    let steps = 80;
-    let radius = (line_width as i32).max(1) / 2;
+    // For branch (first parent): start from bottom of commit circle, end at center of child
+    // For merge (non-first parent): start from center of source, end at top of child commit circle
+    let y1 = if segment.is_branch {
+        y1_offset + circle_outer_radius
+    } else {
+        y1_offset
+    };
+    let y2 = if !segment.is_branch {
+        y2_offset - circle_outer_radius
+    } else {
+        y2_offset
+    };
 
-    let mut prev_x = x0;
-    let mut prev_y = y0;
+    // VS Code Git Graph: d = grid.y * 0.8, clamped to half the pixel distance
+    let pixel_distance = (y1 - y2).abs();
+    let d = ((cell_height as f32 * 0.8).min(pixel_distance as f32 * 0.45)) as i32;
+
+    // Control points: exit vertically from start, arrive vertically at end
+    let cp1x = x1;
+    let cp1y = y1 + d;
+    let cp2x = x2;
+    let cp2y = y2 - d;
+
+    let color = image_params.edge_color(segment.color_index);
+    let radius = (image_params.line_width as i32).max(1) / 2;
+
+    // Sample points along the Bezier curve, clipping to current row
+    let steps = 200;
+    let mut prev_px: Option<(i32, i32)> = None;
 
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
-        let t2 = t * t;
-        let t3 = t2 * t;
         let mt = 1.0 - t;
-        let mt2 = mt * mt;
-        let mt3 = mt2 * mt;
+        let px = (mt*mt*mt * x1 as f32
+            + 3.0 * mt*mt*t * cp1x as f32
+            + 3.0 * mt*t*t * cp2x as f32
+            + t*t*t * x2 as f32) as i32;
+        let py = (mt*mt*mt * y1 as f32
+            + 3.0 * mt*mt*t * cp1y as f32
+            + 3.0 * mt*t*t * cp2y as f32
+            + t*t*t * y2 as f32) as i32;
 
-        let px = (mt3 * x0 as f32
-            + 3.0 * mt2 * t * cp1x as f32
-            + 3.0 * mt * t2 * cp2x as f32
-            + t3 * x1 as f32) as i32;
-        let py = (mt3 * y0 as f32
-            + 3.0 * mt2 * t * cp1y as f32
-            + 3.0 * mt * t2 * cp2y as f32
-            + t3 * y1 as f32) as i32;
-
-        if i > 0 {
-            draw_thick_line(img_buf, prev_x, prev_y, px, py, radius, color);
+        if py >= 0 && py < image_height {
+            draw_filled_circle(img_buf, px, py, radius, color);
+            if let Some((ppx, ppy)) = prev_px {
+                if ppy >= 0 && ppy < image_height {
+                    draw_thick_line(img_buf, ppx, ppy, px, py, radius, color);
+                }
+            }
         }
-        draw_filled_circle(img_buf, px, py, radius, color);
-
-        prev_x = px;
-        prev_y = py;
+        prev_px = Some((px, py));
     }
-}
-
-fn draw_smooth_horizontal_edge(
-    img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
-    edge: &Edge,
-    image_params: &ImageParams,
-) {
-    let cell_width = image_params.width as i32;
-    let x_offset = (edge.pos_x * image_params.width as usize) as i32;
-    let center_x = cell_width / 2;
-    let center_y = image_params.height as i32 / 2;
-    let circle_outer_radius = image_params.circle_outer_radius as i32;
-    let color = image_params.edge_color(edge.associated_line_pos_x);
-
-    let (x0, x1) = match edge.edge_type {
-        EdgeType::Right => (x_offset + center_x + circle_outer_radius, x_offset + cell_width),
-        EdgeType::Left => (x_offset, x_offset + center_x - circle_outer_radius),
-        EdgeType::Horizontal => (x_offset, x_offset + cell_width),
-        _ => return,
-    };
-
-    // Horizontal edges are straight lines in smooth style
-    let radius = (image_params.line_width as i32).max(1) / 2;
-    draw_thick_line(img_buf, x0, center_y, x1, center_y, radius, color);
 }
 
 fn draw_filled_circle(
@@ -1621,6 +1637,8 @@ mod tests {
                     graph_style,
                     head,
                     None,
+                    &[],
+                    0,
                 )
             })
             .collect();
