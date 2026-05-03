@@ -1295,10 +1295,10 @@ impl CommitList<'_> {
             + commit_info.uncommitted_untracked;
         let spans: Vec<Span> = vec![
             Span::raw("Uncommitted Changes")
-                .fg(self.ctx.color_theme.fg)
+                .fg(Color::Rgb(0xff, 0xff, 0xff))
                 .add_modifier(Modifier::BOLD),
             Span::raw(format!(" ({})", total))
-                .fg(self.ctx.color_theme.fg)
+                .fg(Color::Rgb(0xff, 0xff, 0xff))
                 .add_modifier(Modifier::BOLD),
         ];
         self.to_commit_list_item(i, spans, state)

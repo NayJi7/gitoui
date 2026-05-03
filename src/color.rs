@@ -29,7 +29,7 @@ pub struct ColorTheme {
     pub list_ref_stash_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]
     pub list_head_fg: RatatuiColor,
-    #[default(RatatuiColor::Reset)]
+    #[default(RatatuiColor::Rgb(0xb4, 0xbd, 0xe5))]
     pub list_subject_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]
     pub list_name_fg: RatatuiColor,

@@ -269,12 +269,28 @@ fn build_single_graph_row_image(
     let is_stash = matches!(commit.commit_type, crate::git::CommitType::Stash);
     let is_uncommitted = matches!(commit.commit_type, crate::git::CommitType::Uncommitted);
     
-    // Uncommitted uses grey color, others use branch color
+    // Uncommitted uses #808080, matching VS Code Git Graph's convention
+    const UNCOMMITTED_COLOR: image::Rgba<u8> = image::Rgba([0x80, 0x80, 0x80, 0xff]);
     let commit_color = if is_uncommitted {
-        image::Rgba([0x80, 0x80, 0x80, 0xff]) // Grey
+        UNCOMMITTED_COLOR
     } else {
         image_params.edge_color(pos_x)
     };
+
+    // For rows between uncommitted (pos_y=0) and HEAD, color edges on the
+    // uncommitted lane with the same bluish-grey so the full segment is uniform.
+    let uncommitted_lane: Option<(usize, usize, image::Rgba<u8>)> = graph
+        .commits
+        .iter()
+        .find(|c| matches!(c.commit_type, crate::git::CommitType::Uncommitted))
+        .and_then(|unco| {
+            let &(unco_x, _) = graph.commit_pos_map.get(&unco.commit_hash)?;
+            let &(_, head_pos_y) = unco
+                .parent_commit_hashes
+                .first()
+                .and_then(|h| graph.commit_pos_map.get(h))?;
+            Some((unco_x, head_pos_y, UNCOMMITTED_COLOR))
+        });
 
     let max_pos_x = match image_width_mode {
         GraphImageWidthMode::Compact => edges.iter().map(|e| e.pos_x).fold(pos_x, usize::max),
@@ -296,6 +312,7 @@ fn build_single_graph_row_image(
         is_stash,
         is_uncommitted,
         commit_color,
+        uncommitted_lane,
     )
 }
 
@@ -668,6 +685,7 @@ pub fn calc_graph_row_image(
     is_stash: bool,
     is_uncommitted: bool,
     commit_color: image::Rgba<u8>,
+    uncommitted_lane: Option<(usize, usize, image::Rgba<u8>)>,
 ) -> GraphRowImage {
     let image_width = (image_params.width as usize * cell_count) as u32;
     let image_height = image_params.height as u32;
@@ -685,10 +703,30 @@ pub fn calc_graph_row_image(
         draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     }
 
+    let edge_color = |edge: &Edge| -> image::Rgba<u8> {
+        if is_uncommitted {
+            commit_color
+        } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
+            // Color pass-through edges on the uncommitted lane.
+            // For rows strictly between uncommitted and HEAD: color all lane edges (Up/Down/Vertical).
+            // For HEAD's own row: color only the Up edge (the Down edge goes onward past HEAD).
+            let on_lane = edge.pos_x == lane_x && edge.associated_line_pos_x == lane_x;
+            let in_range = pos_y > 0 && pos_y < head_y;
+            let is_head_up = pos_y == head_y && edge.edge_type == EdgeType::Up;
+            if on_lane && (in_range || is_head_up) {
+                lane_color
+            } else {
+                image_params.edge_color(edge.associated_line_pos_x)
+            }
+        } else {
+            image_params.edge_color(edge.associated_line_pos_x)
+        }
+    };
+
     match graph_style {
         GraphStyle::Rounded => {
             for edge in edges {
-                draw_edge(&mut img_buf, edge, image_params, drawing_pixels)
+                draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge))
             }
         }
         GraphStyle::Angular => {
@@ -696,7 +734,7 @@ pub fn calc_graph_row_image(
                 .iter()
                 .partition(|e| e.edge_type.is_vertically_related());
             for edge in vertial_edges {
-                draw_edge(&mut img_buf, edge, image_params, drawing_pixels)
+                draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge))
             }
             let mut horizontal_edges_map: FxHashMap<usize, Vec<&Edge>> = FxHashMap::default();
             for edge in horizontal_edges {
@@ -753,8 +791,23 @@ pub fn calc_graph_row_image(
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
                 let max_y = seg.target_pos_y.max(seg.source_pos_y);
                 if pos_y >= min_y && pos_y <= max_y {
+                    let color_override = if is_uncommitted {
+                        Some(commit_color)
+                    } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
+                        // Segment that connects to the uncommitted row (pos_y=0) on the uncommitted lane
+                        if pos_y <= head_y
+                            && (seg.source_pos_y == 0 || seg.target_pos_y == 0)
+                            && (seg.source_pos_x == lane_x || seg.target_pos_x == lane_x)
+                        {
+                            Some(lane_color)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     draw_smooth_bezier_segment(
-                        &mut img_buf, &seg, pos_y, image_params, cell_count,
+                        &mut img_buf, seg, pos_y, image_params, cell_count, color_override,
                     );
                 }
             }
@@ -764,7 +817,7 @@ pub fn calc_graph_row_image(
                 if skip_edges.contains(&(edge.edge_type, edge.pos_x)) {
                     continue;
                 }
-                draw_edge(&mut img_buf, edge, image_params, drawing_pixels);
+                draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge));
             }
         }
     }
@@ -891,6 +944,7 @@ fn draw_edge(
     edge: &Edge,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
 ) {
     let pixels = match edge.edge_type {
         EdgeType::Vertical => &drawing_pixels.vertical_edge,
@@ -906,7 +960,6 @@ fn draw_edge(
     };
 
     let x_offset = (edge.pos_x * image_params.width as usize) as i32;
-    let color = image_params.edge_color(edge.associated_line_pos_x);
 
     for (x, y) in pixels {
         let x = (*x + x_offset) as u32;
@@ -1104,6 +1157,7 @@ fn draw_smooth_bezier_segment(
     row_y: usize,
     image_params: &ImageParams,
     cell_count: usize,
+    color_override: Option<image::Rgba<u8>>,
 ) {
     let cell_width = image_params.width as i32;
     let cell_height = image_params.height as i32;
@@ -1142,7 +1196,7 @@ fn draw_smooth_bezier_segment(
     let cp2x = x2;
     let cp2y = y2 - d;
 
-    let color = image_params.edge_color(segment.color_index);
+    let color = color_override.unwrap_or_else(|| image_params.edge_color(segment.color_index));
     let radius = (image_params.line_width as i32).max(1) / 2;
 
     // Sample points along the Bezier curve, clipping to current row
@@ -1515,10 +1569,13 @@ mod tests {
                     &image_params,
                     &drawing_pixels,
                     graph_style,
-                    head,
-                    None,
                     &[],
                     0,
+                    head,
+                    false,
+                    false,
+                    image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
+                    None,
                 )
             })
             .collect();

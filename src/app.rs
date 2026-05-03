@@ -133,7 +133,7 @@ impl<'a> App<'a> {
                     let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
                     CommitInfo::new_uncommitted(
                         commit,
-                        graph_color,
+                        ratatui::style::Color::Rgb(0x80, 0x80, 0x80),
                         changes.staged.len(),
                         changes.unstaged.len(),
                         changes.untracked.len(),
