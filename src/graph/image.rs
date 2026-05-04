@@ -135,8 +135,10 @@ impl<'a> GraphImageManager<'a> {
 
     pub fn invalidate(&mut self, commit_hash: &CommitHash) {
         self.prepared_image_map.remove(commit_hash);
-        self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, true));
-        self.image_ids.remove(&graph_image_id(self.session_nonce, commit_hash, false));
+        self.image_ids
+            .remove(&graph_image_id(self.session_nonce, commit_hash, true));
+        self.image_ids
+            .remove(&graph_image_id(self.session_nonce, commit_hash, false));
     }
 }
 
@@ -265,10 +267,14 @@ fn build_single_graph_row_image(
     let edges = &graph.edges[pos_y];
 
     // Determine render style based on commit type
-    let commit = graph.commits.iter().find(|c| c.commit_hash == *commit_hash).unwrap();
+    let commit = graph
+        .commits
+        .iter()
+        .find(|c| c.commit_hash == *commit_hash)
+        .unwrap();
     let is_stash = matches!(commit.commit_type, crate::git::CommitType::Stash);
     let is_uncommitted = matches!(commit.commit_type, crate::git::CommitType::Uncommitted);
-    
+
     // Uncommitted uses #808080, matching VS Code Git Graph's convention
     const UNCOMMITTED_COLOR: image::Rgba<u8> = image::Rgba([0x80, 0x80, 0x80, 0xff]);
     let commit_color = if is_uncommitted {
@@ -707,7 +713,13 @@ pub fn calc_graph_row_image(
     match graph_style {
         GraphStyle::Rounded => {
             for edge in edges {
-                draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge))
+                draw_edge(
+                    &mut img_buf,
+                    edge,
+                    image_params,
+                    drawing_pixels,
+                    edge_color(edge),
+                )
             }
         }
         GraphStyle::Angular => {
@@ -715,7 +727,13 @@ pub fn calc_graph_row_image(
                 .iter()
                 .partition(|e| e.edge_type.is_vertically_related());
             for edge in vertial_edges {
-                draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge))
+                draw_edge(
+                    &mut img_buf,
+                    edge,
+                    image_params,
+                    drawing_pixels,
+                    edge_color(edge),
+                )
             }
             let mut horizontal_edges_map: FxHashMap<usize, Vec<&Edge>> = FxHashMap::default();
             for edge in horizontal_edges {
@@ -729,38 +747,40 @@ pub fn calc_graph_row_image(
             }
         }
         GraphStyle::Smooth => {
-            // Draw vertical edges FIRST (branch-colored), then Bezier curves ON TOP.
-            // The grey Bezier for uncommitted→HEAD overwrites branch-colored verticals on its path,
-            // without bleeding grey into other paths (HEAD→merge etc.) that share the column.
-            for edge in edges {
-                if edge.edge_type.is_vertically_related() {
-                    draw_edge(&mut img_buf, edge, image_params, drawing_pixels, edge_color(edge));
-                }
-            }
+            // VS Code Git Graph style: draw ONLY Bézier curves for all connections.
+            // No angular edges at all — every parent-child connection is a smooth curve.
+            // Sort by rightmost column so rightward curves are drawn last (on top).
+            let mut segs: Vec<_> = branch_segments.iter().collect();
+            segs.sort_by_key(|s| s.source_pos_x.max(s.target_pos_x));
 
-            // Bezier S-curves drawn on top of vertical edges
-            for seg in branch_segments {
+            for seg in segs {
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
                 let max_y = seg.target_pos_y.max(seg.source_pos_y);
-                if pos_y >= min_y && pos_y <= max_y {
-                    let color_override = if is_uncommitted {
-                        Some(commit_color)
-                    } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-                        if pos_y <= head_y
-                            && (seg.source_pos_y == 0 || seg.target_pos_y == 0)
-                            && (seg.source_pos_x == lane_x || seg.target_pos_x == lane_x)
-                        {
-                            Some(lane_color)
-                        } else {
-                            None
-                        }
+                if pos_y < min_y || pos_y > max_y {
+                    continue;
+                }
+                let color_override = if is_uncommitted {
+                    Some(commit_color)
+                } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
+                    if pos_y <= head_y
+                        && (seg.source_pos_y == 0 || seg.target_pos_y == 0)
+                        && (seg.source_pos_x == lane_x || seg.target_pos_x == lane_x)
+                    {
+                        Some(lane_color)
                     } else {
                         None
-                    };
-                    draw_smooth_bezier_segment(
-                        &mut img_buf, seg, pos_y, image_params, cell_count, color_override,
-                    );
-                }
+                    }
+                } else {
+                    None
+                };
+                draw_smooth_bezier_segment(
+                    &mut img_buf,
+                    seg,
+                    pos_y,
+                    image_params,
+                    cell_count,
+                    color_override,
+                );
             }
         }
     }
@@ -770,7 +790,12 @@ pub fn calc_graph_row_image(
     // without bleeding into other paths that share the column.
     if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
         draw_uncommitted_overlay(
-            &mut img_buf, lane_x, head_y, pos_y, image_params, lane_color,
+            &mut img_buf,
+            lane_x,
+            head_y,
+            pos_y,
+            image_params,
+            lane_color,
         );
     }
 
@@ -778,9 +803,21 @@ pub fn calc_graph_row_image(
     if head {
         draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     } else if is_stash {
-        draw_stash_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
+        draw_stash_commit(
+            &mut img_buf,
+            commit_pos_x,
+            image_params,
+            drawing_pixels,
+            commit_color,
+        );
     } else if is_uncommitted {
-        draw_hollow_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels, commit_color);
+        draw_hollow_circle(
+            &mut img_buf,
+            commit_pos_x,
+            image_params,
+            drawing_pixels,
+            commit_color,
+        );
     } else {
         draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
     }
@@ -861,6 +898,15 @@ fn draw_hollow_circle(
     color: image::Rgba<u8>,
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
+    let bg = image_params.background_color;
+
+    // Fill the interior with background color so underlying curves are hidden.
+    for (x, y) in &drawing_pixels.circle {
+        let x = (*x + x_offset) as u32;
+        let y = *y as u32;
+        let pixel = img_buf.get_pixel_mut(x, y);
+        *pixel = bg;
+    }
 
     for (x, y) in &drawing_pixels.circle_edge {
         let x = (*x + x_offset) as u32;
@@ -879,6 +925,15 @@ fn draw_head_commit(
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let color = image_params.edge_color(circle_pos_x);
+    let bg = image_params.background_color;
+
+    // Fill the interior with background color so underlying curves are hidden.
+    for (x, y) in &drawing_pixels.circle {
+        let x = (*x + x_offset) as u32;
+        let y = *y as u32;
+        let pixel = img_buf.get_pixel_mut(x, y);
+        *pixel = bg;
+    }
 
     for (x, y) in &drawing_pixels.circle_edge {
         let x = (*x + x_offset) as u32;
@@ -1156,104 +1211,72 @@ fn draw_smooth_bezier_segment(
     let cell_width = image_params.width as f32;
     let cell_height = image_params.height as f32;
     let image_height = image_params.height as i32;
-
+    // VS Code Git Graph uses thicker curves than standard edges.
+    // Minimum radius 2 gives a 5-pixel-wide curve (visible and smooth).
+    let radius = ((image_params.line_width as i32).max(2) - 1) / 2;
+    let radius = radius.max(2);
     let color = color_override.unwrap_or_else(|| image_params.edge_color(segment.color_index));
-    let radius = (image_params.line_width as i32).max(1) / 2;
 
-    let source_x_px = segment.source_pos_x as f32 * cell_width + cell_width / 2.0;
-    let target_x_px = segment.target_pos_x as f32 * cell_width + cell_width / 2.0;
+    // Absolute pixel coordinates of commit centers.
+    // In VS Code Git Graph, curves connect commit centers. The "exits from top/bottom"
+    // effect is achieved by control-point overshoot, not by starting from cell edges.
+    let p0x = segment.target_pos_x as f32 * cell_width + cell_width / 2.0;
+    let p0y = segment.target_pos_y as f32 * cell_height + cell_height / 2.0;
+    let p3x = segment.source_pos_x as f32 * cell_width + cell_width / 2.0;
+    let p3y = segment.source_pos_y as f32 * cell_height + cell_height / 2.0;
 
-    let source_y_abs = segment.source_pos_y as f32;
-    let target_y_abs = segment.target_pos_y as f32;
-    let row_y_abs = row_y as f32;
-
-    let row_top_abs = row_y_abs * cell_height;
-    let row_bot_abs = (row_y_abs + 1.0) * cell_height;
-
-    let source_center_abs = source_y_abs * cell_height + cell_height / 2.0;
-    let target_center_abs = target_y_abs * cell_height + cell_height / 2.0;
-
-    let d = cell_height * 0.8;
-
-    let full_cp1x = source_x_px;
-    let full_cp1y = source_center_abs + d;
-    let full_cp2x = target_x_px;
-    let full_cp2y = target_center_abs - d;
-
-    let x_at_top = eval_bezier_x(
-        source_x_px, full_cp1x, full_cp2x, target_x_px,
-        row_top_abs, source_center_abs, full_cp1y, full_cp2y, target_center_abs,
-    );
-    let x_at_bot = eval_bezier_x(
-        source_x_px, full_cp1x, full_cp2x, target_x_px,
-        row_bot_abs, source_center_abs, full_cp1y, full_cp2y, target_center_abs,
-    );
-
-    let x_in = x_at_top as i32;
-    let x_out = x_at_bot as i32;
-
-    if x_in == x_out {
-        for py in 0..image_height {
-            draw_filled_circle(img_buf, x_in, py, radius, color);
-        }
+    // VS Code Git Graph S-curve: control points overshoot vertically.
+    // Large overshoot (d = distance * 0.9) creates a long vertical base segment
+    // before the curve transitions, matching VS Code's late-S appearance.
+    // For vertical segments, d = 0 (straight line).
+    let is_vertical = segment.source_pos_x == segment.target_pos_x;
+    let pixel_distance = (p0y - p3y).abs();
+    let d = if is_vertical {
+        0.0
     } else {
-        let d_local = (cell_height * 0.6) as i32;
-        let cp1x = x_in;
-        let cp1y = d_local;
-        let cp2x = x_out;
-        let cp2y = image_height - d_local;
+        pixel_distance * 0.9
+    };
+    let p1x = p0x;
+    let p1y = p0y + d; // control point below child center (short overshoot)
+    let p2x = p3x;
+    let p2y = p3y - d; // control point above parent center (short overshoot)
 
-        let steps = 128;
-        let mut prev_px: Option<(i32, i32)> = None;
+    // Row boundaries in absolute pixel coordinates
+    let row_abs_top = row_y as f32 * cell_height;
 
-        for i in 0..=steps {
-            let t = i as f32 / steps as f32;
-            let mt = 1.0 - t;
-            let px = (mt*mt*mt * x_in as f32
-                + 3.0 * mt*mt*t * cp1x as f32
-                + 3.0 * mt*t*t * cp2x as f32
-                + t*t*t * x_out as f32) as i32;
-            let py = (mt*mt*mt * 0.0f32
-                + 3.0 * mt*mt*t * cp1y as f32
-                + 3.0 * mt*t*t * cp2y as f32
-                + t*t*t * image_height as f32) as i32;
+    // Sample the global Bézier and clip to this row's pixel range.
+    // Pure sampling handles the non-monotone y(t) of the S-curve correctly — no inversion needed.
+    let steps = 500;
+    let margin = radius + 2;
+    let mut prev: Option<(i32, i32)> = None;
 
-            if let Some((ppx, ppy)) = prev_px {
-                draw_thick_line(img_buf, ppx, ppy, px, py, radius, color);
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let mt = 1.0 - t;
+
+        let abs_x =
+            mt * mt * mt * p0x + 3.0 * mt * mt * t * p1x + 3.0 * mt * t * t * p2x + t * t * t * p3x;
+        let abs_y =
+            mt * mt * mt * p0y + 3.0 * mt * mt * t * p1y + 3.0 * mt * t * t * p2y + t * t * t * p3y;
+
+        // Local row coordinates: y=0 at top of this row's image
+        let lx = abs_x as i32;
+        let ly = (abs_y - row_abs_top) as i32;
+
+        let near = ly >= -margin && ly < image_height + margin;
+
+        if let Some((px, py)) = prev {
+            let prev_near = py >= -margin && py < image_height + margin;
+            if near || prev_near {
+                draw_thick_line(img_buf, px, py, lx, ly, radius, color);
             }
-            draw_filled_circle(img_buf, px, py, radius, color);
-            prev_px = Some((px, py));
         }
-    }
-}
-
-fn eval_bezier_x(
-    p0x: f32, p1x: f32, p2x: f32, p3x: f32,
-    y_target: f32,
-    p0y: f32, p1y: f32, p2y: f32, p3y: f32,
-) -> f32 {
-    let y_start = p0y;
-    let y_end = p3y;
-    let increasing = y_start <= y_end;
-    let mut lo = 0.0f32;
-    let mut hi = 1.0f32;
-    for _ in 0..24 {
-        let mid = (lo + hi) / 2.0;
-        let y = eval_cubic(p0y, p1y, p2y, p3y, mid);
-        if (y < y_target) == increasing {
-            lo = mid;
-        } else {
-            hi = mid;
+        if ly >= 0 && ly < image_height {
+            draw_filled_circle(img_buf, lx, ly, radius, color);
         }
-    }
-    let t = (lo + hi) / 2.0;
-    eval_cubic(p0x, p1x, p2x, p3x, t)
-}
 
-#[inline]
-fn eval_cubic(a: f32, b: f32, c: f32, d: f32, t: f32) -> f32 {
-    let mt = 1.0 - t;
-    mt*mt*mt * a + 3.0 * mt*mt*t * b + 3.0 * mt*t*t * c + t*t*t * d
+        prev = Some((lx, ly));
+    }
 }
 
 fn draw_filled_circle(
@@ -1673,5 +1696,3 @@ mod tests {
         std::fs::create_dir_all(path).unwrap();
     }
 }
-
-

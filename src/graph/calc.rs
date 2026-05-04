@@ -193,7 +193,15 @@ fn calc_edges(
             let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
 
             if pos_x == child_pos_x {
-                // commit
+                // commit (vertical connection)
+                branch_segments.push(BranchSegment {
+                    source_pos_x: pos_x,
+                    target_pos_x: child_pos_x,
+                    source_pos_y: pos_y,
+                    target_pos_y: child_pos_y,
+                    color_index: pos_x,
+                    is_branch: true,
+                });
                 edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
                 for y in ((child_pos_y + 1)..pos_y).rev() {
                     edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
