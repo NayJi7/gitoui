@@ -234,10 +234,10 @@ fn key_event_to_string(key_event: KeyEvent) -> String {
         modifiers.push("Alt");
     }
 
-    let mut key = modifiers.join("-");
+    let mut key = modifiers.join("+");
 
     if !key.is_empty() {
-        key.push('-');
+        key.push('+');
     }
     key.push_str(key_code);
 
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(key_event_to_string(key_event), "Down");
 
         let key_event = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL);
-        assert_eq!(key_event_to_string(key_event), "Ctrl-h");
+        assert_eq!(key_event_to_string(key_event), "Ctrl+h");
 
         let key_event = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::SHIFT);
         assert_eq!(key_event_to_string(key_event), "H");
@@ -343,16 +343,16 @@ mod tests {
         assert_eq!(key_event_to_string(key_event), "H");
 
         let key_event = KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT);
-        assert_eq!(key_event_to_string(key_event), "Shift-Left");
+        assert_eq!(key_event_to_string(key_event), "Shift+Left");
 
         let key_event = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT);
-        assert_eq!(key_event_to_string(key_event), "Alt-h");
+        assert_eq!(key_event_to_string(key_event), "Alt+h");
 
         let key_event = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL | KeyModifiers::SHIFT);
-        assert_eq!(key_event_to_string(key_event), "Ctrl-Shift-l");
+        assert_eq!(key_event_to_string(key_event), "Ctrl+Shift+l");
 
         let key_event = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL | KeyModifiers::SHIFT | KeyModifiers::ALT);
-        assert_eq!(key_event_to_string(key_event), "Ctrl-Shift-Alt-l");
+        assert_eq!(key_event_to_string(key_event), "Ctrl+Shift+Alt+l");
 
         let key_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::empty());
         assert_eq!(key_event_to_string(key_event), "Esc");
