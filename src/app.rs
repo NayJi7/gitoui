@@ -269,10 +269,22 @@ impl App<'_> {
                             self.ec.send(AppEvent::Quit);
                         }
                         Some(ue) => {
-                            let event_with_count =
-                                process_numeric_prefix(&self.app_status.numeric_prefix, *ue, key);
-                            self.view.handle_event(event_with_count, key);
-                            self.app_status.numeric_prefix.clear();
+                            // When a text input is active, treat Left/Right as cursor movement
+                            // instead of navigation so the raw KeyEvent reaches the view.
+                            if self.view.is_input_active()
+                                && matches!(ue, UserEvent::NavigateLeft | UserEvent::NavigateRight)
+                            {
+                                self.app_status.numeric_prefix.clear();
+                                self.view.handle_event(
+                                    UserEventWithCount::from_event(UserEvent::Unknown),
+                                    key,
+                                );
+                            } else {
+                                let event_with_count =
+                                    process_numeric_prefix(&self.app_status.numeric_prefix, *ue, key);
+                                self.view.handle_event(event_with_count, key);
+                                self.app_status.numeric_prefix.clear();
+                            }
                         }
                         None => {
                             if let StatusLine::Input(_, _, _) = self.app_status.status_line {
