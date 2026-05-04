@@ -390,7 +390,7 @@ impl<'a> DialogView<'a> {
 
         if self.is_highlighted(DialogElement::Input) {
             if let Some(input_row) = self.input_row {
-                let cursor_x = self.inner_area.x + 2 + self.input_value.len() as u16;
+                let cursor_x = self.inner_area.x + 2 + self.input_cursor as u16;
                 let cursor_y = self.inner_area.y + input_row as u16;
                 match &self.ctx.ui_config.common.cursor_type {
                     CursorType::Native => {

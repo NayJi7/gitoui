@@ -446,8 +446,10 @@ impl App<'_> {
                     self.refresh_uncommitted();
                 }
                 AppEvent::Tick => {
-                    // Re-loop to check notification timeout and re-render if needed
-                    continue;
+                    // Only re-render if there's an active notification that might need clearing
+                    if self.app_status.notification_timestamp.is_some() {
+                        continue;
+                    }
                 }
                 AppEvent::OpenUncommittedDiff { file_path, is_staged } => {
                     self.clear_image(Some(terminal))?;
