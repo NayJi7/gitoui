@@ -28,6 +28,7 @@ pub struct DialogView<'a> {
     before: View<'a>,
     kind: DialogKind,
     input_value: String,
+    input_cursor: usize,
     dropdown_selected: usize,
     checkboxes: Vec<bool>,
     focused: DialogElement,
@@ -81,6 +82,7 @@ impl<'a> DialogView<'a> {
             before,
             kind,
             input_value: String::new(),
+            input_cursor: 0,
             dropdown_selected,
             checkboxes,
             focused,
@@ -98,6 +100,10 @@ impl<'a> DialogView<'a> {
         }
     }
 
+    pub fn is_input_focused(&self) -> bool {
+        matches!(self.focused, DialogElement::Input)
+    }
+
     fn has_input_for(kind: &DialogKind) -> bool {
         matches!(
             kind,
@@ -110,13 +116,13 @@ impl<'a> DialogView<'a> {
         )
     }
 
-    fn has_input(&self) -> bool {
+    fn has_input_field(&self) -> bool {
         Self::has_input_for(&self.kind)
     }
 
     fn elements(&self) -> Vec<DialogElement> {
         let mut els = vec![];
-        if self.has_input() {
+        if self.has_input_field() {
             els.push(DialogElement::Input);
         }
         if matches!(self.kind, DialogKind::Reset { .. }) {

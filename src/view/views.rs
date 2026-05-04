@@ -366,6 +366,7 @@ impl<'a> View<'a> {
     pub fn is_input_active(&self) -> bool {
         match self {
             View::Config(view) => view.is_editing_text(),
+            View::Dialog(view) => view.is_input_focused(),
             _ => false,
         }
     }
