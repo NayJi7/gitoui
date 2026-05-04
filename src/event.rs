@@ -61,6 +61,7 @@ pub enum AppEvent {
     RefreshUncommitted,
     OpenUncommittedDiff { file_path: String, is_staged: bool },
     CloseDiffToUncommitted,
+    Tick,
 }
 
 #[derive(Debug, Clone)]
@@ -200,33 +201,44 @@ impl EventController {
         self.stop.store(false, Ordering::Relaxed);
         let stop = self.stop.clone();
         let tx = self.tx.clone();
-        let handle = thread::spawn(move || loop {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            match ratatui::crossterm::event::poll(std::time::Duration::from_millis(100)) {
-                Ok(true) => match ratatui::crossterm::event::read() {
-                    Ok(e) => match e {
-                        ratatui::crossterm::event::Event::Key(key) => {
-                            tx.send(AppEvent::Key(key));
-                        }
-                        ratatui::crossterm::event::Event::Mouse(mouse) => {
-                            tx.send(AppEvent::Mouse(mouse));
-                        }
-                        ratatui::crossterm::event::Event::Resize(w, h) => {
-                            tx.send(AppEvent::Resize(w as usize, h as usize));
-                        }
-                        _ => {}
-                    },
-                    Err(e) => {
-                        panic!("Failed to read event: {e}");
-                    }
-                },
-                Ok(false) => {
-                    continue;
+        let handle = thread::spawn(move || {
+            let mut tick_counter = 0u8;
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    break;
                 }
-                Err(e) => {
-                    panic!("Failed to poll event: {e}");
+                match ratatui::crossterm::event::poll(std::time::Duration::from_millis(100)) {
+                    Ok(true) => {
+                        tick_counter = 0;
+                        match ratatui::crossterm::event::read() {
+                            Ok(e) => match e {
+                                ratatui::crossterm::event::Event::Key(key) => {
+                                    tx.send(AppEvent::Key(key));
+                                }
+                                ratatui::crossterm::event::Event::Mouse(mouse) => {
+                                    tx.send(AppEvent::Mouse(mouse));
+                                }
+                                ratatui::crossterm::event::Event::Resize(w, h) => {
+                                    tx.send(AppEvent::Resize(w as usize, h as usize));
+                                }
+                                _ => {}
+                            },
+                            Err(e) => {
+                                panic!("Failed to read event: {e}");
+                            }
+                        }
+                    }
+                    Ok(false) => {
+                        tick_counter += 1;
+                        if tick_counter >= 5 {
+                            tick_counter = 0;
+                            tx.send(AppEvent::Tick);
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        panic!("Failed to poll event: {e}");
+                    }
                 }
             }
         });

@@ -445,6 +445,10 @@ impl App<'_> {
                 AppEvent::RefreshUncommitted => {
                     self.refresh_uncommitted();
                 }
+                AppEvent::Tick => {
+                    // Re-loop to check notification timeout and re-render if needed
+                    continue;
+                }
                 AppEvent::OpenUncommittedDiff { file_path, is_staged } => {
                     self.clear_image(Some(terminal))?;
                     terminal.clear()?;
