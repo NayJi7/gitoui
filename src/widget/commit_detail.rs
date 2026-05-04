@@ -57,8 +57,18 @@ impl CommitDetailState {
         self.selected_file = 0;
     }
 
+    pub fn select_first_file(&mut self) {
+        self.selected_file = 0;
+    }
+
     pub fn select_last(&mut self) {
         self.offset = usize::MAX;
+    }
+
+    pub fn select_last_file(&mut self, total: usize) {
+        if total > 0 {
+            self.selected_file = total - 1;
+        }
     }
 
     pub fn select_next_file(&mut self, total: usize) {
@@ -140,37 +150,64 @@ impl StatefulWidget for CommitDetail<'_> {
         let [content_area, action_bar_area] =
             Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
 
-        // Title block over the entire content area
-        let title_block = Block::default()
-            .title("Commit Details")
-            .title_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        // Left panel: top border forms the horizontal separator
+        let content_block = Block::default()
             .borders(Borders::TOP)
-            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(0, 0, 1, 0));
-        let inner = title_block.inner(content_area);
-        title_block.render(content_area, buf);
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg));
+        let content_inner = content_block.inner(content_area);
+        content_block.render(content_area, buf);
+
+        // Content inner: title + underline + spacer + scrollable content
+        let [content_title_area, content_underline_area, _content_spacer_area, content_scroll_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(content_inner);
+
+        // Render centered title
+        let title_text = "Commit Details";
+        let title_len = title_text.chars().count() as u16;
+        let title_pad = content_title_area.width.saturating_sub(title_len);
+        let title_left = title_pad / 2;
+        let title_line = Line::from(vec![
+            Span::styled(" ".repeat(title_left as usize), Style::default()),
+            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        Paragraph::new(title_line).render(content_title_area, buf);
+
+        // Render small underline (slightly shorter than title)
+        let underline_len = (title_len as usize).saturating_sub(4).max(3);
+        let underline_pad = content_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_left = underline_pad / 2;
+        let underline_line = Line::from(vec![
+            Span::styled(" ".repeat(underline_left as usize), Style::default()),
+            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+        ]);
+        Paragraph::new(underline_line).render(content_underline_area, buf);
 
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(inner);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(content_scroll_area);
 
-        let (mut label_lines, mut value_lines, changes_start) = self.contents(inner.width);
+        let (mut label_lines, mut value_lines, changes_start) = self.contents(value_area.width);
 
-        let content_area_height = inner.height as usize;
+        let content_area_height = content_scroll_area.height as usize;
         self.update_state(state, value_lines.len(), content_area_height);
         state.ensure_selected_visible(changes_start);
 
-        // Apply selection highlight to the selected file line
-        if !self.changes.is_empty() {
-            let selected_line = changes_start + state.selected_file;
-            for (i, line) in value_lines.iter_mut().enumerate() {
-                if i == selected_line {
-                    line.style = Style::default().add_modifier(Modifier::REVERSED);
-                }
-            }
-        }
-
         label_lines = label_lines.into_iter().skip(state.offset).collect();
         value_lines = value_lines.into_iter().skip(state.offset).collect();
+
+        // Apply selection highlight to the selected file line (after skipping offset)
+        if !self.changes.is_empty() {
+            let selected_line = changes_start + state.selected_file;
+            let visible_selected = selected_line.saturating_sub(state.offset);
+            if visible_selected < value_lines.len() {
+                value_lines[visible_selected].style = Style::default().add_modifier(Modifier::REVERSED);
+            }
+        }
 
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
@@ -182,34 +219,61 @@ impl CommitDetail<'_> {
     fn render_labels_paragraph(&self, lines: Vec<Line>, area: Rect, buf: &mut Buffer) {
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-                    .padding(Padding::left(2)),
-            );
+            .block(Block::default().padding(Padding::left(2)));
         paragraph.render(area, buf);
     }
 
     fn render_value_paragraph(&self, lines: Vec<Line>, area: Rect, buf: &mut Buffer) {
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-                    .padding(Padding::new(1, 2, 0, 0)),
-            );
+            .block(Block::default().padding(Padding::new(1, 2, 0, 0)));
         paragraph.render(area, buf);
     }
 
     fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
-        let block = Block::default()
+        // Action bar with top+left borders forming a corner with the content border
+        let action_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT)
-            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 1, 0, 0));
-        let inner = block.inner(area);
-        block.render(area, buf);
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg));
+        let inner = action_block.inner(area);
+        action_block.render(area, buf);
+
+        // Inner: title + underline + spacer + actions
+        let [action_title_area, action_underline_area, _action_spacer_area, action_actions_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(inner);
+
+        // Render centered title
+        let title_text = "Git Actions";
+        let title_len = title_text.chars().count() as u16;
+        let title_pad = action_title_area.width.saturating_sub(title_len);
+        let title_left = title_pad / 2;
+        let title_line = Line::from(vec![
+            Span::styled(" ".repeat(title_left as usize), Style::default()),
+            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        Paragraph::new(title_line).render(action_title_area, buf);
+
+        // Render small underline
+        let underline_len = (title_len as usize).saturating_sub(4).max(3);
+        let underline_pad = action_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_left = underline_pad / 2;
+        let underline_line = Line::from(vec![
+            Span::styled(" ".repeat(underline_left as usize), Style::default()),
+            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+        ]);
+        Paragraph::new(underline_line).render(action_underline_area, buf);
+
+        // Action content padding matching left column
+        let action_pad = Block::default()
+            .padding(Padding::new(2, 1, 0, 0));
+        let action_inner = action_pad.inner(action_actions_area);
+        action_pad.render(action_actions_area, buf);
 
         let actions = if self.is_stash() {
             STASH_ACTIONS
@@ -218,11 +282,6 @@ impl CommitDetail<'_> {
         };
 
         let mut lines = Vec::new();
-        lines.push(Line::from(Span::styled(
-            "Git Actions",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from("─".repeat(inner.width as usize).fg(self.ctx.color_theme.divider_fg)));
         for (i, (label, key)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
@@ -239,7 +298,7 @@ impl CommitDetail<'_> {
 
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg));
-        paragraph.render(inner, buf);
+        paragraph.render(action_inner, buf);
     }
 
     fn is_stash(&self) -> bool {
@@ -275,7 +334,7 @@ impl CommitDetail<'_> {
         }
 
         if has_refs(self.refs) {
-            label_lines.push(Line::from("       Refs: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("     Refs: ").fg(self.ctx.color_theme.detail_label_fg));
             value_lines.push(self.refs_line());
         }
 
@@ -396,7 +455,7 @@ impl CommitDetail<'_> {
 
         for (short_name, full_names) in compacted_branches.iter() {
             if !first {
-                spans.push(Span::raw(" "));
+                spans.push(Span::raw(", "));
             }
             first = false;
 
@@ -407,15 +466,23 @@ impl CommitDetail<'_> {
                 .map(|n| n.split_once('/').map(|(r, _)| r).unwrap_or(n))
                 .collect();
 
-            // Use branch_color_map for local branches to match commit list colors
-            let fg = if is_local {
+            // Use branch_color_map for all branches to match commit list colors
+            // HEAD and origin/HEAD are always cyan like in the commit list
+            let fg = if short_name == "HEAD" {
+                self.ctx.color_theme.list_head_fg
+            } else if is_local {
                 self.ctx
                     .branch_color_map
                     .get(short_name)
                     .copied()
                     .unwrap_or(self.ctx.color_theme.list_ref_branch_fg)
             } else {
-                self.ctx.color_theme.list_ref_remote_branch_fg
+                // Remote-only: try short_name first, then fall back to remote default
+                self.ctx
+                    .branch_color_map
+                    .get(short_name)
+                    .copied()
+                    .unwrap_or(self.ctx.color_theme.list_ref_remote_branch_fg)
             };
 
             let display = if remotes.is_empty() {
@@ -424,17 +491,18 @@ impl CommitDetail<'_> {
                 format!("{}|{}", short_name, remotes.join("|"))
             };
 
-            spans.push(Span::styled("⎇ ", Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+            let icon = if short_name == "HEAD" { "಄ " } else { "⎇ " };
+            spans.push(Span::styled(icon, Style::default().fg(fg).add_modifier(Modifier::BOLD)));
             spans.push(Span::styled(display, Style::default().fg(fg).add_modifier(Modifier::BOLD)));
         }
 
         for tag_name in tags.iter() {
             if !first {
-                spans.push(Span::raw(" "));
+                spans.push(Span::raw(", "));
             }
             first = false;
             let fg = self.ctx.color_theme.list_ref_tag_fg;
-            spans.push(Span::styled("🏷 ", Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled("🏷  ", Style::default().fg(fg).add_modifier(Modifier::BOLD)));
             spans.push(Span::styled(tag_name.clone(), Style::default().fg(fg).add_modifier(Modifier::BOLD)));
         }
 
@@ -483,8 +551,7 @@ impl CommitDetail<'_> {
                     Style::default().fg(self.ctx.color_theme.fg)
                 };
                 Line::from(vec![
-                    status.fg(status_color),
-                    "  ".into(),
+                    Span::styled(format!("{} ", status), Style::default().fg(status_color)),
                     Span::styled(path, path_style),
                     add_str.fg(self.ctx.color_theme.detail_file_change_add_fg),
                     del_str.fg(self.ctx.color_theme.detail_file_change_delete_fg),

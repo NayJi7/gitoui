@@ -36,12 +36,12 @@ impl<'a> UncommittedView<'a> {
         tx: Sender,
     ) -> Self {
         let mut state = UncommittedState::default();
-        // Select the first available file by default
-        if !unstaged.is_empty() {
-            state.section = UncommittedSection::Unstaged;
-            state.selected = 0;
-        } else if !staged.is_empty() {
+        // Select the first available file by default (Staged -> Unstaged -> Untracked)
+        if !staged.is_empty() {
             state.section = UncommittedSection::Staged;
+            state.selected = 0;
+        } else if !unstaged.is_empty() {
+            state.section = UncommittedSection::Unstaged;
             state.selected = 0;
         } else if !untracked.is_empty() {
             state.section = UncommittedSection::Untracked;
@@ -66,16 +66,29 @@ impl<'a> UncommittedView<'a> {
         match event {
             UserEvent::NavigateDown => {
                 for _ in 0..count {
-                    self.state.select_next_global(self.unstaged.len(), self.staged.len(), self.untracked.len());
+                    self.state.select_next_global(self.staged.len(), self.unstaged.len(), self.untracked.len());
                 }
             }
             UserEvent::NavigateUp => {
                 for _ in 0..count {
-                    self.state.select_prev_global(self.unstaged.len(), self.staged.len(), self.untracked.len());
+                    self.state.select_prev_global(self.staged.len(), self.unstaged.len(), self.untracked.len());
                 }
             }
-            UserEvent::NavigateRight | UserEvent::NavigateLeft => {
-                self.state.switch_section();
+            UserEvent::ScrollDown => {
+                for _ in 0..count {
+                    self.state.scroll_down();
+                }
+            }
+            UserEvent::ScrollUp => {
+                for _ in 0..count {
+                    self.state.scroll_up();
+                }
+            }
+            UserEvent::NavigateRight => {
+                self.state.switch_section_forward(self.staged.len(), self.unstaged.len(), self.untracked.len());
+            }
+            UserEvent::NavigateLeft => {
+                self.state.switch_section_backward(self.staged.len(), self.unstaged.len(), self.untracked.len());
             }
             UserEvent::Stage => {
                 if matches!(self.state.section, UncommittedSection::Unstaged | UncommittedSection::Untracked) {
@@ -136,6 +149,8 @@ impl<'a> UncommittedView<'a> {
                         });
                     } else if file.status == StatusType::Deleted {
                         self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                    } else if file.status == StatusType::Untracked {
+                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier non suivi.".to_string()));
                     }
                 }
             }
@@ -187,7 +202,7 @@ impl<'a> UncommittedView<'a> {
             if col >= detail_area.x + (detail_area.width as f32 * 0.6) as u16
                 && row >= detail_area.y
             {
-                let action_bar_row = (row - detail_area.y).saturating_sub(3) as usize;
+                let action_bar_row = (row - detail_area.y).saturating_sub(4) as usize;
                 if action_bar_row == 0 {
                     self.tx.send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
                 } else if action_bar_row == 1 {
@@ -201,23 +216,38 @@ impl<'a> UncommittedView<'a> {
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             let mut clicked_on_file = false;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
-                let local_row = row.saturating_sub(detail_area.y + 1) as usize;
-                let unstaged_files_start = 3usize;
-                let staged_files_start = 5 + self.unstaged.len().max(1);
-                let untracked_files_start = staged_files_start + 2 + self.staged.len().max(1);
+                // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
+                let visible_row = row.saturating_sub(detail_area.y + 4) as usize;
 
-                if local_row >= unstaged_files_start && local_row < unstaged_files_start + self.unstaged.len() {
-                    self.state.section = UncommittedSection::Unstaged;
-                    self.state.selected = local_row - unstaged_files_start;
-                    clicked_on_file = true;
-                } else if local_row >= staged_files_start && local_row < staged_files_start + self.staged.len() {
-                    self.state.section = UncommittedSection::Staged;
-                    self.state.selected = local_row - staged_files_start;
-                    clicked_on_file = true;
-                } else if local_row >= untracked_files_start && local_row < untracked_files_start + self.untracked.len() {
-                    self.state.section = UncommittedSection::Untracked;
-                    self.state.selected = local_row - untracked_files_start;
-                    clicked_on_file = true;
+                // Content layout: each section takes N lines (N=1 if empty, N=len if files)
+                // Separators between sections add 1 line each
+                let staged_rows = if self.staged.is_empty() { 1 } else { self.staged.len() };
+                let unstaged_rows = if self.unstaged.is_empty() { 1 } else { self.unstaged.len() };
+                let untracked_rows = if self.untracked.is_empty() { 1 } else { self.untracked.len() };
+                let total_lines = staged_rows + 1 + unstaged_rows + 1 + untracked_rows;
+
+                // Ignore clicks outside the visible content area or beyond total data
+                if visible_row < self.state.height {
+                    let local_row = visible_row + self.state.offset;
+                    if local_row < total_lines {
+                        let unstaged_start = staged_rows + 1; // +1 separator
+                        let untracked_start = unstaged_start + unstaged_rows + 1; // +1 separator
+
+                        // Files start at section start (title row = first file row)
+                        if local_row < staged_rows && !self.staged.is_empty() {
+                            self.state.section = UncommittedSection::Staged;
+                            self.state.selected = local_row;
+                            clicked_on_file = true;
+                        } else if local_row >= unstaged_start && local_row < unstaged_start + unstaged_rows && !self.unstaged.is_empty() {
+                            self.state.section = UncommittedSection::Unstaged;
+                            self.state.selected = local_row - unstaged_start;
+                            clicked_on_file = true;
+                        } else if local_row >= untracked_start && local_row < untracked_start + untracked_rows && !self.untracked.is_empty() {
+                            self.state.section = UncommittedSection::Untracked;
+                            self.state.selected = local_row - untracked_start;
+                            clicked_on_file = true;
+                        }
+                    }
                 }
             }
             
@@ -232,6 +262,8 @@ impl<'a> UncommittedView<'a> {
                         });
                     } else if file.status == StatusType::Deleted {
                         self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                    } else if file.status == StatusType::Untracked {
+                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier non suivi.".to_string()));
                     }
                 }
             }
@@ -239,11 +271,23 @@ impl<'a> UncommittedView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        // Block hover on commit list when in uncommitted detail view
+        // Only process hover inside the detail area
         if let Some(detail_area) = self.detail_area {
+            if row < detail_area.y {
+                // Mouse is in commit list area - do nothing (block hover)
+                return;
+            }
+        } else {
+            return;
+        }
+
+        if let Some(detail_area) = self.detail_area {
+            // Action bar hover (right side)
             if col >= detail_area.x + (detail_area.width as f32 * 0.6) as u16
                 && row >= detail_area.y
             {
-                let action_bar_row = (row - detail_area.y).saturating_sub(3) as usize;
+                let action_bar_row = (row - detail_area.y).saturating_sub(4) as usize;
                 self.state.hovered_action = if action_bar_row < 3 {
                     Some(action_bar_row)
                 } else {
@@ -252,28 +296,44 @@ impl<'a> UncommittedView<'a> {
                 return;
             }
 
+            // Files area hover (left side)
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
-                let local_row = row.saturating_sub(detail_area.y + 1) as usize;
-                let unstaged_files_start = 3usize;
-                let staged_files_start = 5 + self.unstaged.len().max(1);
-                let untracked_files_start = staged_files_start + 2 + self.staged.len().max(1);
+                // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
+                let scroll_start = detail_area.y + 4;
+                let visible_row = row.saturating_sub(scroll_start) as usize;
 
-                if local_row >= unstaged_files_start && local_row < unstaged_files_start + self.unstaged.len() {
-                    self.state.section = UncommittedSection::Unstaged;
-                    self.state.selected = local_row - unstaged_files_start;
-                } else if local_row >= staged_files_start && local_row < staged_files_start + self.staged.len() {
-                    self.state.section = UncommittedSection::Staged;
-                    self.state.selected = local_row - staged_files_start;
-                } else if local_row >= untracked_files_start && local_row < untracked_files_start + self.untracked.len() {
-                    self.state.section = UncommittedSection::Untracked;
-                    self.state.selected = local_row - untracked_files_start;
+                // Content layout: each section takes N lines (N=1 if empty, N=len if files)
+                // Separators between sections add 1 line each
+                let staged_rows = if self.staged.is_empty() { 1 } else { self.staged.len() };
+                let unstaged_rows = if self.unstaged.is_empty() { 1 } else { self.unstaged.len() };
+                let untracked_rows = if self.untracked.is_empty() { 1 } else { self.untracked.len() };
+                let total_lines = staged_rows + 1 + unstaged_rows + 1 + untracked_rows;
+
+                // Only update selection if mouse is inside visible content and within data bounds
+                if visible_row < self.state.height {
+                    let local_row = visible_row + self.state.offset;
+                    if local_row < total_lines {
+                        let unstaged_start = staged_rows + 1; // +1 separator
+                        let untracked_start = unstaged_start + unstaged_rows + 1; // +1 separator
+
+                        // Files start at section start (title row = first file row)
+                        if local_row < staged_rows && !self.staged.is_empty() {
+                            self.state.section = UncommittedSection::Staged;
+                            self.state.selected = local_row;
+                        } else if local_row >= unstaged_start && local_row < unstaged_start + unstaged_rows && !self.unstaged.is_empty() {
+                            self.state.section = UncommittedSection::Unstaged;
+                            self.state.selected = local_row - unstaged_start;
+                        } else if local_row >= untracked_start && local_row < untracked_start + untracked_rows && !self.untracked.is_empty() {
+                            self.state.section = UncommittedSection::Untracked;
+                            self.state.selected = local_row - untracked_start;
+                        }
+                    }
                 }
+            } else {
                 self.state.hovered_action = None;
-                return;
             }
         }
-        self.state.hovered_action = None;
     }
 
     pub fn take_list_state(&mut self) -> Option<CommitListState<'a>> {

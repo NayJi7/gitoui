@@ -220,7 +220,8 @@ fn build_ref_tree_items(refs: &[Ref], ctx: &AppContext) -> Vec<TreeItem<'static,
     sort_stash_tree_nodes(&mut stash_nodes);
 
     let branch_items = branch_tree_nodes_to_tree_items(branch_nodes, branch_color_map, color_theme);
-    let remote_items = remote_tree_nodes_to_tree_items(remote_nodes, branch_color_map, color_theme, 0);
+    let remote_items =
+        remote_tree_nodes_to_tree_items(remote_nodes, branch_color_map, color_theme, 0);
     let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme);
     let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
@@ -306,6 +307,21 @@ fn refs_to_ref_tree_nodes(ref_names: Vec<String>) -> Vec<RefTreeNode> {
     nodes
 }
 
+fn find_first_branch_color(
+    node: &RefTreeNode,
+    branch_color_map: &rustc_hash::FxHashMap<String, Color>,
+) -> Option<Color> {
+    if node.children.is_empty() {
+        return branch_color_map.get(&node.identifier).copied();
+    }
+    for child in &node.children {
+        if let Some(color) = find_first_branch_color(child, branch_color_map) {
+            return Some(color);
+        }
+    }
+    None
+}
+
 fn branch_tree_nodes_to_tree_items(
     nodes: Vec<RefTreeNode>,
     branch_color_map: &rustc_hash::FxHashMap<String, Color>,
@@ -313,21 +329,28 @@ fn branch_tree_nodes_to_tree_items(
 ) -> Vec<TreeItem<'static, String>> {
     let mut items = Vec::new();
     for node in nodes {
-        if node.children.is_empty() {
-            let fg = branch_color_map
+        let fg = if node.children.is_empty() {
+            branch_color_map
                 .get(&node.identifier)
                 .copied()
-                .unwrap_or(color_theme.list_ref_branch_fg);
+                .unwrap_or(color_theme.list_ref_branch_fg)
+        } else {
+            // For folders, find the color from the first leaf descendant
+            find_first_branch_color(&node, branch_color_map)
+                .unwrap_or(color_theme.list_ref_branch_fg)
+        };
+        if node.children.is_empty() {
             let line = Line::from(vec![
                 Span::raw("⎇ ").fg(fg).bold(),
                 Span::raw(node.name).fg(fg).bold(),
             ]);
             items.push(tree_item_with_line(node.identifier, line, Vec::new()));
         } else {
-            let children = branch_tree_nodes_to_tree_items(node.children, branch_color_map, color_theme);
+            let children =
+                branch_tree_nodes_to_tree_items(node.children, branch_color_map, color_theme);
             let line = Line::from(vec![
-                Span::raw("⎇ ").fg(color_theme.list_ref_branch_fg).bold(),
-                Span::raw(node.name).fg(color_theme.list_ref_branch_fg).bold(),
+                Span::raw("⎇ ").fg(fg).bold(),
+                Span::raw(node.name).fg(fg).bold(),
             ]);
             items.push(tree_item_with_line(node.identifier, line, children));
         }
@@ -355,15 +378,26 @@ fn remote_tree_nodes_to_tree_items(
             ]);
             items.push(tree_item_with_line(node.identifier, line, Vec::new()));
         } else {
-            let children = remote_tree_nodes_to_tree_items(node.children, branch_color_map, color_theme, depth + 1);
+            let fg = if depth == 0 {
+                None
+            } else {
+                find_first_branch_color(&node, branch_color_map)
+            };
+            let children = remote_tree_nodes_to_tree_items(
+                node.children,
+                branch_color_map,
+                color_theme,
+                depth + 1,
+            );
             let line = if depth == 0 {
                 // Premier niveau = nom du remote (ex: "origin") → pas de logo
                 Line::from(vec![Span::raw(node.name).fg(color_theme.fg)])
             } else {
-                // Niveaux suivants → logo branche
+                // Niveaux suivants → logo branche, inherit color from first leaf
+                let fg = fg.unwrap_or(color_theme.list_ref_remote_branch_fg);
                 Line::from(vec![
-                    Span::raw("⎇ ").fg(color_theme.list_ref_remote_branch_fg).bold(),
-                    Span::raw(node.name).fg(color_theme.list_ref_remote_branch_fg).bold(),
+                    Span::raw("⎇ ").fg(fg).bold(),
+                    Span::raw(node.name).fg(fg).bold(),
                 ])
             };
             items.push(tree_item_with_line(node.identifier, line, children));
@@ -380,14 +414,14 @@ fn tag_tree_nodes_to_tree_items(
     for node in nodes {
         if node.children.is_empty() {
             let line = Line::from(vec![
-                Span::raw("🏷 ").fg(color_theme.list_ref_tag_fg).bold(),
+                Span::raw("🏷  ").fg(color_theme.list_ref_tag_fg).bold(),
                 Span::raw(node.name).fg(color_theme.list_ref_tag_fg).bold(),
             ]);
             items.push(tree_item_with_line(node.identifier, line, Vec::new()));
         } else {
             let children = tag_tree_nodes_to_tree_items(node.children, color_theme);
             let line = Line::from(vec![
-                Span::raw("🏷 ").fg(color_theme.list_ref_tag_fg).bold(),
+                Span::raw("🏷  ").fg(color_theme.list_ref_tag_fg).bold(),
                 Span::raw(node.name).fg(color_theme.list_ref_tag_fg).bold(),
             ]);
             items.push(tree_item_with_line(node.identifier, line, children));
@@ -404,7 +438,9 @@ fn stash_tree_nodes_to_tree_items(
     for node in nodes {
         let line = Line::from(vec![
             Span::raw("⌧ ").fg(color_theme.list_ref_stash_fg).bold(),
-            Span::raw(node.name).fg(color_theme.list_ref_stash_fg).bold(),
+            Span::raw(node.name)
+                .fg(color_theme.list_ref_stash_fg)
+                .bold(),
         ]);
         items.push(tree_item_with_line(node.identifier, line, Vec::new()));
     }

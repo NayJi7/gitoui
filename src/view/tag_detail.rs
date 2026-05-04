@@ -103,7 +103,7 @@ impl<'a> TagDetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y {
-                let action_bar_row = (row - detail_area.y).saturating_sub(3) as usize;
+                let action_bar_row = (row - detail_area.y).saturating_sub(4) as usize;
                 if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
                     self.execute_action(action_idx);
                 }
@@ -115,7 +115,7 @@ impl<'a> TagDetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y {
-                let action_bar_row = (row - detail_area.y).saturating_sub(3) as usize;
+                let action_bar_row = (row - detail_area.y).saturating_sub(4) as usize;
                 self.tag_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
             } else {
                 self.tag_detail_state.hovered_action = None;

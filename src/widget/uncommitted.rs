@@ -63,58 +63,134 @@ impl UncommittedState {
         }
     }
 
-    pub fn select_next_global(&mut self, unstaged_len: usize, staged_len: usize, untracked_len: usize) {
-        let total = unstaged_len + staged_len + untracked_len;
-        if total == 0 {
-            return;
-        }
-        let current_global = match self.section {
-            UncommittedSection::Unstaged => self.selected,
-            UncommittedSection::Staged => unstaged_len + self.selected,
-            UncommittedSection::Untracked => unstaged_len + staged_len + self.selected,
-        };
-        let next_global = (current_global + 1).min(total.saturating_sub(1));
-        if next_global < unstaged_len {
-            self.section = UncommittedSection::Unstaged;
-            self.selected = next_global;
-        } else if next_global < unstaged_len + staged_len {
-            self.section = UncommittedSection::Staged;
-            self.selected = next_global - unstaged_len;
-        } else {
-            self.section = UncommittedSection::Untracked;
-            self.selected = next_global - unstaged_len - staged_len;
-        }
-    }
-
-    pub fn select_prev_global(&mut self, unstaged_len: usize, staged_len: usize, untracked_len: usize) {
-        let total = unstaged_len + staged_len + untracked_len;
-        if total == 0 {
-            return;
-        }
-        let current_global = match self.section {
-            UncommittedSection::Unstaged => self.selected,
-            UncommittedSection::Staged => unstaged_len + self.selected,
-            UncommittedSection::Untracked => unstaged_len + staged_len + self.selected,
-        };
-        let prev_global = current_global.saturating_sub(1);
-        if prev_global < unstaged_len {
-            self.section = UncommittedSection::Unstaged;
-            self.selected = prev_global;
-        } else if prev_global < unstaged_len + staged_len {
-            self.section = UncommittedSection::Staged;
-            self.selected = prev_global - unstaged_len;
-        } else {
-            self.section = UncommittedSection::Untracked;
-            self.selected = prev_global - unstaged_len - staged_len;
+    pub fn select_next_global(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+        // Order: Staged -> Unstaged -> Untracked, skipping empty sections
+        match self.section {
+            UncommittedSection::Staged => {
+                if self.selected + 1 < staged_len {
+                    self.selected += 1;
+                } else if unstaged_len > 0 {
+                    self.section = UncommittedSection::Unstaged;
+                    self.selected = 0;
+                } else if untracked_len > 0 {
+                    self.section = UncommittedSection::Untracked;
+                    self.selected = 0;
+                }
+            }
+            UncommittedSection::Unstaged => {
+                if self.selected + 1 < unstaged_len {
+                    self.selected += 1;
+                } else if untracked_len > 0 {
+                    self.section = UncommittedSection::Untracked;
+                    self.selected = 0;
+                }
+            }
+            UncommittedSection::Untracked => {
+                if self.selected + 1 < untracked_len {
+                    self.selected += 1;
+                }
+            }
         }
     }
 
-    pub fn switch_section(&mut self) {
-        self.section = match self.section {
-            UncommittedSection::Unstaged => UncommittedSection::Staged,
-            UncommittedSection::Staged => UncommittedSection::Untracked,
-            UncommittedSection::Untracked => UncommittedSection::Unstaged,
+    pub fn select_prev_global(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+        // Order: Staged -> Unstaged -> Untracked, skipping empty sections
+        match self.section {
+            UncommittedSection::Untracked => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                } else if unstaged_len > 0 {
+                    self.section = UncommittedSection::Unstaged;
+                    self.selected = unstaged_len - 1;
+                } else if staged_len > 0 {
+                    self.section = UncommittedSection::Staged;
+                    self.selected = staged_len - 1;
+                }
+            }
+            UncommittedSection::Unstaged => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                } else if staged_len > 0 {
+                    self.section = UncommittedSection::Staged;
+                    self.selected = staged_len - 1;
+                }
+            }
+            UncommittedSection::Staged => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                }
+            }
+        }
+    }
+
+    pub fn switch_section_forward(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+        // Cycle: Staged -> Unstaged -> Untracked -> Staged, skipping empty
+        let (next_section, _) = match self.section {
+            UncommittedSection::Staged => {
+                if unstaged_len > 0 {
+                    (UncommittedSection::Unstaged, unstaged_len)
+                } else if untracked_len > 0 {
+                    (UncommittedSection::Untracked, untracked_len)
+                } else {
+                    (UncommittedSection::Staged, staged_len)
+                }
+            }
+            UncommittedSection::Unstaged => {
+                if untracked_len > 0 {
+                    (UncommittedSection::Untracked, untracked_len)
+                } else if staged_len > 0 {
+                    (UncommittedSection::Staged, staged_len)
+                } else {
+                    (UncommittedSection::Unstaged, unstaged_len)
+                }
+            }
+            UncommittedSection::Untracked => {
+                if staged_len > 0 {
+                    (UncommittedSection::Staged, staged_len)
+                } else if unstaged_len > 0 {
+                    (UncommittedSection::Unstaged, unstaged_len)
+                } else {
+                    (UncommittedSection::Untracked, untracked_len)
+                }
+            }
         };
+        self.section = next_section;
+        self.selected = 0;
+        self.offset = 0;
+    }
+
+    pub fn switch_section_backward(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+        // Cycle: Staged -> Untracked -> Unstaged -> Staged, skipping empty
+        let (next_section, _) = match self.section {
+            UncommittedSection::Staged => {
+                if untracked_len > 0 {
+                    (UncommittedSection::Untracked, untracked_len)
+                } else if unstaged_len > 0 {
+                    (UncommittedSection::Unstaged, unstaged_len)
+                } else {
+                    (UncommittedSection::Staged, staged_len)
+                }
+            }
+            UncommittedSection::Unstaged => {
+                if staged_len > 0 {
+                    (UncommittedSection::Staged, staged_len)
+                } else if untracked_len > 0 {
+                    (UncommittedSection::Untracked, untracked_len)
+                } else {
+                    (UncommittedSection::Unstaged, unstaged_len)
+                }
+            }
+            UncommittedSection::Untracked => {
+                if unstaged_len > 0 {
+                    (UncommittedSection::Unstaged, unstaged_len)
+                } else if staged_len > 0 {
+                    (UncommittedSection::Staged, staged_len)
+                } else {
+                    (UncommittedSection::Untracked, untracked_len)
+                }
+            }
+        };
+        self.section = next_section;
         self.selected = 0;
         self.offset = 0;
     }
@@ -138,6 +214,38 @@ impl UncommittedState {
             UncommittedSection::Staged => staged_len,
             UncommittedSection::Untracked => untracked_len,
         }
+    }
+
+    pub fn selected_global_line(&self, staged_len: usize, unstaged_len: usize, untracked_len: usize) -> usize {
+        let staged_rows = if staged_len == 0 { 1 } else { staged_len };
+        let unstaged_rows = if unstaged_len == 0 { 1 } else { unstaged_len };
+        match self.section {
+            UncommittedSection::Staged => self.selected,
+            UncommittedSection::Unstaged => staged_rows + 1 + self.selected,
+            UncommittedSection::Untracked => staged_rows + 1 + unstaged_rows + 1 + self.selected,
+        }
+    }
+
+    pub fn ensure_selected_visible(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+        let selected_line = self.selected_global_line(staged_len, unstaged_len, untracked_len);
+        if selected_line < self.offset {
+            self.offset = selected_line;
+        } else if selected_line >= self.offset + self.height {
+            self.offset = selected_line.saturating_sub(self.height.saturating_sub(1));
+        }
+    }
+
+    pub fn update_state(&mut self, total_lines: usize, area_height: usize) {
+        self.height = area_height;
+        self.offset = self.offset.min(total_lines.saturating_sub(area_height));
+    }
+
+    pub fn scroll_down(&mut self) {
+        self.offset = self.offset.saturating_add(1);
+    }
+
+    pub fn scroll_up(&mut self) {
+        self.offset = self.offset.saturating_sub(1);
     }
 }
 
@@ -180,21 +288,57 @@ impl<'a> StatefulWidget for UncommittedWidget<'a> {
 }
 
 impl<'a> UncommittedWidget<'a> {
-    fn render_files(&self, area: Rect, buf: &mut Buffer, state: &UncommittedState) {
-        // Title block over the entire files area
-        let title_block = Block::default()
-            .title("Uncommitted Details")
-            .title_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+    fn render_files(&self, area: Rect, buf: &mut Buffer, state: &mut UncommittedState) {
+        // Files area: top border forms the horizontal separator
+        let files_block = Block::default()
             .borders(Borders::TOP)
-            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(0, 0, 1, 0));
-        let inner = title_block.inner(area);
-        title_block.render(area, buf);
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg));
+        let files_inner = files_block.inner(area);
+        files_block.render(area, buf);
+
+        // Inner: title + underline + spacer + scrollable content
+        let [files_title_area, files_underline_area, _files_spacer_area, scroll_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(files_inner);
+
+        // Render centered title
+        let title_text = "Uncommitted Details";
+        let title_len = title_text.chars().count() as u16;
+        let title_pad = files_title_area.width.saturating_sub(title_len);
+        let title_left = title_pad / 2;
+        let title_line = Line::from(vec![
+            Span::styled(" ".repeat(title_left as usize), Style::default()),
+            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        Paragraph::new(title_line).render(files_title_area, buf);
+
+        // Render small underline
+        let underline_len = (title_len as usize).saturating_sub(4).max(3);
+        let underline_pad = files_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_left = underline_pad / 2;
+        let underline_line = Line::from(vec![
+            Span::styled(" ".repeat(underline_left as usize), Style::default()),
+            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+        ]);
+        Paragraph::new(underline_line).render(files_underline_area, buf);
 
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(inner);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(scroll_area);
 
         let (label_lines, value_lines) = self.build_content_lines(state, value_area.width as usize);
+
+        let total_lines = label_lines.len().max(value_lines.len());
+        let content_height = scroll_area.height as usize;
+        state.update_state(total_lines, content_height);
+        state.ensure_selected_visible(self.staged.len(), self.unstaged.len(), self.untracked.len());
+
+        let label_lines: Vec<_> = label_lines.into_iter().skip(state.offset).collect();
+        let value_lines: Vec<_> = value_lines.into_iter().skip(state.offset).collect();
 
         let labels_paragraph = Paragraph::new(label_lines)
             .style(Style::default().fg(self.ctx.color_theme.fg))
@@ -324,21 +468,53 @@ impl<'a> UncommittedWidget<'a> {
     }
 
     fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &UncommittedState) {
-        let block = Block::default()
+        // Action bar with top+left borders forming a corner with the content border
+        let action_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT)
-            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 1, 0, 0));
-        let inner = block.inner(area);
-        block.render(area, buf);
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg));
+        let inner = action_block.inner(area);
+        action_block.render(area, buf);
+
+        // Inner: title + underline + spacer + actions
+        let [action_title_area, action_underline_area, _action_spacer_area, action_actions_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(inner);
+
+        // Render centered title
+        let title_text = "Git Actions";
+        let title_len = title_text.chars().count() as u16;
+        let title_pad = action_title_area.width.saturating_sub(title_len);
+        let title_left = title_pad / 2;
+        let title_line = Line::from(vec![
+            Span::styled(" ".repeat(title_left as usize), Style::default()),
+            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        Paragraph::new(title_line).render(action_title_area, buf);
+
+        // Render small underline
+        let underline_len = (title_len as usize).saturating_sub(4).max(3);
+        let underline_pad = action_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_left = underline_pad / 2;
+        let underline_line = Line::from(vec![
+            Span::styled(" ".repeat(underline_left as usize), Style::default()),
+            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+        ]);
+        Paragraph::new(underline_line).render(action_underline_area, buf);
+
+        // Action content padding matching left column
+        let action_block = Block::default()
+            .padding(Padding::new(2, 1, 0, 0));
+        let action_inner = action_block.inner(action_actions_area);
+        action_block.render(action_actions_area, buf);
 
         let actions = &[("Stash", 'i'), ("Commit", 'w'), ("Clean Untracked", 'v')];
 
         let mut lines = Vec::new();
-        lines.push(Line::from(Span::styled(
-            "Git Actions",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(self.full_divider(inner.width as usize));
         for (i, (label, key)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
@@ -355,6 +531,6 @@ impl<'a> UncommittedWidget<'a> {
 
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg));
-        paragraph.render(inner, buf);
+        paragraph.render(action_inner, buf);
     }
 }

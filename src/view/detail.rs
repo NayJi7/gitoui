@@ -69,6 +69,12 @@ impl<'a> DetailView<'a> {
                     self.commit_detail_state.select_prev_file();
                 }
             }
+            UserEvent::NavigateRight => {
+                self.commit_detail_state.select_last_file(self.changes.len());
+            }
+            UserEvent::NavigateLeft => {
+                self.commit_detail_state.select_first_file();
+            }
             UserEvent::PageDown => {
                 for _ in 0..count {
                     self.commit_detail_state.scroll_page_down();
@@ -311,7 +317,7 @@ impl<'a> DetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(3);
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
                 if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
                     self.execute_action(action_idx);
                 }
@@ -320,11 +326,12 @@ impl<'a> DetailView<'a> {
         }
 
         let detail_local_row = row - self.list_height;
-        if detail_local_row == 0 {
-            return; // clicked on border
+        // Detail widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
+        if detail_local_row < 4 {
+            return; // clicked on header area
         }
 
-        let content_row = detail_local_row - 1;
+        let content_row = detail_local_row - 4;
         let clicked_line = self.commit_detail_state.offset() + content_row;
         let changes_start = self.compute_changes_start_line();
 
@@ -346,7 +353,7 @@ impl<'a> DetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(3);
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
                 self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
                 return;
             } else {
@@ -355,11 +362,12 @@ impl<'a> DetailView<'a> {
         }
 
         let detail_local_row = row - self.list_height;
-        if detail_local_row == 0 {
-            return; // border
+        // Detail widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
+        if detail_local_row < 4 {
+            return; // hovering header area
         }
 
-        let content_row = detail_local_row - 1;
+        let content_row = detail_local_row - 4;
         let hover_line = self.commit_detail_state.offset() + content_row;
         let changes_start = self.compute_changes_start_line();
 

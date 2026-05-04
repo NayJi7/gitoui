@@ -1428,6 +1428,17 @@ fn refs_spans<'a>(
         }
     }
 
+    // Move HEAD branch to the front of ref_infos
+    if let Head::Branch { name: head_name } = head {
+        if let Some(head_idx) = ref_infos
+            .iter()
+            .position(|(names, _, _)| names.contains(&head_name.as_str()))
+        {
+            let head_ref = ref_infos.remove(head_idx);
+            ref_infos.insert(0, head_ref);
+        }
+    }
+
     if let Head::Detached { target } = head {
         if commit_info.commit.commit_hash == *target {
             spans.push(Span::raw("౷ HEAD").fg(color_theme.list_head_fg).bold());
@@ -1447,32 +1458,31 @@ fn refs_spans<'a>(
             names[0].to_string()
         };
 
-        if let Head::Branch { name: head_name } = head {
-            if names.contains(&head_name.as_str()) {
-                spans.push(Span::raw("HEAD -> ").fg(color_theme.list_head_fg).bold());
-                current_width += 8;
-            }
-        }
-
         let is_hovered = if *is_tag {
             hovered_tag == Some(names[0])
         } else {
             hovered_branch.map_or(false, |hb| names.iter().any(|n| *n == hb))
         };
 
-        let icon = if *is_tag {
-            let style = if is_hovered {
-                Style::default()
-                    .fg(*fg)
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED)
-                    .add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default().fg(*fg).add_modifier(Modifier::BOLD)
-            };
-            Span::styled("🏷 ", style)
+        let is_head_branch = if let Head::Branch { name: head_name } = head {
+            names.contains(&head_name.as_str())
         } else {
-            let style = if is_hovered {
+            false
+        };
+
+        // HEAD indicator (always cyan, non-hoverable)
+        if is_head_branch {
+            let head_icon = Span::styled("಄ ", Style::default().fg(color_theme.list_head_fg).bold());
+            spans.push(head_icon);
+            current_width += 1;
+            let head_text = Span::styled("HEAD -> ", Style::default().fg(color_theme.list_head_fg).bold());
+            let head_text_width = head_text.width();
+            spans.push(head_text);
+            current_width += head_text_width;
+        }
+
+        let style = if *is_tag {
+            if is_hovered {
                 Style::default()
                     .fg(*fg)
                     .add_modifier(Modifier::BOLD)
@@ -1480,12 +1490,33 @@ fn refs_spans<'a>(
                     .add_modifier(Modifier::REVERSED)
             } else {
                 Style::default().fg(*fg).add_modifier(Modifier::BOLD)
-            };
-            Span::styled("⎇ ", style)
+            }
+        } else {
+            if is_hovered {
+                Style::default()
+                    .fg(*fg)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED)
+                    .add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default().fg(*fg).add_modifier(Modifier::BOLD)
+            }
         };
+
+        let icon_text = if *is_tag {
+            "🏷  "
+        } else {
+            "⎇ "
+        };
+        let icon = Span::styled(icon_text, style);
         let icon_width = icon.width();
         spans.push(icon);
         current_width += icon_width;
+
+        // Thin space after branch icon
+        if !*is_tag {
+            current_width += 1;
+        }
 
         let name_start = current_width;
         let name_spans = refs_matches

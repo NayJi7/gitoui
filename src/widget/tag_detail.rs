@@ -3,7 +3,7 @@ use std::rc::Rc;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
@@ -50,8 +50,46 @@ impl StatefulWidget for TagDetail<'_> {
         let [metadata_area, action_bar_area] =
             Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
 
+        // Metadata area: top border forms the horizontal separator
+        let meta_block = Block::default()
+            .borders(Borders::TOP)
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg));
+        let meta_inner = meta_block.inner(metadata_area);
+        meta_block.render(metadata_area, buf);
+
+        // Inner: title + underline + spacer + scrollable content
+        let [meta_title_area, meta_underline_area, _meta_spacer_area, meta_scroll_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(meta_inner);
+
+        // Render centered title
+        let title_text = "Tag Details";
+        let title_len = title_text.chars().count() as u16;
+        let title_pad = meta_title_area.width.saturating_sub(title_len);
+        let title_left = title_pad / 2;
+        let title_line = Line::from(vec![
+            Span::styled(" ".repeat(title_left as usize), Style::default()),
+            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        Paragraph::new(title_line).render(meta_title_area, buf);
+
+        // Render small underline
+        let underline_len = (title_len as usize).saturating_sub(4).max(3);
+        let underline_pad = meta_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_left = underline_pad / 2;
+        let underline_line = Line::from(vec![
+            Span::styled(" ".repeat(underline_left as usize), Style::default()),
+            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+        ]);
+        Paragraph::new(underline_line).render(meta_underline_area, buf);
+
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(metadata_area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(meta_scroll_area);
 
         let (label_lines, value_lines) = self.contents();
 
@@ -65,38 +103,63 @@ impl TagDetail<'_> {
     fn render_labels_paragraph(&self, lines: Vec<Line>, area: Rect, buf: &mut Buffer) {
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-                    .padding(Padding::left(2)),
-            );
+            .block(Block::default().padding(Padding::left(2)));
         paragraph.render(area, buf);
     }
 
     fn render_value_paragraph(&self, lines: Vec<Line>, area: Rect, buf: &mut Buffer) {
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-                    .padding(Padding::new(1, 2, 0, 0)),
-            );
+            .block(Block::default().padding(Padding::new(1, 2, 0, 0)));
         paragraph.render(area, buf);
     }
 
     fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &TagDetailState) {
-        let block = Block::default()
+        // Action bar with top+left borders forming a corner with the content border
+        let action_block = Block::default()
             .borders(Borders::TOP | Borders::LEFT)
-            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(1, 1, 0, 0));
-        let inner = block.inner(area);
-        block.render(area, buf);
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg));
+        let inner = action_block.inner(area);
+        action_block.render(area, buf);
+
+        // Inner: title + underline + spacer + actions
+        let [action_title_area, action_underline_area, _action_spacer_area, action_actions_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(inner);
+
+        // Render centered title
+        let title_text = "Git Actions";
+        let title_len = title_text.chars().count() as u16;
+        let title_pad = action_title_area.width.saturating_sub(title_len);
+        let title_left = title_pad / 2;
+        let title_line = Line::from(vec![
+            Span::styled(" ".repeat(title_left as usize), Style::default()),
+            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]);
+        Paragraph::new(title_line).render(action_title_area, buf);
+
+        // Render small underline
+        let underline_len = (title_len as usize).saturating_sub(4).max(3);
+        let underline_pad = action_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_left = underline_pad / 2;
+        let underline_line = Line::from(vec![
+            Span::styled(" ".repeat(underline_left as usize), Style::default()),
+            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+        ]);
+        Paragraph::new(underline_line).render(action_underline_area, buf);
+
+        // Action content padding matching left column
+        let action_block = Block::default()
+            .padding(Padding::new(2, 1, 0, 0));
+        let action_inner = action_block.inner(action_actions_area);
+        action_block.render(action_actions_area, buf);
 
         let mut lines = Vec::new();
-        lines.push(Line::from("Git Actions").add_modifier(Modifier::BOLD));
-        lines.push(Line::from("───".fg(self.ctx.color_theme.divider_fg)));
         for (i, (label, key)) in TAG_ACTIONS.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
@@ -112,7 +175,7 @@ impl TagDetail<'_> {
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));
-        paragraph.render(inner, buf);
+        paragraph.render(action_inner, buf);
     }
 
     fn contents(&self) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
