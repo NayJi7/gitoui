@@ -641,7 +641,7 @@ impl<'a> DiffView<'a> {
     }
 
     fn cycle_file(&self, delta: isize) {
-        if self.all_file_paths.len() <= 1 {
+        if self.all_file_paths.is_empty() {
             return;
         }
         let is_staged = self.title.contains("(staged)");
@@ -657,7 +657,10 @@ impl<'a> DiffView<'a> {
         };
 
         if let Some(idx) = position {
-            let new_idx = ((idx as isize + delta).rem_euclid(self.all_file_paths.len() as isize)) as usize;
+            let new_idx = (idx as isize + delta) as usize;
+            if new_idx >= self.all_file_paths.len() {
+                return;
+            }
             let (new_path, new_staged) = self.all_file_paths[new_idx].clone();
             if self.commit_hash.is_empty() {
                 self.tx.send(AppEvent::OpenUncommittedDiff { file_path: new_path, is_staged: new_staged });
@@ -680,7 +683,7 @@ impl<'a> DiffView<'a> {
 
     pub fn footer_hint(&self) -> String {
         let mut parts = Vec::new();
-        if self.all_file_paths.len() > 1 {
+        if !self.all_file_paths.is_empty() {
             let is_staged = self.title.contains("(staged)");
             let current = self.title.strip_prefix("Diff (staged): ")
                 .or_else(|| self.title.strip_prefix("Diff (unstaged): "))

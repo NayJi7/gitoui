@@ -841,11 +841,12 @@ impl App<'_> {
             .commit_detail(&CommitHash::from(hash.as_str()))
             .1
             .iter()
+            .filter(|c| !matches!(c, crate::git::FileChange::Delete { .. }))
             .map(|c| match c {
                 crate::git::FileChange::Add { path, .. }
-                | crate::git::FileChange::Modify { path, .. }
-                | crate::git::FileChange::Delete { path, .. } => path.clone(),
+                | crate::git::FileChange::Modify { path, .. } => path.clone(),
                 crate::git::FileChange::Move { to, .. } => to.clone(),
+                crate::git::FileChange::Delete { .. } => unreachable!(),
             })
             .collect::<Vec<String>>();
         let all_files = all_files.into_iter().map(|p| (p, false)).collect();
@@ -896,12 +897,14 @@ impl App<'_> {
         let (commit_list_state, all_files) = match self.view {
             View::Uncommitted(ref mut view) => {
                 let list_state = view.take_list_state();
-                let staged = &view.staged;
-                let unstaged = &view.unstaged;
-                let all_files: Vec<(String, bool)> = staged
+                let all_files: Vec<(String, bool)> = view.staged
                     .iter()
+                    .filter(|f| f.status != StatusType::Deleted && f.status != StatusType::Untracked)
                     .map(|f| (f.path.clone(), true))
-                    .chain(unstaged.iter().map(|f| (f.path.clone(), false)))
+                    .chain(view.unstaged
+                        .iter()
+                        .filter(|f| f.status != StatusType::Deleted && f.status != StatusType::Untracked)
+                        .map(|f| (f.path.clone(), false)))
                     .collect();
                 (list_state, all_files)
             }
@@ -1402,16 +1405,17 @@ impl App<'_> {
     // Phase 2 - Git Actions execution
     fn execute_git_action(&mut self, target: String, action: GitAction) {
         let repo_path = self.repository.path();
-        let result = match action {
+        let (result, success_label) = match action {
             GitAction::Checkout => {
-                if target.starts_with("refs/stash") {
+                let r = if target.starts_with("refs/stash") {
                     actions::checkout_commit(repo_path, &target)
                 } else {
                     actions::checkout_commit(repo_path, &target)
-                }
+                };
+                (r, None)
             }
             GitAction::CreateBranch { name, checkout } => {
-                actions::create_branch_at(repo_path, &name, &target, checkout)
+                (actions::create_branch_at(repo_path, &name, &target, checkout), None)
             }
             GitAction::AddTag {
                 name,
@@ -1419,58 +1423,61 @@ impl App<'_> {
                 message,
             } => {
                 let msg = if annotated { message.as_deref() } else { None };
-                actions::create_tag(repo_path, &name, &target, msg)
+                (actions::create_tag(repo_path, &name, &target, msg), None)
             }
             GitAction::CherryPick {
                 no_commit,
                 record_origin,
-            } => actions::cherry_pick(repo_path, &target, no_commit, record_origin),
-            GitAction::Revert => actions::revert_commit(repo_path, &target),
-            GitAction::Drop => actions::drop_commit(repo_path, &target),
+            } => (actions::cherry_pick(repo_path, &target, no_commit, record_origin), None),
+            GitAction::Revert => (actions::revert_commit(repo_path, &target), None),
+            GitAction::Drop => (actions::drop_commit(repo_path, &target), None),
             GitAction::Merge {
                 no_ff,
                 squash,
                 no_commit,
-            } => actions::merge_commit(repo_path, &target, no_ff, squash, no_commit),
+            } => (actions::merge_commit(repo_path, &target, no_ff, squash, no_commit), None),
             GitAction::Rebase {
                 ignore_date,
                 interactive,
-            } => actions::rebase_onto(repo_path, &target, ignore_date, interactive),
-            GitAction::Reset { mode } => actions::reset(repo_path, &target, &mode),
-            GitAction::DeleteBranch { force } => actions::delete_branch(repo_path, &target, force),
+            } => (actions::rebase_onto(repo_path, &target, ignore_date, interactive), None),
+            GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),
+            GitAction::DeleteBranch { force } => (actions::delete_branch(repo_path, &target, force), None),
             GitAction::RenameBranch { new_name } => {
-                actions::rename_branch(repo_path, &target, &new_name)
+                (actions::rename_branch(repo_path, &target, &new_name), None)
             }
-            GitAction::PushBranch { force } => actions::push_branch(repo_path, &target, force),
+            GitAction::PushBranch { force } => (actions::push_branch(repo_path, &target, force), None),
             GitAction::PullBranch { rebase } => {
-                if rebase {
+                let r = if rebase {
                     actions::pull_branch(repo_path, &target)
                 } else {
                     actions::pull_branch(repo_path, &target)
-                }
+                };
+                (r, None)
             }
-            GitAction::Fetch => actions::fetch(repo_path),
-            GitAction::DeleteTag => actions::delete_tag(repo_path, &target),
-            GitAction::PushTag => actions::push_commit(repo_path, &target),
-            GitAction::ApplyStash => actions::apply_stash(repo_path, &target),
-            GitAction::PopStash => actions::pop_stash(repo_path, &target),
-            GitAction::DropStash => actions::drop_stash(repo_path, &target),
+            GitAction::Fetch => (actions::fetch(repo_path), None),
+            GitAction::DeleteTag => (actions::delete_tag(repo_path, &target), None),
+            GitAction::PushTag => (actions::push_commit(repo_path, &target), None),
+            GitAction::ApplyStash => (actions::apply_stash(repo_path, &target), None),
+            GitAction::PopStash => (actions::pop_stash(repo_path, &target), None),
+            GitAction::DropStash => (actions::drop_stash(repo_path, &target), None),
             GitAction::CreateBranchFromStash { branch_name } => {
-                actions::create_branch_from_stash(repo_path, &branch_name, &target)
+                (actions::create_branch_from_stash(repo_path, &branch_name, &target), None)
             }
-            GitAction::StageFile { file } => actions::stage_file(repo_path, &file),
-            GitAction::StageAll => actions::stage_all(repo_path),
-            GitAction::UnstageFile { file } => actions::unstage_file(repo_path, &file),
-            GitAction::UnstageAll => actions::unstage_all(repo_path),
-            GitAction::DiscardFile { file } => actions::discard_file(repo_path, &file),
-            GitAction::DiscardAll => actions::discard_all(repo_path),
-            GitAction::Stash { message } => actions::stash(repo_path, message.as_deref()),
-            GitAction::Commit { message, amend } => actions::commit(repo_path, &message, amend),
-            GitAction::CleanUntracked => actions::clean_untracked(repo_path),
-            GitAction::Push => actions::push_commit(repo_path, &target),
+            GitAction::StageFile { file } => (actions::stage_file(repo_path, &file), Some(format!("Staged {}", file))),
+            GitAction::StageAll => (actions::stage_all(repo_path), Some("Staged all files".into())),
+            GitAction::UnstageFile { file } => (actions::unstage_file(repo_path, &file), Some(format!("Unstaged {}", file))),
+            GitAction::UnstageAll => (actions::unstage_all(repo_path), Some("Unstaged all files".into())),
+            GitAction::DiscardFile { file } => (actions::discard_file(repo_path, &file), Some(format!("Discarded {}", file))),
+            GitAction::DiscardAll => (actions::discard_all(repo_path), Some("Discarded all changes".into())),
+            GitAction::Stash { message } => (actions::stash(repo_path, message.as_deref()), Some("Stashed changes".into())),
+            GitAction::Commit { message, amend } => {
+                let label = if amend { "Amended commit" } else { "Committed" };
+                (actions::commit(repo_path, &message, amend), Some(label.to_string()))
+            }
+            GitAction::CleanUntracked => (actions::clean_untracked(repo_path), Some("Cleaned untracked files".into())),
+            GitAction::Push => (actions::push_commit(repo_path, &target), None),
             GitAction::CreateArchive => {
-                // git archive branch > branch.zip
-                std::process::Command::new("git")
+                let r = std::process::Command::new("git")
                     .current_dir(repo_path)
                     .args([
                         "archive",
@@ -1481,27 +1488,28 @@ impl App<'_> {
                     ])
                     .output()
                     .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                    .map_err(|e| format!("Failed to create archive: {}", e))
+                    .map_err(|e| format!("Failed to create archive: {}", e));
+                (r, None)
             }
         };
 
         match result {
-            Ok(msg) => {
+            Ok(_) => {
                 self.close_dialog();
-                let notification = if !msg.is_empty() {
-                    msg
+                if let Some(label) = success_label {
+                    self.ec.send(AppEvent::NotifySuccess(label));
+                    self.ec.send(AppEvent::RefreshUncommitted);
                 } else {
-                    "Operation completed successfully".into()
-                };
-                self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
-                    list_context: crate::view::ListRefreshViewContext {
-                        commit_hash: String::new(),
-                        selected: 0,
-                        height: 20,
-                        scroll_to_top: false,
-                    },
-                    pending_notification: Some(notification),
-                }));
+                    self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: Some("Operation completed successfully".into()),
+                    }));
+                }
             }
             Err(msg) => {
                 self.ec.send(AppEvent::NotifyError(msg));
@@ -1588,17 +1596,33 @@ impl App<'_> {
             _ => None,
         };
         let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
-        let convert =
-            |f: &crate::git::status::FileStatus| crate::widget::uncommitted::UncommittedFile {
+        
+        let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
+            let diff_result = if is_staged {
+                DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
+            } else {
+                DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
+            };
+            match diff_result {
+                Ok(diff_entry) => diff_entry.count_additions_and_deletions(),
+                Err(_) => (0, 0),
+            }
+        };
+
+        let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
+            let (additions, deletions) = load_diff_stats(f, is_staged);
+            crate::widget::uncommitted::UncommittedFile {
                 status: f.status.clone(),
                 path: f.path.clone(),
                 old_path: f.old_path.clone(),
-                additions: 0,
-                deletions: 0,
-            };
-        let staged: Vec<_> = changes.staged.iter().map(convert).collect();
-        let unstaged: Vec<_> = changes.unstaged.iter().map(convert).collect();
-        let untracked: Vec<_> = changes.untracked.iter().map(convert).collect();
+                additions,
+                deletions,
+            }
+        };
+
+        let staged: Vec<_> = changes.staged.iter().map(|f| convert(f, true)).collect();
+        let unstaged: Vec<_> = changes.unstaged.iter().map(|f| convert(f, false)).collect();
+        let untracked: Vec<_> = changes.untracked.iter().map(|f| convert(f, false)).collect();
         self.view = View::Uncommitted(Box::new(crate::view::uncommitted::UncommittedView::new(
             unstaged,
             staged,
@@ -1611,8 +1635,8 @@ impl App<'_> {
 
     fn stage_file(&mut self, file: String) {
         match actions::stage_file(self.repository.path(), &file) {
-            Ok(msg) => {
-                self.ec.send(AppEvent::NotifySuccess(msg));
+            Ok(_) => {
+                self.ec.send(AppEvent::NotifySuccess(format!("Staged {}", file)));
                 self.ec.send(AppEvent::RefreshUncommitted);
             }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
@@ -1621,8 +1645,8 @@ impl App<'_> {
 
     fn unstage_file(&mut self, file: String) {
         match actions::unstage_file(self.repository.path(), &file) {
-            Ok(msg) => {
-                self.ec.send(AppEvent::NotifySuccess(msg));
+            Ok(_) => {
+                self.ec.send(AppEvent::NotifySuccess(format!("Unstaged {}", file)));
                 self.ec.send(AppEvent::RefreshUncommitted);
             }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
@@ -1631,8 +1655,8 @@ impl App<'_> {
 
     fn discard_file(&mut self, file: String) {
         match actions::discard_file(self.repository.path(), &file) {
-            Ok(msg) => {
-                self.ec.send(AppEvent::NotifySuccess(msg));
+            Ok(_) => {
+                self.ec.send(AppEvent::NotifySuccess(format!("Discarded {}", file)));
                 self.ec.send(AppEvent::RefreshUncommitted);
             }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
@@ -1641,6 +1665,9 @@ impl App<'_> {
 
     fn refresh_uncommitted(&mut self) {
         if let View::Uncommitted(ref mut view) = self.view {
+            let selected_path = view.selected_path().map(|s| s.to_string());
+            let was_section = view.section();
+
             let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
             
             let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
@@ -1673,6 +1700,10 @@ impl App<'_> {
             view.staged = changes.staged.iter().map(|f| convert(f, true)).collect();
             view.unstaged = changes.unstaged.iter().map(|f| convert(f, false)).collect();
             view.untracked = changes.untracked.iter().map(|f| convert(f, false)).collect();
+
+            if let Some(ref path) = selected_path {
+                view.reselect(path);
+            }
         }
     }
 }

@@ -262,6 +262,35 @@ impl<'a> UncommittedView<'a> {
         self.commit_list_state.take()
     }
 
+    pub fn selected_path(&self) -> Option<&str> {
+        self.state.selected_file(&self.unstaged, &self.staged, &self.untracked)
+            .map(|f| f.path.as_str())
+    }
+
+    pub fn section(&self) -> UncommittedSection {
+        self.state.section
+    }
+
+    pub fn reselect(&mut self, path: &str) {
+        if let Some(idx) = self.staged.iter().position(|f| f.path == path) {
+            self.state.section = UncommittedSection::Staged;
+            self.state.selected = idx;
+        } else if let Some(idx) = self.unstaged.iter().position(|f| f.path == path) {
+            self.state.section = UncommittedSection::Unstaged;
+            self.state.selected = idx;
+        } else if let Some(idx) = self.untracked.iter().position(|f| f.path == path) {
+            self.state.section = UncommittedSection::Untracked;
+            self.state.selected = idx;
+        } else {
+            let files: &[UncommittedFile] = match self.state.section {
+                UncommittedSection::Staged => &self.staged,
+                UncommittedSection::Unstaged => &self.unstaged,
+                UncommittedSection::Untracked => &self.untracked,
+            };
+            self.state.selected = self.state.selected.min(files.len().saturating_sub(1));
+        }
+    }
+
     pub fn set_list_state(&mut self, state: CommitListState<'a>) {
         self.commit_list_state = Some(state);
     }
