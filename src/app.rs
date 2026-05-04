@@ -223,7 +223,7 @@ impl App<'_> {
          loop {
             // Clear notifications after 3 seconds
             if let Some(timestamp) = self.app_status.notification_timestamp {
-                if timestamp.elapsed() >= std::time::Duration::from_secs(3) {
+                if timestamp.elapsed() >= std::time::Duration::from_secs(2) {
                     self.clear_status_line();
                     self.app_status.notification_timestamp = None;
                 }

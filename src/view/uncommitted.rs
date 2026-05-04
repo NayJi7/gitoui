@@ -35,6 +35,18 @@ impl<'a> UncommittedView<'a> {
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
+        let mut state = UncommittedState::default();
+        // Select the first available file by default
+        if !unstaged.is_empty() {
+            state.section = UncommittedSection::Unstaged;
+            state.selected = 0;
+        } else if !staged.is_empty() {
+            state.section = UncommittedSection::Staged;
+            state.selected = 0;
+        } else if !untracked.is_empty() {
+            state.section = UncommittedSection::Untracked;
+            state.selected = 0;
+        }
         Self {
             commit_list_state,
             ctx,
@@ -42,7 +54,7 @@ impl<'a> UncommittedView<'a> {
             unstaged,
             staged,
             untracked,
-            state: UncommittedState::default(),
+            state,
             detail_area: None,
         }
     }
