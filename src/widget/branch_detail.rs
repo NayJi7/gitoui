@@ -17,7 +17,7 @@ pub struct BranchDetailState {
 
 pub const LOCAL_BRANCH_ACTIONS: &[(&str, &str)] = &[
     ("Checkout", "o"),
-    ("Rename", "Ctrl-R"),
+    ("Rename", "Ctrl+R"),
     ("Delete", "D"),
     ("Merge into current", "m"),
     ("Rebase current on", "e"),

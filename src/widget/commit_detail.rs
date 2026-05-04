@@ -126,11 +126,11 @@ pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
 
 pub const STASH_ACTIONS: &[(&str, &str)] = &[
     ("Apply Stash", "y"),
-    ("Pop Stash", "Ctrl-P"),
-    ("Drop Stash", "Ctrl-X"),
-    ("Create Branch from Stash", "Ctrl-N"),
-    ("Copy Stash Name", "Ctrl-I"),
-    ("Copy Stash Hash", "Ctrl-O"),
+    ("Pop Stash", "Ctrl+P"),
+    ("Drop Stash", "Ctrl+X"),
+    ("Create Branch from Stash", "Ctrl+N"),
+    ("Copy Stash Name", "Ctrl+I"),
+    ("Copy Stash Hash", "Ctrl+O"),
 ];
 
 impl StatefulWidget for CommitDetail<'_> {
