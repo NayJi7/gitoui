@@ -161,11 +161,41 @@ impl<'a> DialogView<'a> {
         if matches!(self.focused, DialogElement::Input) {
             match key.code {
                 ratatui::crossterm::event::KeyCode::Char(c) => {
-                    self.input_value.push(c);
+                    self.input_value.insert(self.input_cursor, c);
+                    self.input_cursor += 1;
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Backspace => {
-                    self.input_value.pop();
+                    if self.input_cursor > 0 {
+                        self.input_cursor -= 1;
+                        self.input_value.remove(self.input_cursor);
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Delete => {
+                    if self.input_cursor < self.input_value.len() {
+                        self.input_value.remove(self.input_cursor);
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Left => {
+                    if self.input_cursor > 0 {
+                        self.input_cursor -= 1;
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Right => {
+                    if self.input_cursor < self.input_value.len() {
+                        self.input_cursor += 1;
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Home => {
+                    self.input_cursor = 0;
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::End => {
+                    self.input_cursor = self.input_value.len();
                     return;
                 }
                 _ => {}
@@ -201,18 +231,34 @@ impl<'a> DialogView<'a> {
                 }
                 _ => self.focus_prev(),
             },
-            UserEvent::NavigateLeft => match self.focused {
-                DialogElement::Validate => self.focused = DialogElement::Cancel,
-                DialogElement::Cancel => self.focused = DialogElement::Validate,
-                DialogElement::Checkbox(i) => self.toggle_checkbox_at(i),
-                _ => self.focus_prev(),
-            },
-            UserEvent::NavigateRight => match self.focused {
-                DialogElement::Validate => self.focused = DialogElement::Cancel,
-                DialogElement::Cancel => self.focused = DialogElement::Validate,
-                DialogElement::Checkbox(i) => self.toggle_checkbox_at(i),
-                _ => self.focus_next(),
-            },
+            UserEvent::NavigateLeft => {
+                if matches!(self.focused, DialogElement::Input) {
+                    if self.input_cursor > 0 {
+                        self.input_cursor -= 1;
+                    }
+                } else {
+                    match self.focused {
+                        DialogElement::Validate => self.focused = DialogElement::Cancel,
+                        DialogElement::Cancel => self.focused = DialogElement::Validate,
+                        DialogElement::Checkbox(i) => self.toggle_checkbox_at(i),
+                        _ => self.focus_prev(),
+                    }
+                }
+            }
+            UserEvent::NavigateRight => {
+                if matches!(self.focused, DialogElement::Input) {
+                    if self.input_cursor < self.input_value.len() {
+                        self.input_cursor += 1;
+                    }
+                } else {
+                    match self.focused {
+                        DialogElement::Validate => self.focused = DialogElement::Cancel,
+                        DialogElement::Cancel => self.focused = DialogElement::Validate,
+                        DialogElement::Checkbox(i) => self.toggle_checkbox_at(i),
+                        _ => self.focus_next(),
+                    }
+                }
+            }
             UserEvent::RefList => {
                 self.focus_next();
             }
