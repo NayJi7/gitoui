@@ -446,6 +446,8 @@ impl App<'_> {
                     self.refresh_uncommitted();
                 }
                 AppEvent::OpenUncommittedDiff { file_path, is_staged } => {
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                     self.open_uncommitted_diff(file_path, is_staged);
                 }
                 AppEvent::CloseDiffToUncommitted => {
