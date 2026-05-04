@@ -265,7 +265,7 @@ impl App<'_> {
                     }
 
                     match user_event {
-                        Some(UserEvent::ForceQuit) => {
+                        Some(UserEvent::ForceQuit) | Some(UserEvent::Quit) => {
                             self.ec.send(AppEvent::Quit);
                         }
                         Some(ue) => {

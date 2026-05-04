@@ -101,15 +101,6 @@ impl<'a> DiffView<'a> {
             UserEvent::GoToBottom => {
                 self.scroll_to_bottom();
             }
-            UserEvent::SelectDown => {
-                self.tx.send(AppEvent::SelectOlderCommit);
-            }
-            UserEvent::SelectUp => {
-                self.tx.send(AppEvent::SelectNewerCommit);
-            }
-            UserEvent::GoToParent => {
-                self.tx.send(AppEvent::SelectParentCommit);
-            }
             UserEvent::ShortCopy => {
                 self.copy_file_path();
             }
@@ -710,12 +701,8 @@ impl<'a> DiffView<'a> {
         parts.join(" ")
     }
 
-    pub fn handle_click(&mut self, _col: u16, row: u16) {
-        if let Some(list_state) = self.as_mut_list_state() {
-            let (_, offset, height) = list_state.current_list_status();
-            let clicked_index = offset + (row as usize).min(height.saturating_sub(1));
-            list_state.select(clicked_index);
-        }
+    pub fn handle_click(&mut self, _col: u16, _row: u16) {
+        // Ignore clicks on the commit list when in diff view
     }
 }
 
