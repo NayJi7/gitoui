@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
@@ -140,12 +140,22 @@ impl StatefulWidget for CommitDetail<'_> {
         let [content_area, action_bar_area] =
             Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
 
+        // Title block over the entire content area
+        let title_block = Block::default()
+            .title("Commit Details")
+            .title_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+            .borders(Borders::TOP)
+            .style(Style::default().fg(self.ctx.color_theme.divider_fg))
+            .padding(Padding::new(0, 0, 1, 0));
+        let inner = title_block.inner(content_area);
+        title_block.render(content_area, buf);
+
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(content_area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(inner);
 
-        let (mut label_lines, mut value_lines, changes_start) = self.contents(content_area);
+        let (mut label_lines, mut value_lines, changes_start) = self.contents(inner.width);
 
-        let content_area_height = content_area.height as usize - 1; // minus the top border
+        let content_area_height = inner.height as usize;
         self.update_state(state, value_lines.len(), content_area_height);
         state.ensure_selected_visible(changes_start);
 
@@ -208,8 +218,11 @@ impl CommitDetail<'_> {
         };
 
         let mut lines = Vec::new();
-        lines.push(Line::from("Git Actions").add_modifier(Modifier::BOLD));
-        lines.push(Line::from("───".fg(self.ctx.color_theme.divider_fg)));
+        lines.push(Line::from(Span::styled(
+            "Git Actions",
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from("─".repeat(inner.width as usize).fg(self.ctx.color_theme.divider_fg)));
         for (i, (label, key)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
@@ -234,7 +247,7 @@ impl CommitDetail<'_> {
         matches!(self.commit.commit_type, CommitType::Stash)
     }
 
-    fn contents(&self, area: Rect) -> (Vec<Line<'_>>, Vec<Line<'_>>, usize) {
+    fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>, usize) {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
@@ -252,7 +265,12 @@ impl CommitDetail<'_> {
         value_lines.push(self.sha_line());
 
         if has_parent(self.commit) {
-            label_lines.push(Line::from("  Parents: ").fg(self.ctx.color_theme.detail_label_fg));
+            let parent_label = if self.commit.parent_commit_hashes.len() == 1 {
+                "   Parent: "
+            } else {
+                "  Parents: "
+            };
+            label_lines.push(Line::from(parent_label).fg(self.ctx.color_theme.detail_label_fg));
             value_lines.push(self.parents_line());
         }
 
@@ -261,10 +279,16 @@ impl CommitDetail<'_> {
             value_lines.push(self.refs_line());
         }
 
-        value_lines.push(self.divider_line(area.width as usize));
+        // Divider before message
+        label_lines.push(Line::from(""));
+        value_lines.push(self.divider_line(width as usize));
+
+        label_lines.push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
         value_lines.extend(self.commit_message_lines());
 
-        value_lines.push(self.divider_line(area.width as usize));
+        // Divider before changes
+        label_lines.push(Line::from(""));
+        value_lines.push(self.divider_line(width as usize));
         value_lines.extend(self.changes_lines());
 
         let changes_start = value_lines.len() - self.changes.len();
@@ -335,42 +359,85 @@ impl CommitDetail<'_> {
     }
 
     fn refs_line(&self) -> Line<'_> {
-        let ref_spans: Vec<Vec<Span>> = self.refs.iter().filter_map(|r| {
-            let (icon, name, fg) = match r {
-                Ref::Branch { name, .. } => (
-                    "⎇ ",
-                    name.as_str(),
-                    self.ctx.color_theme.detail_ref_branch_fg,
-                ),
-                Ref::RemoteBranch { name, .. } => (
-                    "⎇ ",
-                    name.as_str(),
-                    self.ctx.color_theme.detail_ref_remote_branch_fg,
-                ),
-                Ref::Tag { name, .. } => (
-                    "🏷 ",
-                    name.as_str(),
-                    self.ctx.color_theme.detail_ref_tag_fg,
-                ),
-                Ref::Stash { name, .. } => (
-                    "⌧	 ",
-                    name.as_str(),
-                    self.ctx.color_theme.list_ref_stash_fg,
-                ),
-            };
-            Some(vec![
-                Span::raw(icon).fg(fg).add_modifier(Modifier::BOLD),
-                Span::raw(name).fg(fg).add_modifier(Modifier::BOLD),
-            ])
-        }).collect();
+        // Build compacted branch display: local + remote branches sharing the same short name
+        // are shown as "main|origin" instead of "main origin/main"
+        // Use BTreeMap to preserve insertion order and avoid random ordering on re-render.
+        let mut compacted_branches: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        let mut tags: Vec<String> = Vec::new();
 
-        let mut spans = Vec::new();
-        for (i, ref_span_vec) in ref_spans.iter().enumerate() {
-            spans.extend(ref_span_vec.clone());
-            if i < ref_spans.len() - 1 {
-                spans.push(Span::raw(" "));
+        for r in self.refs.iter() {
+            match r {
+                Ref::Branch { name, .. } => {
+                    compacted_branches
+                        .entry(name.clone())
+                        .or_default()
+                        .push(name.clone());
+                }
+                Ref::RemoteBranch { name, .. } => {
+                    let short_name = name
+                        .split_once('/')
+                        .map(|(_, rest)| rest.to_string())
+                        .unwrap_or_else(|| name.clone());
+                    compacted_branches
+                        .entry(short_name)
+                        .or_default()
+                        .push(name.clone());
+                }
+                Ref::Tag { name, .. } => {
+                    tags.push(name.clone());
+                }
+                _ => {}
             }
         }
+
+        let mut spans = Vec::new();
+        let mut first = true;
+
+        for (short_name, full_names) in compacted_branches.iter() {
+            if !first {
+                spans.push(Span::raw(" "));
+            }
+            first = false;
+
+            let is_local = full_names.iter().any(|n| !n.contains('/'));
+            let remotes: Vec<&str> = full_names
+                .iter()
+                .filter(|n| n.contains('/'))
+                .map(|n| n.split_once('/').map(|(r, _)| r).unwrap_or(n))
+                .collect();
+
+            // Use branch_color_map for local branches to match commit list colors
+            let fg = if is_local {
+                self.ctx
+                    .branch_color_map
+                    .get(short_name)
+                    .copied()
+                    .unwrap_or(self.ctx.color_theme.list_ref_branch_fg)
+            } else {
+                self.ctx.color_theme.list_ref_remote_branch_fg
+            };
+
+            let display = if remotes.is_empty() {
+                short_name.clone()
+            } else {
+                format!("{}|{}", short_name, remotes.join("|"))
+            };
+
+            spans.push(Span::styled("⎇ ", Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(display, Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+        }
+
+        for tag_name in tags.iter() {
+            if !first {
+                spans.push(Span::raw(" "));
+            }
+            first = false;
+            let fg = self.ctx.color_theme.list_ref_tag_fg;
+            spans.push(Span::styled("🏷 ", Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(tag_name.clone(), Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+        }
+
         Line::from(spans)
     }
 
@@ -417,7 +484,7 @@ impl CommitDetail<'_> {
                 };
                 Line::from(vec![
                     status.fg(status_color),
-                    " ".into(),
+                    "  ".into(),
                     Span::styled(path, path_style),
                     add_str.fg(self.ctx.color_theme.detail_file_change_add_fg),
                     del_str.fg(self.ctx.color_theme.detail_file_change_delete_fg),

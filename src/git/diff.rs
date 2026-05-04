@@ -38,8 +38,12 @@ pub enum DiffLineType {
 
 impl DiffEntry {
     pub fn load_for_commit(repo_path: &Path, hash: &str) -> Result<Vec<Self>, String> {
+        Self::load_for_commit_with_context(repo_path, hash, 3)
+    }
+
+    pub fn load_for_commit_with_context(repo_path: &Path, hash: &str, context_lines: u32) -> Result<Vec<Self>, String> {
         let output = Command::new("git")
-            .args(["diff", "--unified=3", &format!("{}^", hash), hash])
+            .args(["diff", &format!("--unified={}", context_lines), &format!("{}^", hash), hash])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
@@ -53,8 +57,12 @@ impl DiffEntry {
     }
 
     pub fn load_for_file(repo_path: &Path, hash: &str, file_path: &str) -> Result<Self, String> {
+        Self::load_for_file_with_context(repo_path, hash, file_path, 3)
+    }
+
+    pub fn load_for_file_with_context(repo_path: &Path, hash: &str, file_path: &str, context_lines: u32) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["diff", "--unified=3", &format!("{}^", hash), hash, "--", file_path])
+            .args(["diff", &format!("--unified={}", context_lines), &format!("{}^", hash), hash, "--", file_path])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
@@ -65,8 +73,12 @@ impl DiffEntry {
     }
 
     pub fn load_unstaged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
+        Self::load_unstaged_for_file_with_context(repo_path, file_path, 3)
+    }
+
+    pub fn load_unstaged_for_file_with_context(repo_path: &Path, file_path: &str, context_lines: u32) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["diff", "--unified=3", "--", file_path])
+            .args(["diff", &format!("--unified={}", context_lines), "--", file_path])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
@@ -77,8 +89,12 @@ impl DiffEntry {
     }
 
     pub fn load_staged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
+        Self::load_staged_for_file_with_context(repo_path, file_path, 3)
+    }
+
+    pub fn load_staged_for_file_with_context(repo_path: &Path, file_path: &str, context_lines: u32) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["diff", "--unified=3", "--cached", "--", file_path])
+            .args(["diff", &format!("--unified={}", context_lines), "--cached", "--", file_path])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;

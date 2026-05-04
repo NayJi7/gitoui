@@ -881,6 +881,7 @@ impl App<'_> {
                     title,
                     hash,
                     all_files,
+                    self.repository.path().to_path_buf(),
                 );
             }
             Err(err) => {
@@ -956,6 +957,7 @@ impl App<'_> {
                     self.ec.sender(),
                     title,
                     all_files,
+                    self.repository.path().to_path_buf(),
                 );
             }
             Err(err) => {

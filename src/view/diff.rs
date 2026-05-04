@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use ratatui::{
@@ -31,6 +32,20 @@ pub struct DiffView<'a> {
 
     ctx: Rc<AppContext>,
     tx: Sender,
+
+    // Mouse hover state for expand buttons
+    hovered_row: Option<u16>,
+    diff_content_area: Option<Rect>,
+
+    repo_path: std::path::PathBuf,
+    context_lines: u32,
+    expand_buttons: RefCell<Vec<(usize, ExpandDirection)>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpandDirection {
+    Up,
+    Down,
 }
 
 impl<'a> DiffView<'a> {
@@ -46,6 +61,7 @@ impl<'a> DiffView<'a> {
         title: String,
         commit_hash: String,
     all_file_paths: Vec<(String, bool)>,
+        repo_path: std::path::PathBuf,
     ) -> DiffView<'a> {
         DiffView {
             commit_list_state,
@@ -57,6 +73,11 @@ impl<'a> DiffView<'a> {
             all_file_paths,
             ctx,
             tx,
+            hovered_row: None,
+            diff_content_area: None,
+            repo_path,
+            context_lines: 3,
+            expand_buttons: RefCell::new(Vec::new()),
         }
     }
 
@@ -146,10 +167,7 @@ impl<'a> DiffView<'a> {
     }
 
     fn render_diff(&mut self, f: &mut Frame, diff_area: Rect) {
-        let lines = self.build_diff_lines(&diff_area);
-        self.content_height = lines.len();
-
-        if !self.title.is_empty() {
+        let (content_area, hovered_line_idx) = if !self.title.is_empty() {
             let [separator_area, title_area, content_area] = Layout::vertical([
                 Constraint::Length(1),
                 Constraint::Length(1),
@@ -171,7 +189,6 @@ impl<'a> DiffView<'a> {
             } else {
                 (0, 0)
             };
-            // Build colored stats: additions in bright green, deletions in bright red
             let mut title_spans = vec![
                 Span::styled(
                     format!("─── {} ", self.title),
@@ -201,24 +218,25 @@ impl<'a> DiffView<'a> {
             let title = Line::from(title_spans);
             f.render_widget(Paragraph::new(title), title_area);
 
-            let visible_lines: Vec<Line> = lines
-                .into_iter()
-                .skip(self.scroll_offset)
-                .take(content_area.height as usize)
-                .collect();
-
-            let paragraph = Paragraph::new(visible_lines);
-            f.render_widget(paragraph, content_area);
+            let hovered = self.hovered_row.map(|r| self.scroll_offset + r as usize);
+            (content_area, hovered)
         } else {
-            let visible_lines: Vec<Line> = lines
-                .into_iter()
-                .skip(self.scroll_offset)
-                .take(diff_area.height as usize)
-                .collect();
+            let hovered = self.hovered_row.map(|r| self.scroll_offset + r as usize);
+            (diff_area, hovered)
+        };
 
-            let paragraph = Paragraph::new(visible_lines);
-            f.render_widget(paragraph, diff_area);
-        }
+        self.diff_content_area = Some(content_area);
+        let lines = self.build_diff_lines_with_hover(&content_area, hovered_line_idx);
+        self.content_height = lines.len();
+
+        let visible_lines: Vec<Line> = lines
+            .into_iter()
+            .skip(self.scroll_offset)
+            .take(content_area.height as usize)
+            .collect();
+
+        let paragraph = Paragraph::new(visible_lines);
+        f.render_widget(paragraph, content_area);
     }
 
     pub fn update_layout(&mut self, area: Rect) {
@@ -299,7 +317,18 @@ impl<'a> DiffView<'a> {
     fn build_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
         match self.ctx.ui_config.common.diff_mode {
             DiffMode::Raw => self.build_raw_diff_lines(diff_area),
-            DiffMode::Enhanced => self.build_enhanced_diff_lines(diff_area.width),
+            DiffMode::Enhanced => self.build_enhanced_diff_lines(diff_area.width, None),
+        }
+    }
+
+    fn build_diff_lines_with_hover(
+        &self,
+        diff_area: &Rect,
+        hovered_line_idx: Option<usize>,
+    ) -> Vec<Line<'static>> {
+        match self.ctx.ui_config.common.diff_mode {
+            DiffMode::Raw => self.build_raw_diff_lines(diff_area),
+            DiffMode::Enhanced => self.build_enhanced_diff_lines(diff_area.width, hovered_line_idx),
         }
     }
 
@@ -408,7 +437,11 @@ impl<'a> DiffView<'a> {
         lines
     }
 
-    fn build_enhanced_diff_lines(&self, width: u16) -> Vec<Line<'static>> {
+    fn build_enhanced_diff_lines(
+        &self,
+        width: u16,
+        hovered_line_idx: Option<usize>,
+    ) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
         let entry = match self.diff_entries.first() {
@@ -422,14 +455,21 @@ impl<'a> DiffView<'a> {
             &self.ctx.core_config.option.syntax_theme,
         );
 
-        // Softer diff colors matching VS Code style
-        let add_style = Style::default()
-            .fg(Color::Rgb(158, 206, 106))
-            .bg(Color::Rgb(29, 43, 59));
-        let del_style = Style::default()
-            .fg(Color::Rgb(247, 118, 142))
-            .bg(Color::Rgb(59, 29, 43));
-        let ctx_style = Style::default().fg(Color::Rgb(192, 202, 245));
+        // VS Code-style diff colors: brighter backgrounds, vivid bars
+        let add_bg = Color::Rgb(32, 68, 45);
+        let del_bg = Color::Rgb(68, 35, 40);
+        let ctx_fg = Color::Rgb(192, 202, 245);
+
+        // Only change background so syntax highlighting / default text color is preserved
+        let add_style = Style::default().bg(add_bg);
+        let del_style = Style::default().bg(del_bg);
+        let ctx_style = Style::default().fg(ctx_fg);
+
+        // Thicker bar (▍) with matching background so it visually merges with the highlight block
+        let bar_add = Span::styled("▍", Style::default().fg(Color::Rgb(63, 185, 80)).bg(add_bg));
+        let bar_del = Span::styled("▍", Style::default().fg(Color::Rgb(248, 81, 73)).bg(del_bg));
+
+        self.expand_buttons.borrow_mut().clear();
 
         for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
             // Show collapsed region between hunks
@@ -443,12 +483,59 @@ impl<'a> DiffView<'a> {
                         .saturating_sub(prev_hunk.new_start + prev_hunk.new_count);
                     let gap = old_gap.max(new_gap);
                     if gap > 0 {
+                        let unchanged_text = format!("─── {} lines unchanged ───", gap);
+                        let unchanged_width = unchanged_text.chars().count();
+
+                        let up_idx = lines.len();
+                        let up_hover = hovered_line_idx == Some(up_idx);
+                        let up_style = if up_hover {
+                            Style::default()
+                                .fg(Color::Rgb(192, 202, 245))
+                                .bg(Color::Rgb(41, 46, 66))
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                                .fg(Color::Rgb(122, 162, 247))
+                                .add_modifier(Modifier::BOLD)
+                        };
+                        // Expand button above — centered under the unchanged text
+                        let up_label = "  ▼  show more  ";
+                        let up_label_len = up_label.chars().count();
+                        let up_pad = unchanged_width.saturating_sub(up_label_len);
+                        let up_left = up_pad / 2;
+                        lines.push(Line::from(vec![
+                            Span::styled(" ".repeat(up_left), Style::default()),
+                            Span::styled(up_label.to_string(), up_style),
+                        ]));
+                        self.expand_buttons.borrow_mut().push((up_idx, ExpandDirection::Up));
                         lines.push(Line::from(vec![Span::styled(
-                            format!("─── {} lines unchanged ───", gap),
+                            unchanged_text,
                             Style::default()
                                 .fg(Color::Rgb(59, 66, 97))
                                 .add_modifier(Modifier::ITALIC),
                         )]));
+                        let down_idx = lines.len();
+                        let down_hover = hovered_line_idx == Some(down_idx);
+                        let down_style = if down_hover {
+                            Style::default()
+                                .fg(Color::Rgb(192, 202, 245))
+                                .bg(Color::Rgb(41, 46, 66))
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                                .fg(Color::Rgb(122, 162, 247))
+                                .add_modifier(Modifier::BOLD)
+                        };
+                        // Expand button below — centered under the unchanged text
+                        let down_label = "  ▲  show more  ";
+                        let down_label_len = down_label.chars().count();
+                        let down_pad = unchanged_width.saturating_sub(down_label_len);
+                        let down_left = down_pad / 2;
+                        lines.push(Line::from(vec![
+                            Span::styled(" ".repeat(down_left), Style::default()),
+                            Span::styled(down_label.to_string(), down_style),
+                        ]));
+                        self.expand_buttons.borrow_mut().push((down_idx, ExpandDirection::Down));
                         lines.push(Line::from(""));
                     }
                 }
@@ -476,21 +563,46 @@ impl<'a> DiffView<'a> {
                 match diff_line.line_type {
                     DiffLineType::Addition => {
                         let line_num = format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
-                        lines.extend(wrap_diff_line(
-                            &diff_line.content,
-                            &line_num,
-                            add_style,
-                            width,
-                        ));
+                        if let Some(ref mut h) = highlighter {
+                            lines.extend(wrap_diff_line_with_syntax_and_bar(
+                                &diff_line.content,
+                                &line_num,
+                                add_style,
+                                width,
+                                h,
+                                Some(bar_add.clone()),
+                            ));
+                        } else {
+                            lines.extend(wrap_diff_line_with_bar(
+                                &diff_line.content,
+                                &line_num,
+                                add_style,
+                                width,
+                                Some(bar_add.clone()),
+                            ));
+                        }
                     }
                     DiffLineType::Deletion => {
-                        let line_num = format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
-                        lines.extend(wrap_diff_line(
-                            &diff_line.content,
-                            &line_num,
-                            del_style,
-                            width,
-                        ));
+                        // No line number for deleted lines; keep alignment with gutter
+                        let line_num = "     │ ".to_string();
+                        if let Some(ref mut h) = highlighter {
+                            lines.extend(wrap_diff_line_with_syntax_and_bar(
+                                &diff_line.content,
+                                &line_num,
+                                del_style,
+                                width,
+                                h,
+                                Some(bar_del.clone()),
+                            ));
+                        } else {
+                            lines.extend(wrap_diff_line_with_bar(
+                                &diff_line.content,
+                                &line_num,
+                                del_style,
+                                width,
+                                Some(bar_del.clone()),
+                            ));
+                        }
                     }
                     DiffLineType::Context => {
                         let line_num = format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
@@ -701,8 +813,89 @@ impl<'a> DiffView<'a> {
         parts.join(" ")
     }
 
-    pub fn handle_click(&mut self, _col: u16, _row: u16) {
-        // Ignore clicks on the commit list when in diff view
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        if let Some(area) = self.diff_content_area {
+            let in_area = col >= area.x
+                && col < area.x + area.width
+                && row >= area.y
+                && row < area.y + area.height;
+            if in_area {
+                let clicked_screen_line = row - area.y;
+                let clicked_line = self.scroll_offset + clicked_screen_line as usize;
+                let btn = self
+                    .expand_buttons
+                    .borrow()
+                    .iter()
+                    .find(|(idx, _)| *idx == clicked_line)
+                    .map(|(_, dir)| *dir);
+                if let Some(direction) = btn {
+                    let old_context = self.context_lines;
+                    // Double the context each time for a more dramatic reveal
+                    self.context_lines = old_context.saturating_mul(2).max(old_context + 5);
+                    let _ = self.reload_diff();
+                    // Directional scroll: jump to show the newly revealed content
+                    match direction {
+                        ExpandDirection::Up => {
+                            // Scroll up aggressively to reveal the newly loaded content above
+                            let jump = (self.context_lines as usize).saturating_sub(old_context as usize);
+                            self.scroll_offset = self.scroll_offset.saturating_sub(jump.max(10));
+                        }
+                        ExpandDirection::Down => {
+                            // Small scroll down to reveal content below the button
+                            self.scroll_offset = self.scroll_offset.saturating_add(3);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn reload_diff(&mut self) -> Result<(), String> {
+        let file_path = self
+            .title
+            .strip_prefix("Diff (staged): ")
+            .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
+            .or_else(|| self.title.strip_prefix("Diff: "))
+            .unwrap_or("");
+
+        let new_entries = if !self.commit_hash.is_empty() {
+            vec![DiffEntry::load_for_file_with_context(
+                &self.repo_path,
+                &self.commit_hash,
+                file_path,
+                self.context_lines,
+            )?]
+        } else if self.title.contains("(staged)") {
+            vec![DiffEntry::load_staged_for_file_with_context(
+                &self.repo_path,
+                file_path,
+                self.context_lines,
+            )?]
+        } else {
+            vec![DiffEntry::load_unstaged_for_file_with_context(
+                &self.repo_path,
+                file_path,
+                self.context_lines,
+            )?]
+        };
+
+        self.diff_entries = new_entries;
+        // Preserve scroll offset so the user's view stays anchored
+        Ok(())
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        if let Some(area) = self.diff_content_area {
+            let in_area = col >= area.x
+                && col < area.x + area.width
+                && row >= area.y
+                && row < area.y + area.height;
+            if in_area {
+                self.hovered_row = Some(row - area.y);
+            } else {
+                self.hovered_row = None;
+            }
+        }
     }
 }
 
@@ -891,6 +1084,177 @@ fn wrap_diff_line(
             num_span,
             Span::styled(chunk.to_string(), content_style),
         ]));
+
+        remaining = rest;
+        first = false;
+    }
+
+    lines
+}
+
+fn wrap_diff_line_with_bar(
+    content: &str,
+    line_num_str: &str,
+    content_style: Style,
+    available_width: u16,
+    bar_span: Option<Span<'static>>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let line_num_width = 7; // "1234 │ " = 7 chars
+    let bar_width = if bar_span.is_some() { 1 } else { 0 };
+    let content_width = available_width.saturating_sub(line_num_width + bar_width) as usize;
+
+    if content_width == 0 {
+        let mut spans = vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )];
+        if let Some(bar) = bar_span {
+            spans.push(bar);
+        }
+        spans.push(Span::styled(content.to_string(), content_style));
+        spans.push(Span::styled(" ".repeat(200), content_style));
+        lines.push(Line::from(spans));
+        return lines;
+    }
+
+    let mut remaining = content;
+    let mut first = true;
+
+    while !remaining.is_empty() {
+        let (chunk, rest) = if remaining.chars().count() > content_width {
+            let char_indices: Vec<(usize, char)> =
+                remaining.char_indices().take(content_width + 1).collect();
+            let mut break_at = content_width;
+            while break_at > 0 {
+                if char_indices[break_at - 1].1.is_ascii_whitespace() {
+                    break;
+                }
+                break_at -= 1;
+            }
+            if break_at == 0 {
+                break_at = content_width;
+            }
+            let byte_break = if break_at < char_indices.len() {
+                char_indices[break_at].0
+            } else {
+                remaining.len()
+            };
+            let (before, after) = remaining.split_at(byte_break);
+            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
+                (before.trim_end(), after.trim_start())
+            } else {
+                (before, after)
+            }
+        } else {
+            (remaining, "")
+        };
+
+        let num_span = if first {
+            Span::styled(
+                line_num_str.to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
+        } else {
+            Span::styled(
+                "     │ ".to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
+        };
+
+        let mut spans = vec![num_span];
+        if let Some(ref bar) = bar_span {
+            spans.push(bar.clone());
+        }
+        spans.push(Span::styled(chunk.to_string(), content_style));
+        spans.push(Span::styled(" ".repeat(200), content_style));
+        lines.push(Line::from(spans));
+
+        remaining = rest;
+        first = false;
+    }
+
+    lines
+}
+
+fn wrap_diff_line_with_syntax_and_bar(
+    content: &str,
+    line_num_str: &str,
+    base_style: Style,
+    available_width: u16,
+    highlighter: &mut SyntaxHighlighter,
+    bar_span: Option<Span<'static>>,
+) -> Vec<Line<'static>> {
+    let line_num_width = 7; // "1234 │ " = 7 chars
+    let bar_width = if bar_span.is_some() { 1 } else { 0 };
+    let content_width = available_width.saturating_sub(line_num_width + bar_width) as usize;
+
+    let mut lines = Vec::new();
+    if content_width == 0 {
+        let mut spans = vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )];
+        if let Some(bar) = bar_span {
+            spans.push(bar);
+        }
+        spans.extend(highlighter.highlight_line(content, base_style, None));
+        spans.push(Span::styled(" ".repeat(200), base_style));
+        lines.push(Line::from(spans));
+        return lines;
+    }
+
+    let mut remaining = content;
+    let mut first = true;
+
+    while !remaining.is_empty() {
+        let (chunk, rest) = if remaining.chars().count() > content_width {
+            let char_indices: Vec<(usize, char)> =
+                remaining.char_indices().take(content_width + 1).collect();
+            let mut break_at = content_width;
+            while break_at > 0 {
+                if char_indices[break_at - 1].1.is_ascii_whitespace() {
+                    break;
+                }
+                break_at -= 1;
+            }
+            if break_at == 0 {
+                break_at = content_width;
+            }
+            let byte_break = if break_at < char_indices.len() {
+                char_indices[break_at].0
+            } else {
+                remaining.len()
+            };
+            let (before, after) = remaining.split_at(byte_break);
+            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
+                (before.trim_end(), after.trim_start())
+            } else {
+                (before, after)
+            }
+        } else {
+            (remaining, "")
+        };
+
+        let num_span = if first {
+            Span::styled(
+                line_num_str.to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
+        } else {
+            Span::styled(
+                "     │ ".to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
+        };
+
+        let mut spans = vec![num_span];
+        if let Some(ref bar) = bar_span {
+            spans.push(bar.clone());
+        }
+        spans.extend(highlighter.highlight_line(chunk, base_style, None));
+        spans.push(Span::styled(" ".repeat(200), base_style));
+        lines.push(Line::from(spans));
 
         remaining = rest;
         first = false;

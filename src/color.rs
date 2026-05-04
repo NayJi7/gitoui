@@ -44,13 +44,13 @@ pub struct ColorTheme {
 
     #[default(RatatuiColor::Reset)]
     pub detail_label_fg: RatatuiColor,
-    #[default(RatatuiColor::Reset)]
+    #[default(RatatuiColor::Cyan)]
     pub detail_name_fg: RatatuiColor,
-    #[default(RatatuiColor::Reset)]
+    #[default(RatatuiColor::Magenta)]
     pub detail_date_fg: RatatuiColor,
     #[default(RatatuiColor::Blue)]
     pub detail_email_fg: RatatuiColor,
-    #[default(RatatuiColor::Reset)]
+    #[default(RatatuiColor::Yellow)]
     pub detail_hash_fg: RatatuiColor,
     #[default(RatatuiColor::Green)]
     pub detail_ref_branch_fg: RatatuiColor,

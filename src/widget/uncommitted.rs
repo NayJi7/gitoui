@@ -181,96 +181,104 @@ impl<'a> StatefulWidget for UncommittedWidget<'a> {
 
 impl<'a> UncommittedWidget<'a> {
     fn render_files(&self, area: Rect, buf: &mut Buffer, state: &UncommittedState) {
-        let block = Block::default()
+        // Title block over the entire files area
+        let title_block = Block::default()
+            .title("Uncommitted Details")
+            .title_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
             .borders(Borders::TOP)
             .style(Style::default().fg(self.ctx.color_theme.divider_fg))
-            .padding(Padding::new(2, 2, 0, 0));
-        let inner = block.inner(area);
-        block.render(area, buf);
+            .padding(Padding::new(0, 0, 1, 0));
+        let inner = title_block.inner(area);
+        title_block.render(area, buf);
 
-        let mut lines = Vec::new();
+        let [labels_area, value_area] =
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(inner);
 
-        // Title
-        lines.push(Line::from(vec![Span::styled(
-            "Uncommitted Changes",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from(""));
+        let (label_lines, value_lines) = self.build_content_lines(state, value_area.width as usize);
 
-        // Unstaged section
-        lines.push(Line::from(vec![Span::styled(
-            "-- Unstaged --",
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(self.ctx.color_theme.divider_fg),
-        )]));
-        if self.unstaged.is_empty() {
-            lines.push(Line::from("  (no unstaged changes)").fg(Color::DarkGray));
-        } else {
-            for (i, file) in self.unstaged.iter().enumerate() {
-                let is_selected =
-                    state.section == UncommittedSection::Unstaged && i == state.selected;
-                let style = if is_selected {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                };
-                lines.push(self.file_line(file, style));
-            }
-        }
-        lines.push(Line::from(""));
+        let labels_paragraph = Paragraph::new(label_lines)
+            .style(Style::default().fg(self.ctx.color_theme.fg))
+            .block(Block::default().padding(Padding::left(2)));
+        labels_paragraph.render(labels_area, buf);
 
-        // Staged section
-        lines.push(Line::from(vec![Span::styled(
-            "-- Staged --",
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(self.ctx.color_theme.divider_fg),
-        )]));
-        if self.staged.is_empty() {
-            lines.push(Line::from("  (no staged changes)").fg(Color::DarkGray));
-        } else {
-            for (i, file) in self.staged.iter().enumerate() {
-                let is_selected =
-                    state.section == UncommittedSection::Staged && i == state.selected;
-                let style = if is_selected {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                };
-                lines.push(self.file_line(file, style));
-            }
-        }
-        lines.push(Line::from(""));
-
-        // Untracked section
-        lines.push(Line::from(vec![Span::styled(
-            "-- Untracked --",
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(self.ctx.color_theme.divider_fg),
-        )]));
-        if self.untracked.is_empty() {
-            lines.push(Line::from("  (no untracked files)").fg(Color::DarkGray));
-        } else {
-            for (i, file) in self.untracked.iter().enumerate() {
-                let is_selected =
-                    state.section == UncommittedSection::Untracked && i == state.selected;
-                let style = if is_selected {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                };
-                lines.push(self.file_line(file, style));
-            }
-        }
-
-        let paragraph = Paragraph::new(lines)
-            .style(Style::default().fg(self.ctx.color_theme.fg));
-        paragraph.render(inner, buf);
+        let values_paragraph = Paragraph::new(value_lines)
+            .style(Style::default().fg(self.ctx.color_theme.fg))
+            .block(Block::default().padding(Padding::new(1, 2, 0, 0)));
+        values_paragraph.render(value_area, buf);
     }
 
-    fn file_line(&self, file: &UncommittedFile, style: Style) -> Line {
+    fn build_content_lines(
+        &self,
+        state: &UncommittedState,
+        value_width: usize,
+    ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+        let mut labels: Vec<Line<'static>> = Vec::new();
+        let mut values: Vec<Line<'static>> = Vec::new();
+
+        // Order: Staged, Unstaged, Untracked
+        let sections = [
+            ("Staged", "(no staged changes)", &self.staged, UncommittedSection::Staged),
+            ("Unstaged", "(no unstaged changes)", &self.unstaged, UncommittedSection::Unstaged),
+            ("Untracked", "(no untracked files)", &self.untracked, UncommittedSection::Untracked),
+        ];
+
+        for (idx, (title, empty_msg, files, section)) in sections.iter().enumerate() {
+            self.build_section(
+                state,
+                title,
+                empty_msg,
+                files,
+                *section,
+                &mut labels,
+                &mut values,
+            );
+            // Add full-width separator between sections (but not after the last one)
+            if idx < sections.len() - 1 {
+                labels.push(Line::from(""));
+                values.push(self.full_divider(value_width));
+            }
+        }
+
+        (labels, values)
+    }
+
+    fn build_section(
+        &self,
+        state: &UncommittedState,
+        title: &str,
+        empty_msg: &str,
+        files: &[UncommittedFile],
+        section: UncommittedSection,
+        labels: &mut Vec<Line<'static>>,
+        values: &mut Vec<Line<'static>>,
+    ) {
+        labels.push(Line::from(Span::styled(
+            title.to_string(),
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )));
+
+        if files.is_empty() {
+            values.push(Line::from(Span::styled(
+                empty_msg.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for (i, file) in files.iter().enumerate() {
+                let is_selected = state.section == section && i == state.selected;
+                let style = if is_selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                values.push(self.file_line(file, style));
+                if i < files.len() - 1 {
+                    labels.push(Line::from(""));
+                }
+            }
+        }
+    }
+
+    fn file_line(&self, file: &UncommittedFile, style: Style) -> Line<'static> {
         let status_color = match file.status {
             StatusType::Added => self.ctx.color_theme.detail_file_change_add_fg,
             StatusType::Modified => self.ctx.color_theme.detail_file_change_modify_fg,
@@ -278,9 +286,9 @@ impl<'a> UncommittedWidget<'a> {
             _ => self.ctx.color_theme.detail_file_change_move_fg,
         };
         let path_style = if matches!(file.status, StatusType::Deleted | StatusType::Unmerged) {
-            style.add_modifier(Modifier::CROSSED_OUT)
+            Style::default().add_modifier(Modifier::CROSSED_OUT)
         } else {
-            style
+            Style::default()
         };
         let add_str = if file.additions > 0 {
             format!(" +{}", file.additions)
@@ -294,10 +302,10 @@ impl<'a> UncommittedWidget<'a> {
         };
         Line::from(vec![
             Span::styled(
-                format!("  {:2}", file.status_char()),
+                format!("{:2}", file.status_char()),
                 Style::default().fg(status_color),
             ),
-            Span::styled(" ", style),
+            Span::raw(" "),
             Span::styled(file.path.clone(), path_style),
             Span::styled(
                 add_str,
@@ -308,6 +316,11 @@ impl<'a> UncommittedWidget<'a> {
                 Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
             ),
         ])
+        .style(style)
+    }
+
+    fn full_divider(&self, width: usize) -> Line<'static> {
+        Line::from("─".repeat(width).fg(self.ctx.color_theme.divider_fg))
     }
 
     fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &UncommittedState) {
@@ -321,8 +334,11 @@ impl<'a> UncommittedWidget<'a> {
         let actions = &[("Stash", 'i'), ("Commit", 'w'), ("Clean Untracked", 'v')];
 
         let mut lines = Vec::new();
-        lines.push(Line::from("Git Actions").add_modifier(Modifier::BOLD));
-        lines.push(Line::from("───".fg(self.ctx.color_theme.divider_fg)));
+        lines.push(Line::from(Span::styled(
+            "Git Actions",
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(self.full_divider(inner.width as usize));
         for (i, (label, key)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {

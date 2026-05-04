@@ -252,6 +252,7 @@ impl<'a> View<'a> {
         title: String,
         commit_hash: String,
         all_file_paths: Vec<(String, bool)>,
+        repo_path: std::path::PathBuf,
     ) -> Self {
         View::Diff(Box::new(DiffView::new(
             Some(commit_list_state),
@@ -261,6 +262,7 @@ impl<'a> View<'a> {
             title,
             commit_hash,
             all_file_paths,
+            repo_path,
         )))
     }
 
@@ -271,6 +273,7 @@ impl<'a> View<'a> {
         tx: Sender,
         title: String,
         all_file_paths: Vec<(String, bool)>,
+        repo_path: std::path::PathBuf,
     ) -> Self {
         View::Diff(Box::new(DiffView::new(
             commit_list_state,
@@ -280,6 +283,7 @@ impl<'a> View<'a> {
             title,
             String::new(),
             all_file_paths,
+            repo_path,
         )))
     }
 
@@ -336,6 +340,7 @@ impl<'a> View<'a> {
         match self {
             View::List(view) => view.handle_mouse_move(col, row),
             View::Detail(view) => view.handle_mouse_move(col, row),
+            View::Diff(view) => view.handle_mouse_move(col, row),
             View::Refs(view) => view.handle_mouse_move(col, row),
             View::Config(view) => view.handle_mouse_move(col, row),
             View::Dialog(view) => view.handle_mouse_move(col, row),
