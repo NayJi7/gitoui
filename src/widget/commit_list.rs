@@ -1178,11 +1178,12 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf);
     }
 
-    fn render_name(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
+    fn render_name(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
         }
+        let avatar_width = 3; // 2 cells image + 1 space
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
             .map(|(i, commit_info)| {
@@ -1194,28 +1195,24 @@ impl CommitList<'_> {
                     );
                 }
                 let commit = commit_info.commit;
-                let mut avatar_prefix: Vec<Span> = Vec::new();
-                let mut name_max = max_width;
-                if max_width > 10 {
-                    let mut mgr = self.ctx.avatar_manager.lock().unwrap();
-                    if let Some(mut prepared) = mgr.get_avatar(&commit.author_email, 1) {
-                        if let Some(upload) = prepared.take_upload_data() {
-                            let _ = write!(std::io::stdout(), "{}", upload);
-                            let _ = std::io::stdout().flush();
-                        }
-                        let cell_width = prepared.cell_width();
-                        for cell in prepared.cells() {
-                            avatar_prefix.push(Span::styled(cell.symbol().to_owned(), cell.style()));
-                        }
-                        avatar_prefix.push(Span::raw(" "));
-                        name_max = name_max.saturating_sub(cell_width + 1);
-                    }
-                }
-                let truncate = console::measure_text_width(&commit.author_name) > name_max;
+                let has_avatar = self.ctx.avatar_manager.lock().unwrap()
+                    .get_avatar(&commit.author_email, 1)
+                    .is_some();
+                let effective_max = if has_avatar && max_width > 10 {
+                    max_width.saturating_sub(avatar_width)
+                } else {
+                    max_width
+                };
+                let truncate = console::measure_text_width(&commit.author_name) > effective_max;
                 let name = if truncate {
-                    console::truncate_str(&commit.author_name, name_max, ELLIPSIS).to_string()
+                    console::truncate_str(&commit.author_name, effective_max, ELLIPSIS).to_string()
                 } else {
                     commit.author_name.to_string()
+                };
+                let mut spans = if has_avatar && max_width > 10 {
+                    vec![Span::raw("   ")]
+                } else {
+                    vec![]
                 };
                 let name_spans =
                     if let Some(pos) = state.search_matches[state.offset + i].author_name.clone() {
@@ -1230,12 +1227,37 @@ impl CommitList<'_> {
                     } else {
                         vec![name.fg(self.ctx.color_theme.list_name_fg)]
                     };
-                let mut spans = avatar_prefix;
                 spans.extend(name_spans);
                 self.to_commit_list_item(i, spans, state)
             })
             .collect();
         Widget::render(List::new(items), area, buf);
+
+        // Write avatar images directly into the buffer at the reserved positions
+        let visible_count = state.height.min(area.height as usize);
+        for i in 0..visible_count {
+            let (_, commit_info) = match self.rendering_commit_info_iter(state).nth(i) {
+                Some(ci) => ci,
+                None => continue,
+            };
+            if commit_info.is_uncommitted {
+                continue;
+            }
+            let y = area.top() + i as u16;
+            let mut mgr = self.ctx.avatar_manager.lock().unwrap();
+            if let Some(mut prepared) = mgr.get_avatar(&commit_info.commit.author_email, 1) {
+                if let Some(upload) = prepared.take_upload_data() {
+                    let _ = write!(std::io::stdout(), "{}", upload);
+                    let _ = std::io::stdout().flush();
+                }
+                for (x, image_cell) in prepared.cells().iter().enumerate() {
+                    let cell = &mut buf[(area.left() + x as u16 + 1, y)];
+                    cell.set_symbol(image_cell.symbol());
+                    cell.set_style(image_cell.style());
+                    cell.set_skip(image_cell.skip());
+                }
+            }
+        }
     }
 
     fn render_hash(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
