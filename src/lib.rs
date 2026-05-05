@@ -1,3 +1,4 @@
+pub mod avatar;
 pub mod color;
 pub mod config;
 pub mod git;
