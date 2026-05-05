@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::process::Command;
 use std::rc::Rc;
 
 use ratatui::{
@@ -16,7 +16,6 @@ use crate::{
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     git::diff::{DiffEntry, DiffLineType},
     highlight::SyntaxHighlighter,
-    view::{ListRefreshViewContext, RefreshViewContext},
     widget::commit_list::{CommitList, CommitListState},
 };
 
@@ -27,25 +26,51 @@ pub struct DiffView<'a> {
     scroll_offset: usize,
     content_height: usize,
     title: String,
-        commit_hash: String,
-        all_file_paths: Vec<(String, bool)>,
+    commit_hash: String,
+    all_file_paths: Vec<(String, bool)>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
 
-    // Mouse hover state for expand buttons
-    hovered_row: Option<u16>,
     diff_content_area: Option<Rect>,
 
-    repo_path: std::path::PathBuf,
-    context_lines: u32,
-    expand_buttons: RefCell<Vec<(usize, ExpandDirection)>>,
+    // Cached lines (without hover styling) - rebuilt only when content changes
+    base_lines: Vec<Line<'static>>,
+    needs_rebuild: bool,
+
+    // Expand button tracking with precise column positions
+    expand_buttons: Vec<ButtonInfo>,
+    hovered_button: Option<usize>,
+    focused_button: Option<usize>,
+
+    // Full file contents for directional gap expansion
+    old_file_lines: Vec<String>,
+    new_file_lines: Vec<String>,
+    // Per-gap state: (visible_up, visible_down, total_gap_size)
+    gap_states: Vec<GapState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpandDirection {
     Up,
     Down,
+}
+
+#[derive(Debug, Clone)]
+struct ButtonInfo {
+    line_idx: usize,
+    direction: ExpandDirection,
+    col_start: u16,
+    col_end: u16,
+    gap_idx: usize,
+    is_edge: bool,
+}
+
+#[derive(Debug, Clone)]
+struct GapState {
+    visible_up: usize,
+    visible_down: usize,
+    total: usize,
 }
 
 impl<'a> DiffView<'a> {
@@ -63,6 +88,16 @@ impl<'a> DiffView<'a> {
     all_file_paths: Vec<(String, bool)>,
         repo_path: std::path::PathBuf,
     ) -> DiffView<'a> {
+        let file_path = title
+            .strip_prefix("Diff (staged): ")
+            .or_else(|| title.strip_prefix("Diff (unstaged): "))
+            .or_else(|| title.strip_prefix("Diff: "))
+            .unwrap_or("");
+        let (old_lines, new_lines) = Self::load_file_versions(&repo_path, &commit_hash, file_path, title.contains("(staged)"));
+
+        let file_line_count = new_lines.len() as u32;
+        let gap_states = Self::compute_initial_gap_states(&diff_entries, file_line_count);
+
         DiffView {
             commit_list_state,
             diff_entries,
@@ -73,12 +108,119 @@ impl<'a> DiffView<'a> {
             all_file_paths,
             ctx,
             tx,
-            hovered_row: None,
             diff_content_area: None,
-            repo_path,
-            context_lines: 3,
-            expand_buttons: RefCell::new(Vec::new()),
+            base_lines: Vec::new(),
+            needs_rebuild: true,
+            expand_buttons: Vec::new(),
+            hovered_button: None,
+            focused_button: None,
+            old_file_lines: old_lines,
+            new_file_lines: new_lines,
+            gap_states,
         }
+    }
+
+    fn load_file_versions(repo_path: &std::path::Path, commit_hash: &str, file_path: &str, is_staged: bool) -> (Vec<String>, Vec<String>) {
+        let old_cmd = if commit_hash.is_empty() {
+            if is_staged {
+                Command::new("git")
+                    .args(["show", &format!("HEAD:{}", file_path)])
+                    .current_dir(repo_path)
+                    .output()
+            } else {
+                Command::new("git")
+                    .args(["show", &format!(":{}", file_path)])
+                    .current_dir(repo_path)
+                    .output()
+            }
+        } else {
+            Command::new("git")
+                .args(["show", &format!("{}^:{}", commit_hash, file_path)])
+                .current_dir(repo_path)
+                .output()
+        };
+
+        let new_lines = if commit_hash.is_empty() && !is_staged {
+            std::fs::read_to_string(repo_path.join(file_path))
+                .unwrap_or_default()
+                .lines()
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            let hash = if commit_hash.is_empty() { "HEAD".to_string() } else { commit_hash.to_string() };
+            match Command::new("git")
+                .args(["show", &format!("{}:{}", hash, file_path)])
+                .current_dir(repo_path)
+                .output()
+            {
+                Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).lines().map(|s| s.to_string()).collect(),
+                _ => Vec::new(),
+            }
+        };
+
+        let old_lines = match old_cmd {
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).lines().map(|s| s.to_string()).collect(),
+            _ => Vec::new(),
+        };
+
+        (old_lines, new_lines)
+    }
+
+    fn compute_initial_gap_states(diff_entries: &[DiffEntry], file_line_count: u32) -> Vec<GapState> {
+        let mut states = Vec::new();
+        if let Some(entry) = diff_entries.first() {
+            // Gap before first hunk — no lines shown by default, single button
+            if let Some(first_new) = entry.hunks.first().and_then(|h| {
+                h.lines.iter().find_map(|l| if l.line_type == DiffLineType::Context { l.new_line_no } else { None })
+            }) {
+                if first_new > 1 {
+                    let gap = (first_new - 1) as usize;
+                    states.push(GapState {
+                        visible_up: 0,
+                        visible_down: 0,
+                        total: gap,
+                    });
+                }
+            }
+
+            // Gaps between hunks — show some context by default
+            for hunk_idx in 1..entry.hunks.len() {
+                if let (Some(prev), Some(curr)) = (entry.hunks.get(hunk_idx - 1), entry.hunks.get(hunk_idx)) {
+                    let prev_end = prev.lines.iter().rev().find_map(|l| {
+                        if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+                    });
+                    let curr_start = curr.lines.iter().find_map(|l| {
+                        if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+                    });
+                    if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
+                        if cs > pe + 1 {
+                            let gap = (cs - pe - 1) as usize;
+                            let default_visible = 3.min(gap / 2).max(0);
+                            states.push(GapState {
+                                visible_up: default_visible,
+                                visible_down: default_visible,
+                                total: gap,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Gap after last hunk — no lines shown by default, single button
+            if let Some(last_new) = entry.hunks.last().and_then(|h| {
+                h.lines.iter().rev().find_map(|l| if l.line_type == DiffLineType::Context { l.new_line_no } else { None })
+            }) {
+                if last_new < file_line_count {
+                    let gap = (file_line_count - last_new) as usize;
+                    states.push(GapState {
+                        visible_up: 0,
+                        visible_down: 0,
+                        total: gap,
+                    });
+                }
+            }
+        }
+        states
     }
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
@@ -129,9 +271,39 @@ impl<'a> DiffView<'a> {
                 self.copy_commit_hash();
             }
             UserEvent::NavigateRight => {
-                self.cycle_file(1);
+                if let Some(idx) = self.focused_button {
+                    let next = (idx + 1).min(self.expand_buttons.len().saturating_sub(1));
+                    self.focused_button = Some(next);
+                    self.scroll_to_button(next);
+                }
             }
             UserEvent::NavigateLeft => {
+                if let Some(idx) = self.focused_button {
+                    let prev = idx.saturating_sub(1);
+                    self.focused_button = Some(prev);
+                    self.scroll_to_button(prev);
+                }
+            }
+            UserEvent::Confirm => {
+                if let Some(idx) = self.focused_button {
+                    self.activate_button(idx);
+                } else if self.commit_hash.is_empty() {
+                    self.tx.send(AppEvent::CloseDiffToUncommitted);
+                } else {
+                    self.tx.send(AppEvent::CloseDiffToDetail);
+                }
+            }
+            UserEvent::Cancel | UserEvent::Close => {
+                if self.commit_hash.is_empty() {
+                    self.tx.send(AppEvent::CloseDiffToUncommitted);
+                } else {
+                    self.tx.send(AppEvent::CloseDiffToDetail);
+                }
+            }
+            UserEvent::CycleFileNext => {
+                self.cycle_file(1);
+            }
+            UserEvent::CycleFilePrev => {
                 self.cycle_file(-1);
             }
             UserEvent::UserCommand(n) => {
@@ -139,13 +311,6 @@ impl<'a> DiffView<'a> {
             }
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);
-            }
-            UserEvent::Confirm | UserEvent::Cancel | UserEvent::Close => {
-                if self.commit_hash.is_empty() {
-                    self.tx.send(AppEvent::CloseDiffToUncommitted);
-                } else {
-                    self.tx.send(AppEvent::CloseDiffToDetail);
-                }
             }
             UserEvent::Refresh => {
                 self.refresh();
@@ -167,7 +332,7 @@ impl<'a> DiffView<'a> {
     }
 
     fn render_diff(&mut self, f: &mut Frame, diff_area: Rect) {
-        let (content_area, hovered_line_idx) = if !self.title.is_empty() {
+        let content_area = if !self.title.is_empty() {
             let [separator_area, title_area, content_area] = Layout::vertical([
                 Constraint::Length(1),
                 Constraint::Length(1),
@@ -218,22 +383,52 @@ impl<'a> DiffView<'a> {
             let title = Line::from(title_spans);
             f.render_widget(Paragraph::new(title), title_area);
 
-            let hovered = self.hovered_row.map(|r| self.scroll_offset + r as usize);
-            (content_area, hovered)
+            content_area
         } else {
-            let hovered = self.hovered_row.map(|r| self.scroll_offset + r as usize);
-            (diff_area, hovered)
+            diff_area
         };
 
         self.diff_content_area = Some(content_area);
-        let lines = self.build_diff_lines_with_hover(&content_area, hovered_line_idx);
-        self.content_height = lines.len();
 
-        let visible_lines: Vec<Line> = lines
-            .into_iter()
+        // Rebuild base lines if needed (content changed, not just hover)
+        if self.needs_rebuild || self.base_lines.is_empty() {
+            self.base_lines = self.build_diff_lines(&content_area);
+            self.needs_rebuild = false;
+            self.focused_button = if self.expand_buttons.is_empty() { None } else { Some(0) };
+        }
+        self.content_height = self.base_lines.len();
+
+        // Build visible lines from cache, applying hover only to button lines
+        let mut visible_lines: Vec<Line> = self.base_lines
+            .iter()
             .skip(self.scroll_offset)
             .take(content_area.height as usize)
+            .cloned()
             .collect();
+
+        // Apply hover styling to the hovered button line
+        if let Some(btn_idx) = self.hovered_button {
+            if let Some(btn) = self.expand_buttons.get(btn_idx) {
+                let visible_idx = btn.line_idx.saturating_sub(self.scroll_offset);
+                if visible_idx < visible_lines.len() {
+                    visible_lines[visible_idx] = self.build_button_line(btn, true, content_area.width);
+                }
+            }
+        }
+
+        // Apply keyboard focus highlight to the focused button line
+        if let Some(btn_idx) = self.focused_button {
+            if Some(btn_idx) != self.hovered_button {
+                if let Some(btn) = self.expand_buttons.get(btn_idx) {
+                    if btn.line_idx >= self.scroll_offset {
+                        let visible_idx = btn.line_idx - self.scroll_offset;
+                        if visible_idx < visible_lines.len() {
+                            visible_lines[visible_idx] = self.build_button_line(btn, true, content_area.width);
+                        }
+                    }
+                }
+            }
+        }
 
         let paragraph = Paragraph::new(visible_lines);
         f.render_widget(paragraph, content_area);
@@ -286,7 +481,7 @@ impl<'a> DiffView<'a> {
             .unwrap_or_default()
     }
 
-    fn split_areas(&self, area: Rect) -> [Rect; 2] {
+    fn split_areas(&mut self, area: Rect) -> [Rect; 2] {
         let available_height = area.height;
         let content_lines = self.count_diff_lines(area.width);
 
@@ -309,26 +504,18 @@ impl<'a> DiffView<'a> {
         .areas(area)
     }
 
-    fn count_diff_lines(&self, width: u16) -> usize {
+    fn count_diff_lines(&mut self, width: u16) -> usize {
+        if !self.base_lines.is_empty() {
+            return self.base_lines.len();
+        }
         let dummy_area = Rect::new(0, 0, width, 1);
         self.build_diff_lines(&dummy_area).len()
     }
 
-    fn build_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
+    fn build_diff_lines(&mut self, diff_area: &Rect) -> Vec<Line<'static>> {
         match self.ctx.ui_config.common.diff_mode {
             DiffMode::Raw => self.build_raw_diff_lines(diff_area),
-            DiffMode::Enhanced => self.build_enhanced_diff_lines(diff_area.width, None),
-        }
-    }
-
-    fn build_diff_lines_with_hover(
-        &self,
-        diff_area: &Rect,
-        hovered_line_idx: Option<usize>,
-    ) -> Vec<Line<'static>> {
-        match self.ctx.ui_config.common.diff_mode {
-            DiffMode::Raw => self.build_raw_diff_lines(diff_area),
-            DiffMode::Enhanced => self.build_enhanced_diff_lines(diff_area.width, hovered_line_idx),
+            DiffMode::Enhanced => self.build_base_lines(diff_area.width),
         }
     }
 
@@ -437,11 +624,7 @@ impl<'a> DiffView<'a> {
         lines
     }
 
-    fn build_enhanced_diff_lines(
-        &self,
-        width: u16,
-        hovered_line_idx: Option<usize>,
-    ) -> Vec<Line<'static>> {
+    fn build_base_lines(&mut self, width: u16) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
 
         let entry = match self.diff_entries.first() {
@@ -455,171 +638,286 @@ impl<'a> DiffView<'a> {
             &self.ctx.core_config.option.syntax_theme,
         );
 
-        // VS Code-style diff colors: brighter backgrounds, vivid bars
+        // VS Code-style diff colors
         let add_bg = Color::Rgb(32, 68, 45);
         let del_bg = Color::Rgb(68, 35, 40);
         let ctx_fg = Color::Rgb(192, 202, 245);
 
-        // Only change background so syntax highlighting / default text color is preserved
         let add_style = Style::default().bg(add_bg);
         let del_style = Style::default().bg(del_bg);
         let ctx_style = Style::default().fg(ctx_fg);
 
-        // Thicker bar (▍) with matching background so it visually merges with the highlight block
         let bar_add = Span::styled("▍", Style::default().fg(Color::Rgb(63, 185, 80)).bg(add_bg));
         let bar_del = Span::styled("▍", Style::default().fg(Color::Rgb(248, 81, 73)).bg(del_bg));
 
-        self.expand_buttons.borrow_mut().clear();
+        self.expand_buttons.clear();
+        let mut gap_idx = 0usize;
 
-        for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
-            // Show collapsed region between hunks
-            if hunk_idx > 0 {
-                if let Some(prev_hunk) = entry.hunks.get(hunk_idx - 1) {
-                    let old_gap = hunk
-                        .old_start
-                        .saturating_sub(prev_hunk.old_start + prev_hunk.old_count);
-                    let new_gap = hunk
-                        .new_start
-                        .saturating_sub(prev_hunk.new_start + prev_hunk.new_count);
-                    let gap = old_gap.max(new_gap);
-                    if gap > 0 {
-                        let unchanged_text = format!("─── {} lines unchanged ───", gap);
+        // Helper: last context line's new_line_no in a hunk
+        fn hunk_last_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
+            hunk.lines.iter().rev().find_map(|l| {
+                if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+            })
+        }
+
+        // Helper: first context line's new_line_no in a hunk
+        fn hunk_first_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
+            hunk.lines.iter().find_map(|l| {
+                if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+            })
+        }
+
+        // Render a gap between hunks (bidirectional)
+        // Extract references to avoid closure capture conflicts
+        let gap_states = &self.gap_states;
+        let new_file_lines = &self.new_file_lines;
+
+        // Helper: render a gap block. is_edge: None=middle, Some(true)=top, Some(false)=bottom
+        let mut render_gap = |lines: &mut Vec<Line<'static>>, gap_start: u32, gap_end: u32, gidx: usize, hl: &mut Option<SyntaxHighlighter>, edge: Option<bool>| -> usize {
+            if gap_end <= gap_start {
+                return gidx;
+            }
+            let total = (gap_end - gap_start) as usize;
+            let gap_state = gap_states.get(gidx).cloned().unwrap_or(GapState {
+                visible_up: if edge.is_some() { 0 } else { 3.min(total) },
+                visible_down: if edge.is_some() { 0 } else { 3.min(total) },
+                total,
+            });
+
+            let mut visible_up = gap_state.visible_up.min(total);
+            let mut visible_down = gap_state.visible_down.min(total);
+            if visible_up + visible_down > total {
+                visible_up = total.saturating_sub(visible_down);
+                visible_down = total.saturating_sub(visible_up);
+            }
+
+            match edge {
+                Some(true) => {
+                    // Top edge: ⩕ button, then text, then lines from top toward hunk
+                    let hidden = total.saturating_sub(visible_up);
+                    if hidden > 0 {
+                        let unchanged_text = format!("─── {} lines unchanged ───", hidden);
+                        let unchanged_width = unchanged_text.chars().count();
+                        let label = "  ⩕  show more  ";
+                        let label_len = label.chars().count();
+                        let pad = unchanged_width.saturating_sub(label_len);
+                        let left = pad / 2;
+                        let idx = lines.len();
+                        let col_start = left as u16;
+                        let col_end = col_start + label_len as u16;
+                        lines.push(Line::from(vec![
+                            Span::styled(" ".repeat(left), Style::default()),
+                            Span::styled(label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
+                        ]));
+                        self.expand_buttons.push(ButtonInfo {
+                            line_idx: idx,
+                            direction: ExpandDirection::Up,
+                            col_start,
+                            col_end,
+                            gap_idx: gidx,
+                            is_edge: true,
+                        });
+                        lines.push(Line::from(vec![Span::styled(
+                            unchanged_text,
+                            Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::ITALIC),
+                        )]));
+                    }
+                    for i in 0..visible_up {
+                        let line_no = (gap_end - visible_up as u32 + i as u32) as usize;
+                        if line_no > 0 && line_no <= new_file_lines.len() {
+                            let content = &new_file_lines[line_no - 1];
+                            let line_num = format!("{:>4} │ ", line_no);
+                            if let Some(ref mut h) = hl {
+                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                            } else {
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                            }
+                        }
+                    }
+                }
+                Some(false) => {
+                    // Bottom edge: lines from hunk toward bottom, then text, then ⩖ button
+                    for i in 0..visible_down {
+                        let line_no = (gap_start + i as u32) as usize;
+                        if line_no > 0 && line_no <= new_file_lines.len() {
+                            let content = &new_file_lines[line_no - 1];
+                            let line_num = format!("{:>4} │ ", line_no);
+                            if let Some(ref mut h) = hl {
+                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                            } else {
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                            }
+                        }
+                    }
+                    let hidden = total.saturating_sub(visible_down);
+                    if hidden > 0 {
+                        let unchanged_text = format!("─── {} lines unchanged ───", hidden);
+                        let unchanged_width = unchanged_text.chars().count();
+                        lines.push(Line::from(vec![Span::styled(
+                            unchanged_text,
+                            Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::ITALIC),
+                        )]));
+                        let label = "  ⩖  show more  ";
+                        let label_len = label.chars().count();
+                        let pad = unchanged_width.saturating_sub(label_len);
+                        let left = pad / 2;
+                        let idx = lines.len();
+                        let col_start = left as u16;
+                        let col_end = col_start + label_len as u16;
+                        lines.push(Line::from(vec![
+                            Span::styled(" ".repeat(left), Style::default()),
+                            Span::styled(label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
+                        ]));
+                        self.expand_buttons.push(ButtonInfo {
+                            line_idx: idx,
+                            direction: ExpandDirection::Down,
+                            col_start,
+                            col_end,
+                            gap_idx: gidx,
+                            is_edge: true,
+                        });
+                    }
+                }
+                None => {
+                    // Middle gap: bidirectional with both buttons
+                    for i in 0..visible_up {
+                        let line_no = (gap_start + i as u32) as usize;
+                        if line_no > 0 && line_no <= new_file_lines.len() {
+                            let content = &new_file_lines[line_no - 1];
+                            let line_num = format!("{:>4} │ ", line_no);
+                            if let Some(ref mut h) = hl {
+                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                            } else {
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                            }
+                        }
+                    }
+
+                    let hidden = total.saturating_sub(visible_up + visible_down);
+                    if hidden > 0 {
+                        let unchanged_text = format!("─── {} lines unchanged ───", hidden);
                         let unchanged_width = unchanged_text.chars().count();
 
-                        let up_idx = lines.len();
-                        let up_hover = hovered_line_idx == Some(up_idx);
-                        let up_style = if up_hover {
-                            Style::default()
-                                .fg(Color::Rgb(192, 202, 245))
-                                .bg(Color::Rgb(41, 46, 66))
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default()
-                                .fg(Color::Rgb(122, 162, 247))
-                                .add_modifier(Modifier::BOLD)
-                        };
-                        // Expand button above — centered under the unchanged text
-                        let up_label = "  ▼  show more  ";
+                        let up_label = "  ⩖  show more  ";
                         let up_label_len = up_label.chars().count();
                         let up_pad = unchanged_width.saturating_sub(up_label_len);
                         let up_left = up_pad / 2;
+                        let up_idx = lines.len();
+                        let col_start = up_left as u16;
+                        let col_end = col_start + up_label_len as u16;
                         lines.push(Line::from(vec![
                             Span::styled(" ".repeat(up_left), Style::default()),
-                            Span::styled(up_label.to_string(), up_style),
+                            Span::styled(up_label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
                         ]));
-                        self.expand_buttons.borrow_mut().push((up_idx, ExpandDirection::Up));
+                        self.expand_buttons.push(ButtonInfo {
+                            line_idx: up_idx,
+                            direction: ExpandDirection::Up,
+                            col_start,
+                            col_end,
+                            gap_idx: gidx,
+                            is_edge: false,
+                        });
                         lines.push(Line::from(vec![Span::styled(
                             unchanged_text,
-                            Style::default()
-                                .fg(Color::Rgb(59, 66, 97))
-                                .add_modifier(Modifier::ITALIC),
+                            Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::ITALIC),
                         )]));
-                        let down_idx = lines.len();
-                        let down_hover = hovered_line_idx == Some(down_idx);
-                        let down_style = if down_hover {
-                            Style::default()
-                                .fg(Color::Rgb(192, 202, 245))
-                                .bg(Color::Rgb(41, 46, 66))
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default()
-                                .fg(Color::Rgb(122, 162, 247))
-                                .add_modifier(Modifier::BOLD)
-                        };
-                        // Expand button below — centered under the unchanged text
-                        let down_label = "  ▲  show more  ";
+                        let down_label = "  ⩕  show more  ";
                         let down_label_len = down_label.chars().count();
                         let down_pad = unchanged_width.saturating_sub(down_label_len);
                         let down_left = down_pad / 2;
+                        let down_idx = lines.len();
+                        let col_start = down_left as u16;
+                        let col_end = col_start + down_label_len as u16;
                         lines.push(Line::from(vec![
                             Span::styled(" ".repeat(down_left), Style::default()),
-                            Span::styled(down_label.to_string(), down_style),
+                            Span::styled(down_label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
                         ]));
-                        self.expand_buttons.borrow_mut().push((down_idx, ExpandDirection::Down));
-                        lines.push(Line::from(""));
+                        self.expand_buttons.push(ButtonInfo {
+                            line_idx: down_idx,
+                            direction: ExpandDirection::Down,
+                            col_start,
+                            col_end,
+                            gap_idx: gidx,
+                            is_edge: false,
+                        });
+                    }
+
+                    for i in (0..visible_down).rev() {
+                        let line_no = (gap_end - i as u32 - 1) as usize;
+                        if line_no > 0 && line_no <= new_file_lines.len() {
+                            let content = &new_file_lines[line_no - 1];
+                            let line_num = format!("{:>4} │ ", line_no);
+                            if let Some(ref mut h) = hl {
+                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                            } else {
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                            }
+                        }
+                    }
+                }
+            }
+            gidx + 1
+        };
+
+        // Gap before first hunk — single button at top
+        if let Some(first_hunk) = entry.hunks.first() {
+            if let Some(first_new) = hunk_first_new_line(first_hunk) {
+                if first_new > 1 {
+                    gap_idx = render_gap(&mut lines, 1, first_new, gap_idx, &mut highlighter, Some(true));
+                }
+            }
+        }
+
+        for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
+            // Gap between hunks
+            if hunk_idx > 0 {
+                if let Some(prev_hunk) = entry.hunks.get(hunk_idx - 1) {
+                    let prev_end = hunk_last_new_line(prev_hunk);
+                    let curr_start = hunk_first_new_line(hunk);
+                    if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
+                        if cs > pe + 1 {
+                            gap_idx = render_gap(&mut lines, pe + 1, cs, gap_idx, &mut highlighter, None);
+                        }
                     }
                 }
             }
 
-            // Hunk header — show line range instead of raw @@
-            let hunk_label = format!(
-                "@@ lines {}–{} (old)  →  lines {}–{} (new) @@",
-                hunk.old_start,
-                hunk.old_start + hunk.old_count.saturating_sub(1),
-                hunk.new_start,
-                hunk.new_start + hunk.new_count.saturating_sub(1),
-            );
-            for chunk in wrap_text(&hunk_label, width as usize) {
-                lines.push(Line::from(vec![Span::styled(
-                    chunk.to_string(),
-                    Style::default()
-                        .fg(Color::Rgb(86, 95, 137))
-                        .add_modifier(Modifier::ITALIC),
-                )]));
-            }
-
-            // Context/addition/deletion lines
+            // Hunk content
             for diff_line in hunk.lines.iter().skip(1) {
                 match diff_line.line_type {
                     DiffLineType::Addition => {
                         let line_num = format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
                         if let Some(ref mut h) = highlighter {
                             lines.extend(wrap_diff_line_with_syntax_and_bar(
-                                &diff_line.content,
-                                &line_num,
-                                add_style,
-                                width,
-                                h,
-                                Some(bar_add.clone()),
+                                &diff_line.content, &line_num, add_style, width, h, Some(bar_add.clone()),
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
-                                &diff_line.content,
-                                &line_num,
-                                add_style,
-                                width,
-                                Some(bar_add.clone()),
+                                &diff_line.content, &line_num, add_style, width, Some(bar_add.clone()),
                             ));
                         }
                     }
                     DiffLineType::Deletion => {
-                        // No line number for deleted lines; keep alignment with gutter
                         let line_num = "     │ ".to_string();
                         if let Some(ref mut h) = highlighter {
                             lines.extend(wrap_diff_line_with_syntax_and_bar(
-                                &diff_line.content,
-                                &line_num,
-                                del_style,
-                                width,
-                                h,
-                                Some(bar_del.clone()),
+                                &diff_line.content, &line_num, del_style, width, h, Some(bar_del.clone()),
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
-                                &diff_line.content,
-                                &line_num,
-                                del_style,
-                                width,
-                                Some(bar_del.clone()),
+                                &diff_line.content, &line_num, del_style, width, Some(bar_del.clone()),
                             ));
                         }
                     }
                     DiffLineType::Context => {
-                        let line_num = format!("{:>4} │ ", diff_line.old_line_no.unwrap_or(0));
+                        let line_num = format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
                         if let Some(ref mut h) = highlighter {
                             lines.extend(wrap_diff_line_with_syntax(
-                                &diff_line.content,
-                                &line_num,
-                                ctx_style,
-                                width,
-                                h,
+                                &diff_line.content, &line_num, ctx_style, width, h,
                             ));
                         } else {
                             lines.extend(wrap_diff_line(
-                                &diff_line.content,
-                                &line_num,
-                                ctx_style,
-                                width,
+                                &diff_line.content, &line_num, ctx_style, width,
                             ));
                         }
                     }
@@ -627,9 +925,7 @@ impl<'a> DiffView<'a> {
                         for chunk in wrap_text(&diff_line.content, width as usize) {
                             lines.push(Line::from(vec![Span::styled(
                                 chunk.to_string(),
-                                Style::default()
-                                    .fg(Color::Rgb(192, 202, 245))
-                                    .add_modifier(Modifier::DIM),
+                                Style::default().fg(Color::Rgb(192, 202, 245)).add_modifier(Modifier::DIM),
                             )]));
                         }
                     }
@@ -637,6 +933,16 @@ impl<'a> DiffView<'a> {
                 }
             }
             lines.push(Line::from(""));
+        }
+
+        // Gap after last hunk — single button at bottom
+        if let Some(last_hunk) = entry.hunks.last() {
+            if let Some(last_new) = hunk_last_new_line(last_hunk) {
+                let file_total = self.new_file_lines.len() as u32;
+                if last_new < file_total {
+                    render_gap(&mut lines, last_new + 1, file_total + 1, gap_idx, &mut highlighter, Some(false));
+                }
+            }
         }
 
         lines
@@ -777,22 +1083,38 @@ impl<'a> DiffView<'a> {
     }
 
     pub fn refresh(&self) {
-        if let Some(list_state) = self.commit_list_state.as_ref() {
-            let list_context = ListRefreshViewContext::from(list_state);
-            let context = RefreshViewContext::Detail { list_context };
-            self.tx.send(AppEvent::Refresh(context));
+        let file_path = self.title
+            .strip_prefix("Diff (staged): ")
+            .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
+            .or_else(|| self.title.strip_prefix("Diff: "))
+            .unwrap_or("");
+        if self.commit_hash.is_empty() {
+            let is_staged = self.title.contains("(staged)");
+            self.tx.send(AppEvent::OpenUncommittedDiff {
+                file_path: file_path.into(),
+                is_staged,
+            });
+        } else {
+            self.tx.send(AppEvent::OpenFileDiff {
+                hash: self.commit_hash.clone(),
+                file_path: file_path.into(),
+            });
         }
     }
 
     pub fn footer_hint(&self) -> String {
         let mut parts = Vec::new();
+        if !self.expand_buttons.is_empty() {
+            parts.push("←→:buttons");
+            parts.push("Enter:expand");
+        }
         if !self.all_file_paths.is_empty() {
             let is_staged = self.title.contains("(staged)");
             let current = self.title.strip_prefix("Diff (staged): ")
                 .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
                 .or_else(|| self.title.strip_prefix("Diff: "))
                 .unwrap_or("");
-                
+
             let position = if self.commit_hash.is_empty() {
                 self.all_file_paths.iter().position(|(p, s)| p == current && *s == is_staged)
             } else {
@@ -801,16 +1123,111 @@ impl<'a> DiffView<'a> {
 
             if let Some(idx) = position {
                 if idx > 0 {
-                    parts.push("←:prev-file");
+                    parts.push("-:prev-file");
                 }
                 if idx + 1 < self.all_file_paths.len() {
-                    parts.push("→:next-file");
+                    parts.push("+:next-file");
                 }
             }
         }
         parts.push("c:copy-path");
+        parts.push("r:refresh");
         parts.push("Esc:close");
         parts.join(" ")
+    }
+
+    fn build_button_line(&self, btn: &ButtonInfo, is_hovered: bool, _width: u16) -> Line<'static> {
+        let style = if is_hovered {
+            Style::default()
+                .fg(Color::Rgb(192, 202, 245))
+                .bg(Color::Rgb(41, 46, 66))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(Color::Rgb(122, 162, 247))
+                .add_modifier(Modifier::BOLD)
+        };
+        let label = if btn.is_edge {
+            // Edge buttons: icon is the opposite of direction
+            match btn.direction {
+                ExpandDirection::Up => "  ⩕  show more  ",
+                ExpandDirection::Down => "  ⩖  show more  ",
+            }
+        } else {
+            // Middle gap buttons: icon matches direction
+            match btn.direction {
+                ExpandDirection::Up => "  ⩖  show more  ",
+                ExpandDirection::Down => "  ⩕  show more  ",
+            }
+        };
+        let _label_len = label.chars().count();
+        let pad = btn.col_start as usize;
+        Line::from(vec![
+            Span::styled(" ".repeat(pad), Style::default()),
+            Span::styled(label.to_string(), style),
+        ])
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        let prev_hover = self.hovered_button;
+        self.hovered_button = None;
+
+        if let Some(area) = self.diff_content_area {
+            let in_area = col >= area.x
+                && col < area.x + area.width
+                && row >= area.y
+                && row < area.y + area.height;
+            if in_area {
+                let local_row = (self.scroll_offset + (row - area.y) as usize) as usize;
+                // Check if mouse is over any button (considering column range)
+                for (idx, btn) in self.expand_buttons.iter().enumerate() {
+                    if btn.line_idx == local_row {
+                        let local_col = col.saturating_sub(area.x);
+                        if local_col >= btn.col_start && local_col < btn.col_end {
+                            self.hovered_button = Some(idx);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Only mark needs redraw if hover state changed
+        if prev_hover != self.hovered_button {
+            // The render loop will pick up the new hover state
+        }
+    }
+
+    fn activate_button(&mut self, idx: usize) {
+        if let Some(btn) = self.expand_buttons.get(idx).cloned() {
+            if let Some(gap_state) = self.gap_states.get_mut(btn.gap_idx) {
+                match btn.direction {
+                    ExpandDirection::Up => {
+                        let max_expand = gap_state.total.saturating_sub(gap_state.visible_down);
+                        let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
+                        gap_state.visible_up = (gap_state.visible_up + increment).min(max_expand);
+                    }
+                    ExpandDirection::Down => {
+                        let max_expand = gap_state.total.saturating_sub(gap_state.visible_up);
+                        let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
+                        gap_state.visible_down = (gap_state.visible_down + increment).min(max_expand);
+                    }
+                }
+                self.needs_rebuild = true;
+            }
+        }
+    }
+
+    fn scroll_to_button(&mut self, idx: usize) {
+        if let Some(btn) = self.expand_buttons.get(idx) {
+            let line = btn.line_idx;
+            let viewport = self.diff_content_area.map(|a| a.height as usize).unwrap_or(0);
+            if line < self.scroll_offset {
+                self.scroll_offset = line;
+            } else if viewport > 0 && line >= self.scroll_offset + viewport {
+                self.scroll_offset = line.saturating_sub(viewport - 1);
+            }
+        }
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
@@ -820,80 +1237,28 @@ impl<'a> DiffView<'a> {
                 && row >= area.y
                 && row < area.y + area.height;
             if in_area {
-                let clicked_screen_line = row - area.y;
-                let clicked_line = self.scroll_offset + clicked_screen_line as usize;
-                let btn = self
-                    .expand_buttons
-                    .borrow()
-                    .iter()
-                    .find(|(idx, _)| *idx == clicked_line)
-                    .map(|(_, dir)| *dir);
-                if let Some(direction) = btn {
-                    let old_context = self.context_lines;
-                    // Double the context each time for a more dramatic reveal
-                    self.context_lines = old_context.saturating_mul(2).max(old_context + 5);
-                    let _ = self.reload_diff();
-                    // Directional scroll: jump to show the newly revealed content
-                    match direction {
-                        ExpandDirection::Up => {
-                            // Scroll up aggressively to reveal the newly loaded content above
-                            let jump = (self.context_lines as usize).saturating_sub(old_context as usize);
-                            self.scroll_offset = self.scroll_offset.saturating_sub(jump.max(10));
+                let local_row = (self.scroll_offset + (row - area.y) as usize) as usize;
+                let local_col = col.saturating_sub(area.x);
+                for btn in self.expand_buttons.iter() {
+                    if btn.line_idx == local_row && local_col >= btn.col_start && local_col < btn.col_end {
+                        if let Some(gap_state) = self.gap_states.get_mut(btn.gap_idx) {
+                            match btn.direction {
+                                ExpandDirection::Up => {
+                                    let max_expand = gap_state.total.saturating_sub(gap_state.visible_down);
+                                    let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
+                                    gap_state.visible_up = (gap_state.visible_up + increment).min(max_expand);
+                                }
+                                ExpandDirection::Down => {
+                                    let max_expand = gap_state.total.saturating_sub(gap_state.visible_up);
+                                    let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
+                                    gap_state.visible_down = (gap_state.visible_down + increment).min(max_expand);
+                                }
+                            }
+                            self.needs_rebuild = true;
                         }
-                        ExpandDirection::Down => {
-                            // Small scroll down to reveal content below the button
-                            self.scroll_offset = self.scroll_offset.saturating_add(3);
-                        }
+                        break;
                     }
                 }
-            }
-        }
-    }
-
-    fn reload_diff(&mut self) -> Result<(), String> {
-        let file_path = self
-            .title
-            .strip_prefix("Diff (staged): ")
-            .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
-            .or_else(|| self.title.strip_prefix("Diff: "))
-            .unwrap_or("");
-
-        let new_entries = if !self.commit_hash.is_empty() {
-            vec![DiffEntry::load_for_file_with_context(
-                &self.repo_path,
-                &self.commit_hash,
-                file_path,
-                self.context_lines,
-            )?]
-        } else if self.title.contains("(staged)") {
-            vec![DiffEntry::load_staged_for_file_with_context(
-                &self.repo_path,
-                file_path,
-                self.context_lines,
-            )?]
-        } else {
-            vec![DiffEntry::load_unstaged_for_file_with_context(
-                &self.repo_path,
-                file_path,
-                self.context_lines,
-            )?]
-        };
-
-        self.diff_entries = new_entries;
-        // Preserve scroll offset so the user's view stays anchored
-        Ok(())
-    }
-
-    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
-        if let Some(area) = self.diff_content_area {
-            let in_area = col >= area.x
-                && col < area.x + area.width
-                && row >= area.y
-                && row < area.y + area.height;
-            if in_area {
-                self.hovered_row = Some(row - area.y);
-            } else {
-                self.hovered_row = None;
             }
         }
     }

@@ -83,3 +83,7 @@ drop_stash = ["ctrl-x"]
 create_branch_from_stash = ["ctrl-n"]
 copy_stash_name = ["ctrl-i"]
 copy_stash_hash = ["ctrl-o"]
+
+# Diff view file cycling (replaces left/right arrows which are used for button navigation)
+cycle_file_next = ["+"]
+cycle_file_prev = ["-"]

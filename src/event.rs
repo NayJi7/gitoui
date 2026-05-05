@@ -372,6 +372,9 @@ pub enum UserEvent {
     CreateBranchFromStash,
     CopyStashName,
     CopyStashHash,
+    // Diff view file cycling
+    CycleFileNext,
+    CycleFilePrev,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -469,6 +472,8 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "create_branch_from_stash" => Ok(UserEvent::CreateBranchFromStash),
                         "copy_stash_name" => Ok(UserEvent::CopyStashName),
                         "copy_stash_hash" => Ok(UserEvent::CopyStashHash),
+                        "cycle_file_next" => Ok(UserEvent::CycleFileNext),
+                        "cycle_file_prev" => Ok(UserEvent::CycleFilePrev),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))
