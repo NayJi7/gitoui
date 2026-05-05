@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::rc::Rc;
 
 use chrono::{DateTime, FixedOffset};
@@ -384,13 +385,24 @@ impl CommitDetail<'_> {
             date,
             self.ctx.core_config.date_time_local(),
         );
+        let mut avatar_prefix: Vec<Span<'a>> = Vec::new();
+        if let Some(mut prepared) = self.ctx.avatar_manager.lock().unwrap().get_avatar(email, 1) {
+            if let Some(upload) = prepared.take_upload_data() {
+                let _ = write!(std::io::stdout(), "{}", upload);
+                let _ = std::io::stdout().flush();
+            }
+            for cell in prepared.cells() {
+                avatar_prefix.push(Span::styled(cell.symbol().to_owned(), cell.style()));
+            }
+            avatar_prefix.push(Span::raw(" "));
+        }
+        let mut name_spans = avatar_prefix;
+        name_spans.push(name.fg(self.ctx.color_theme.detail_name_fg));
+        name_spans.push(" <".into());
+        name_spans.push(email.fg(self.ctx.color_theme.detail_email_fg));
+        name_spans.push("> ".into());
         vec![
-            Line::from(vec![
-                name.fg(self.ctx.color_theme.detail_name_fg),
-                " <".into(),
-                email.fg(self.ctx.color_theme.detail_email_fg),
-                "> ".into(),
-            ]),
+            Line::from(name_spans),
             Line::from(date_str.fg(self.ctx.color_theme.detail_date_fg)),
         ]
     }

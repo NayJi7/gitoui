@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::rc::Rc;
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
@@ -1193,13 +1194,30 @@ impl CommitList<'_> {
                     );
                 }
                 let commit = commit_info.commit;
-                let truncate = console::measure_text_width(&commit.author_name) > max_width;
+                let mut avatar_prefix: Vec<Span> = Vec::new();
+                let mut name_max = max_width;
+                if max_width > 10 {
+                    let mut mgr = self.ctx.avatar_manager.lock().unwrap();
+                    if let Some(mut prepared) = mgr.get_avatar(&commit.author_email, 1) {
+                        if let Some(upload) = prepared.take_upload_data() {
+                            let _ = write!(std::io::stdout(), "{}", upload);
+                            let _ = std::io::stdout().flush();
+                        }
+                        let cell_width = prepared.cell_width();
+                        for cell in prepared.cells() {
+                            avatar_prefix.push(Span::styled(cell.symbol().to_owned(), cell.style()));
+                        }
+                        avatar_prefix.push(Span::raw(" "));
+                        name_max = name_max.saturating_sub(cell_width + 1);
+                    }
+                }
+                let truncate = console::measure_text_width(&commit.author_name) > name_max;
                 let name = if truncate {
-                    console::truncate_str(&commit.author_name, max_width, ELLIPSIS).to_string()
+                    console::truncate_str(&commit.author_name, name_max, ELLIPSIS).to_string()
                 } else {
                     commit.author_name.to_string()
                 };
-                let spans =
+                let name_spans =
                     if let Some(pos) = state.search_matches[state.offset + i].author_name.clone() {
                         highlighted_spans(
                             (*name).into(),
@@ -1212,6 +1230,8 @@ impl CommitList<'_> {
                     } else {
                         vec![name.fg(self.ctx.color_theme.list_name_fg)]
                     };
+                let mut spans = avatar_prefix;
+                spans.extend(name_spans);
                 self.to_commit_list_item(i, spans, state)
             })
             .collect();
