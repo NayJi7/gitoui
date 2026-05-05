@@ -1,10 +1,10 @@
 [package]
-name = "gitbranch"
+name = "gitui"
 version = "0.8.0"
 description = "Interactive Git client for the terminal"
 authors = ["Kyosuke Fujimoto <kyoro.f@gmail.com>"]
-homepage = "https://github.com/aterrak/gitbranch"
-repository = "https://github.com/aterrak/gitbranch"
+homepage = "https://github.com/aterrak/gitui"
+repository = "https://github.com/aterrak/gitui"
 readme = "README.md"
 license = "MIT"
 keywords = ["git", "cli", "tui", "terminal"]

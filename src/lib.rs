@@ -20,7 +20,7 @@ use clap::{Parser, ValueEnum};
 use graph::GraphImageManager;
 use serde::Deserialize;
 
-/// GitBranch - Interactive Git client for the terminal
+/// GitUi - Interactive Git client for the terminal
 #[derive(Parser)]
 #[command(version)]
 struct Args {

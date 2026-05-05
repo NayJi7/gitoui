@@ -1,3 +1,3 @@
-fn main() -> gitbranch::Result<()> {
-    gitbranch::run()
+fn main() -> gitui::Result<()> {
+    gitui::run()
 }

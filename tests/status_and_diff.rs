@@ -44,7 +44,7 @@ fn test_uncommitted_changes_untracked() {
     std::fs::write(dir.path().join("new.txt"), "hello").unwrap();
 
     let changes =
-        gitbranch::git::status::UncommittedChanges::load(dir.path()).unwrap();
+        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(changes.is_dirty());
     assert_eq!(changes.untracked.len(), 1);
     assert_eq!(changes.untracked[0].path, "new.txt");
@@ -63,7 +63,7 @@ fn test_uncommitted_changes_staged() {
         .unwrap();
 
     let changes =
-        gitbranch::git::status::UncommittedChanges::load(dir.path()).unwrap();
+        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(changes.is_dirty());
     assert_eq!(changes.staged.len(), 1);
     assert_eq!(changes.untracked.len(), 0);
@@ -83,7 +83,7 @@ fn test_uncommitted_changes_modified() {
     std::fs::write(dir.path().join("a.txt"), "modified").unwrap();
 
     let changes =
-        gitbranch::git::status::UncommittedChanges::load(dir.path()).unwrap();
+        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(changes.is_dirty());
     assert_eq!(changes.unstaged.len(), 1);
 }
@@ -100,7 +100,7 @@ fn test_uncommitted_changes_clean() {
     commit(&dir, "initial");
 
     let changes =
-        gitbranch::git::status::UncommittedChanges::load(dir.path()).unwrap();
+        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(!changes.is_dirty());
     assert_eq!(changes.total_files(), 0);
 }
@@ -125,7 +125,7 @@ fn test_diff_for_commit() {
     let hash2 = commit(&dir, "modify a.txt");
 
     let entries =
-        gitbranch::git::diff::DiffEntry::load_for_commit(dir.path(), &hash2).unwrap();
+        gitui::git::diff::DiffEntry::load_for_commit(dir.path(), &hash2).unwrap();
     assert!(!entries.is_empty());
 
     let has_modified = entries.iter().any(|e| {
@@ -158,7 +158,7 @@ fn test_diff_for_file() {
         .unwrap();
     let hash = commit(&dir, "modify a");
 
-    let entry = gitbranch::git::diff::DiffEntry::load_for_file(
+    let entry = gitui::git::diff::DiffEntry::load_for_file(
         dir.path(),
         &hash,
         "a.txt",

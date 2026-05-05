@@ -3,7 +3,7 @@ use std::{path::Path, process::Command};
 use chrono::{DateTime, Days, NaiveDate, TimeZone, Utc};
 use image::{GenericImage, GenericImageView};
 use rustc_hash::FxHashSet;
-use gitbranch::{color, config, git, graph};
+use gitui::{color, config, git, graph};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
