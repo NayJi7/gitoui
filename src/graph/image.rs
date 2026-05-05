@@ -328,7 +328,6 @@ type Pixels = FxHashSet<(i32, i32)>;
 pub struct DrawingPixels {
     circle: Pixels,
     circle_edge: Pixels,
-    circle_gap: Pixels,
     vertical_edge: Pixels,
     horizontal_edge: Pixels,
     up_edge: Pixels,
@@ -345,7 +344,6 @@ impl DrawingPixels {
     pub fn new(image_params: &ImageParams) -> Self {
         let circle = calc_commit_circle_drawing_pixels(image_params);
         let circle_edge = calc_circle_edge_drawing_pixels(image_params);
-        let circle_gap = calc_circle_gap_drawing_pixels(image_params);
         let vertical_edge = calc_vertical_edge_drawing_pixels(image_params);
         let horizontal_edge = calc_horizontal_edge_drawing_pixels(image_params);
         let up_edge = calc_up_edge_drawing_pixels(image_params);
@@ -360,7 +358,6 @@ impl DrawingPixels {
         Self {
             circle,
             circle_edge,
-            circle_gap,
             vertical_edge,
             horizontal_edge,
             up_edge,
@@ -382,14 +379,6 @@ fn calc_commit_circle_drawing_pixels(image_params: &ImageParams) -> Pixels {
 fn calc_circle_edge_drawing_pixels(image_params: &ImageParams) -> Pixels {
     let inner = calc_circle_drawing_pixels(image_params, image_params.circle_inner_radius as i32);
     let outer = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
-    outer.difference(&inner).cloned().collect()
-}
-
-// 2-pixel ring just outside the circle — drawn with background color to create
-// the small visual gap between segments and commit circles.
-fn calc_circle_gap_drawing_pixels(image_params: &ImageParams) -> Pixels {
-    let inner = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
-    let outer = calc_circle_drawing_pixels(image_params, (image_params.circle_outer_radius + 2) as i32);
     outer.difference(&inner).cloned().collect()
 }
 
@@ -909,15 +898,6 @@ fn draw_hollow_circle(
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let bg = image_params.background_color;
 
-    // Gap ring
-    for (x, y) in &drawing_pixels.circle_gap {
-        let px = (*x + x_offset) as u32;
-        let py = *y as u32;
-        if px < img_buf.width() && py < img_buf.height() {
-            *img_buf.get_pixel_mut(px, py) = bg;
-        }
-    }
-
     // Fill the interior with background color so underlying curves are hidden.
     for (x, y) in &drawing_pixels.circle {
         let x = (*x + x_offset) as u32;
@@ -944,15 +924,6 @@ fn draw_head_commit(
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let color = image_params.edge_color(circle_pos_x);
     let bg = image_params.background_color;
-
-    // Gap ring
-    for (x, y) in &drawing_pixels.circle_gap {
-        let px = (*x + x_offset) as u32;
-        let py = *y as u32;
-        if px < img_buf.width() && py < img_buf.height() {
-            *img_buf.get_pixel_mut(px, py) = bg;
-        }
-    }
 
     // Fill the interior with background color so underlying curves are hidden.
     for (x, y) in &drawing_pixels.circle {
@@ -992,15 +963,6 @@ fn draw_commit_circle(
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let color = image_params.edge_color(circle_pos_x);
-
-    // Gap ring: 2px of background color just outside the circle
-    for (x, y) in &drawing_pixels.circle_gap {
-        let px = (*x + x_offset) as u32;
-        let py = *y as u32;
-        if px < img_buf.width() && py < img_buf.height() {
-            *img_buf.get_pixel_mut(px, py) = image_params.background_color;
-        }
-    }
 
     for (x, y) in &drawing_pixels.circle {
         let x = (*x + x_offset) as u32;
