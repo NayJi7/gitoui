@@ -51,7 +51,7 @@ impl AvatarManager {
         if path.exists() {
             return;
         }
-        let url = format!("https://unavatar.io/{}", email.trim().to_lowercase());
+        let url = format!("https://unavatar.io/github/{}", email.trim().to_lowercase());
         let path_clone = path.clone();
         thread::spawn(move || {
             let result = reqwest::blocking::Client::builder()
