@@ -1,6 +1,7 @@
 use std::{
     io::{self, Write},
     rc::Rc,
+    sync::Mutex,
 };
 
 use ratatui::{
@@ -14,6 +15,7 @@ use ratatui::{
 use rustc_hash::FxHashMap;
 
 use crate::{
+    avatar::AvatarManager,
     color::{ColorTheme, GraphColorSet},
     config::{save, CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
     event::{
@@ -61,13 +63,45 @@ pub struct RefreshRequest {
     pub context: RefreshViewContext,
 }
 
-#[derive(Debug, Clone)]
+impl Clone for AppContext {
+    fn clone(&self) -> Self {
+        Self {
+            keybind: self.keybind.clone(),
+            core_config: self.core_config.clone(),
+            ui_config: self.ui_config.clone(),
+            color_theme: self.color_theme.clone(),
+            image_protocol: self.image_protocol,
+            avatar_manager: Mutex::new(AvatarManager::new(self.image_protocol)),
+            git_user_name: self.git_user_name.clone(),
+            git_user_email: self.git_user_email.clone(),
+            branch_color_map: self.branch_color_map.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for AppContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppContext")
+            .field("keybind", &self.keybind)
+            .field("core_config", &self.core_config)
+            .field("ui_config", &self.ui_config)
+            .field("color_theme", &self.color_theme)
+            .field("image_protocol", &self.image_protocol)
+            .field("avatar_manager", &"Mutex<AvatarManager>")
+            .field("git_user_name", &self.git_user_name)
+            .field("git_user_email", &self.git_user_email)
+            .field("branch_color_map", &self.branch_color_map)
+            .finish()
+    }
+}
+
 pub struct AppContext {
     pub keybind: KeyBind,
     pub core_config: CoreConfig,
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
     pub image_protocol: ImageProtocol,
+    pub avatar_manager: Mutex<AvatarManager>,
     pub git_user_name: String,
     pub git_user_email: String,
     pub branch_color_map: FxHashMap<String, Color>,
@@ -81,6 +115,7 @@ impl Default for AppContext {
             ui_config: UiConfig::default(),
             color_theme: ColorTheme::default(),
             image_protocol: ImageProtocol::Iterm2,
+            avatar_manager: Mutex::new(AvatarManager::new(ImageProtocol::Iterm2)),
             git_user_name: String::new(),
             git_user_email: String::new(),
             branch_color_map: FxHashMap::default(),

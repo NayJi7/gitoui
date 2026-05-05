@@ -184,18 +184,28 @@ pub fn run() -> Result<()> {
             .ok()
             .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
             .unwrap_or_else(|| "Not set".into());
+        let avatar_manager = avatar::AvatarManager::new(image_protocol);
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
             ui_config,
             color_theme,
             image_protocol,
+            avatar_manager: std::sync::Mutex::new(avatar_manager),
             git_user_name,
             git_user_email,
             branch_color_map: rustc_hash::FxHashMap::default(),
         });
 
         let repository = git::Repository::load(Path::new("."), order, max_count)?;
+
+        {
+            let mgr = ctx.avatar_manager.lock().unwrap();
+            for commit in repository.all_commits() {
+                mgr.prefetch(&commit.author_email);
+                mgr.prefetch(&commit.committer_email);
+            }
+        }
 
         let graph = graph::calc_graph(&repository);
 
