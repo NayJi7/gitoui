@@ -26,7 +26,7 @@ pub struct TagMetadata {
     pub tag_name: String,
     pub tag_type: String,
     pub target_hash: String,
-    pub target_subject: String,
+    pub target_commit_message: String,
     pub tagger: Option<String>,
     pub date: Option<String>,
     pub message: Option<String>,
@@ -191,7 +191,7 @@ impl TagDetail<'_> {
         label_lines.push(Line::from("   Target: ").fg(self.ctx.color_theme.detail_label_fg));
         value_lines.push(Line::from(format!(
             "{} {}",
-            self.metadata.target_hash, self.metadata.target_subject
+            self.metadata.target_hash, self.metadata.target_commit_message
         )));
 
         if let Some(tagger) = &self.metadata.tagger {

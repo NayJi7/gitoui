@@ -104,6 +104,7 @@ pub struct CommitDetail<'a> {
     changes: &'a Vec<FileChange>,
     refs: &'a Vec<Ref>,
     ctx: Rc<AppContext>,
+    head_branch_name: Option<String>,
 }
 
 impl<'a> CommitDetail<'a> {
@@ -112,12 +113,14 @@ impl<'a> CommitDetail<'a> {
         changes: &'a Vec<FileChange>,
         refs: &'a Vec<Ref>,
         ctx: Rc<AppContext>,
+        head_branch_name: Option<String>,
     ) -> Self {
         Self {
             commit,
             changes,
             refs,
             ctx,
+            head_branch_name,
         }
     }
 }
@@ -418,9 +421,6 @@ impl CommitDetail<'_> {
     }
 
     fn refs_line(&self) -> Line<'_> {
-        // Build compacted branch display: local + remote branches sharing the same short name
-        // are shown as "main|origin" instead of "main origin/main"
-        // Use BTreeMap to preserve insertion order and avoid random ordering on re-render.
         let mut compacted_branches: std::collections::BTreeMap<String, Vec<String>> =
             std::collections::BTreeMap::new();
         let mut tags: Vec<String> = Vec::new();
@@ -434,6 +434,9 @@ impl CommitDetail<'_> {
                         .push(name.clone());
                 }
                 Ref::RemoteBranch { name, .. } => {
+                    if name.ends_with("/HEAD") {
+                        continue;
+                    }
                     let short_name = name
                         .split_once('/')
                         .map(|(_, rest)| rest.to_string())
@@ -453,7 +456,24 @@ impl CommitDetail<'_> {
         let mut spans = Vec::new();
         let mut first = true;
 
+        // HEAD indicator first, like in commit list
+        if let Some(ref head_name) = self.head_branch_name {
+            if compacted_branches.contains_key(head_name) {
+                let fg = self.ctx.color_theme.list_head_fg;
+                spans.push(Span::styled(
+                    "಄ ",
+                    Style::default().fg(fg).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    "HEAD -> ",
+                    Style::default().fg(fg).add_modifier(Modifier::BOLD),
+                ));
+                first = false;
+            }
+        }
+
         for (short_name, full_names) in compacted_branches.iter() {
+            let is_head = self.head_branch_name.as_deref() == Some(short_name.as_str());
             if !first {
                 spans.push(Span::raw(", "));
             }
@@ -466,9 +486,7 @@ impl CommitDetail<'_> {
                 .map(|n| n.split_once('/').map(|(r, _)| r).unwrap_or(n))
                 .collect();
 
-            // Use branch_color_map for all branches to match commit list colors
-            // HEAD and origin/HEAD are always cyan like in the commit list
-            let fg = if short_name == "HEAD" {
+            let fg = if is_head {
                 self.ctx.color_theme.list_head_fg
             } else if is_local {
                 self.ctx
@@ -477,7 +495,6 @@ impl CommitDetail<'_> {
                     .copied()
                     .unwrap_or(self.ctx.color_theme.list_ref_branch_fg)
             } else {
-                // Remote-only: try short_name first, then fall back to remote default
                 self.ctx
                     .branch_color_map
                     .get(short_name)
@@ -491,9 +508,14 @@ impl CommitDetail<'_> {
                 format!("{}|{}", short_name, remotes.join("|"))
             };
 
-            let icon = if short_name == "HEAD" { "಄ " } else { "⎇ " };
-            spans.push(Span::styled(icon, Style::default().fg(fg).add_modifier(Modifier::BOLD)));
-            spans.push(Span::styled(display, Style::default().fg(fg).add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "⎇ ",
+                Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                display,
+                Style::default().fg(fg).add_modifier(Modifier::BOLD),
+            ));
         }
 
         for tag_name in tags.iter() {
@@ -510,9 +532,9 @@ impl CommitDetail<'_> {
     }
 
     fn commit_message_lines(&self) -> Vec<Line<'_>> {
-        let subject_line = Line::from(self.commit.subject.as_str().bold());
+let commit_message_line = Line::from(self.commit.commit_message.as_str().bold());
 
-        let mut lines = vec![subject_line];
+    let mut lines = vec![commit_message_line];
 
         if self.commit.body.is_empty() {
             return lines;

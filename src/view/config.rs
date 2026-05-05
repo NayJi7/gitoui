@@ -18,7 +18,16 @@ use crate::{
     GraphStyle, ImageProtocolType,
 };
 
-#[derive(Debug)]
+impl<'a> std::fmt::Debug for ConfigView<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigView")
+            .field("selected", &self.selected)
+            .field("editing_text", &self.editing_text)
+            .field("editing_value", &self.editing_value)
+            .finish()
+    }
+}
+
 pub struct ConfigView<'a> {
     before: View<'a>,
     selected: usize,
@@ -28,6 +37,7 @@ pub struct ConfigView<'a> {
     ui_config: UiConfig,
     editing_text: bool,
     editing_value: String,
+    theme_preview: Option<SyntaxHighlighter>,
 }
 
 impl<'a> ConfigView<'a> {
@@ -43,6 +53,7 @@ impl<'a> ConfigView<'a> {
             ui_config,
             editing_text: false,
             editing_value: String::new(),
+            theme_preview: None,
         }
     }
 
@@ -207,6 +218,7 @@ impl<'a> ConfigView<'a> {
                 let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
                 let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
                 self.core_config.option.syntax_theme = themes[prev_idx].to_string();
+                self.theme_preview = None;
             }
             5 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
@@ -258,6 +270,7 @@ impl<'a> ConfigView<'a> {
                 let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
                 let next_idx = (idx + 1) % themes.len();
                 self.core_config.option.syntax_theme = themes[next_idx].to_string();
+                self.theme_preview = None;
             }
             5 => {
                 let next = self.core_config.date_time_format().cycle_next();
@@ -376,7 +389,6 @@ impl<'a> ConfigView<'a> {
 
         match self.selected {
             4 => {
-                // Syntax Theme preview
                 right_lines.push(Line::from(""));
                 right_lines.push(Line::from(vec![
                     Span::styled("Preview", Style::default().add_modifier(Modifier::BOLD)),
@@ -391,10 +403,13 @@ impl<'a> ConfigView<'a> {
                     "}",
                 ];
 
-                if let Some(mut highlighter) = SyntaxHighlighter::new_with_theme(
-                    "test.rs",
-                    &self.core_config.option.syntax_theme,
-                ) {
+                if self.theme_preview.is_none() {
+                    self.theme_preview = SyntaxHighlighter::new_with_theme(
+                        "test.rs",
+                        &self.core_config.option.syntax_theme,
+                    );
+                }
+                if let Some(ref mut highlighter) = self.theme_preview {
                     for line in preview_code {
                         let spans = highlighter.highlight_line(line, Style::default(), None);
                         right_lines.push(Line::from(spans));

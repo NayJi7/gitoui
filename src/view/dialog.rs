@@ -415,7 +415,7 @@ impl<'a> DialogView<'a> {
         self.radio_rows.clear();
 
         let theme = &self.ctx.color_theme;
-        let dim_fg = theme.list_subject_fg;
+        let dim_fg = theme.list_commit_message_fg;
         let fg = theme.fg;
         let yellow = theme.list_hash_fg;
         let warn_fg = theme.status_warn_fg;
@@ -672,7 +672,7 @@ impl<'a> DialogView<'a> {
         let style = if focused {
             Style::default().fg(fg)
         } else {
-            Style::default().fg(self.ctx.color_theme.list_subject_fg)
+            Style::default().fg(self.ctx.color_theme.list_commit_message_fg)
         };
         Line::from(vec![
             Span::raw("  "),
@@ -720,7 +720,7 @@ impl<'a> DialogView<'a> {
         } else if selected {
             Style::default().fg(theme.fg)
         } else {
-            Style::default().fg(theme.list_subject_fg)
+            Style::default().fg(theme.list_commit_message_fg)
         };
 
         Line::from(vec![

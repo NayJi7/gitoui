@@ -643,14 +643,14 @@ impl App<'_> {
             } else {
                 match &self.view {
                     View::List(_) => {
-                        "f:search c:copy-hash C:copy-subject Tab:refs r:refresh ?:help q:quit"
+                        "f:search c:copy-hash C:copy-message Tab:refs r:refresh ?:help q:quit"
                             .into()
                     }
                     View::Diff(_) => self
                         .view
                         .diff_footer_hint()
                         .unwrap_or_else(|| "c:copy-path Esc:close".into()),
-                    View::Detail(_) => "c:copy-hash C:copy-subject r:refresh Esc:close".into(),
+                    View::Detail(_) => "c:copy-hash C:copy-message r:refresh Esc:close".into(),
                     View::Refs(_) => "r:refresh Esc:close".into(),
                     View::Help(_) => "Esc:close".into(),
                     View::UserCommand(_) => "Esc:close".into(),
@@ -834,11 +834,16 @@ impl App<'_> {
             _ => return,
         };
         let (commit, changes, refs) = selected_commit_details(self.repository, &commit_list_state);
+        let head_branch_name = match self.repository.head() {
+            Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
         self.view = View::of_detail(
             commit_list_state,
             commit,
             changes,
             refs,
+            head_branch_name,
             self.ctx.clone(),
             self.ec.sender(),
         );
@@ -935,11 +940,16 @@ impl App<'_> {
             let commit_list_state = view.take_list_state().unwrap();
             let (commit, changes, refs) =
                 selected_commit_details(self.repository, &commit_list_state);
+            let head_branch_name = match self.repository.head() {
+                Head::Branch { name } => Some(name.clone()),
+                _ => None,
+            };
             self.view = View::of_detail(
                 commit_list_state,
                 commit,
                 changes,
                 refs,
+                head_branch_name,
                 self.ctx.clone(),
                 self.ec.sender(),
             );
@@ -1589,7 +1599,7 @@ impl App<'_> {
         let upstream = actions::branch_upstream(repo_path, &branch_name).ok();
         let ahead = actions::branch_ahead_count(repo_path, &branch_name).unwrap_or_default();
         let behind = actions::branch_behind_count(repo_path, &branch_name).unwrap_or_default();
-        let (tip_hash, tip_subject) = actions::branch_tip_info(repo_path, &branch_name)
+        let (tip_hash, tip_commit_message) = actions::branch_tip_info(repo_path, &branch_name)
             .map(|s| {
                 let mut parts = s.splitn(2, ' ');
                 (
@@ -1602,7 +1612,7 @@ impl App<'_> {
             branch_name: branch_name.clone(),
             is_remote,
             tip_hash,
-            tip_subject,
+            tip_commit_message,
             tip_author: String::new(),
             tip_date: String::new(),
             upstream,
@@ -1634,7 +1644,7 @@ impl App<'_> {
             tag_name: tag_name.clone(),
             tag_type: "Tag".to_string(),
             target_hash: String::new(),
-            target_subject: String::new(),
+            target_commit_message: String::new(),
             tagger: None,
             date: None,
             message: None,

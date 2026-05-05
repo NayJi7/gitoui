@@ -25,6 +25,7 @@ pub struct DetailView<'a> {
     commit: Commit,
     changes: Vec<FileChange>,
     refs: Vec<Ref>,
+    head_branch_name: Option<String>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -38,6 +39,7 @@ impl<'a> DetailView<'a> {
         commit: Commit,
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
+        head_branch_name: Option<String>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> DetailView<'a> {
@@ -47,6 +49,7 @@ impl<'a> DetailView<'a> {
             commit,
             changes,
             refs,
+            head_branch_name,
             ctx,
             tx,
             list_height: 0,
@@ -124,7 +127,7 @@ impl<'a> DetailView<'a> {
                 self.copy_commit_hash();
             }
             UserEvent::FullCopy => {
-                self.copy_commit_subject();
+                self.copy_commit_message();
             }
             UserEvent::UserCommand(n) => {
                 self.tx.send(AppEvent::OpenUserCommand(n));
@@ -211,8 +214,13 @@ impl<'a> DetailView<'a> {
         let commit_list = CommitList::new(self.ctx.clone());
         f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
 
-        let commit_detail =
-            CommitDetail::new(&self.commit, &self.changes, &self.refs, self.ctx.clone());
+        let commit_detail = CommitDetail::new(
+            &self.commit,
+            &self.changes,
+            &self.refs,
+            self.ctx.clone(),
+            self.head_branch_name.clone(),
+        );
         f.render_stateful_widget(commit_detail, detail_area, &mut self.commit_detail_state);
     }
 
@@ -291,8 +299,8 @@ impl<'a> DetailView<'a> {
         self.copy_to_clipboard("Commit SHA".into(), selected.as_str().into());
     }
 
-    fn copy_commit_subject(&self) {
-        self.copy_to_clipboard("Commit subject".into(), self.commit.subject.clone());
+    fn copy_commit_message(&self) {
+        self.copy_to_clipboard("Commit message".into(), self.commit.commit_message.clone());
     }
 
     fn copy_to_clipboard(&self, name: String, value: String) {
@@ -502,7 +510,7 @@ impl<'a> DetailView<'a> {
             count += 1; // Refs
         }
         count += 1; // divider
-        count += 1; // subject
+        count += 1; // commit message
         if !self.commit.body.is_empty() {
             count += 1; // empty line
             count += self.commit.body.lines().count();

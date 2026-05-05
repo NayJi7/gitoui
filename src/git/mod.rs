@@ -50,7 +50,7 @@ pub struct Commit {
     pub committer_name: String,
     pub committer_email: String,
     pub committer_date: DateTime<FixedOffset>,
-    pub subject: String,
+    pub commit_message: String,
     pub body: String,
     pub parent_commit_hashes: Vec<CommitHash>,
     pub commit_type: CommitType,
@@ -173,7 +173,7 @@ impl Repository {
                     committer_name: "".to_string(),
                     committer_email: "".to_string(),
                     committer_date: chrono::Local::now().fixed_offset(),
-                    subject: "Uncommitted changes".to_string(),
+                    commit_message: "Uncommitted changes".to_string(),
                     body: "".to_string(),
                     commit_type: CommitType::Uncommitted,
                 };
@@ -372,7 +372,7 @@ fn load_all_commits(
             committer_name: parts[4].into(),
             committer_email: parts[5].into(),
             committer_date: parse_iso_date(parts[6]),
-            subject: parts[7].into(),
+            commit_message: parts[7].into(),
             body: parts[8].into(),
             parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
             commit_type: CommitType::Commit,
@@ -422,7 +422,7 @@ fn load_all_stashes(path: &Path) -> Vec<Commit> {
             committer_name: parts[4].into(),
             committer_email: parts[5].into(),
             committer_date: parse_iso_date(parts[6]),
-            subject: parts[7].into(),
+            commit_message: parts[7].into(),
             body: parts[8].into(),
             parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
             commit_type: CommitType::Stash,
@@ -590,11 +590,11 @@ fn load_stashes_as_refs(path: &Path) -> RefMap {
 
         let name = parts[0];
         let hash = parts[1];
-        let subject = parts[2];
+        let commit_message = parts[2];
 
         let r = Ref::Stash {
             name: name.into(),
-            message: subject.into(),
+            message: commit_message.into(),
             target: hash.into(),
         };
 

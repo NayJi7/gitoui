@@ -610,7 +610,7 @@ mod tests {
                 "2024-01-01T00:00:00+00:00",
             )
             .unwrap(),
-            subject: hash.to_string(),
+            commit_message: hash.to_string(),
             parent_commit_hashes: parents.into_iter().map(CommitHash::from).collect(),
             commit_type,
             ..Default::default()

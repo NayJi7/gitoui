@@ -445,7 +445,7 @@ pub struct UiListConfig {
     #[default(vec![
         UserListColumnType::Graph,
         UserListColumnType::Marker,
-        UserListColumnType::Subject,
+        UserListColumnType::CommitMessage,
         UserListColumnType::Name,
         UserListColumnType::Hash,
         UserListColumnType::Date,
@@ -453,7 +453,7 @@ pub struct UiListConfig {
     pub columns: Vec<UserListColumnType>,
     #[garde(range(min = 1))]
     #[default = 20]
-    pub subject_min_width: u16,
+    pub commit_message_min_width: u16,
     #[garde(length(min = 1))]
     #[default = "%d/%m/%Y - %H:%M"]
     pub date_format: String,
@@ -473,7 +473,8 @@ pub struct UiListConfig {
 pub enum UserListColumnType {
     Graph,
     Marker,
-    Subject,
+    #[serde(rename = "commit_message")]
+    CommitMessage,
     Name,
     Hash,
     Date,
@@ -770,12 +771,12 @@ mod tests {
                     columns: vec![
                         UserListColumnType::Graph,
                         UserListColumnType::Marker,
-                        UserListColumnType::Subject,
+                        UserListColumnType::CommitMessage,
                         UserListColumnType::Name,
                         UserListColumnType::Hash,
                         UserListColumnType::Date,
                     ],
-                    subject_min_width: 20,
+                    commit_message_min_width: 20,
                     date_format: "%d/%m/%Y - %H:%M".into(),
                     date_width: 20,
                     date_local: true,
@@ -833,8 +834,8 @@ mod tests {
             [ui.common]
             cursor_type = { Virtual = "|" }
             [ui.list]
-            columns = ["date", "subject", "hash", "graph"]
-            subject_min_width = 40
+            columns = ["date", "commit_message", "hash", "graph"]
+            commit_message_min_width = 40
             date_format = "%Y/%m/%d"
             date_width = 20
             date_local = false
@@ -936,11 +937,11 @@ mod tests {
                 list: UiListConfig {
                     columns: vec![
                         UserListColumnType::Date,
-                        UserListColumnType::Subject,
+                        UserListColumnType::CommitMessage,
                         UserListColumnType::Hash,
                         UserListColumnType::Graph,
                     ],
-                    subject_min_width: 40,
+                    commit_message_min_width: 40,
                     date_format: "%Y/%m/%d".into(),
                     date_width: 20,
                     date_local: false,
@@ -1030,12 +1031,12 @@ mod tests {
                     columns: vec![
                         UserListColumnType::Graph,
                         UserListColumnType::Marker,
-                        UserListColumnType::Subject,
+                        UserListColumnType::CommitMessage,
                         UserListColumnType::Name,
                         UserListColumnType::Hash,
                         UserListColumnType::Date,
                     ],
-                    subject_min_width: 20,
+                    commit_message_min_width: 20,
                     date_format: "%Y/%m/%d".into(),
                     date_width: 20,
                     date_local: true,

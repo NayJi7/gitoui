@@ -40,8 +40,7 @@ pub struct DiffView<'a> {
 
     // Expand button tracking with precise column positions
     expand_buttons: Vec<ButtonInfo>,
-    hovered_button: Option<usize>,
-    focused_button: Option<usize>,
+    focused_button: Option<usize>, // unified selection: set by both keyboard and mouse hover
 
     // Full file contents for directional gap expansion
     old_file_lines: Vec<String>,
@@ -112,7 +111,6 @@ impl<'a> DiffView<'a> {
             base_lines: Vec::new(),
             needs_rebuild: true,
             expand_buttons: Vec::new(),
-            hovered_button: None,
             focused_button: None,
             old_file_lines: old_lines,
             new_file_lines: new_lines,
@@ -406,25 +404,13 @@ impl<'a> DiffView<'a> {
             .cloned()
             .collect();
 
-        // Apply hover styling to the hovered button line
-        if let Some(btn_idx) = self.hovered_button {
-            if let Some(btn) = self.expand_buttons.get(btn_idx) {
-                let visible_idx = btn.line_idx.saturating_sub(self.scroll_offset);
-                if visible_idx < visible_lines.len() {
-                    visible_lines[visible_idx] = self.build_button_line(btn, true, content_area.width);
-                }
-            }
-        }
-
-        // Apply keyboard focus highlight to the focused button line
+        // Apply highlight to the single focused/hovered button
         if let Some(btn_idx) = self.focused_button {
-            if Some(btn_idx) != self.hovered_button {
-                if let Some(btn) = self.expand_buttons.get(btn_idx) {
-                    if btn.line_idx >= self.scroll_offset {
-                        let visible_idx = btn.line_idx - self.scroll_offset;
-                        if visible_idx < visible_lines.len() {
-                            visible_lines[visible_idx] = self.build_button_line(btn, true, content_area.width);
-                        }
+            if let Some(btn) = self.expand_buttons.get(btn_idx) {
+                if btn.line_idx >= self.scroll_offset {
+                    let visible_idx = btn.line_idx - self.scroll_offset;
+                    if visible_idx < visible_lines.len() {
+                        visible_lines[visible_idx] = self.build_button_line(btn, true, content_area.width);
                     }
                 }
             }
@@ -1169,8 +1155,7 @@ impl<'a> DiffView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
-        let prev_hover = self.hovered_button;
-        self.hovered_button = None;
+        let prev = self.focused_button;
 
         if let Some(area) = self.diff_content_area {
             let in_area = col >= area.x
@@ -1178,23 +1163,29 @@ impl<'a> DiffView<'a> {
                 && row >= area.y
                 && row < area.y + area.height;
             if in_area {
-                let local_row = (self.scroll_offset + (row - area.y) as usize) as usize;
-                // Check if mouse is over any button (considering column range)
+                let local_row = self.scroll_offset + (row - area.y) as usize;
+                let mut found = None;
                 for (idx, btn) in self.expand_buttons.iter().enumerate() {
                     if btn.line_idx == local_row {
                         let local_col = col.saturating_sub(area.x);
                         if local_col >= btn.col_start && local_col < btn.col_end {
-                            self.hovered_button = Some(idx);
+                            found = Some(idx);
                             break;
                         }
                     }
                 }
+                // Only update focused_button if we're over a button; leaving the button
+                // area clears the selection so keyboard and mouse stay in sync.
+                if found.is_some() || prev.is_some() {
+                    self.focused_button = found;
+                }
+                return;
             }
         }
 
-        // Only mark needs redraw if hover state changed
-        if prev_hover != self.hovered_button {
-            // The render loop will pick up the new hover state
+        // Mouse left the content area entirely — clear selection
+        if prev.is_some() {
+            self.focused_button = None;
         }
     }
 

@@ -112,6 +112,11 @@ impl SyntaxHighlighter {
     }
 }
 
+pub fn init() {
+    Lazy::force(&SYNTAX_SET);
+    Lazy::force(&THEME_SET);
+}
+
 pub fn list_syntax_themes() -> Vec<&'static str> {
     vec![
         "base16-ocean.dark",

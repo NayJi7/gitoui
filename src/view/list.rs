@@ -45,24 +45,6 @@ impl<'a> ListView<'a> {
                     self.as_mut_list_state().cancel_search();
                     self.clear_search_query();
                 }
-                UserEvent::IgnoreCaseToggle => {
-                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_ignore_case() {
-                        let ctx = Rc::make_mut(&mut self.ctx);
-                        ctx.core_config.search.ignore_case = ignore_case;
-                        ctx.core_config.search.fuzzy = fuzzy;
-                        let _ = save(&ctx.core_config, &ctx.ui_config);
-                    }
-                    self.update_search_query();
-                }
-                UserEvent::FuzzyToggle => {
-                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_fuzzy() {
-                        let ctx = Rc::make_mut(&mut self.ctx);
-                        ctx.core_config.search.ignore_case = ignore_case;
-                        ctx.core_config.search.fuzzy = fuzzy;
-                        let _ = save(&ctx.core_config, &ctx.ui_config);
-                    }
-                    self.update_search_query();
-                }
                 _ => {
                     self.as_mut_list_state().handle_search_input(key);
                     self.update_search_query();
@@ -138,7 +120,7 @@ impl<'a> ListView<'a> {
                     self.copy_commit_hash();
                 }
                 UserEvent::FullCopy => {
-                    self.copy_commit_subject();
+                    self.copy_commit_message();
                 }
                 UserEvent::Search => {
                     self.as_mut_list_state().start_search();
@@ -292,9 +274,9 @@ impl<'a> ListView<'a> {
         self.copy_to_clipboard("Commit SHA".into(), selected.as_str().into());
     }
 
-    fn copy_commit_subject(&self) {
-        if let Some(subject) = self.as_list_state().selected_commit_subject() {
-            self.copy_to_clipboard("Commit subject".into(), subject.into());
+    fn copy_commit_message(&self) {
+        if let Some(commit_message) = self.as_list_state().selected_commit_message() {
+            self.copy_to_clipboard("Commit message".into(), commit_message.into());
         }
     }
 

@@ -277,7 +277,7 @@ fn build_lines(
         (vec![UserEvent::FuzzyToggle], "Toggle fuzzy match".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit hash".into()),
-        (vec![UserEvent::FullCopy], "Copy commit subject".into()),
+        (vec![UserEvent::FullCopy], "Copy commit message".into()),
     ];
     list_helps.extend(user_command_help_items.clone());
     let (list_key_lines, list_value_lines) = build_block_lines("Commit List:", list_helps, color_theme, keybind);
@@ -297,7 +297,7 @@ fn build_lines(
         (vec![UserEvent::GoToParent], "Select parent commit".into()),
         (vec![UserEvent::Refresh], "Refresh".into()),
         (vec![UserEvent::ShortCopy], "Copy commit hash".into()),
-        (vec![UserEvent::FullCopy], "Copy commit subject".into()),
+        (vec![UserEvent::FullCopy], "Copy commit message".into()),
     ];
     detail_helps.extend(user_command_help_items.clone());
     let (detail_key_lines, detail_value_lines) = build_block_lines("Commit Detail:", detail_helps, color_theme, keybind);

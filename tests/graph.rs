@@ -1431,8 +1431,8 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
             .copy_from(&text_image, text_x, y + (height as u32 / 4))
             .unwrap();
 
-        // write subject
-        let text = &commit.subject;
+        // write commit message
+        let text = &commit.commit_message;
         let text_png = text_renderer
             .render_text_to_png_data(text, height / 4, 0x888888)
             .unwrap();

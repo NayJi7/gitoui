@@ -42,7 +42,7 @@ pub struct BranchMetadata {
     pub branch_name: String,
     pub is_remote: bool,
     pub tip_hash: String,
-    pub tip_subject: String,
+    pub tip_commit_message: String,
     pub tip_author: String,
     pub tip_date: String,
     pub upstream: Option<String>,
@@ -220,7 +220,7 @@ impl BranchDetail<'_> {
         label_lines.push(Line::from("      Tip: ").fg(self.ctx.color_theme.detail_label_fg));
         value_lines.push(Line::from(format!(
             "{} {}",
-            self.metadata.tip_hash, self.metadata.tip_subject
+            self.metadata.tip_hash, self.metadata.tip_commit_message
         )));
 
         if !self.metadata.tip_author.is_empty() {

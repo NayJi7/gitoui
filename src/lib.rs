@@ -140,6 +140,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub fn run() -> Result<()> {
     let args = Args::parse();
 
+    highlight::init();
     let ec = event::EventController::init();
     let mut refresh_view_context = None;
     let mut terminal = None;

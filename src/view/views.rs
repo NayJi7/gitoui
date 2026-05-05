@@ -231,6 +231,7 @@ impl<'a> View<'a> {
         commit: Commit,
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
+        head_branch_name: Option<String>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -239,6 +240,7 @@ impl<'a> View<'a> {
             commit,
             changes,
             refs,
+            head_branch_name,
             ctx,
             tx,
         )))

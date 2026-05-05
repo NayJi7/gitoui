@@ -30,7 +30,7 @@ pub struct ColorTheme {
     #[default(RatatuiColor::Cyan)]
     pub list_head_fg: RatatuiColor,
     #[default(RatatuiColor::Rgb(0xb4, 0xbd, 0xe5))]
-    pub list_subject_fg: RatatuiColor,
+    pub list_commit_message_fg: RatatuiColor,
     #[default(RatatuiColor::Cyan)]
     pub list_name_fg: RatatuiColor,
     #[default(RatatuiColor::Yellow)]

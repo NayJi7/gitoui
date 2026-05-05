@@ -136,7 +136,7 @@ pub enum TransientMessage {
 #[derive(Debug, Default, Clone)]
 struct SearchMatch {
     refs: FxHashMap<String, SearchMatchPosition>,
-    subject: Option<SearchMatchPosition>,
+    commit_message: Option<SearchMatchPosition>,
     author_name: Option<SearchMatchPosition>,
     commit_hash: Option<SearchMatchPosition>,
     match_index: usize, // 1-based
@@ -153,7 +153,7 @@ impl SearchMatch {
                     .map(|pos| (r.name().into(), pos))
             })
             .collect();
-        self.subject = matcher.matched_position(&c.subject);
+        self.commit_message = matcher.matched_position(&c.commit_message);
         self.author_name = matcher.matched_position(&c.author_name);
         self.commit_hash = matcher.matched_position(c.commit_hash.as_short_hash());
         self.match_index = 0;
@@ -161,14 +161,14 @@ impl SearchMatch {
 
     fn matched(&self) -> bool {
         !self.refs.is_empty()
-            || self.subject.is_some()
+            || self.commit_message.is_some()
             || self.author_name.is_some()
             || self.commit_hash.is_some()
     }
 
     fn clear(&mut self) {
         self.refs.clear();
-        self.subject = None;
+        self.commit_message = None;
         self.author_name = None;
         self.commit_hash = None;
     }
@@ -547,9 +547,9 @@ impl<'a> CommitListState<'a> {
         &info.commit.commit_hash
     }
 
-    pub fn selected_commit_subject(&self) -> Option<&str> {
+    pub fn selected_commit_message(&self) -> Option<&str> {
         let info = &self.commits[self.current_selected_index()];
-        Some(info.commit.subject.as_str())
+        Some(info.commit.commit_message.as_str())
     }
 
     pub fn is_uncommitted_selected(&self) -> bool {
@@ -975,7 +975,7 @@ impl<'a> StatefulWidget for CommitList<'a> {
 
         let constraints = calc_cell_widths(
             rows_area.width,
-            self.ctx.ui_config.list.subject_min_width,
+            self.ctx.ui_config.list.commit_message_min_width,
             state.graph_area_cell_width(),
             self.ctx.ui_config.list.name_width,
             self.ctx.ui_config.list.date_width,
@@ -991,8 +991,8 @@ impl<'a> StatefulWidget for CommitList<'a> {
                 UserListColumnType::Marker => {
                     self.render_marker(buf, chunks[i], state);
                 }
-                UserListColumnType::Subject => {
-                    self.render_subject(buf, chunks[i], state);
+                UserListColumnType::CommitMessage => {
+                    self.render_commit_message(buf, chunks[i], state);
                 }
                 UserListColumnType::Name => {
                     self.render_name(buf, chunks[i], state);
@@ -1016,7 +1016,7 @@ impl CommitList<'_> {
     fn render_header(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
         let constraints = calc_cell_widths(
             area.width,
-            self.ctx.ui_config.list.subject_min_width,
+            self.ctx.ui_config.list.commit_message_min_width,
             state.graph_area_cell_width(),
             self.ctx.ui_config.list.name_width,
             self.ctx.ui_config.list.date_width,
@@ -1028,7 +1028,7 @@ impl CommitList<'_> {
             let text = match col_type {
                 UserListColumnType::Graph => "Graph",
                 UserListColumnType::Marker => "",
-                UserListColumnType::Subject => "Commit message",
+                UserListColumnType::CommitMessage => "Commit message",
                 UserListColumnType::Name => "Committer",
                 UserListColumnType::Hash => "SHA",
                 UserListColumnType::Date => "Date",
@@ -1106,7 +1106,7 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf)
     }
 
-    fn render_subject(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
+    fn render_commit_message(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
@@ -1120,7 +1120,7 @@ impl CommitList<'_> {
             .enumerate()
         {
             if commit_info.is_uncommitted {
-                items.push(self.render_uncommitted_subject(i, commit_info, state));
+                items.push(self.render_uncommitted_commit_message(i, commit_info, state));
                 continue;
             }
             let (mut spans, hit_areas) = refs_spans(
@@ -1149,25 +1149,25 @@ impl CommitList<'_> {
             let max_width = max_width.saturating_sub(ref_spans_width);
             let commit = commit_info.commit;
             if max_width > ELLIPSIS.len() {
-                let truncate = console::measure_text_width(&commit.subject) > max_width;
-                let subject = if truncate {
-                    console::truncate_str(&commit.subject, max_width, ELLIPSIS).to_string()
+                let truncate = console::measure_text_width(&commit.commit_message) > max_width;
+                let commit_message = if truncate {
+                    console::truncate_str(&commit.commit_message, max_width, ELLIPSIS).to_string()
                 } else {
-                    commit.subject.to_string()
+                    commit.commit_message.to_string()
                 };
 
                 let sub_spans =
-                    if let Some(pos) = state.search_matches[state.offset + i].subject.clone() {
+                    if let Some(pos) = state.search_matches[state.offset + i].commit_message.clone() {
                         highlighted_spans(
-                            subject.into(),
+                            commit_message.into(),
                             pos,
-                            self.ctx.color_theme.list_subject_fg,
+                            self.ctx.color_theme.list_commit_message_fg,
                             Modifier::empty(),
                             &self.ctx.color_theme,
                             truncate,
                         )
                     } else {
-                        vec![subject.fg(self.ctx.color_theme.list_subject_fg)]
+                        vec![commit_message.fg(self.ctx.color_theme.list_commit_message_fg)]
                     };
 
                 spans.extend(sub_spans)
@@ -1306,7 +1306,7 @@ impl CommitList<'_> {
             .enumerate()
     }
 
-    fn render_uncommitted_subject<'a>(
+    fn render_uncommitted_commit_message<'a>(
         &self,
         i: usize,
         commit_info: &CommitInfo,
@@ -1532,15 +1532,12 @@ fn refs_spans<'a>(
         };
         let icon = Span::styled(icon_text, style);
         let icon_width = icon.width();
+
+        // Hit area starts at the icon (icon + name are both clickable)
+        let name_start = current_width;
+
         spans.push(icon);
         current_width += icon_width;
-
-        // Thin space after branch icon
-        if !*is_tag {
-            current_width += 1;
-        }
-
-        let name_start = current_width;
         let name_spans = refs_matches
             .get(display_name.as_str())
             .or_else(|| refs_matches.get(names[0]))
@@ -1627,7 +1624,7 @@ fn highlighted_spans(
 
 fn calc_cell_widths(
     area_width: u16,
-    subject_min_width: u16,
+    commit_message_min_width: u16,
     graph_width: u16,
     name_width: u16,
     date_width: u16,
@@ -1659,18 +1656,18 @@ fn calc_cell_widths(
             UserListColumnType::Date => {
                 date_cell_width = (date_width + pad).max(4);
             }
-            UserListColumnType::Subject => {}
+            UserListColumnType::CommitMessage => {}
         }
     }
 
-    let subject_min_width = subject_min_width.max(14);
+    let commit_message_min_width = commit_message_min_width.max(14);
 
     let mut total_width = graph_cell_width
         + marker_cell_width
         + hash_cell_width
         + name_cell_width
         + date_cell_width
-        + subject_min_width;
+        + commit_message_min_width;
 
     if total_width > area_width {
         total_width = total_width.saturating_sub(name_cell_width);
@@ -1693,7 +1690,7 @@ fn calc_cell_widths(
             UserListColumnType::Marker => {
                 constraints.push(Constraint::Length(marker_cell_width));
             }
-            UserListColumnType::Subject => {
+            UserListColumnType::CommitMessage => {
                 constraints.push(Constraint::Min(0));
             }
             UserListColumnType::Name => {
@@ -1717,14 +1714,14 @@ mod tests {
     #[test]
     fn test_calc_cell_widths_all_columns() {
         let area_width = 80;
-        let subject_min_width = 20;
+        let commit_message_min_width = 20;
         let graph_width = 6;
         let name_width = 10;
         let date_width = 15;
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
-            UserListColumnType::Subject,
+            UserListColumnType::CommitMessage,
             UserListColumnType::Name,
             UserListColumnType::Hash,
             UserListColumnType::Date,
@@ -1732,7 +1729,7 @@ mod tests {
 
         let actual = calc_cell_widths(
             area_width,
-            subject_min_width,
+            commit_message_min_width,
             graph_width,
             name_width,
             date_width,
@@ -1742,7 +1739,7 @@ mod tests {
         let expected = vec![
             Constraint::Length(6),  // Graph
             Constraint::Length(1),  // Marker
-            Constraint::Min(0),     // Subject
+            Constraint::Min(0),     // Message
             Constraint::Length(12), // Name (10 + 2 pad)
             Constraint::Length(9),  // Hash (7 + 2 pad)
             Constraint::Length(17), // Date (15 + 2 pad)
@@ -1753,14 +1750,14 @@ mod tests {
     #[test]
     fn test_calc_cell_width_all_columns_small_area_remove_name_date_hash() {
         let area_width = 30;
-        let subject_min_width = 20;
+        let commit_message_min_width = 20;
         let graph_width = 6;
         let name_width = 10;
         let date_width = 15;
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
-            UserListColumnType::Subject,
+            UserListColumnType::CommitMessage,
             UserListColumnType::Name,
             UserListColumnType::Hash,
             UserListColumnType::Date,
@@ -1768,19 +1765,19 @@ mod tests {
 
         let actual = calc_cell_widths(
             area_width,
-            subject_min_width,
+            commit_message_min_width,
             graph_width,
             name_width,
             date_width,
             &columns,
         );
 
-        // Graph + Marker + Subject + Hash = 6 + 1 + 20 + 9 = 36 > 30
+        // Graph + Marker + Message + Hash = 6 + 1 + 20 + 9 = 36 > 30
         // => Name, Date, and Hash are removed
         let expected = vec![
             Constraint::Length(6), // Graph
             Constraint::Length(1), // Marker
-            Constraint::Min(0),    // Subject
+            Constraint::Min(0),    // Message
             Constraint::Length(0), // Name removed
             Constraint::Length(0), // Hash removed
             Constraint::Length(0), // Date removed
@@ -1791,14 +1788,14 @@ mod tests {
     #[test]
     fn test_calc_cell_width_all_columns_small_area_remove_name_date() {
         let area_width = 40;
-        let subject_min_width = 20;
+        let commit_message_min_width = 20;
         let graph_width = 6;
         let name_width = 10;
         let date_width = 15;
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
-            UserListColumnType::Subject,
+            UserListColumnType::CommitMessage,
             UserListColumnType::Name,
             UserListColumnType::Hash,
             UserListColumnType::Date,
@@ -1806,20 +1803,20 @@ mod tests {
 
         let actual = calc_cell_widths(
             area_width,
-            subject_min_width,
+            commit_message_min_width,
             graph_width,
             name_width,
             date_width,
             &columns,
         );
 
-        // Graph + Marker + Subject + Hash = 6 + 1 + 20 + 9 = 36
-        // Graph + Marker + Subject + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 > 40
+        // Graph + Marker + Message + Hash = 6 + 1 + 20 + 9 = 36
+        // Graph + Marker + Message + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 > 40
         // => Name and Date are removed
         let expected = vec![
             Constraint::Length(6), // Graph
             Constraint::Length(1), // Marker
-            Constraint::Min(0),    // Subject
+            Constraint::Min(0),    // Message
             Constraint::Length(0), // Name removed
             Constraint::Length(9), // Hash (7 + 2 pad)
             Constraint::Length(0), // Date removed
@@ -1830,14 +1827,14 @@ mod tests {
     #[test]
     fn test_calc_cell_width_all_columns_small_area_remove_name() {
         let area_width = 60;
-        let subject_min_width = 20;
+        let commit_message_min_width = 20;
         let graph_width = 6;
         let name_width = 10;
         let date_width = 15;
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
-            UserListColumnType::Subject,
+            UserListColumnType::CommitMessage,
             UserListColumnType::Name,
             UserListColumnType::Hash,
             UserListColumnType::Date,
@@ -1845,20 +1842,20 @@ mod tests {
 
         let actual = calc_cell_widths(
             area_width,
-            subject_min_width,
+            commit_message_min_width,
             graph_width,
             name_width,
             date_width,
             &columns,
         );
 
-        // Graph + Marker + Subject + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 <= 60
-        // Graph + Marker + Subject + Name + Date + Hash = 6 + 1 + 20 + 12 + 17 + 9 = 65 > 60
+        // Graph + Marker + Message + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 <= 60
+        // Graph + Marker + Message + Name + Date + Hash = 6 + 1 + 20 + 12 + 17 + 9 = 65 > 60
         // => Name is removed
         let expected = vec![
             Constraint::Length(6),  // Graph
             Constraint::Length(1),  // Marker
-            Constraint::Min(0),     // Subject
+            Constraint::Min(0),     // Message
             Constraint::Length(0),  // Name removed
             Constraint::Length(9),  // Hash (7 + 2 pad)
             Constraint::Length(17), // Date (15 + 2 pad)
@@ -1869,20 +1866,20 @@ mod tests {
     #[test]
     fn test_calc_cell_width_columns_order() {
         let area_width = 80;
-        let subject_min_width = 20;
+        let commit_message_min_width = 20;
         let graph_width = 6;
         let name_width = 10;
         let date_width = 15;
         let columns = vec![
             UserListColumnType::Date,
-            UserListColumnType::Subject,
+            UserListColumnType::CommitMessage,
             UserListColumnType::Hash,
             UserListColumnType::Graph,
         ];
 
         let actual = calc_cell_widths(
             area_width,
-            subject_min_width,
+            commit_message_min_width,
             graph_width,
             name_width,
             date_width,
@@ -1891,7 +1888,7 @@ mod tests {
 
         let expected = vec![
             Constraint::Length(17), // Date (15 + 2 pad)
-            Constraint::Min(0),     // Subject
+            Constraint::Min(0),     // Message
             Constraint::Length(9),  // Hash (7 + 2 pad)
             Constraint::Length(6),  // Graph
         ];
