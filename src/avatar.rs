@@ -51,24 +51,28 @@ impl AvatarManager {
         if path.exists() {
             return;
         }
-        let hash = format!("{:x}", Md5::digest(email.trim().to_lowercase()));
-        let url = format!("https://www.gravatar.com/avatar/{hash}?s=128&d=404");
+        let url = format!("https://unavatar.io/{}", email.trim().to_lowercase());
+        let path_clone = path.clone();
         thread::spawn(move || {
             let result = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(5))
                 .build();
             let Ok(client) = result else {
-                let _ = fs::write(&path, &[]);
+                let _ = fs::write(&path_clone, &[]);
                 return;
             };
             match client.get(&url).send() {
                 Ok(resp) if resp.status().is_success() => {
                     if let Ok(bytes) = resp.bytes() {
-                        let _ = fs::write(&path, &bytes);
+                        if bytes.len() > 100 {
+                            let _ = fs::write(&path_clone, &bytes);
+                        } else {
+                            let _ = fs::write(&path_clone, &[]);
+                        }
                     }
                 }
                 _ => {
-                    let _ = fs::write(&path, &[]);
+                    let _ = fs::write(&path_clone, &[]);
                 }
             }
         });
