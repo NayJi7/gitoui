@@ -12,6 +12,7 @@ pub struct BranchSegment {
     pub target_pos_y: usize,
     pub color_index: usize,
     pub is_branch: bool,
+    pub is_uncommitted: bool,
 }
 
 #[derive(Debug)]
@@ -118,7 +119,7 @@ impl LayoutVertex {
 #[derive(Debug)]
 struct LayoutBranch {
     colour: usize,
-    lines: Vec<(Pt, Pt)>,   // (p1=newer, p2=older) in grid coords
+    lines: Vec<(Pt, Pt, bool)>,   // (p1=newer, p2=older, is_uncommitted) in grid coords
     end: usize,
 }
 
@@ -126,8 +127,8 @@ impl LayoutBranch {
     fn new(colour: usize) -> Self {
         Self { colour, lines: Vec::new(), end: 0 }
     }
-    fn add_line(&mut self, p1: Pt, p2: Pt) {
-        self.lines.push((p1, p2));
+    fn add_line(&mut self, p1: Pt, p2: Pt, is_uncommitted: bool) {
+        self.lines.push((p1, p2, is_uncommitted));
     }
     fn set_end(&mut self, end: usize) {
         self.end = end;
@@ -236,7 +237,7 @@ fn determine_path(
             }
             let cur_pt = conn_pt.unwrap_or_else(|| { vertices[i].next_point() });
 
-            branches[parent_branch_id].add_line(last_pt, cur_pt);
+            branches[parent_branch_id].add_line(last_pt, cur_pt, false);
             { vertices[i].register_unavailable_point(cur_pt.x, parent_id, parent_branch_id); }
             last_pt = cur_pt;
 
@@ -281,7 +282,8 @@ fn determine_path(
                 vertices[i].next_point()
             };
 
-            branches[branch_id].add_line(last_pt, cur_pt);
+            let line_is_uncommitted = !vertices[cur_vertex_id].is_committed;
+            branches[branch_id].add_line(last_pt, cur_pt, line_is_uncommitted);
             vertices[i].register_unavailable_point(cur_pt.x, cur_parent_id, branch_id);
             last_pt = cur_pt;
 
@@ -369,13 +371,14 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
     // Convention: source = older commit (higher row index), target = newer (lower row index)
     // Each branch line is (p1=newer, p2=older)
     let branch_segments: Vec<BranchSegment> = branches.iter().flat_map(|b| {
-        b.lines.iter().map(|&(p1, p2)| BranchSegment {
+        b.lines.iter().map(|&(p1, p2, is_uncommitted)| BranchSegment {
             source_pos_x: p2.x,
             target_pos_x: p1.x,
             source_pos_y: p2.y,
             target_pos_y: p1.y,
             color_index: b.colour,
             is_branch: true,
+            is_uncommitted,
         })
     }).collect();
 
@@ -453,4 +456,70 @@ fn build_edges(commits_len: usize, branch_segments: &[BranchSegment]) -> Vec<Vec
     }
 
     edges
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, FixedOffset};
+    use rustc_hash::FxHashMap;
+
+    use crate::git::{Commit, CommitHash, CommitType, Head, Repository};
+
+    use super::*;
+
+    fn commit(hash: &str, parents: Vec<&str>, commit_type: CommitType) -> Commit {
+        Commit {
+            commit_hash: CommitHash::from(hash),
+            author_date: DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
+            committer_date: DateTime::<FixedOffset>::parse_from_rfc3339(
+                "2024-01-01T00:00:00+00:00",
+            )
+            .unwrap(),
+            subject: hash.to_string(),
+            parent_commit_hashes: parents.into_iter().map(CommitHash::from).collect(),
+            commit_type,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn uncommitted_layout_marks_only_segments_before_head() {
+        let commits = vec![
+            commit("uncommitted", vec!["head"], CommitType::Uncommitted),
+            commit("head", vec!["parent"], CommitType::Commit),
+            commit("parent", vec![], CommitType::Commit),
+        ];
+        let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect::<Vec<_>>();
+        let commit_map = commits
+            .into_iter()
+            .map(|c| (c.commit_hash.clone(), c))
+            .collect::<FxHashMap<_, _>>();
+        let repository = Repository::new(
+            Default::default(),
+            commit_map,
+            FxHashMap::default(),
+            FxHashMap::default(),
+            FxHashMap::default(),
+            Head::Detached { target: CommitHash::from("head") },
+            commit_hashes,
+            None,
+        );
+
+        let graph = calc_graph(&repository);
+
+        let segment_to_head = graph
+            .branch_segments
+            .iter()
+            .find(|s| s.target_pos_y == 0 && s.source_pos_y == 1)
+            .expect("expected uncommitted to HEAD segment");
+        assert!(segment_to_head.is_uncommitted);
+
+        let segment_after_head = graph
+            .branch_segments
+            .iter()
+            .find(|s| s.target_pos_y == 1 && s.source_pos_y == 2)
+            .expect("expected HEAD to parent segment");
+        assert!(!segment_after_head.is_uncommitted);
+    }
+
 }
