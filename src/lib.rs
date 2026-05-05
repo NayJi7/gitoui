@@ -225,6 +225,7 @@ pub fn run() -> Result<()> {
             &graph,
             &graph_color_set,
             cell_width_type,
+            graph_style,
             initial_selection,
             ctx.clone(),
             &ec,

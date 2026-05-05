@@ -279,9 +279,15 @@ fn build_single_graph_row_image(
     const UNCOMMITTED_COLOR: image::Rgba<u8> = image::Rgba([0x80, 0x80, 0x80, 0xff]);
     let commit_color = if is_uncommitted {
         UNCOMMITTED_COLOR
-    } else {
-        let color_index = graph.commit_color_map.get(commit_hash).copied().unwrap_or(pos_x);
+    } else if graph_style == GraphStyle::Smooth {
+        let color_index = graph
+            .commit_color_map
+            .get(commit_hash)
+            .copied()
+            .unwrap_or(pos_x);
         image_params.edge_color(color_index)
+    } else {
+        image_params.edge_color(pos_x)
     };
 
     // For rows between uncommitted (pos_y=0) and HEAD, color edges on the
@@ -828,13 +834,18 @@ pub fn calc_graph_row_image(
     }
 
     // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
+    let node_color = if graph_style == GraphStyle::Smooth || is_uncommitted || is_stash {
+        commit_color
+    } else {
+        image_params.edge_color(commit_pos_x)
+    };
     if head {
         draw_head_commit(
             &mut img_buf,
             commit_pos_x,
             image_params,
             drawing_pixels,
-            commit_color,
+            node_color,
         );
     } else if is_stash {
         draw_stash_commit(
@@ -842,7 +853,7 @@ pub fn calc_graph_row_image(
             commit_pos_x,
             image_params,
             drawing_pixels,
-            commit_color,
+            node_color,
         );
     } else if is_uncommitted {
         draw_hollow_circle(
@@ -850,7 +861,7 @@ pub fn calc_graph_row_image(
             commit_pos_x,
             image_params,
             drawing_pixels,
-            commit_color,
+            node_color,
         );
     } else {
         draw_commit_circle(
@@ -858,7 +869,7 @@ pub fn calc_graph_row_image(
             commit_pos_x,
             image_params,
             drawing_pixels,
-            commit_color,
+            node_color,
         );
     }
 
@@ -1521,6 +1532,38 @@ mod tests {
             *img.get_pixel(center_x, center_y),
             image_params.edge_color(0),
             "commit circles should follow the branch color, not the lane color"
+        );
+    }
+
+    #[test]
+    fn rounded_commit_circle_uses_column_color() {
+        let mut image_params = test_image_params();
+        image_params.circle_edge_color = image::Rgba([0x00, 0x00, 0x00, 0x00]);
+        let drawing_pixels = DrawingPixels::new(&image_params);
+
+        let row = calc_graph_row_image(
+            1,
+            2,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Rounded,
+            &[],
+            0,
+            false,
+            false,
+            false,
+            image_params.edge_color(0),
+            None,
+        );
+        let img = decode_graph_row(&row);
+        let center_x = image_params.width as u32 + image_params.width as u32 / 2;
+        let center_y = image_params.height as u32 / 2;
+
+        assert_eq!(
+            *img.get_pixel(center_x, center_y),
+            image_params.edge_color(1),
+            "rounded nodes should keep legacy lane-based colors"
         );
     }
 

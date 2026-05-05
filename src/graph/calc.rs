@@ -397,8 +397,9 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
         if seg.target_pos_x > max_pos_x { max_pos_x = seg.target_pos_x; }
     }
 
-    // 5. Build edges for Rounded/Angular styles
-    let edges = build_edges(n, &branch_segments);
+    // 5. Build legacy row edges for Rounded/Angular styles. Smooth uses branch_segments.
+    let (edges, legacy_max_pos_x) = build_legacy_edges(&commit_pos_map, &commits, repository);
+    max_pos_x = max_pos_x.max(legacy_max_pos_x);
 
     Graph {
         commits,
@@ -410,61 +411,186 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
     }
 }
 
-fn build_edges(commits_len: usize, branch_segments: &[BranchSegment]) -> Vec<Vec<Edge>> {
-    let mut edges: Vec<Vec<Edge>> = vec![vec![]; commits_len];
+#[derive(Debug, Clone)]
+struct WrappedEdge<'a> {
+    edge: Edge,
+    edge_parent_hash: &'a CommitHash,
+}
 
-    for seg in branch_segments {
-        // source = older commit (higher row index), target = newer (lower row index)
-        let (src_x, src_y) = (seg.source_pos_x, seg.source_pos_y);
-        let (tgt_x, tgt_y) = (seg.target_pos_x, seg.target_pos_y);
-        let color_x = seg.color_index;
+impl<'a> WrappedEdge<'a> {
+    fn new(edge_type: EdgeType, pos_x: usize, line_pos_x: usize, edge_parent_hash: &'a CommitHash) -> Self {
+        Self { edge: Edge::new(edge_type, pos_x, line_pos_x), edge_parent_hash }
+    }
+}
 
-        if src_y >= commits_len || tgt_y >= commits_len {
-            continue; // safety: skip out-of-bound segments
-        }
+fn build_legacy_edges<'a>(
+    commit_pos_map: &CommitPosMap<'a>,
+    commits: &[&'a Commit],
+    repository: &'a Repository,
+) -> (Vec<Vec<Edge>>, usize) {
+    let mut max_pos_x = 0;
+    let mut edges: Vec<Vec<WrappedEdge>> = vec![vec![]; commits.len()];
 
-        if src_x == tgt_x {
-            // Straight vertical connection
-            if src_y < commits_len { edges[src_y].push(Edge::new(EdgeType::Up, src_x, color_x)); }
-            for y in (tgt_y + 1)..src_y {
-                edges[y].push(Edge::new(EdgeType::Vertical, src_x, color_x));
-            }
-            if tgt_y < commits_len { edges[tgt_y].push(Edge::new(EdgeType::Down, src_x, color_x)); }
-        } else {
-            // Diagonal: horizontal exit at source row, vertical on target column, entry at target row
-            if src_x > tgt_x {
-                // Source is to the right → branch going left-up
-                edges[src_y].push(Edge::new(EdgeType::Left, src_x, color_x));
-                for x in (tgt_x + 1)..src_x {
-                    edges[src_y].push(Edge::new(EdgeType::Horizontal, x, color_x));
+    for commit in commits {
+        let (pos_x, pos_y) = commit_pos_map[&commit.commit_hash];
+        let hash = &commit.commit_hash;
+
+        for child_hash in repository.children_hash(hash) {
+            let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
+
+            if pos_x == child_pos_x {
+                edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
+                for y in ((child_pos_y + 1)..pos_y).rev() {
+                    edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
                 }
-                edges[src_y].push(Edge::new(EdgeType::LeftBottom, tgt_x, color_x));
+                edges[child_pos_y].push(WrappedEdge::new(EdgeType::Down, pos_x, pos_x, hash));
             } else {
-                // Source is to the left → branch going right-up
-                edges[src_y].push(Edge::new(EdgeType::Right, src_x, color_x));
-                for x in (src_x + 1)..tgt_x {
-                    edges[src_y].push(Edge::new(EdgeType::Horizontal, x, color_x));
+                let child_first_parent_hash = &commits[child_pos_y].parent_commit_hashes[0];
+                if *child_first_parent_hash == *hash {
+                    if pos_x < child_pos_x {
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::Right, pos_x, child_pos_x, hash));
+                        for x in (pos_x + 1)..child_pos_x {
+                            edges[pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, child_pos_x, hash));
+                        }
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::RightBottom, child_pos_x, child_pos_x, hash));
+                    } else {
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::Left, pos_x, child_pos_x, hash));
+                        for x in (child_pos_x + 1)..pos_x {
+                            edges[pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, child_pos_x, hash));
+                        }
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::LeftBottom, child_pos_x, child_pos_x, hash));
+                    }
+                    for y in ((child_pos_y + 1)..pos_y).rev() {
+                        edges[y].push(WrappedEdge::new(EdgeType::Vertical, child_pos_x, child_pos_x, hash));
+                    }
+                    edges[child_pos_y].push(WrappedEdge::new(EdgeType::Down, child_pos_x, child_pos_x, hash));
                 }
-                edges[src_y].push(Edge::new(EdgeType::RightBottom, tgt_x, color_x));
             }
-            // Vertical segment on target column between the two commits
-            for y in (tgt_y + 1)..src_y {
-                edges[y].push(Edge::new(EdgeType::Vertical, tgt_x, color_x));
-            }
-            // Entry at target row
-            if tgt_y < commits_len {
-                edges[tgt_y].push(Edge::new(EdgeType::Down, tgt_x, color_x));
-            }
+        }
+
+        if max_pos_x < pos_x {
+            max_pos_x = pos_x;
+        }
+
+        if !commit.parent_commit_hashes.is_empty() && repository.commit(&commit.parent_commit_hashes[0]).is_none() {
+            edges[pos_y].push(WrappedEdge::new(EdgeType::Down, pos_x, pos_x, hash));
+            ((pos_y + 1)..commits.len()).for_each(|y| {
+                edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
+            });
         }
     }
 
-    // Dedup each row
-    for row in &mut edges {
-        row.sort_by_key(|e| (e.pos_x, e.edge_type));
-        row.dedup();
+    for commit in commits {
+        let (pos_x, pos_y) = commit_pos_map[&commit.commit_hash];
+        let hash = &commit.commit_hash;
+
+        for child_hash in repository.children_hash(hash) {
+            let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
+
+            if pos_x != child_pos_x {
+                let child_first_parent_hash = &commits[child_pos_y].parent_commit_hashes[0];
+                if *child_first_parent_hash != *hash {
+                    let mut overlap = false;
+                    let mut new_pos_x = pos_x;
+
+                    let mut skip_judge_overlap = true;
+                    for y in (child_pos_y + 1)..pos_y {
+                        let processing_commit_pos_x = commit_pos_map.get(&commits[y].commit_hash).unwrap().0;
+                        if processing_commit_pos_x == new_pos_x {
+                            skip_judge_overlap = false;
+                            break;
+                        }
+                        if edges[y]
+                            .iter()
+                            .filter(|e| e.edge.pos_x == pos_x)
+                            .filter(|e| matches!(e.edge.edge_type, EdgeType::Vertical))
+                            .any(|e| e.edge_parent_hash != hash)
+                        {
+                            skip_judge_overlap = false;
+                            break;
+                        }
+                    }
+
+                    if !skip_judge_overlap {
+                        for y in (child_pos_y + 1)..pos_y {
+                            let processing_commit_pos_x = commit_pos_map.get(&commits[y].commit_hash).unwrap().0;
+                            if processing_commit_pos_x == new_pos_x {
+                                overlap = true;
+                                if new_pos_x < processing_commit_pos_x + 1 {
+                                    new_pos_x = processing_commit_pos_x + 1;
+                                }
+                            }
+                            for edge in &edges[y] {
+                                if edge.edge.pos_x >= new_pos_x
+                                    && edge.edge_parent_hash != hash
+                                    && matches!(edge.edge.edge_type, EdgeType::Vertical)
+                                {
+                                    overlap = true;
+                                    if new_pos_x < edge.edge.pos_x + 1 {
+                                        new_pos_x = edge.edge.pos_x + 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if overlap {
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::Right, pos_x, pos_x, hash));
+                        for x in (pos_x + 1)..new_pos_x {
+                            edges[pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
+                        }
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::RightBottom, new_pos_x, pos_x, hash));
+                        for y in ((child_pos_y + 1)..pos_y).rev() {
+                            edges[y].push(WrappedEdge::new(EdgeType::Vertical, new_pos_x, pos_x, hash));
+                        }
+                        edges[child_pos_y].push(WrappedEdge::new(EdgeType::RightTop, new_pos_x, pos_x, hash));
+                        for x in (child_pos_x + 1)..new_pos_x {
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
+                        }
+                        edges[child_pos_y].push(WrappedEdge::new(EdgeType::Right, child_pos_x, pos_x, hash));
+
+                        if max_pos_x < new_pos_x {
+                            max_pos_x = new_pos_x;
+                        }
+                    } else {
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
+                        for y in ((child_pos_y + 1)..pos_y).rev() {
+                            edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
+                        }
+                        if pos_x < child_pos_x {
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::LeftTop, pos_x, pos_x, hash));
+                            for x in (pos_x + 1)..child_pos_x {
+                                edges[child_pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
+                            }
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::Left, child_pos_x, pos_x, hash));
+                        } else {
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::RightTop, pos_x, pos_x, hash));
+                            for x in (child_pos_x + 1)..pos_x {
+                                edges[child_pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
+                            }
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::Right, child_pos_x, pos_x, hash));
+                        }
+                    }
+                }
+            }
+        }
+
+        if max_pos_x < pos_x {
+            max_pos_x = pos_x;
+        }
     }
 
-    edges
+    let edges = edges
+        .into_iter()
+        .map(|es| {
+            let mut es: Vec<Edge> = es.into_iter().map(|e| e.edge).collect();
+            es.sort_by_key(|e| (e.associated_line_pos_x, e.pos_x, e.edge_type));
+            es.dedup();
+            es
+        })
+        .collect();
+
+    (edges, max_pos_x)
 }
 
 #[cfg(test)]
@@ -529,6 +655,50 @@ mod tests {
             .find(|s| s.target_pos_y == 1 && s.source_pos_y == 2)
             .expect("expected HEAD to parent segment");
         assert!(!segment_after_head.is_uncommitted);
+    }
+
+    #[test]
+    fn non_smooth_edges_route_merge_into_child_row() {
+        let commits = vec![
+            commit("merge", vec!["main", "side"], CommitType::Commit),
+            commit("main", vec!["root"], CommitType::Commit),
+            commit("side", vec!["root"], CommitType::Commit),
+            commit("root", vec![], CommitType::Commit),
+        ];
+        let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect::<Vec<_>>();
+        let commit_map = commits
+            .into_iter()
+            .map(|c| (c.commit_hash.clone(), c))
+            .collect::<FxHashMap<_, _>>();
+        let parents_map = FxHashMap::from_iter([
+            (CommitHash::from("merge"), vec![CommitHash::from("main"), CommitHash::from("side")]),
+            (CommitHash::from("main"), vec![CommitHash::from("root")]),
+            (CommitHash::from("side"), vec![CommitHash::from("root")]),
+        ]);
+        let children_map = FxHashMap::from_iter([
+            (CommitHash::from("main"), vec![CommitHash::from("merge")]),
+            (CommitHash::from("side"), vec![CommitHash::from("merge")]),
+            (CommitHash::from("root"), vec![CommitHash::from("main"), CommitHash::from("side")]),
+        ]);
+        let repository = Repository::new(
+            Default::default(),
+            commit_map,
+            parents_map,
+            children_map,
+            FxHashMap::default(),
+            Head::Detached { target: CommitHash::from("merge") },
+            commit_hashes,
+            None,
+        );
+
+        let graph = calc_graph(&repository);
+
+        assert!(
+            graph.edges[0]
+                .iter()
+                .any(|edge| matches!(edge.edge_type, EdgeType::Horizontal | EdgeType::Left | EdgeType::Right)),
+            "merge rows need horizontal entry edges for rounded/angular renderers"
+        );
     }
 
 }
