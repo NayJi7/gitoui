@@ -219,8 +219,8 @@ impl ImageParams {
     pub fn new(graph_color_set: &GraphColorSet, cell_width_type: CellWidthType) -> Self {
         let (width, height, line_width, circle_inner_radius, circle_outer_radius) =
             match cell_width_type {
-                CellWidthType::Double => (50, 50, 5, 10, 13),
-                CellWidthType::Single => (25, 50, 3, 7, 10),
+                CellWidthType::Double => (50, 56, 5, 11, 14),
+                CellWidthType::Single => (25, 56, 3, 7, 10),
             };
         let edge_colors = graph_color_set
             .colors
@@ -328,6 +328,7 @@ type Pixels = FxHashSet<(i32, i32)>;
 pub struct DrawingPixels {
     circle: Pixels,
     circle_edge: Pixels,
+    circle_gap: Pixels,
     vertical_edge: Pixels,
     horizontal_edge: Pixels,
     up_edge: Pixels,
@@ -344,6 +345,7 @@ impl DrawingPixels {
     pub fn new(image_params: &ImageParams) -> Self {
         let circle = calc_commit_circle_drawing_pixels(image_params);
         let circle_edge = calc_circle_edge_drawing_pixels(image_params);
+        let circle_gap = calc_circle_gap_drawing_pixels(image_params);
         let vertical_edge = calc_vertical_edge_drawing_pixels(image_params);
         let horizontal_edge = calc_horizontal_edge_drawing_pixels(image_params);
         let up_edge = calc_up_edge_drawing_pixels(image_params);
@@ -358,6 +360,7 @@ impl DrawingPixels {
         Self {
             circle,
             circle_edge,
+            circle_gap,
             vertical_edge,
             horizontal_edge,
             up_edge,
@@ -379,7 +382,14 @@ fn calc_commit_circle_drawing_pixels(image_params: &ImageParams) -> Pixels {
 fn calc_circle_edge_drawing_pixels(image_params: &ImageParams) -> Pixels {
     let inner = calc_circle_drawing_pixels(image_params, image_params.circle_inner_radius as i32);
     let outer = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
+    outer.difference(&inner).cloned().collect()
+}
 
+// 2-pixel ring just outside the circle — drawn with background color to create
+// the small visual gap between segments and commit circles.
+fn calc_circle_gap_drawing_pixels(image_params: &ImageParams) -> Pixels {
+    let inner = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
+    let outer = calc_circle_drawing_pixels(image_params, (image_params.circle_outer_radius + 2) as i32);
     outer.difference(&inner).cloned().collect()
 }
 
@@ -747,11 +757,22 @@ pub fn calc_graph_row_image(
             }
         }
         GraphStyle::Smooth => {
-            // VS Code Git Graph style: draw ONLY Bézier curves for all connections.
-            // No angular edges at all — every parent-child connection is a smooth curve.
-            // Sort by rightmost column so rightward curves are drawn last (on top).
+            // Identify uncommitted lane segments by column: purely vertical segments on
+            // lane_x within [0, head_y].  These are drawn first (behind) in gray.
+            // All other segments are drawn on top in their natural branch color.
+            let is_uncomm_lane = |s: &&crate::graph::calc::BranchSegment| -> bool {
+                if let Some((lane_x, head_y, _)) = uncommitted_lane {
+                    s.source_pos_x == lane_x
+                        && s.target_pos_x == lane_x
+                        && s.source_pos_y <= head_y
+                } else {
+                    false
+                }
+            };
+
             let mut segs: Vec<_> = branch_segments.iter().collect();
-            segs.sort_by_key(|s| s.source_pos_x.max(s.target_pos_x));
+            // Uncommitted lane segments first (behind); then sort by rightmost column.
+            segs.sort_by_key(|s| (!is_uncomm_lane(s) as usize, s.source_pos_x.max(s.target_pos_x)));
 
             for seg in segs {
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
@@ -761,15 +782,8 @@ pub fn calc_graph_row_image(
                 }
                 let color_override = if is_uncommitted {
                     Some(commit_color)
-                } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-                    if pos_y <= head_y
-                        && (seg.source_pos_y == 0 || seg.target_pos_y == 0)
-                        && (seg.source_pos_x == lane_x || seg.target_pos_x == lane_x)
-                    {
-                        Some(lane_color)
-                    } else {
-                        None
-                    }
+                } else if is_uncomm_lane(&seg) {
+                    uncommitted_lane.map(|(_, _, c)| c)
                 } else {
                     None
                 };
@@ -785,18 +799,13 @@ pub fn calc_graph_row_image(
         }
     }
 
-    // Draw grey overlay for the uncommitted→HEAD segment.
-    // This covers the vertical edges on the uncommitted column with grey,
-    // without bleeding into other paths that share the column.
-    if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-        draw_uncommitted_overlay(
-            &mut img_buf,
-            lane_x,
-            head_y,
-            pos_y,
-            image_params,
-            lane_color,
-        );
+    // Overlay for Rounded/Angular only (Smooth handles coloring via color_override above).
+    if graph_style != GraphStyle::Smooth {
+        if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
+            draw_uncommitted_overlay(
+                &mut img_buf, lane_x, head_y, pos_y, image_params, lane_color,
+            );
+        }
     }
 
     // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
@@ -900,6 +909,15 @@ fn draw_hollow_circle(
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let bg = image_params.background_color;
 
+    // Gap ring
+    for (x, y) in &drawing_pixels.circle_gap {
+        let px = (*x + x_offset) as u32;
+        let py = *y as u32;
+        if px < img_buf.width() && py < img_buf.height() {
+            *img_buf.get_pixel_mut(px, py) = bg;
+        }
+    }
+
     // Fill the interior with background color so underlying curves are hidden.
     for (x, y) in &drawing_pixels.circle {
         let x = (*x + x_offset) as u32;
@@ -926,6 +944,15 @@ fn draw_head_commit(
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let color = image_params.edge_color(circle_pos_x);
     let bg = image_params.background_color;
+
+    // Gap ring
+    for (x, y) in &drawing_pixels.circle_gap {
+        let px = (*x + x_offset) as u32;
+        let py = *y as u32;
+        if px < img_buf.width() && py < img_buf.height() {
+            *img_buf.get_pixel_mut(px, py) = bg;
+        }
+    }
 
     // Fill the interior with background color so underlying curves are hidden.
     for (x, y) in &drawing_pixels.circle {
@@ -965,6 +992,15 @@ fn draw_commit_circle(
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let color = image_params.edge_color(circle_pos_x);
+
+    // Gap ring: 2px of background color just outside the circle
+    for (x, y) in &drawing_pixels.circle_gap {
+        let px = (*x + x_offset) as u32;
+        let py = *y as u32;
+        if px < img_buf.width() && py < img_buf.height() {
+            *img_buf.get_pixel_mut(px, py) = image_params.background_color;
+        }
+    }
 
     for (x, y) in &drawing_pixels.circle {
         let x = (*x + x_offset) as u32;
@@ -1225,10 +1261,9 @@ fn draw_smooth_bezier_segment(
     let p3x = segment.source_pos_x as f32 * cell_width + cell_width / 2.0;
     let p3y = segment.source_pos_y as f32 * cell_height + cell_height / 2.0;
 
-    // VS Code Git Graph S-curve: control points overshoot vertically.
-    // Large overshoot (d = distance * 0.9) creates a long vertical base segment
-    // before the curve transitions, matching VS Code's late-S appearance.
-    // For vertical segments, d = 0 (straight line).
+    // S-curve: d scales with total segment height so the Bezier tangent exits
+    // each circle vertically for a long visible straight portion before curving.
+    // For vertical segments (same column), no curve needed.
     let is_vertical = segment.source_pos_x == segment.target_pos_x;
     let pixel_distance = (p0y - p3y).abs();
     let d = if is_vertical {
