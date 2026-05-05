@@ -265,6 +265,10 @@ pub struct CommitListState<'a> {
     pub hovered_branch: Option<String>,
     pub hovered_tag: Option<String>,
     pub hovered_row: Option<usize>,
+
+    // Tracks the (offset, height, area) of the last graph render so we can skip
+    // re-rendering graph image cells when visible commits haven't changed.
+    graph_render_state: Option<(usize, usize, Rect)>,
 }
 
 impl<'a> CommitListState<'a> {
@@ -314,6 +318,7 @@ impl<'a> CommitListState<'a> {
             hovered_branch: None,
             hovered_tag: None,
             hovered_row: None,
+            graph_render_state: None,
         }
     }
 
@@ -348,6 +353,7 @@ impl<'a> CommitListState<'a> {
             }
             self.graph_image_manager
                 .set_head_commit_hash(current_head_hash.as_ref());
+            self.graph_render_state = None; // HEAD appearance changed
         }
 
         self.commits
@@ -366,6 +372,7 @@ impl<'a> CommitListState<'a> {
 
     pub fn clear_graph_images(&mut self) {
         self.graph_image_manager.clear_prepared_images();
+        self.graph_render_state = None; // images cleared, must re-render
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
@@ -1046,27 +1053,42 @@ impl CommitList<'_> {
         }
     }
 
-    fn render_graph(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
+    fn render_graph(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
         if area.is_empty() {
             return;
         }
-        self.rendering_commit_info_iter(state)
-            .for_each(|(i, commit_info)| {
-                let prepared_image = state.prepared_image(commit_info, i);
-                let max_graph_width = area.width.saturating_sub(1) as usize;
+
+        let key = (state.offset, state.height, area);
+        if state.graph_render_state == Some(key) {
+            // Visible commits and graph area unchanged: write skip cells so ratatui never
+            // emits escape sequences for graph positions. Terminal retains the previous render.
+            for i in 0..state.height.min(area.height as usize) {
                 let y = area.top() + i as u16;
-                for (x, image_cell) in prepared_image
-                    .cells()
-                    .iter()
-                    .take(max_graph_width)
-                    .enumerate()
-                {
-                    let cell = &mut buf[(area.left() + x as u16, y)];
-                    cell.set_symbol(image_cell.symbol());
-                    cell.set_style(image_cell.style());
-                    cell.set_skip(image_cell.skip());
+                for x in area.left()..area.right() {
+                    buf[(x, y)].set_skip(true);
                 }
-            });
+            }
+            return;
+        }
+
+        // Render real graph image cells
+        {
+            let state_ref: &CommitListState = state;
+            let max_graph_width = area.width.saturating_sub(1) as usize;
+            self.rendering_commit_info_iter(state_ref)
+                .for_each(|(i, commit_info)| {
+                    let prepared_image = state_ref.prepared_image(commit_info, i);
+                    let y = area.top() + i as u16;
+                    for (x, image_cell) in prepared_image.cells().iter().take(max_graph_width).enumerate() {
+                        let cell = &mut buf[(area.left() + x as u16, y)];
+                        cell.set_symbol(image_cell.symbol());
+                        cell.set_style(image_cell.style());
+                        cell.set_skip(image_cell.skip());
+                    }
+                });
+        }
+
+        state.graph_render_state = Some(key);
     }
 
     fn render_marker(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {

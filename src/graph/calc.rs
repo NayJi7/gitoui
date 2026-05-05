@@ -1,8 +1,9 @@
 use rustc_hash::FxHashMap;
 
-use crate::git::{Commit, CommitHash, Repository};
+use crate::git::{Commit, CommitHash, CommitType, Repository};
 
 type CommitPosMap<'a> = FxHashMap<&'a CommitHash, (usize, usize)>;
+type CommitColorMap<'a> = FxHashMap<&'a CommitHash, usize>;
 
 #[derive(Debug, Clone)]
 pub struct BranchSegment {
@@ -12,12 +13,14 @@ pub struct BranchSegment {
     pub target_pos_y: usize,
     pub color_index: usize,
     pub is_branch: bool,
+    pub is_uncommitted: bool,
 }
 
 #[derive(Debug)]
 pub struct Graph<'a> {
     pub commits: Vec<&'a Commit>,
     pub commit_pos_map: CommitPosMap<'a>,
+    pub commit_color_map: CommitColorMap<'a>,
     pub edges: Vec<Vec<Edge>>,
     pub max_pos_x: usize,
     pub branch_segments: Vec<BranchSegment>,
@@ -60,100 +63,352 @@ impl EdgeType {
     }
 }
 
+// ── Internal layout types ──────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug)]
+struct Pt { x: usize, y: usize }
+
+#[derive(Debug)]
+struct Connection {
+    x: usize,
+    connects_to: usize,   // vertex id (index into vertices); usize::MAX = no vertex
+    on_branch: usize,     // branch id (index into branches)
+}
+
+struct LayoutVertex {
+    id: usize,
+    x: Option<usize>,           // None = not yet on a branch
+    next_x: usize,
+    connections: Vec<Connection>,
+    parent_ids: Vec<usize>,     // indices into vertices; usize::MAX = parent not in graph
+    child_ids: Vec<usize>,
+    next_parent: usize,         // index into parent_ids currently being processed
+    branch_id: Option<usize>,   // index into branches
+    is_committed: bool,
+}
+
+impl LayoutVertex {
+    fn point(&self) -> Pt { Pt { x: self.x.unwrap_or(0), y: self.id } }
+    fn next_point(&self) -> Pt { Pt { x: self.next_x, y: self.id } }
+    fn not_on_branch(&self) -> bool { self.branch_id.is_none() }
+    fn is_merge(&self) -> bool { self.parent_ids.len() > 1 }
+
+    fn add_to_branch(&mut self, branch_id: usize, x: usize) {
+        if self.branch_id.is_none() {
+            self.branch_id = Some(branch_id);
+            self.x = Some(x);
+        }
+    }
+
+    fn register_unavailable_point(&mut self, x: usize, connects_to: usize, on_branch: usize) {
+        if x == self.next_x {
+            self.connections.push(Connection { x, connects_to, on_branch });
+            self.next_x += 1;
+        }
+    }
+
+    fn get_point_connecting_to(&self, target_id: usize, branch_id: usize) -> Option<Pt> {
+        self.connections.iter()
+            .find(|c| c.connects_to == target_id && c.on_branch == branch_id)
+            .map(|c| Pt { x: c.x, y: self.id })
+    }
+
+    fn register_parent_processed(&mut self) {
+        self.next_parent += 1;
+    }
+}
+
+#[derive(Debug)]
+struct LayoutBranch {
+    colour: usize,
+    lines: Vec<(Pt, Pt, bool)>,   // (p1=newer, p2=older, is_uncommitted) in grid coords
+    end: usize,
+}
+
+impl LayoutBranch {
+    fn new(colour: usize) -> Self {
+        Self { colour, lines: Vec::new(), end: 0 }
+    }
+    fn add_line(&mut self, p1: Pt, p2: Pt, is_uncommitted: bool) {
+        self.lines.push((p1, p2, is_uncommitted));
+    }
+    fn set_end(&mut self, end: usize) {
+        self.end = end;
+    }
+}
+
+fn load_commits<'a>(
+    commits: &[&'a Commit],
+    _repository: &Repository,
+) -> Vec<LayoutVertex> {
+    // Build hash → index map
+    let mut hash_to_id: FxHashMap<&CommitHash, usize> = FxHashMap::default();
+    for (i, c) in commits.iter().enumerate() {
+        hash_to_id.insert(&c.commit_hash, i);
+    }
+
+    let n = commits.len();
+
+    // Create vertex for each commit
+    let mut vertices: Vec<LayoutVertex> = commits
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let is_committed = !matches!(c.commit_type, CommitType::Uncommitted);
+            LayoutVertex {
+                id: i,
+                x: None,
+                next_x: 0,
+                connections: Vec::new(),
+                parent_ids: Vec::new(),
+                child_ids: Vec::new(),
+                next_parent: 0,
+                branch_id: None,
+                is_committed,
+            }
+        })
+        .collect();
+
+    // Wire parent/child links
+    for i in 0..n {
+        let parent_ids: Vec<usize> = commits[i]
+            .parent_commit_hashes
+            .iter()
+            .map(|ph| hash_to_id.get(ph).copied().unwrap_or(usize::MAX))
+            .collect();
+        for &pid in &parent_ids {
+            if pid != usize::MAX {
+                vertices[pid].child_ids.push(i);
+            }
+        }
+        vertices[i].parent_ids = parent_ids;
+    }
+
+    vertices
+}
+
+fn get_available_colour(start_at: usize, available_colours: &[usize]) -> usize {
+    for (colour, &end) in available_colours.iter().enumerate() {
+        if end <= start_at {
+            return colour;
+        }
+    }
+    available_colours.len() // allocate new colour index
+}
+
+fn determine_path(
+    start_at: usize,
+    vertices: &mut Vec<LayoutVertex>,
+    branches: &mut Vec<LayoutBranch>,
+    available_colours: &mut Vec<usize>,
+) {
+    // Extract info from start_at vertex before any mutation
+    let (parent_id, v_not_on_branch, v_is_merge, v_on_branch) = {
+        let v = &vertices[start_at];
+        let pid = v.parent_ids.get(v.next_parent).copied().unwrap_or(usize::MAX);
+        (pid, v.not_on_branch(), v.is_merge(), !v.not_on_branch())
+    };
+
+    // No parent in graph — mark processed and return
+    if parent_id == usize::MAX {
+        vertices[start_at].register_parent_processed();
+        return;
+    }
+
+    let last_pt_start = if v_not_on_branch {
+        vertices[start_at].next_point()
+    } else {
+        vertices[start_at].point()
+    };
+
+    let parent_on_branch = !vertices[parent_id].not_on_branch();
+
+    if v_is_merge && v_on_branch && parent_on_branch {
+        // ── MERGE PATH ──────────────────────────────────────────────────────
+        // Route along the parent's existing branch
+        let parent_branch_id = vertices[parent_id].branch_id.unwrap();
+        let mut last_pt = last_pt_start;
+        let mut found_point_to_parent = false;
+
+        let mut i = start_at + 1;
+        while i < vertices.len() {
+            // Check if this vertex has a reserved connection point toward parent
+            let conn_pt = { vertices[i].get_point_connecting_to(parent_id, parent_branch_id) };
+            if conn_pt.is_some() {
+                found_point_to_parent = true;
+            }
+            let cur_pt = conn_pt.unwrap_or_else(|| { vertices[i].next_point() });
+
+            branches[parent_branch_id].add_line(last_pt, cur_pt, false);
+            { vertices[i].register_unavailable_point(cur_pt.x, parent_id, parent_branch_id); }
+            last_pt = cur_pt;
+
+            if found_point_to_parent {
+                vertices[start_at].register_parent_processed();
+                break;
+            }
+            i += 1;
+        }
+        if !found_point_to_parent {
+            // Parent connection point not found (shouldn't happen in a consistent graph)
+            vertices[start_at].register_parent_processed();
+        }
+    } else {
+        // ── NORMAL PATH ─────────────────────────────────────────────────────
+        // Create a new branch and trace it from start_at down to parent
+        let colour = get_available_colour(start_at, available_colours);
+        while available_colours.len() <= colour {
+            available_colours.push(0);
+        }
+
+        let branch_id = branches.len();
+        branches.push(LayoutBranch::new(colour));
+
+        // Place start_at vertex on this branch
+        let last_pt_x = last_pt_start.x;
+        vertices[start_at].add_to_branch(branch_id, last_pt_x);
+        // No-op if vertex already on a branch (next_x already advanced past last_pt_x)
+        vertices[start_at].register_unavailable_point(last_pt_x, start_at, branch_id);
+
+        let mut last_pt = last_pt_start;
+        let mut cur_vertex_id = start_at;
+        let mut cur_parent_id = parent_id;
+
+        let mut i = start_at + 1;
+        while i < vertices.len() {
+            // Determine where this row's connection point is
+            let parent_already_placed = !vertices[cur_parent_id].not_on_branch();
+            let cur_pt = if i == cur_parent_id && parent_already_placed {
+                vertices[i].point()
+            } else {
+                vertices[i].next_point()
+            };
+
+            let line_is_uncommitted = !vertices[cur_vertex_id].is_committed;
+            branches[branch_id].add_line(last_pt, cur_pt, line_is_uncommitted);
+            vertices[i].register_unavailable_point(cur_pt.x, cur_parent_id, branch_id);
+            last_pt = cur_pt;
+
+            if i == cur_parent_id {
+                vertices[cur_vertex_id].register_parent_processed();
+                let parent_was_on_branch = !vertices[i].not_on_branch();
+                vertices[i].add_to_branch(branch_id, cur_pt.x);
+                cur_vertex_id = i;
+
+                // Get next parent of the newly adopted vertex
+                let next_pid = {
+                    let v = &vertices[cur_vertex_id];
+                    v.parent_ids.get(v.next_parent).copied().unwrap_or(usize::MAX)
+                };
+
+                if next_pid == usize::MAX || parent_was_on_branch {
+                    // No more parents to trace, or parent was already placed
+                    if next_pid == usize::MAX {
+                        vertices[cur_vertex_id].register_parent_processed();
+                    }
+                    cur_parent_id = usize::MAX;
+                    break;
+                }
+                cur_parent_id = next_pid;
+            }
+            i += 1;
+        }
+
+        // Handle case where we ran off the end (parent not in graph)
+        if i == vertices.len() && cur_parent_id != usize::MAX {
+            vertices[cur_vertex_id].register_parent_processed();
+        }
+
+        branches[branch_id].set_end(i);
+        available_colours[colour] = i;
+    }
+}
+
 pub fn calc_graph(repository: &Repository) -> Graph<'_> {
     let commits = repository.all_commits();
+    let n = commits.len();
 
-    let commit_pos_map = calc_commit_positions(&commits, repository);
-    let (graph_edges, max_pos_x, branch_segments) = calc_edges(&commit_pos_map, &commits, repository);
+    // 1. Build layout vertices
+    let mut vertices = load_commits(&commits, repository);
+
+    // 2. Run determine_path for every vertex that has unprocessed parents
+    let mut branches: Vec<LayoutBranch> = Vec::new();
+    let mut available_colours: Vec<usize> = Vec::new();
+
+    for i in 0..n {
+        loop {
+            let has_more = {
+                let v = &vertices[i];
+                v.next_parent < v.parent_ids.len()
+            };
+            if !has_more { break; }
+            determine_path(i, &mut vertices, &mut branches, &mut available_colours);
+        }
+        // Place root commits (no parents processed yet) that still have no branch
+        if vertices[i].not_on_branch() {
+            let colour = get_available_colour(i, &available_colours);
+            while available_colours.len() <= colour {
+                available_colours.push(0);
+            }
+            let branch_id = branches.len();
+            branches.push(LayoutBranch::new(colour));
+            let x = vertices[i].next_x;
+            vertices[i].add_to_branch(branch_id, x);
+            vertices[i].register_unavailable_point(x, i, branch_id);
+            branches[branch_id].set_end(i + 1);
+            available_colours[colour] = i + 1;
+        }
+    }
+
+    // 3. Build commit_pos_map (one (x, y) per commit)
+    let mut commit_pos_map: CommitPosMap = FxHashMap::default();
+    let mut commit_color_map: CommitColorMap = FxHashMap::default();
+    let mut max_pos_x = 0usize;
+    for (i, commit) in commits.iter().enumerate() {
+        let x = vertices[i].x.unwrap_or(0);
+        commit_pos_map.insert(&commit.commit_hash, (x, i));
+        let color = vertices[i]
+            .branch_id
+            .map(|branch_id| branches[branch_id].colour)
+            .unwrap_or(x);
+        commit_color_map.insert(&commit.commit_hash, color);
+        if x > max_pos_x { max_pos_x = x; }
+    }
+
+    // 4. Convert branch lines → BranchSegments
+    // Convention: source = older commit (higher row index), target = newer (lower row index)
+    // Each branch line is (p1=newer, p2=older)
+    let branch_segments: Vec<BranchSegment> = branches.iter().flat_map(|b| {
+        b.lines.iter().map(|&(p1, p2, is_uncommitted)| BranchSegment {
+            source_pos_x: p2.x,
+            target_pos_x: p1.x,
+            source_pos_y: p2.y,
+            target_pos_y: p1.y,
+            color_index: b.colour,
+            is_branch: true,
+            is_uncommitted,
+        })
+    }).collect();
+
+    // Extend max_pos_x to cover all x-coordinates that appear in branch segments.
+    // Intermediate waypoint x values (from next_x) can exceed committed vertex positions.
+    for seg in &branch_segments {
+        if seg.source_pos_x > max_pos_x { max_pos_x = seg.source_pos_x; }
+        if seg.target_pos_x > max_pos_x { max_pos_x = seg.target_pos_x; }
+    }
+
+    // 5. Build legacy row edges for Rounded/Angular styles. Smooth uses branch_segments.
+    let (edges, legacy_max_pos_x) = build_legacy_edges(&commit_pos_map, &commits, repository);
+    max_pos_x = max_pos_x.max(legacy_max_pos_x);
 
     Graph {
         commits,
         commit_pos_map,
-        edges: graph_edges,
+        commit_color_map,
+        edges,
         max_pos_x,
         branch_segments,
     }
-}
-
-fn calc_commit_positions<'a>(
-    commits: &[&'a Commit],
-    repository: &'a Repository,
-) -> CommitPosMap<'a> {
-    let mut commit_pos_map: CommitPosMap = FxHashMap::default();
-    let mut commit_line_state: Vec<Option<&CommitHash>> = Vec::new();
-
-    for (pos_y, commit) in commits.iter().enumerate() {
-        let filtered_children_hash = filtered_children_hash(commit, repository);
-        if filtered_children_hash.is_empty() {
-            let pos_x = get_first_vacant_line(&commit_line_state);
-            add_commit_line(commit, &mut commit_line_state, pos_x);
-            commit_pos_map.insert(&commit.commit_hash, (pos_x, pos_y));
-        } else {
-            let pos_x = update_commit_line(commit, &mut commit_line_state, &filtered_children_hash);
-            commit_pos_map.insert(&commit.commit_hash, (pos_x, pos_y));
-        }
-    }
-
-    commit_pos_map
-}
-
-fn filtered_children_hash<'a>(
-    commit: &'a Commit,
-    repository: &'a Repository,
-) -> Vec<&'a CommitHash> {
-    repository
-        .children_hash(&commit.commit_hash)
-        .into_iter()
-        .filter(|child_hash| {
-            let child_parents_hash = repository.parents_hash(child_hash);
-            !child_parents_hash.is_empty() && *child_parents_hash[0] == commit.commit_hash
-        })
-        .collect()
-}
-
-fn get_first_vacant_line(commit_line_state: &[Option<&CommitHash>]) -> usize {
-    commit_line_state
-        .iter()
-        .position(|c| c.is_none())
-        .unwrap_or(commit_line_state.len())
-}
-
-fn add_commit_line<'a>(
-    commit: &'a Commit,
-    commit_line_state: &mut Vec<Option<&'a CommitHash>>,
-    pos_x: usize,
-) {
-    if commit_line_state.len() <= pos_x {
-        commit_line_state.push(Some(&commit.commit_hash));
-    } else {
-        commit_line_state[pos_x] = Some(&commit.commit_hash);
-    }
-}
-
-fn update_commit_line<'a>(
-    commit: &'a Commit,
-    commit_line_state: &mut [Option<&'a CommitHash>],
-    target_commit_hashes: &[&CommitHash],
-) -> usize {
-    if commit_line_state.is_empty() {
-        return 0;
-    }
-    let mut min_pos_x = commit_line_state.len().saturating_sub(1);
-    for target_hash in target_commit_hashes {
-        for (pos_x, commit_hash) in commit_line_state.iter().enumerate() {
-            if let Some(hash) = commit_hash {
-                if hash == target_hash {
-                    commit_line_state[pos_x] = None;
-                    if min_pos_x > pos_x {
-                        min_pos_x = pos_x;
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    commit_line_state[min_pos_x] = Some(&commit.commit_hash);
-    min_pos_x
 }
 
 #[derive(Debug, Clone)]
@@ -163,27 +418,18 @@ struct WrappedEdge<'a> {
 }
 
 impl<'a> WrappedEdge<'a> {
-    fn new(
-        edge_type: EdgeType,
-        pos_x: usize,
-        line_pos_x: usize,
-        edge_parent_hash: &'a CommitHash,
-    ) -> Self {
-        Self {
-            edge: Edge::new(edge_type, pos_x, line_pos_x),
-            edge_parent_hash,
-        }
+    fn new(edge_type: EdgeType, pos_x: usize, line_pos_x: usize, edge_parent_hash: &'a CommitHash) -> Self {
+        Self { edge: Edge::new(edge_type, pos_x, line_pos_x), edge_parent_hash }
     }
 }
 
-fn calc_edges(
-    commit_pos_map: &CommitPosMap,
-    commits: &[&Commit],
-    repository: &Repository,
-) -> (Vec<Vec<Edge>>, usize, Vec<BranchSegment>) {
+fn build_legacy_edges<'a>(
+    commit_pos_map: &CommitPosMap<'a>,
+    commits: &[&'a Commit],
+    repository: &'a Repository,
+) -> (Vec<Vec<Edge>>, usize) {
     let mut max_pos_x = 0;
     let mut edges: Vec<Vec<WrappedEdge>> = vec![vec![]; commits.len()];
-    let mut branch_segments: Vec<BranchSegment> = Vec::new();
 
     for commit in commits {
         let (pos_x, pos_y) = commit_pos_map[&commit.commit_hash];
@@ -193,15 +439,6 @@ fn calc_edges(
             let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
 
             if pos_x == child_pos_x {
-                // commit (vertical connection)
-                branch_segments.push(BranchSegment {
-                    source_pos_x: pos_x,
-                    target_pos_x: child_pos_x,
-                    source_pos_y: pos_y,
-                    target_pos_y: child_pos_y,
-                    color_index: pos_x,
-                    is_branch: true,
-                });
                 edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
                 for y in ((child_pos_y + 1)..pos_y).rev() {
                     edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
@@ -210,75 +447,23 @@ fn calc_edges(
             } else {
                 let child_first_parent_hash = &commits[child_pos_y].parent_commit_hashes[0];
                 if *child_first_parent_hash == *hash {
-                    // branch
-                    branch_segments.push(BranchSegment {
-                        source_pos_x: pos_x,
-                        target_pos_x: child_pos_x,
-                        source_pos_y: pos_y,
-                        target_pos_y: child_pos_y,
-                        color_index: pos_x,
-                        is_branch: true,
-                    });
                     if pos_x < child_pos_x {
-                        edges[pos_y].push(WrappedEdge::new(
-                            EdgeType::Right,
-                            pos_x,
-                            child_pos_x,
-                            hash,
-                        ));
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::Right, pos_x, child_pos_x, hash));
                         for x in (pos_x + 1)..child_pos_x {
-                            edges[pos_y].push(WrappedEdge::new(
-                                EdgeType::Horizontal,
-                                x,
-                                child_pos_x,
-                                hash,
-                            ));
+                            edges[pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, child_pos_x, hash));
                         }
-                        edges[pos_y].push(WrappedEdge::new(
-                            EdgeType::RightBottom,
-                            child_pos_x,
-                            child_pos_x,
-                            hash,
-                        ));
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::RightBottom, child_pos_x, child_pos_x, hash));
                     } else {
-                        edges[pos_y].push(WrappedEdge::new(
-                            EdgeType::Left,
-                            pos_x,
-                            child_pos_x,
-                            hash,
-                        ));
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::Left, pos_x, child_pos_x, hash));
                         for x in (child_pos_x + 1)..pos_x {
-                            edges[pos_y].push(WrappedEdge::new(
-                                EdgeType::Horizontal,
-                                x,
-                                child_pos_x,
-                                hash,
-                            ));
+                            edges[pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, child_pos_x, hash));
                         }
-                        edges[pos_y].push(WrappedEdge::new(
-                            EdgeType::LeftBottom,
-                            child_pos_x,
-                            child_pos_x,
-                            hash,
-                        ));
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::LeftBottom, child_pos_x, child_pos_x, hash));
                     }
                     for y in ((child_pos_y + 1)..pos_y).rev() {
-                        edges[y].push(WrappedEdge::new(
-                            EdgeType::Vertical,
-                            child_pos_x,
-                            child_pos_x,
-                            hash,
-                        ));
+                        edges[y].push(WrappedEdge::new(EdgeType::Vertical, child_pos_x, child_pos_x, hash));
                     }
-                    edges[child_pos_y].push(WrappedEdge::new(
-                        EdgeType::Down,
-                        child_pos_x,
-                        child_pos_x,
-                        hash,
-                    ));
-                } else {
-                    // merge
-                    // skip
+                    edges[child_pos_y].push(WrappedEdge::new(EdgeType::Down, child_pos_x, child_pos_x, hash));
                 }
             }
         }
@@ -287,10 +472,7 @@ fn calc_edges(
             max_pos_x = pos_x;
         }
 
-        // draw down edge if has parent but parent not in the graph (when max_count is set)
-        if !commit.parent_commit_hashes.is_empty()
-            && repository.commit(&commit.parent_commit_hashes[0]).is_none()
-        {
+        if !commit.parent_commit_hashes.is_empty() && repository.commit(&commit.parent_commit_hashes[0]).is_none() {
             edges[pos_y].push(WrappedEdge::new(EdgeType::Down, pos_x, pos_x, hash));
             ((pos_y + 1)..commits.len()).for_each(|y| {
                 edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
@@ -305,23 +487,15 @@ fn calc_edges(
         for child_hash in repository.children_hash(hash) {
             let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
 
-            if pos_x == child_pos_x {
-                // commit
-                // skip
-            } else {
+            if pos_x != child_pos_x {
                 let child_first_parent_hash = &commits[child_pos_y].parent_commit_hashes[0];
-                if *child_first_parent_hash == *hash {
-                    // branch
-                    // skip
-                } else {
-                    // merge
+                if *child_first_parent_hash != *hash {
                     let mut overlap = false;
                     let mut new_pos_x = pos_x;
 
                     let mut skip_judge_overlap = true;
                     for y in (child_pos_y + 1)..pos_y {
-                        let processing_commit_pos_x =
-                            commit_pos_map.get(&commits[y].commit_hash).unwrap().0;
+                        let processing_commit_pos_x = commit_pos_map.get(&commits[y].commit_hash).unwrap().0;
                         if processing_commit_pos_x == new_pos_x {
                             skip_judge_overlap = false;
                             break;
@@ -339,8 +513,7 @@ fn calc_edges(
 
                     if !skip_judge_overlap {
                         for y in (child_pos_y + 1)..pos_y {
-                            let processing_commit_pos_x =
-                                commit_pos_map.get(&commits[y].commit_hash).unwrap().0;
+                            let processing_commit_pos_x = commit_pos_map.get(&commits[y].commit_hash).unwrap().0;
                             if processing_commit_pos_x == new_pos_x {
                                 overlap = true;
                                 if new_pos_x < processing_commit_pos_x + 1 {
@@ -362,117 +535,40 @@ fn calc_edges(
                     }
 
                     if overlap {
-                        // detour
-                        branch_segments.push(BranchSegment {
-                            source_pos_x: pos_x,
-                            target_pos_x: child_pos_x,
-                            source_pos_y: pos_y,
-                            target_pos_y: child_pos_y,
-                            color_index: pos_x,
-                            is_branch: false,
-                        });
                         edges[pos_y].push(WrappedEdge::new(EdgeType::Right, pos_x, pos_x, hash));
                         for x in (pos_x + 1)..new_pos_x {
-                            edges[pos_y].push(WrappedEdge::new(
-                                EdgeType::Horizontal,
-                                x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
                         }
-                        edges[pos_y].push(WrappedEdge::new(
-                            EdgeType::RightBottom,
-                            new_pos_x,
-                            pos_x,
-                            hash,
-                        ));
+                        edges[pos_y].push(WrappedEdge::new(EdgeType::RightBottom, new_pos_x, pos_x, hash));
                         for y in ((child_pos_y + 1)..pos_y).rev() {
-                            edges[y].push(WrappedEdge::new(
-                                EdgeType::Vertical,
-                                new_pos_x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[y].push(WrappedEdge::new(EdgeType::Vertical, new_pos_x, pos_x, hash));
                         }
-                        edges[child_pos_y].push(WrappedEdge::new(
-                            EdgeType::RightTop,
-                            new_pos_x,
-                            pos_x,
-                            hash,
-                        ));
+                        edges[child_pos_y].push(WrappedEdge::new(EdgeType::RightTop, new_pos_x, pos_x, hash));
                         for x in (child_pos_x + 1)..new_pos_x {
-                            edges[child_pos_y].push(WrappedEdge::new(
-                                EdgeType::Horizontal,
-                                x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
                         }
-                        edges[child_pos_y].push(WrappedEdge::new(
-                            EdgeType::Right,
-                            child_pos_x,
-                            pos_x,
-                            hash,
-                        ));
+                        edges[child_pos_y].push(WrappedEdge::new(EdgeType::Right, child_pos_x, pos_x, hash));
 
                         if max_pos_x < new_pos_x {
                             max_pos_x = new_pos_x;
                         }
                     } else {
-                        branch_segments.push(BranchSegment {
-                            source_pos_x: pos_x,
-                            target_pos_x: child_pos_x,
-                            source_pos_y: pos_y,
-                            target_pos_y: child_pos_y,
-                            color_index: pos_x,
-                            is_branch: false,
-                        });
                         edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
                         for y in ((child_pos_y + 1)..pos_y).rev() {
                             edges[y].push(WrappedEdge::new(EdgeType::Vertical, pos_x, pos_x, hash));
                         }
                         if pos_x < child_pos_x {
-                            edges[child_pos_y].push(WrappedEdge::new(
-                                EdgeType::LeftTop,
-                                pos_x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::LeftTop, pos_x, pos_x, hash));
                             for x in (pos_x + 1)..child_pos_x {
-                                edges[child_pos_y].push(WrappedEdge::new(
-                                    EdgeType::Horizontal,
-                                    x,
-                                    pos_x,
-                                    hash,
-                                ));
+                                edges[child_pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
                             }
-                            edges[child_pos_y].push(WrappedEdge::new(
-                                EdgeType::Left,
-                                child_pos_x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::Left, child_pos_x, pos_x, hash));
                         } else {
-                            edges[child_pos_y].push(WrappedEdge::new(
-                                EdgeType::RightTop,
-                                pos_x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::RightTop, pos_x, pos_x, hash));
                             for x in (child_pos_x + 1)..pos_x {
-                                edges[child_pos_y].push(WrappedEdge::new(
-                                    EdgeType::Horizontal,
-                                    x,
-                                    pos_x,
-                                    hash,
-                                ));
+                                edges[child_pos_y].push(WrappedEdge::new(EdgeType::Horizontal, x, pos_x, hash));
                             }
-                            edges[child_pos_y].push(WrappedEdge::new(
-                                EdgeType::Right,
-                                child_pos_x,
-                                pos_x,
-                                hash,
-                            ));
+                            edges[child_pos_y].push(WrappedEdge::new(EdgeType::Right, child_pos_x, pos_x, hash));
                         }
                     }
                 }
@@ -484,7 +580,7 @@ fn calc_edges(
         }
     }
 
-    let edges: Vec<Vec<Edge>> = edges
+    let edges = edges
         .into_iter()
         .map(|es| {
             let mut es: Vec<Edge> = es.into_iter().map(|e| e.edge).collect();
@@ -494,5 +590,115 @@ fn calc_edges(
         })
         .collect();
 
-    (edges, max_pos_x, branch_segments)
+    (edges, max_pos_x)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, FixedOffset};
+    use rustc_hash::FxHashMap;
+
+    use crate::git::{Commit, CommitHash, CommitType, Head, Repository};
+
+    use super::*;
+
+    fn commit(hash: &str, parents: Vec<&str>, commit_type: CommitType) -> Commit {
+        Commit {
+            commit_hash: CommitHash::from(hash),
+            author_date: DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
+            committer_date: DateTime::<FixedOffset>::parse_from_rfc3339(
+                "2024-01-01T00:00:00+00:00",
+            )
+            .unwrap(),
+            subject: hash.to_string(),
+            parent_commit_hashes: parents.into_iter().map(CommitHash::from).collect(),
+            commit_type,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn uncommitted_layout_marks_only_segments_before_head() {
+        let commits = vec![
+            commit("uncommitted", vec!["head"], CommitType::Uncommitted),
+            commit("head", vec!["parent"], CommitType::Commit),
+            commit("parent", vec![], CommitType::Commit),
+        ];
+        let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect::<Vec<_>>();
+        let commit_map = commits
+            .into_iter()
+            .map(|c| (c.commit_hash.clone(), c))
+            .collect::<FxHashMap<_, _>>();
+        let repository = Repository::new(
+            Default::default(),
+            commit_map,
+            FxHashMap::default(),
+            FxHashMap::default(),
+            FxHashMap::default(),
+            Head::Detached { target: CommitHash::from("head") },
+            commit_hashes,
+            None,
+        );
+
+        let graph = calc_graph(&repository);
+
+        let segment_to_head = graph
+            .branch_segments
+            .iter()
+            .find(|s| s.target_pos_y == 0 && s.source_pos_y == 1)
+            .expect("expected uncommitted to HEAD segment");
+        assert!(segment_to_head.is_uncommitted);
+
+        let segment_after_head = graph
+            .branch_segments
+            .iter()
+            .find(|s| s.target_pos_y == 1 && s.source_pos_y == 2)
+            .expect("expected HEAD to parent segment");
+        assert!(!segment_after_head.is_uncommitted);
+    }
+
+    #[test]
+    fn non_smooth_edges_route_merge_into_child_row() {
+        let commits = vec![
+            commit("merge", vec!["main", "side"], CommitType::Commit),
+            commit("main", vec!["root"], CommitType::Commit),
+            commit("side", vec!["root"], CommitType::Commit),
+            commit("root", vec![], CommitType::Commit),
+        ];
+        let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect::<Vec<_>>();
+        let commit_map = commits
+            .into_iter()
+            .map(|c| (c.commit_hash.clone(), c))
+            .collect::<FxHashMap<_, _>>();
+        let parents_map = FxHashMap::from_iter([
+            (CommitHash::from("merge"), vec![CommitHash::from("main"), CommitHash::from("side")]),
+            (CommitHash::from("main"), vec![CommitHash::from("root")]),
+            (CommitHash::from("side"), vec![CommitHash::from("root")]),
+        ]);
+        let children_map = FxHashMap::from_iter([
+            (CommitHash::from("main"), vec![CommitHash::from("merge")]),
+            (CommitHash::from("side"), vec![CommitHash::from("merge")]),
+            (CommitHash::from("root"), vec![CommitHash::from("main"), CommitHash::from("side")]),
+        ]);
+        let repository = Repository::new(
+            Default::default(),
+            commit_map,
+            parents_map,
+            children_map,
+            FxHashMap::default(),
+            Head::Detached { target: CommitHash::from("merge") },
+            commit_hashes,
+            None,
+        );
+
+        let graph = calc_graph(&repository);
+
+        assert!(
+            graph.edges[0]
+                .iter()
+                .any(|edge| matches!(edge.edge_type, EdgeType::Horizontal | EdgeType::Left | EdgeType::Right)),
+            "merge rows need horizontal entry edges for rounded/angular renderers"
+        );
+    }
+
 }

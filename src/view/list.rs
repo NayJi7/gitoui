@@ -365,23 +365,30 @@ impl<'a> ListView<'a> {
         }
     }
 
-    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
-        if let Some(list_state) = self.commit_list_state.as_mut() {
-            let header_height = 2u16;
-            if row < header_height {
-                list_state.set_hovered_branch(None);
-                list_state.set_hovered_tag(None);
-                list_state.set_hovered_row(None);
-                return;
-            }
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
+        let Some(list_state) = self.commit_list_state.as_mut() else {
+            return false;
+        };
+        let (prev_selected, prev_offset, _) = list_state.current_list_status();
+        let prev_branch = list_state.hovered_branch.clone();
+        let prev_tag = list_state.hovered_tag.clone();
+
+        let header_height = 2u16;
+        if row < header_height {
+            list_state.set_hovered_branch(None);
+            list_state.set_hovered_tag(None);
+            list_state.set_hovered_row(None);
+        } else {
             let (selected, offset, height) = list_state.current_list_status();
             let visible_row = (row - header_height) as usize;
 
             if let Some(branch_name) = list_state.branch_at_position(col, row) {
                 list_state.set_hovered_branch(Some(branch_name));
+                list_state.set_hovered_tag(None);
                 list_state.set_hovered_row(Some(visible_row));
             } else if let Some(tag_name) = list_state.tag_at_position(col, row) {
                 list_state.set_hovered_tag(Some(tag_name));
+                list_state.set_hovered_branch(None);
                 list_state.set_hovered_row(Some(visible_row));
             } else {
                 list_state.set_hovered_branch(None);
@@ -396,5 +403,11 @@ impl<'a> ListView<'a> {
                 }
             }
         }
+
+        let (new_selected, new_offset, _) = list_state.current_list_status();
+        prev_selected != new_selected
+            || prev_offset != new_offset
+            || list_state.hovered_branch != prev_branch
+            || list_state.hovered_tag != prev_tag
     }
 }

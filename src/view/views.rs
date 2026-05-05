@@ -336,18 +336,18 @@ impl<'a> View<'a> {
         }
     }
 
-    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
         match self {
             View::List(view) => view.handle_mouse_move(col, row),
-            View::Detail(view) => view.handle_mouse_move(col, row),
-            View::Diff(view) => view.handle_mouse_move(col, row),
-            View::Refs(view) => view.handle_mouse_move(col, row),
-            View::Config(view) => view.handle_mouse_move(col, row),
-            View::Dialog(view) => view.handle_mouse_move(col, row),
-            View::BranchDetail(view) => view.handle_mouse_move(col, row),
-            View::TagDetail(view) => view.handle_mouse_move(col, row),
-            View::Uncommitted(view) => view.handle_mouse_move(col, row),
-            _ => {}
+            View::Detail(view) => { view.handle_mouse_move(col, row); true }
+            View::Diff(view) => { view.handle_mouse_move(col, row); true }
+            View::Refs(view) => { view.handle_mouse_move(col, row); true }
+            View::Config(view) => { view.handle_mouse_move(col, row); true }
+            View::Dialog(view) => { view.handle_mouse_move(col, row); true }
+            View::BranchDetail(view) => { view.handle_mouse_move(col, row); true }
+            View::TagDetail(view) => { view.handle_mouse_move(col, row); true }
+            View::Uncommitted(view) => { view.handle_mouse_move(col, row); true }
+            _ => false
         }
     }
 

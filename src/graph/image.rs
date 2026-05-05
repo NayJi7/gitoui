@@ -219,8 +219,8 @@ impl ImageParams {
     pub fn new(graph_color_set: &GraphColorSet, cell_width_type: CellWidthType) -> Self {
         let (width, height, line_width, circle_inner_radius, circle_outer_radius) =
             match cell_width_type {
-                CellWidthType::Double => (50, 50, 5, 10, 13),
-                CellWidthType::Single => (25, 50, 3, 7, 10),
+                CellWidthType::Double => (50, 56, 5, 11, 14),
+                CellWidthType::Single => (25, 56, 3, 7, 10),
             };
         let edge_colors = graph_color_set
             .colors
@@ -279,6 +279,13 @@ fn build_single_graph_row_image(
     const UNCOMMITTED_COLOR: image::Rgba<u8> = image::Rgba([0x80, 0x80, 0x80, 0xff]);
     let commit_color = if is_uncommitted {
         UNCOMMITTED_COLOR
+    } else if graph_style == GraphStyle::Smooth {
+        let color_index = graph
+            .commit_color_map
+            .get(commit_hash)
+            .copied()
+            .unwrap_or(pos_x);
+        image_params.edge_color(color_index)
     } else {
         image_params.edge_color(pos_x)
     };
@@ -328,6 +335,8 @@ type Pixels = FxHashSet<(i32, i32)>;
 pub struct DrawingPixels {
     circle: Pixels,
     circle_edge: Pixels,
+    circle_gap: Pixels,
+    commit_circle_gap: Pixels,
     vertical_edge: Pixels,
     horizontal_edge: Pixels,
     up_edge: Pixels,
@@ -344,6 +353,8 @@ impl DrawingPixels {
     pub fn new(image_params: &ImageParams) -> Self {
         let circle = calc_commit_circle_drawing_pixels(image_params);
         let circle_edge = calc_circle_edge_drawing_pixels(image_params);
+        let circle_gap = calc_circle_gap_drawing_pixels(image_params);
+        let commit_circle_gap = calc_commit_circle_gap_drawing_pixels(image_params);
         let vertical_edge = calc_vertical_edge_drawing_pixels(image_params);
         let horizontal_edge = calc_horizontal_edge_drawing_pixels(image_params);
         let up_edge = calc_up_edge_drawing_pixels(image_params);
@@ -358,6 +369,8 @@ impl DrawingPixels {
         Self {
             circle,
             circle_edge,
+            circle_gap,
+            commit_circle_gap,
             vertical_edge,
             horizontal_edge,
             up_edge,
@@ -379,7 +392,18 @@ fn calc_commit_circle_drawing_pixels(image_params: &ImageParams) -> Pixels {
 fn calc_circle_edge_drawing_pixels(image_params: &ImageParams) -> Pixels {
     let inner = calc_circle_drawing_pixels(image_params, image_params.circle_inner_radius as i32);
     let outer = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
+    outer.difference(&inner).cloned().collect()
+}
 
+fn calc_circle_gap_drawing_pixels(image_params: &ImageParams) -> Pixels {
+    let inner = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
+    let outer = calc_circle_drawing_pixels(image_params, (image_params.circle_outer_radius + 1) as i32);
+    outer.difference(&inner).cloned().collect()
+}
+
+fn calc_commit_circle_gap_drawing_pixels(image_params: &ImageParams) -> Pixels {
+    let inner = calc_circle_drawing_pixels(image_params, image_params.circle_inner_radius as i32);
+    let outer = calc_circle_drawing_pixels(image_params, (image_params.circle_inner_radius + 1) as i32);
     outer.difference(&inner).cloned().collect()
 }
 
@@ -747,11 +771,31 @@ pub fn calc_graph_row_image(
             }
         }
         GraphStyle::Smooth => {
-            // VS Code Git Graph style: draw ONLY Bézier curves for all connections.
-            // No angular edges at all — every parent-child connection is a smooth curve.
-            // Sort by rightmost column so rightward curves are drawn last (on top).
+            let is_uncommitted_segment = |s: &&crate::graph::calc::BranchSegment| -> bool {
+                if let Some((_, head_y, _)) = uncommitted_lane {
+                    s.is_uncommitted && s.source_pos_y <= head_y
+                } else {
+                    false
+                }
+            };
+            let uncommitted_continuation_color = |s: &crate::graph::calc::BranchSegment| {
+                let (_, head_y, _) = uncommitted_lane?;
+                if !s.is_uncommitted || s.source_pos_y != head_y {
+                    return None;
+                }
+                branch_segments
+                    .iter()
+                    .find(|other| {
+                        !other.is_uncommitted
+                            && other.source_pos_y == s.target_pos_y
+                            && other.source_pos_x == s.target_pos_x
+                    })
+                    .map(|other| image_params.edge_color(other.color_index))
+            };
+
             let mut segs: Vec<_> = branch_segments.iter().collect();
-            segs.sort_by_key(|s| s.source_pos_x.max(s.target_pos_x));
+            // Uncommitted segments first (behind); then sort by rightmost column.
+            segs.sort_by_key(|s| (!is_uncommitted_segment(s) as usize, s.source_pos_x.max(s.target_pos_x)));
 
             for seg in segs {
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
@@ -761,15 +805,10 @@ pub fn calc_graph_row_image(
                 }
                 let color_override = if is_uncommitted {
                     Some(commit_color)
-                } else if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-                    if pos_y <= head_y
-                        && (seg.source_pos_y == 0 || seg.target_pos_y == 0)
-                        && (seg.source_pos_x == lane_x || seg.target_pos_x == lane_x)
-                    {
-                        Some(lane_color)
-                    } else {
-                        None
-                    }
+                } else if let Some(color) = uncommitted_continuation_color(seg) {
+                    Some(color)
+                } else if is_uncommitted_segment(&seg) {
+                    uncommitted_lane.map(|(_, _, c)| c)
                 } else {
                     None
                 };
@@ -785,30 +824,36 @@ pub fn calc_graph_row_image(
         }
     }
 
-    // Draw grey overlay for the uncommitted→HEAD segment.
-    // This covers the vertical edges on the uncommitted column with grey,
-    // without bleeding into other paths that share the column.
-    if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
-        draw_uncommitted_overlay(
-            &mut img_buf,
-            lane_x,
-            head_y,
-            pos_y,
-            image_params,
-            lane_color,
-        );
+    // Overlay for Rounded/Angular only (Smooth handles coloring via color_override above).
+    if graph_style != GraphStyle::Smooth {
+        if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
+            draw_uncommitted_overlay(
+                &mut img_buf, lane_x, head_y, pos_y, image_params, lane_color,
+            );
+        }
     }
 
     // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
+    let node_color = if graph_style == GraphStyle::Smooth || is_uncommitted || is_stash {
+        commit_color
+    } else {
+        image_params.edge_color(commit_pos_x)
+    };
     if head {
-        draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+        draw_head_commit(
+            &mut img_buf,
+            commit_pos_x,
+            image_params,
+            drawing_pixels,
+            node_color,
+        );
     } else if is_stash {
         draw_stash_commit(
             &mut img_buf,
             commit_pos_x,
             image_params,
             drawing_pixels,
-            commit_color,
+            node_color,
         );
     } else if is_uncommitted {
         draw_hollow_circle(
@@ -816,10 +861,16 @@ pub fn calc_graph_row_image(
             commit_pos_x,
             image_params,
             drawing_pixels,
-            commit_color,
+            node_color,
         );
     } else {
-        draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+        draw_commit_circle(
+            &mut img_buf,
+            commit_pos_x,
+            image_params,
+            drawing_pixels,
+            node_color,
+        );
     }
 
     let bytes = build_image(&img_buf, image_width, image_height);
@@ -900,6 +951,14 @@ fn draw_hollow_circle(
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
     let bg = image_params.background_color;
 
+    for (x, y) in &drawing_pixels.circle_gap {
+        let px = (*x + x_offset) as u32;
+        let py = *y as u32;
+        if px < img_buf.width() && py < img_buf.height() {
+            *img_buf.get_pixel_mut(px, py) = bg;
+        }
+    }
+
     // Fill the interior with background color so underlying curves are hidden.
     for (x, y) in &drawing_pixels.circle {
         let x = (*x + x_offset) as u32;
@@ -922,10 +981,18 @@ fn draw_head_commit(
     circle_pos_x: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
-    let color = image_params.edge_color(circle_pos_x);
     let bg = image_params.background_color;
+
+    for (x, y) in &drawing_pixels.circle_gap {
+        let px = (*x + x_offset) as u32;
+        let py = *y as u32;
+        if px < img_buf.width() && py < img_buf.height() {
+            *img_buf.get_pixel_mut(px, py) = bg;
+        }
+    }
 
     // Fill the interior with background color so underlying curves are hidden.
     for (x, y) in &drawing_pixels.circle {
@@ -962,9 +1029,17 @@ fn draw_commit_circle(
     circle_pos_x: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
-    let color = image_params.edge_color(circle_pos_x);
+
+    for (x, y) in &drawing_pixels.commit_circle_gap {
+        let px = (*x + x_offset) as u32;
+        let py = *y as u32;
+        if px < img_buf.width() && py < img_buf.height() {
+            *img_buf.get_pixel_mut(px, py) = image_params.background_color;
+        }
+    }
 
     for (x, y) in &drawing_pixels.circle {
         let x = (*x + x_offset) as u32;
@@ -1225,10 +1300,9 @@ fn draw_smooth_bezier_segment(
     let p3x = segment.source_pos_x as f32 * cell_width + cell_width / 2.0;
     let p3y = segment.source_pos_y as f32 * cell_height + cell_height / 2.0;
 
-    // VS Code Git Graph S-curve: control points overshoot vertically.
-    // Large overshoot (d = distance * 0.9) creates a long vertical base segment
-    // before the curve transitions, matching VS Code's late-S appearance.
-    // For vertical segments, d = 0 (straight line).
+    // S-curve: d scales with total segment height so the Bezier tangent exits
+    // each circle vertically for a long visible straight portion before curving.
+    // For vertical segments (same column), no curve needed.
     let is_vertical = segment.source_pos_x == segment.target_pos_x;
     let pixel_distance = (p0y - p3y).abs();
     let d = if is_vertical {
@@ -1364,11 +1438,300 @@ mod tests {
     use crate::config::GraphColorConfig;
 
     use super::*;
+    use crate::graph::calc::BranchSegment;
     use EdgeType::*;
 
     const OUTPUT_DIR: &str = "./out/ut/graph/image";
 
     type TestParam = (usize, Vec<(EdgeType, usize, usize)>);
+
+    fn test_image_params() -> ImageParams {
+        ImageParams {
+            width: 50,
+            height: 56,
+            line_width: 5,
+            circle_inner_radius: 11,
+            circle_outer_radius: 14,
+            edge_colors: vec![
+                image::Rgba([0x00, 0x7a, 0xcc, 0xff]),
+                image::Rgba([0xff, 0x00, 0xff, 0xff]),
+            ],
+            circle_edge_color: image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
+            background_color: image::Rgba([0x20, 0x22, 0x30, 0xff]),
+        }
+    }
+
+    fn decode_graph_row(row: &GraphRowImage) -> image::RgbaImage {
+        image::load_from_memory(&row.bytes).unwrap().to_rgba8()
+    }
+
+    #[test]
+    fn smooth_branch_segment_on_uncommitted_column_keeps_own_color() {
+        let image_params = test_image_params();
+        let drawing_pixels = DrawingPixels::new(&image_params);
+        let segment = BranchSegment {
+            source_pos_x: 0,
+            target_pos_x: 0,
+            source_pos_y: 1,
+            target_pos_y: 0,
+            color_index: 0,
+            is_branch: true,
+            is_uncommitted: false,
+        };
+
+        let row = calc_graph_row_image(
+            1,
+            2,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[segment],
+            1,
+            false,
+            false,
+            false,
+            image_params.edge_color(1),
+            Some((0, 1, image::Rgba([0x80, 0x80, 0x80, 0xff]))),
+        );
+        let img = decode_graph_row(&row);
+
+        assert_eq!(
+            *img.get_pixel(25, 8),
+            image_params.edge_color(0),
+            "non-uncommitted branches must not be recolored gray just because they share the uncommitted column"
+        );
+    }
+
+    #[test]
+    fn commit_circle_uses_branch_color_instead_of_column_color() {
+        let mut image_params = test_image_params();
+        image_params.circle_edge_color = image::Rgba([0x00, 0x00, 0x00, 0x00]);
+        let drawing_pixels = DrawingPixels::new(&image_params);
+
+        let row = calc_graph_row_image(
+            1,
+            2,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[],
+            0,
+            false,
+            false,
+            false,
+            image_params.edge_color(0),
+            None,
+        );
+        let img = decode_graph_row(&row);
+        let center_x = image_params.width as u32 + image_params.width as u32 / 2;
+        let center_y = image_params.height as u32 / 2;
+
+        assert_eq!(
+            *img.get_pixel(center_x, center_y),
+            image_params.edge_color(0),
+            "commit circles should follow the branch color, not the lane color"
+        );
+    }
+
+    #[test]
+    fn rounded_commit_circle_uses_column_color() {
+        let mut image_params = test_image_params();
+        image_params.circle_edge_color = image::Rgba([0x00, 0x00, 0x00, 0x00]);
+        let drawing_pixels = DrawingPixels::new(&image_params);
+
+        let row = calc_graph_row_image(
+            1,
+            2,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Rounded,
+            &[],
+            0,
+            false,
+            false,
+            false,
+            image_params.edge_color(0),
+            None,
+        );
+        let img = decode_graph_row(&row);
+        let center_x = image_params.width as u32 + image_params.width as u32 / 2;
+        let center_y = image_params.height as u32 / 2;
+
+        assert_eq!(
+            *img.get_pixel(center_x, center_y),
+            image_params.edge_color(1),
+            "rounded nodes should keep legacy lane-based colors"
+        );
+    }
+
+    #[test]
+    fn smooth_hollow_circle_masks_one_pixel_gap_outside_edge() {
+        let image_params = test_image_params();
+        let drawing_pixels = DrawingPixels::new(&image_params);
+        let segment = BranchSegment {
+            source_pos_x: 0,
+            target_pos_x: 0,
+            source_pos_y: 1,
+            target_pos_y: 0,
+            color_index: 0,
+            is_branch: true,
+            is_uncommitted: false,
+        };
+
+        let row = calc_graph_row_image(
+            0,
+            1,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[segment],
+            0,
+            true,
+            false,
+            false,
+            image_params.edge_color(0),
+            None,
+        );
+        let img = decode_graph_row(&row);
+        let center_x = image_params.width as u32 / 2;
+        let gap_y = image_params.height as u32 / 2 + image_params.circle_outer_radius as u32 + 1;
+
+        assert_eq!(
+            *img.get_pixel(center_x, gap_y),
+            image_params.background_color,
+            "hollow circles should mask a one-pixel background gap outside the circle edge"
+        );
+    }
+
+    #[test]
+    fn smooth_filled_circle_masks_one_pixel_gap_outside_visible_fill() {
+        let mut image_params = test_image_params();
+        image_params.circle_edge_color = image::Rgba([0x00, 0x00, 0x00, 0x00]);
+        let drawing_pixels = DrawingPixels::new(&image_params);
+        let segment = BranchSegment {
+            source_pos_x: 0,
+            target_pos_x: 0,
+            source_pos_y: 1,
+            target_pos_y: 0,
+            color_index: 0,
+            is_branch: true,
+            is_uncommitted: false,
+        };
+
+        let row = calc_graph_row_image(
+            0,
+            1,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[segment],
+            0,
+            false,
+            false,
+            false,
+            image_params.edge_color(0),
+            None,
+        );
+        let img = decode_graph_row(&row);
+        let center_x = image_params.width as u32 / 2;
+        let gap_y = image_params.height as u32 / 2 + image_params.circle_inner_radius as u32 + 1;
+
+        assert_eq!(
+            *img.get_pixel(center_x, gap_y),
+            image_params.background_color,
+            "filled circles should mask the line just outside the visible fill radius"
+        );
+    }
+
+    #[test]
+    fn smooth_uncommitted_branch_segment_below_head_keeps_own_color() {
+        let image_params = test_image_params();
+        let drawing_pixels = DrawingPixels::new(&image_params);
+        let segment = BranchSegment {
+            source_pos_x: 0,
+            target_pos_x: 0,
+            source_pos_y: 2,
+            target_pos_y: 1,
+            color_index: 0,
+            is_branch: true,
+            is_uncommitted: true,
+        };
+
+        let row = calc_graph_row_image(
+            0,
+            1,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[segment],
+            2,
+            false,
+            false,
+            false,
+            image_params.edge_color(0),
+            Some((0, 1, image::Rgba([0x80, 0x80, 0x80, 0xff]))),
+        );
+        let img = decode_graph_row(&row);
+
+        assert_eq!(
+            *img.get_pixel(25, 8),
+            image_params.edge_color(0),
+            "only the uncommitted-to-HEAD range should be recolored gray"
+        );
+    }
+
+    #[test]
+    fn smooth_last_uncommitted_segment_uses_continuation_color_above_head() {
+        let image_params = test_image_params();
+        let drawing_pixels = DrawingPixels::new(&image_params);
+        let uncommitted_segment = BranchSegment {
+            source_pos_x: 0,
+            target_pos_x: 0,
+            source_pos_y: 11,
+            target_pos_y: 10,
+            color_index: 0,
+            is_branch: true,
+            is_uncommitted: true,
+        };
+        let continuation_segment = BranchSegment {
+            source_pos_x: 0,
+            target_pos_x: 1,
+            source_pos_y: 10,
+            target_pos_y: 9,
+            color_index: 0,
+            is_branch: true,
+            is_uncommitted: false,
+        };
+
+        let row = calc_graph_row_image(
+            0,
+            2,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[uncommitted_segment, continuation_segment],
+            11,
+            true,
+            false,
+            false,
+            image_params.edge_color(0),
+            Some((0, 11, image::Rgba([0x80, 0x80, 0x80, 0xff]))),
+        );
+        let img = decode_graph_row(&row);
+
+        assert_eq!(
+            *img.get_pixel(25, 8),
+            image_params.edge_color(0),
+            "the branch continuation above HEAD should color the shared lane segment"
+        );
+    }
 
     // Note: The output contents are not verified by the code.
 

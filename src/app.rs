@@ -26,7 +26,7 @@ use crate::{
          actions, diff::DiffEntry, status::{StatusType, UncommittedChanges}, Commit, CommitHash, FileChange, Head,
          Ref, Repository,
      },
-    graph::{CellWidthType, Graph, GraphImageManager},
+    graph::{CellWidthType, Graph, GraphImageManager, GraphStyle},
     keybind::KeyBind,
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
@@ -112,6 +112,7 @@ impl<'a> App<'a> {
         graph: &'a Graph,
         graph_color_set: &'a GraphColorSet,
         cell_width_type: CellWidthType,
+        graph_style: GraphStyle,
         initial_selection: InitialSelection,
         ctx: Rc<AppContext>,
         ec: &'a EventController,
@@ -128,7 +129,16 @@ impl<'a> App<'a> {
                     ref_name_to_commit_index_map.insert(r.name(), i);
                 }
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
-                let graph_color = graph_color_set.get(pos_x).to_ratatui_color();
+                let color_index = if graph_style == GraphStyle::Smooth {
+                    graph
+                        .commit_color_map
+                        .get(&commit.commit_hash)
+                        .copied()
+                        .unwrap_or(pos_x)
+                } else {
+                    pos_x
+                };
+                let graph_color = graph_color_set.get(color_index).to_ratatui_color();
                 if commit.commit_type == crate::git::CommitType::Uncommitted {
                     let changes = repository.uncommitted_changes().unwrap();
                     let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
@@ -156,13 +166,23 @@ impl<'a> App<'a> {
             match r {
                 Ref::Branch { name, target } => {
                     if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
-                        let color = graph_color_set.get(pos_x).to_ratatui_color();
+                        let color_index = if graph_style == GraphStyle::Smooth {
+                            graph.commit_color_map.get(target).copied().unwrap_or(pos_x)
+                        } else {
+                            pos_x
+                        };
+                        let color = graph_color_set.get(color_index).to_ratatui_color();
                         branch_color_map.insert(name.clone(), color);
                     }
                 }
                 Ref::RemoteBranch { name, target } => {
                     if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
-                        let color = graph_color_set.get(pos_x).to_ratatui_color();
+                        let color_index = if graph_style == GraphStyle::Smooth {
+                            graph.commit_color_map.get(target).copied().unwrap_or(pos_x)
+                        } else {
+                            pos_x
+                        };
+                        let color = graph_color_set.get(color_index).to_ratatui_color();
                         branch_color_map.insert(name.clone(), color);
                         if let Some((_, base)) = name.split_once('/') {
                             branch_color_map.insert(base.to_string(), color);
@@ -220,18 +240,23 @@ impl App<'_> {
         self.clear_image(None)?;
         terminal.clear()?;
 
+        let mut needs_draw = true;
          loop {
             // Clear notifications after 3 seconds
             if let Some(timestamp) = self.app_status.notification_timestamp {
                 if timestamp.elapsed() >= std::time::Duration::from_secs(2) {
                     self.clear_status_line();
                     self.app_status.notification_timestamp = None;
+                    needs_draw = true;
                 }
             }
 
-            self.prepare_render(terminal)?;
-            self.flush_pending_graph_uploads()?;
-            terminal.draw(|f| self.render(f))?;
+            if needs_draw {
+                self.prepare_render(terminal)?;
+                self.flush_pending_graph_uploads()?;
+                terminal.draw(|f| self.render(f))?;
+            }
+            needs_draw = true;
             match self.ec.recv() {
                 AppEvent::Key(key) => {
                     match self.app_status.status_line {
@@ -309,7 +334,11 @@ impl App<'_> {
                                     && (c != '0' || !self.app_status.numeric_prefix.is_empty())
                                 {
                                     self.app_status.numeric_prefix.push(c);
+                                } else {
+                                    needs_draw = false; // unbound non-digit key: nothing changed
                                 }
+                            } else {
+                                needs_draw = false; // unbound non-char key: nothing changed
                             }
                          }
                      }
@@ -318,7 +347,7 @@ impl App<'_> {
                     let _ = (w, h);
                 }
                 AppEvent::Mouse(mouse) => {
-                    self.handle_mouse_event(mouse);
+                    needs_draw = self.handle_mouse_event(mouse);
                 }
                 AppEvent::Quit => {
                     self.cleanup_graph_images()?;
@@ -458,10 +487,13 @@ impl App<'_> {
                     self.refresh_uncommitted();
                 }
                 AppEvent::Tick => {
-                    // Only re-render if there's an active notification that might need clearing
-                    if self.app_status.notification_timestamp.is_some() {
-                        continue;
-                    }
+                    // Only redraw when a notification is about to expire.
+                    // Ticking without a notification produces no visual change, so skip the draw.
+                    needs_draw = self
+                        .app_status
+                        .notification_timestamp
+                        .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
+                        .unwrap_or(false);
                 }
                 AppEvent::OpenUncommittedDiff { file_path, is_staged } => {
                     self.clear_image(Some(terminal))?;
@@ -1328,7 +1360,7 @@ impl App<'_> {
         self.app_status.notification_timestamp = None;
     }
 
-    fn handle_mouse_event(&mut self, mouse: ratatui::crossterm::event::MouseEvent) {
+    fn handle_mouse_event(&mut self, mouse: ratatui::crossterm::event::MouseEvent) -> bool {
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
 
         match mouse.kind {
@@ -1340,6 +1372,7 @@ impl App<'_> {
                         ratatui::crossterm::event::KeyModifiers::NONE,
                     ),
                 );
+                true
             }
             MouseEventKind::ScrollDown => {
                 let _ = self.view.handle_event(
@@ -1349,14 +1382,16 @@ impl App<'_> {
                         ratatui::crossterm::event::KeyModifiers::NONE,
                     ),
                 );
+                true
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 self.view.handle_click(mouse.column, mouse.row);
+                true
             }
             MouseEventKind::Moved => {
-                self.view.handle_mouse_move(mouse.column, mouse.row);
+                self.view.handle_mouse_move(mouse.column, mouse.row)
             }
-            _ => {}
+            _ => false
         }
     }
 
