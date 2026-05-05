@@ -280,7 +280,8 @@ fn build_single_graph_row_image(
     let commit_color = if is_uncommitted {
         UNCOMMITTED_COLOR
     } else {
-        image_params.edge_color(pos_x)
+        let color_index = graph.commit_color_map.get(commit_hash).copied().unwrap_or(pos_x);
+        image_params.edge_color(color_index)
     };
 
     // For rows between uncommitted (pos_y=0) and HEAD, color edges on the
@@ -828,7 +829,13 @@ pub fn calc_graph_row_image(
 
     // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
     if head {
-        draw_head_commit(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+        draw_head_commit(
+            &mut img_buf,
+            commit_pos_x,
+            image_params,
+            drawing_pixels,
+            commit_color,
+        );
     } else if is_stash {
         draw_stash_commit(
             &mut img_buf,
@@ -846,7 +853,13 @@ pub fn calc_graph_row_image(
             commit_color,
         );
     } else {
-        draw_commit_circle(&mut img_buf, commit_pos_x, image_params, drawing_pixels);
+        draw_commit_circle(
+            &mut img_buf,
+            commit_pos_x,
+            image_params,
+            drawing_pixels,
+            commit_color,
+        );
     }
 
     let bytes = build_image(&img_buf, image_width, image_height);
@@ -957,9 +970,9 @@ fn draw_head_commit(
     circle_pos_x: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
-    let color = image_params.edge_color(circle_pos_x);
     let bg = image_params.background_color;
 
     for (x, y) in &drawing_pixels.circle_gap {
@@ -1005,9 +1018,9 @@ fn draw_commit_circle(
     circle_pos_x: usize,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
+    color: image::Rgba<u8>,
 ) {
     let x_offset = (circle_pos_x * image_params.width as usize) as i32;
-    let color = image_params.edge_color(circle_pos_x);
 
     for (x, y) in &drawing_pixels.commit_circle_gap {
         let px = (*x + x_offset) as u32;
@@ -1476,6 +1489,38 @@ mod tests {
             *img.get_pixel(25, 8),
             image_params.edge_color(0),
             "non-uncommitted branches must not be recolored gray just because they share the uncommitted column"
+        );
+    }
+
+    #[test]
+    fn commit_circle_uses_branch_color_instead_of_column_color() {
+        let mut image_params = test_image_params();
+        image_params.circle_edge_color = image::Rgba([0x00, 0x00, 0x00, 0x00]);
+        let drawing_pixels = DrawingPixels::new(&image_params);
+
+        let row = calc_graph_row_image(
+            1,
+            2,
+            &[],
+            &image_params,
+            &drawing_pixels,
+            GraphStyle::Smooth,
+            &[],
+            0,
+            false,
+            false,
+            false,
+            image_params.edge_color(0),
+            None,
+        );
+        let img = decode_graph_row(&row);
+        let center_x = image_params.width as u32 + image_params.width as u32 / 2;
+        let center_y = image_params.height as u32 / 2;
+
+        assert_eq!(
+            *img.get_pixel(center_x, center_y),
+            image_params.edge_color(0),
+            "commit circles should follow the branch color, not the lane color"
         );
     }
 

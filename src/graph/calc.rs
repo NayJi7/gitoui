@@ -3,6 +3,7 @@ use rustc_hash::FxHashMap;
 use crate::git::{Commit, CommitHash, CommitType, Repository};
 
 type CommitPosMap<'a> = FxHashMap<&'a CommitHash, (usize, usize)>;
+type CommitColorMap<'a> = FxHashMap<&'a CommitHash, usize>;
 
 #[derive(Debug, Clone)]
 pub struct BranchSegment {
@@ -19,6 +20,7 @@ pub struct BranchSegment {
 pub struct Graph<'a> {
     pub commits: Vec<&'a Commit>,
     pub commit_pos_map: CommitPosMap<'a>,
+    pub commit_color_map: CommitColorMap<'a>,
     pub edges: Vec<Vec<Edge>>,
     pub max_pos_x: usize,
     pub branch_segments: Vec<BranchSegment>,
@@ -360,10 +362,16 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
 
     // 3. Build commit_pos_map (one (x, y) per commit)
     let mut commit_pos_map: CommitPosMap = FxHashMap::default();
+    let mut commit_color_map: CommitColorMap = FxHashMap::default();
     let mut max_pos_x = 0usize;
     for (i, commit) in commits.iter().enumerate() {
         let x = vertices[i].x.unwrap_or(0);
         commit_pos_map.insert(&commit.commit_hash, (x, i));
+        let color = vertices[i]
+            .branch_id
+            .map(|branch_id| branches[branch_id].colour)
+            .unwrap_or(x);
+        commit_color_map.insert(&commit.commit_hash, color);
         if x > max_pos_x { max_pos_x = x; }
     }
 
@@ -395,6 +403,7 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
     Graph {
         commits,
         commit_pos_map,
+        commit_color_map,
         edges,
         max_pos_x,
         branch_segments,
