@@ -172,6 +172,9 @@ impl<'a> RefsView<'a> {
 
     pub fn prepare_graph_uploads(&mut self) {
         self.as_mut_list_state().ensure_visible_graph_uploaded();
+        let ctx = self.ctx.clone();
+        self.as_mut_list_state()
+            .ensure_visible_avatars_uploaded(&mut ctx.avatar_manager.lock().unwrap(), ctx.color_theme.bg, ctx.color_theme.list_selected_bg);
     }
 
     pub fn clear_graph_images(&mut self) {

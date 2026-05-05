@@ -71,7 +71,7 @@ impl Clone for AppContext {
             ui_config: self.ui_config.clone(),
             color_theme: self.color_theme.clone(),
             image_protocol: self.image_protocol,
-            avatar_manager: Mutex::new(AvatarManager::new(self.image_protocol)),
+            avatar_manager: Mutex::new(AvatarManager::new(self.image_protocol, Vec::new())),
             git_user_name: self.git_user_name.clone(),
             git_user_email: self.git_user_email.clone(),
             branch_color_map: self.branch_color_map.clone(),
@@ -115,7 +115,7 @@ impl Default for AppContext {
             ui_config: UiConfig::default(),
             color_theme: ColorTheme::default(),
             image_protocol: ImageProtocol::Iterm2,
-            avatar_manager: Mutex::new(AvatarManager::new(ImageProtocol::Iterm2)),
+            avatar_manager: Mutex::new(AvatarManager::new(ImageProtocol::Iterm2, Vec::new())),
             git_user_name: String::new(),
             git_user_email: String::new(),
             branch_color_map: FxHashMap::default(),
@@ -554,7 +554,8 @@ impl App<'_> {
     }
 
     fn flush_pending_graph_uploads(&mut self) -> Result<(), std::io::Error> {
-        let uploads = self.view.drain_pending_graph_uploads();
+        let mut uploads = self.view.drain_pending_graph_uploads();
+        uploads.extend(self.ctx.avatar_manager.lock().unwrap().drain_pending_uploads());
         if uploads.is_empty() {
             return Ok(());
         }
@@ -567,7 +568,8 @@ impl App<'_> {
     }
 
     fn cleanup_graph_images(&self) -> Result<(), std::io::Error> {
-        let image_ids = self.view.graph_image_ids_sorted();
+        let mut image_ids = self.view.graph_image_ids_sorted();
+        image_ids.extend(self.ctx.avatar_manager.lock().unwrap().image_ids_sorted());
         self.ctx.image_protocol.delete_images(&image_ids)
     }
 

@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::rc::Rc;
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
@@ -270,6 +269,7 @@ pub struct CommitListState<'a> {
     // Tracks the (offset, height, area) of the last graph render so we can skip
     // re-rendering graph image cells when visible commits haven't changed.
     graph_render_state: Option<(usize, usize, Rect)>,
+    avatar_render_state: Option<(usize, usize, Rect, Vec<(String, bool, bool)>)>,
 }
 
 impl<'a> CommitListState<'a> {
@@ -320,6 +320,7 @@ impl<'a> CommitListState<'a> {
             hovered_tag: None,
             hovered_row: None,
             graph_render_state: None,
+            avatar_render_state: None,
         }
     }
 
@@ -367,6 +368,28 @@ impl<'a> CommitListState<'a> {
             });
     }
 
+    pub fn ensure_visible_avatars_uploaded(
+        &mut self,
+        avatar_manager: &mut crate::avatar::AvatarManager,
+        bg: Color,
+        selected_bg: Color,
+    ) {
+        if !avatar_manager.is_enabled() {
+            return;
+        }
+        self.commits
+            .iter()
+            .skip(self.offset)
+            .take(self.height)
+            .enumerate()
+            .filter(|(_, commit_info)| !commit_info.is_uncommitted)
+            .for_each(|(i, commit_info)| {
+                let selected = i == self.selected;
+                let row_bg = if selected { selected_bg } else { bg };
+                avatar_manager.ensure_uploaded(&commit_info.commit.author_email, 1, selected, row_bg)
+            });
+    }
+
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
         self.graph_image_manager.drain_pending_uploads()
     }
@@ -374,6 +397,7 @@ impl<'a> CommitListState<'a> {
     pub fn clear_graph_images(&mut self) {
         self.graph_image_manager.clear_prepared_images();
         self.graph_render_state = None; // images cleared, must re-render
+        self.avatar_render_state = None;
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
@@ -1183,6 +1207,7 @@ impl CommitList<'_> {
         if area.is_empty() || max_width == 0 {
             return;
         }
+        let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let avatar_width = 3; // 2 cells image + 1 space
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
@@ -1195,10 +1220,7 @@ impl CommitList<'_> {
                     );
                 }
                 let commit = commit_info.commit;
-                let has_avatar = self.ctx.avatar_manager.lock().unwrap()
-                    .get_avatar(&commit.author_email, 1)
-                    .is_some();
-                let effective_max = if has_avatar && max_width > 10 {
+                let effective_max = if avatars_enabled && max_width > 10 {
                     max_width.saturating_sub(avatar_width)
                 } else {
                     max_width
@@ -1209,7 +1231,7 @@ impl CommitList<'_> {
                 } else {
                     commit.author_name.to_string()
                 };
-                let mut spans = if has_avatar && max_width > 10 {
+                let mut spans = if avatars_enabled && max_width > 10 {
                     vec![Span::raw("   ")]
                 } else {
                     vec![]
@@ -1233,23 +1255,44 @@ impl CommitList<'_> {
             .collect();
         Widget::render(List::new(items), area, buf);
 
-        // Write avatar images directly into the buffer at the reserved positions
-        let visible_count = state.height.min(area.height as usize);
-        for i in 0..visible_count {
-            let (_, commit_info) = match self.rendering_commit_info_iter(state).nth(i) {
-                Some(ci) => ci,
-                None => continue,
-            };
-            if commit_info.is_uncommitted {
+        if !avatars_enabled || max_width <= 10 {
+            state.avatar_render_state = None;
+            return;
+        }
+
+        let avatar_manager = self.ctx.avatar_manager.lock().unwrap();
+        let visible: Vec<(String, bool, bool)> = self
+            .rendering_commit_info_iter(state)
+            .map(|(i, commit_info)| {
+                if commit_info.is_uncommitted {
+                    return (String::new(), false, false);
+                }
+                let email = commit_info.commit.author_email.clone();
+                let selected = i == state.selected;
+                let is_prepared = avatar_manager.prepared_image(&email, 1, selected).is_some();
+                (email, is_prepared, selected)
+            })
+            .collect();
+        let key = (state.offset, state.height, area, visible.clone());
+        if state.avatar_render_state == Some(key.clone()) {
+            for (i, (_, is_prepared, _)) in visible.iter().enumerate().take(area.height as usize) {
+                if !is_prepared {
+                    continue;
+                }
+                let y = area.top() + i as u16;
+                for x in 0..2 {
+                    buf[(area.left() + x + 1, y)].set_skip(true);
+                }
+            }
+            return;
+        }
+
+        for (i, (email, is_prepared, selected)) in visible.iter().enumerate() {
+            if !is_prepared {
                 continue;
             }
-            let y = area.top() + i as u16;
-            let mut mgr = self.ctx.avatar_manager.lock().unwrap();
-            if let Some(mut prepared) = mgr.get_avatar(&commit_info.commit.author_email, 1) {
-                if let Some(upload) = prepared.take_upload_data() {
-                    let _ = write!(std::io::stdout(), "{}", upload);
-                    let _ = std::io::stdout().flush();
-                }
+            if let Some(prepared) = avatar_manager.prepared_image(email, 1, *selected) {
+                let y = area.top() + i as u16;
                 for (x, image_cell) in prepared.cells().iter().enumerate() {
                     let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                     cell.set_symbol(image_cell.symbol());
@@ -1258,6 +1301,7 @@ impl CommitList<'_> {
                 }
             }
         }
+        state.avatar_render_state = Some(key);
     }
 
     fn render_hash(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {

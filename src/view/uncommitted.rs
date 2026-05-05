@@ -383,6 +383,7 @@ impl<'a> UncommittedView<'a> {
     pub fn prepare_graph_uploads(&mut self) {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.ensure_visible_graph_uploaded();
+            list_state.ensure_visible_avatars_uploaded(&mut self.ctx.avatar_manager.lock().unwrap(), self.ctx.color_theme.bg, self.ctx.color_theme.list_selected_bg);
         }
     }
 

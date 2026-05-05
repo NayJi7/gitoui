@@ -184,7 +184,10 @@ pub fn run() -> Result<()> {
             .ok()
             .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
             .unwrap_or_else(|| "Not set".into());
-        let avatar_manager = avatar::AvatarManager::new(image_protocol);
+        let avatar_manager = avatar::AvatarManager::new(
+            image_protocol,
+            github_repos_from_remotes(),
+        );
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
@@ -201,9 +204,20 @@ pub fn run() -> Result<()> {
 
         {
             let mgr = ctx.avatar_manager.lock().unwrap();
+            let mut commits_by_email: rustc_hash::FxHashMap<String, Vec<String>> =
+                rustc_hash::FxHashMap::default();
             for commit in repository.all_commits() {
-                mgr.prefetch(&commit.author_email);
-                mgr.prefetch(&commit.committer_email);
+                commits_by_email
+                    .entry(commit.author_email.clone())
+                    .or_default()
+                    .push(commit.commit_hash.as_str().to_string());
+                commits_by_email
+                    .entry(commit.committer_email.clone())
+                    .or_default()
+                    .push(commit.commit_hash.as_str().to_string());
+            }
+            for (email, commit_hashes) in commits_by_email {
+                mgr.prefetch(commit_hashes, &email);
             }
         }
 
@@ -265,4 +279,61 @@ pub fn run() -> Result<()> {
     .unwrap();
     ratatui::restore();
     ret.map_err(Into::into)
+}
+
+fn github_repos_from_remotes() -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .args(["remote", "-v"])
+        .output()
+        .ok();
+    let Some(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let mut repos = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some(url) = line.split_whitespace().nth(1) else {
+            continue;
+        };
+        if let Some(repo) = parse_github_repo(url) {
+            if !repos.contains(&repo) {
+                repos.push(repo);
+            }
+        }
+    }
+    repos
+}
+
+fn parse_github_repo(url: &str) -> Option<String> {
+    let path = if let Some(rest) = url.strip_prefix("git@github.com:") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("https://github.com/") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("ssh://git@github.com/") {
+        rest
+    } else {
+        return None;
+    };
+    let path = path.trim_end_matches(".git");
+    let (owner, repo) = path.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() {
+        None
+    } else {
+        Some(format!("{owner}/{repo}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_github_repo_from_common_remote_urls() {
+        assert_eq!(parse_github_repo("git@github.com:owner/repo.git"), Some("owner/repo".to_string()));
+        assert_eq!(parse_github_repo("https://github.com/org/repo"), Some("org/repo".to_string()));
+        assert_eq!(parse_github_repo("ssh://git@github.com/user/repo.git"), Some("user/repo".to_string()));
+        assert_eq!(parse_github_repo("https://example.com/user/repo"), None);
+    }
 }
