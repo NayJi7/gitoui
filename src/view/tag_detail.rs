@@ -59,6 +59,9 @@ impl<'a> TagDetailView<'a> {
                     value: self.metadata.tag_name.clone(),
                 });
             }
+            UserEvent::Refresh => {
+                self.refresh();
+            }
             _ => {}
         }
     }
@@ -129,6 +132,12 @@ impl<'a> TagDetailView<'a> {
 
     pub fn set_list_state(&mut self, state: CommitListState<'a>) {
         self.commit_list_state = Some(state);
+    }
+
+    pub fn refresh(&self) {
+        self.tx.send(AppEvent::OpenTagDetail {
+            tag_name: self.metadata.tag_name.clone(),
+        });
     }
 
     pub fn prepare_graph_uploads(&mut self) {

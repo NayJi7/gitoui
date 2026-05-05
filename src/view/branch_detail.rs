@@ -98,6 +98,9 @@ impl<'a> BranchDetailView<'a> {
                     value: self.metadata.branch_name.clone(),
                 });
             }
+            UserEvent::Refresh => {
+                self.refresh();
+            }
             _ => {}
         }
     }
@@ -143,7 +146,9 @@ impl<'a> BranchDetailView<'a> {
     }
 
     pub fn refresh(&self) {
-        // Metadata refresh is handled by the app when re-opening the view
+        self.tx.send(AppEvent::OpenBranchDetail {
+            branch_name: self.metadata.branch_name.clone(),
+        });
     }
 
     pub fn prepare_graph_uploads(&mut self) {

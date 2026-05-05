@@ -618,13 +618,13 @@ impl App<'_> {
                         .view
                         .diff_footer_hint()
                         .unwrap_or_else(|| "c:copy-path Esc:close".into()),
-                    View::Detail(_) => "c:copy-hash C:copy-subject Esc:close".into(),
-                    View::Refs(_) => "Esc:close".into(),
+                    View::Detail(_) => "c:copy-hash C:copy-subject r:refresh Esc:close".into(),
+                    View::Refs(_) => "r:refresh Esc:close".into(),
                     View::Help(_) => "Esc:close".into(),
                     View::UserCommand(_) => "Esc:close".into(),
                     View::Dialog(_) => "Enter:confirm Esc:cancel".into(),
-                    View::BranchDetail(_) => "c:copy-name o:checkout Esc:close".into(),
-                    View::TagDetail(_) => "c:copy-name p:push Esc:close".into(),
+                    View::BranchDetail(_) => "c:copy-name o:checkout r:refresh Esc:close".into(),
+                    View::TagDetail(_) => "c:copy-name p:push r:refresh Esc:close".into(),
                     View::Uncommitted(_) => self
                         .view
                         .uncommitted_footer_hint()
@@ -1545,6 +1545,8 @@ impl App<'_> {
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::UserCommand(ref mut view) => Some(view.take_list_state()),
             View::Refs(ref mut view) => Some(view.take_list_state()),
+            View::BranchDetail(ref mut view) => view.take_list_state(),
+            View::TagDetail(ref mut view) => view.take_list_state(),
             _ => None,
         };
         let repo_path = self.repository.path();
@@ -1588,6 +1590,8 @@ impl App<'_> {
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::UserCommand(ref mut view) => Some(view.take_list_state()),
             View::Refs(ref mut view) => Some(view.take_list_state()),
+            View::BranchDetail(ref mut view) => view.take_list_state(),
+            View::TagDetail(ref mut view) => view.take_list_state(),
             _ => None,
         };
         let repo_path = self.repository.path();

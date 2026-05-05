@@ -362,9 +362,9 @@ impl<'a> View<'a> {
             View::Help(_) => {}
             View::Config(_) => {}
             View::Dialog(_) => {}
-            View::BranchDetail(_) => {}
-            View::TagDetail(_) => {}
-            View::Uncommitted(_) => {}
+            View::BranchDetail(view) => view.refresh(),
+            View::TagDetail(view) => view.refresh(),
+            View::Uncommitted(view) => view.refresh(),
         }
     }
 

@@ -148,14 +148,17 @@ impl<'a> UncommittedView<'a> {
                             is_staged,
                         });
                     } else if file.status == StatusType::Deleted {
-                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for a deleted file.".to_string()));
                     } else if file.status == StatusType::Untracked {
-                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier non suivi.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for an untracked file.".to_string()));
                     }
                 }
             }
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
+            }
+            UserEvent::Refresh => {
+                self.refresh();
             }
             _ => {}
         }
@@ -261,9 +264,9 @@ impl<'a> UncommittedView<'a> {
                             is_staged,
                         });
                     } else if file.status == StatusType::Deleted {
-                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for a deleted file.".to_string()));
                     } else if file.status == StatusType::Untracked {
-                        self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier non suivi.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for an untracked file.".to_string()));
                     }
                 }
             }
@@ -373,6 +376,10 @@ impl<'a> UncommittedView<'a> {
         self.commit_list_state = Some(state);
     }
 
+    pub fn refresh(&self) {
+        self.tx.send(AppEvent::RefreshUncommitted);
+    }
+
     pub fn prepare_graph_uploads(&mut self) {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.ensure_visible_graph_uploaded();
@@ -426,6 +433,7 @@ impl<'a> UncommittedView<'a> {
                 parts.push("X:discard-all".to_string());
             }
         }
+        parts.push("r:refresh".to_string());
         parts.push("Esc:close".to_string());
         parts.join(" ")
     }

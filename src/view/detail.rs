@@ -474,7 +474,7 @@ impl<'a> DetailView<'a> {
                     });
                 }
                 FileChange::Delete { .. } => {
-                    let _ = self.tx.send(AppEvent::NotifyWarn("Impossible de voir le diff d'un fichier supprimé.".to_string()));
+                    let _ = self.tx.send(AppEvent::NotifyWarn("Cannot view diff for a deleted file.".to_string()));
                 }
             }
         }
