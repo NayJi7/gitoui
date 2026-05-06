@@ -1118,9 +1118,9 @@ impl<'a> DiffView<'a> {
             }
         }
         parts.push("c:copy-path");
-        parts.push("r:refresh");
+        parts.push("r:fetch");
         parts.push("Esc:close");
-        parts.join(" ")
+        format!("⌘ {}", parts.join("▕▏"))
     }
 
     fn build_button_line(&self, btn: &ButtonInfo, is_hovered: bool, _width: u16) -> Line<'static> {

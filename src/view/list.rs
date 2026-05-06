@@ -153,6 +153,12 @@ impl<'a> ListView<'a> {
                 UserEvent::Refresh => {
                     self.refresh();
                 }
+                UserEvent::Push => {
+                    self.tx.send(AppEvent::PushCurrentBranch);
+                }
+                UserEvent::Pull => {
+                    self.tx.send(AppEvent::PullCurrentBranch);
+                }
                 UserEvent::Config => {
                     self.tx.send(AppEvent::OpenConfig);
                 }

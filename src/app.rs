@@ -491,6 +491,12 @@ impl App<'_> {
                 AppEvent::NotifyError(msg) => {
                     self.error_notification(msg);
                 }
+                AppEvent::PushCurrentBranch => {
+                    self.execute_push_current_branch();
+                }
+                AppEvent::PullCurrentBranch => {
+                    self.execute_pull_current_branch();
+                }
                 // Phase 2 - Git Actions
                 AppEvent::OpenDialog(kind) => self.open_dialog(kind),
                 AppEvent::CloseDialog => self.close_dialog(),
@@ -668,51 +674,42 @@ impl App<'_> {
 
         let status_area = if show_shortcuts {
             let shortcut_text: String = if is_search_querying {
-                "Esc:cancel".into()
+                "⌘ Esc:cancel".into()
             } else if is_search_active {
                 let (ignore_case, fuzzy) = self.view.search_case_fuzzy().unwrap_or((false, false));
                 // ON = case-sensitive (ignore_case=false), OFF = case-insensitive (ignore_case=true)
                 let case_str = if ignore_case { "[OFF]" } else { "[ON]" };
                 let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
-                format!("s:case{case_str} z:fuzzy{fuzzy_str} n:next N:prev Esc:clear")
+                format!("⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏n:next▕▏N:prev▕▏Esc:clear")
             } else if is_config_active {
-                "Enter/←→:cycle Esc:close".into()
+                "⌘ Enter/⇆:cycle▕▏Esc:close".into()
             } else {
                 match &self.view {
                     View::List(_) => {
-                        "f:search c:copy-hash C:copy-message Tab:refs r:refresh ?:help q:quit"
+                        "⌘ f:search▕▏P:push▕▏U:pull▕▏r:fetch▕▏c:copy msg▕▏C:copy hash▕▏Tab:refs▕▏p:config▕▏?:help▕▏q:quit"
                             .into()
                     }
                     View::Diff(_) => self
                         .view
                         .diff_footer_hint()
-                        .unwrap_or_else(|| "c:copy-path Esc:close".into()),
-                    View::Detail(_) => "c:copy-hash C:copy-message r:refresh Esc:close".into(),
-                    View::Refs(_) => "r:refresh Esc:close".into(),
-                    View::Help(_) => "Esc:close".into(),
-                    View::UserCommand(_) => "Esc:close".into(),
-                    View::Dialog(_) => "Enter:confirm Esc:cancel".into(),
-                    View::BranchDetail(_) => "c:copy-name o:checkout r:refresh Esc:close".into(),
-                    View::TagDetail(_) => "c:copy-name p:push r:refresh Esc:close".into(),
+                        .unwrap_or_else(|| "⌘ c:copy-path▕▏Esc:close".into()),
+                    View::Detail(_) => "⌘ c:copy msg▕▏C:copy hash▕▏r:fetch▕▏Esc:close".into(),
+                    View::Refs(_) => "⌘ r:fetch▕▏Esc:close".into(),
+                    View::Help(_) => "⌘ Esc:close".into(),
+                    View::UserCommand(_) => "⌘ Esc:close".into(),
+                    View::Dialog(_) => "⌘ Enter:confirm▕▏Esc:cancel".into(),
+                    View::BranchDetail(_) => "⌘ c:copy-name▕▏o:checkout▕▏r:fetch▕▏Esc:close".into(),
+                    View::TagDetail(_) => "⌘ c:copy-name▕▏W:push▕▏r:fetch▕▏Esc:close".into(),
                     View::Uncommitted(_) => self
                         .view
                         .uncommitted_footer_hint()
                         .unwrap_or_else(|| "Esc:close".into()),
-                    _ => "f:search Tab:refs ?:help q:quit r:refresh".into(),
+                    _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
 
-            let right_constraint = if is_search_querying {
-                Constraint::Length(16)
-            } else if is_search_active {
-                Constraint::Length(58)
-            } else if is_config_active {
-                Constraint::Length(32)
-            } else if is_diff {
-                Constraint::Length(55)
-            } else {
-                Constraint::Length(shortcut_text.len() as u16 + 4)
-            };
+            let shortcut_display_width = shortcut_text.chars().count() as u16;
+            let right_constraint = Constraint::Length(shortcut_display_width + 4);
             let [left_area, right_area] =
                 Layout::horizontal([Constraint::Min(0), right_constraint]).areas(area);
             let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
@@ -1504,6 +1501,57 @@ impl App<'_> {
         // DialogConfirm is handled by the DialogView itself via handle_event
         // This method is called when the dialog sends DialogConfirm event
         // In practice, DialogView sends ExecuteGitAction directly on Confirm
+    }
+
+    fn execute_push_current_branch(&mut self) {
+        let repo_path = self.repository.path();
+        match actions::push_commit(repo_path, "") {
+            Ok(msg) => {
+                let msg = if msg.is_empty() {
+                    "Pushed successfully".into()
+                } else {
+                    msg
+                };
+                self.ec.send(AppEvent::NotifySuccess(msg));
+            }
+            Err(msg) => {
+                self.ec.send(AppEvent::NotifyError(msg));
+            }
+        }
+    }
+
+    fn execute_pull_current_branch(&mut self) {
+        let repo_path = self.repository.path();
+        let branch = match self.repository.head() {
+            Head::Branch { name } => name.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyError(
+                    "Cannot pull: not on a branch".into(),
+                ));
+                return;
+            }
+        };
+        match actions::pull_branch(repo_path, &branch) {
+            Ok(msg) => {
+                let msg = if msg.is_empty() {
+                    "Pulled successfully".into()
+                } else {
+                    msg
+                };
+                self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                    list_context: crate::view::ListRefreshViewContext {
+                        commit_hash: String::new(),
+                        selected: 0,
+                        height: 20,
+                        scroll_to_top: false,
+                    },
+                    pending_notification: Some(msg),
+                }));
+            }
+            Err(msg) => {
+                self.ec.send(AppEvent::NotifyError(msg));
+            }
+        }
     }
 
     // Phase 2 - Git Actions execution

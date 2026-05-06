@@ -425,7 +425,7 @@ impl<'a> UncommittedView<'a> {
         if can_unstage {
             parts.push("u:unstage".to_string());
             if has_staged {
-                parts.push("U:unstage-all".to_string());
+                parts.push("B:unstage-all".to_string());
             }
         }
         if can_discard {
@@ -434,8 +434,8 @@ impl<'a> UncommittedView<'a> {
                 parts.push("X:discard-all".to_string());
             }
         }
-        parts.push("r:refresh".to_string());
+        parts.push("r:fetch".to_string());
         parts.push("Esc:close".to_string());
-        parts.join(" ")
+        format!("⌘ {}", parts.join("▕▏"))
     }
 }
