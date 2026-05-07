@@ -33,18 +33,21 @@ ignore_case_toggle = ["s"]
 fuzzy_toggle = ["z"]
 refresh = ["r"]
 
+push = ["shift-p"]
+pull = ["shift-u"]
+
 # copy part of information, ex: copy the short commit hash not all
 config = ["p"]
 
 # copy part of information, ex: copy the short commit hash not all
-short_copy = ["c"]
-full_copy = ["shift-c"]
+short_copy = ["shift-c"]
+full_copy = ["c"]
 
 # Phase 2 - Commit detail actions
 add_tag = ["t"]
 create_branch = ["b"]
 checkout = ["o"]
-cherry_pick = ["shift-p"]
+cherry_pick = ["shift-o"]
 revert = ["shift-r"]
 drop = ["d"]
 merge = ["m"]
@@ -69,7 +72,7 @@ copy_tag_name = ["shift-y"]
 stage = ["a"]
 stage_all = ["shift-a"]
 unstage = ["u"]
-unstage_all = ["shift-u"]
+unstage_all = ["shift-b"]
 discard = ["x"]
 discard_all = ["shift-x"]
 stash = ["i"]
