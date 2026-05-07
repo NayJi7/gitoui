@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use ratatui::style::{Color, Style};
 use syntect::{
     easy::HighlightLines,
-    highlighting::{ThemeSet, Style as SyntectStyle},
+    highlighting::{Style as SyntectStyle, ThemeSet},
     parsing::{SyntaxSet, SyntaxSetBuilder},
 };
 
@@ -28,7 +28,7 @@ static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {
 // Embed custom themes directly into the binary so they're always available
 static THEME_SET: Lazy<ThemeSet> = Lazy::new(|| {
     let mut ts = ThemeSet::load_defaults();
-    
+
     macro_rules! embed_theme {
         ($name:expr, $path:expr) => {{
             static THEME_XML: &str = include_str!($path);
@@ -39,12 +39,15 @@ static THEME_SET: Lazy<ThemeSet> = Lazy::new(|| {
                     ts.themes.insert(theme_name, theme);
                 }
                 Err(e) => {
-                    eprintln!("[THEME_SET] Failed to parse embedded {} theme: {:?}", $name, e);
+                    eprintln!(
+                        "[THEME_SET] Failed to parse embedded {} theme: {:?}",
+                        $name, e
+                    );
                 }
             }
         }};
     }
-    
+
     // Load all embedded custom themes
     embed_theme!("Dracula", "../assets/themes/Dracula.tmTheme");
     embed_theme!("Monokai", "../assets/themes/Monokai.tmTheme");
@@ -70,7 +73,9 @@ impl SyntaxHighlighter {
 
     pub fn new_with_theme(file_path: &str, theme_name: &str) -> Option<Self> {
         let syntax = Self::find_syntax(file_path)?;
-        let theme = THEME_SET.themes.get(theme_name)
+        let theme = THEME_SET
+            .themes
+            .get(theme_name)
             .or_else(|| THEME_SET.themes.get("base16-ocean.dark"))
             .unwrap_or_else(|| &THEME_SET.themes["InspiredGitHub"]);
         let highlighter = HighlightLines::new(syntax, theme);
@@ -100,15 +105,26 @@ impl SyntaxHighlighter {
     }
 
     /// Highlight a single line, returning spans with syntax colors.
-    pub fn highlight_line(&mut self, content: &str, base_style: Style, _preserve_fg: Option<Color>) -> Vec<ratatui::text::Span<'static>> {
-        let ranges = self.highlighter.highlight_line(content, &SYNTAX_SET).unwrap_or_default();
-        
-        ranges.into_iter().map(|(style, text)| {
-            let fg = syntect_color_to_ratatui(style.foreground);
-            let mut span_style = base_style;
-            span_style.fg = Some(fg);
-            ratatui::text::Span::styled(text.to_string(), span_style)
-        }).collect()
+    pub fn highlight_line(
+        &mut self,
+        content: &str,
+        base_style: Style,
+        _preserve_fg: Option<Color>,
+    ) -> Vec<ratatui::text::Span<'static>> {
+        let ranges = self
+            .highlighter
+            .highlight_line(content, &SYNTAX_SET)
+            .unwrap_or_default();
+
+        ranges
+            .into_iter()
+            .map(|(style, text)| {
+                let fg = syntect_color_to_ratatui(style.foreground);
+                let mut span_style = base_style;
+                span_style.fg = Some(fg);
+                ratatui::text::Span::styled(text.to_string(), span_style)
+            })
+            .collect()
     }
 }
 

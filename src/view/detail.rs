@@ -64,7 +64,8 @@ impl<'a> DetailView<'a> {
         match event {
             UserEvent::NavigateDown => {
                 for _ in 0..count {
-                    self.commit_detail_state.select_next_file(self.changes.len());
+                    self.commit_detail_state
+                        .select_next_file(self.changes.len());
                 }
             }
             UserEvent::NavigateUp => {
@@ -73,7 +74,8 @@ impl<'a> DetailView<'a> {
                 }
             }
             UserEvent::NavigateRight => {
-                self.commit_detail_state.select_last_file(self.changes.len());
+                self.commit_detail_state
+                    .select_last_file(self.changes.len());
             }
             UserEvent::NavigateLeft => {
                 self.commit_detail_state.select_first_file();
@@ -145,31 +147,51 @@ impl<'a> DetailView<'a> {
                 self.refresh();
             }
             UserEvent::AddTag => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::CreateBranch => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::Checkout => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: self.commit.commit_hash.as_str().into(), is_branch: false }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                    target: self.commit.commit_hash.as_str().into(),
+                    is_branch: false,
+                }));
             }
             UserEvent::CherryPick => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::Revert => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Revert {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::Drop => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Drop {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::Merge => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: self.commit.commit_hash.as_str().into(), is_branch: false }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                    target: self.commit.commit_hash.as_str().into(),
+                    is_branch: false,
+                }));
             }
             UserEvent::Rebase => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::Reset => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: self.commit.commit_hash.as_str().into() }));
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Reset {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
             }
             UserEvent::ApplyStash => {
                 self.tx.send(AppEvent::ExecuteGitAction {
@@ -179,20 +201,27 @@ impl<'a> DetailView<'a> {
             }
             UserEvent::PopStash => {
                 if let Some(stash_ref) = self.stash_ref() {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash { stash_ref }));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash {
+                            stash_ref,
+                        }));
                 }
             }
             UserEvent::DropStash => {
                 if let Some(stash_ref) = self.stash_ref() {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash { stash_ref }));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash {
+                            stash_ref,
+                        }));
                 }
             }
             UserEvent::CreateBranchFromStash => {
                 if let Some(stash_ref) = self.stash_ref() {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
-                        target: self.commit.commit_hash.as_str().into(),
-                        stash_ref,
-                    }));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
+                            target: self.commit.commit_hash.as_str().into(),
+                            stash_ref,
+                        }));
                 }
             }
             UserEvent::CopyStashName => {
@@ -226,16 +255,23 @@ impl<'a> DetailView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
+        let height = if list_area.height >= 2 {
+            list_area.height - 2
+        } else {
+            list_area.height
+        };
         self.list_height = list_area.height as usize;
-        self.as_mut_list_state()
-            .update_height(list_area.height as usize);
+        self.as_mut_list_state().update_height(height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
         self.as_mut_list_state().ensure_visible_graph_uploaded();
         let ctx = self.ctx.clone();
-        self.as_mut_list_state()
-            .ensure_visible_avatars_uploaded(&mut ctx.avatar_manager.lock().unwrap(), ctx.color_theme.bg, ctx.color_theme.list_selected_bg);
+        self.as_mut_list_state().ensure_visible_avatars_uploaded(
+            &mut ctx.avatar_manager.lock().unwrap(),
+            ctx.color_theme.bg,
+            ctx.color_theme.list_selected_bg,
+        );
     }
 
     pub fn clear_graph_images(&mut self) {
@@ -265,7 +301,7 @@ impl<'a> DetailView<'a> {
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
-        let detail_height = (area.height - 1).min(self.ctx.ui_config.detail.height);
+        let detail_height = super::adaptive_detail_height(area.height, self.ctx.ui_config.detail.height, 10);
         Layout::vertical([Constraint::Min(0), Constraint::Length(detail_height)]).areas(area)
     }
 
@@ -328,7 +364,7 @@ impl<'a> DetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(5);
                 if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
                     self.execute_action(action_idx);
                 }
@@ -392,7 +428,11 @@ impl<'a> DetailView<'a> {
 
     fn action_index_at_row(&self, action_bar_row: usize) -> Option<usize> {
         use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
-        let actions = if self.is_stash() { STASH_ACTIONS } else { COMMIT_ACTIONS };
+        let actions = if self.is_stash() {
+            STASH_ACTIONS
+        } else {
+            COMMIT_ACTIONS
+        };
         if action_bar_row < actions.len() {
             Some(action_bar_row)
         } else {
@@ -402,7 +442,11 @@ impl<'a> DetailView<'a> {
 
     fn execute_action(&self, action_idx: usize) {
         use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
-        let actions = if self.is_stash() { STASH_ACTIONS } else { COMMIT_ACTIONS };
+        let actions = if self.is_stash() {
+            STASH_ACTIONS
+        } else {
+            COMMIT_ACTIONS
+        };
         if action_idx >= actions.len() {
             return;
         }
@@ -415,20 +459,27 @@ impl<'a> DetailView<'a> {
                 }),
                 1 => {
                     if let Some(stash_ref) = self.stash_ref() {
-                        self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash { stash_ref }));
+                        self.tx
+                            .send(AppEvent::OpenDialog(DialogKind::ConfirmPopStash {
+                                stash_ref,
+                            }));
                     }
                 }
                 2 => {
                     if let Some(stash_ref) = self.stash_ref() {
-                        self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash { stash_ref }));
+                        self.tx
+                            .send(AppEvent::OpenDialog(DialogKind::ConfirmDropStash {
+                                stash_ref,
+                            }));
                     }
                 }
                 3 => {
                     if let Some(stash_ref) = self.stash_ref() {
-                        self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
-                            target: hash,
-                            stash_ref,
-                        }));
+                        self.tx
+                            .send(AppEvent::OpenDialog(DialogKind::CreateBranchFromStash {
+                                target: hash,
+                                stash_ref,
+                            }));
                     }
                 }
                 4 => {
@@ -441,15 +492,35 @@ impl<'a> DetailView<'a> {
             }
         } else {
             match action_idx {
-                0 => self.tx.send(AppEvent::OpenDialog(DialogKind::AddTag { target: hash })),
-                1 => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch { target: hash })),
-                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout { target: hash, is_branch: false })),
-                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick { target: hash })),
-                4 => self.tx.send(AppEvent::OpenDialog(DialogKind::Revert { target: hash })),
-                5 => self.tx.send(AppEvent::OpenDialog(DialogKind::Drop { target: hash })),
-                6 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge { target: hash, is_branch: false })),
-                7 => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase { target: hash })),
-                8 => self.tx.send(AppEvent::OpenDialog(DialogKind::Reset { target: hash })),
+                0 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::AddTag { target: hash })),
+                1 => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch {
+                    target: hash,
+                })),
+                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                    target: hash,
+                    is_branch: false,
+                })),
+                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick {
+                    target: hash,
+                })),
+                4 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Revert { target: hash })),
+                5 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Drop { target: hash })),
+                6 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                    target: hash,
+                    is_branch: false,
+                })),
+                7 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Rebase { target: hash })),
+                8 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Reset { target: hash })),
                 _ => {}
             }
         }
@@ -485,7 +556,9 @@ impl<'a> DetailView<'a> {
                     });
                 }
                 FileChange::Delete { .. } => {
-                    let _ = self.tx.send(AppEvent::NotifyWarn("Cannot view diff for a deleted file.".to_string()));
+                    let _ = self.tx.send(AppEvent::NotifyWarn(
+                        "Cannot view diff for a deleted file.".to_string(),
+                    ));
                 }
             }
         }

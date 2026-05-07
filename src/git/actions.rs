@@ -55,10 +55,19 @@ pub fn delete_tag(path: &Path, name: &str) -> GitResult {
     run_git(path, &["tag", "-d", name])
 }
 
-pub fn cherry_pick(path: &Path, commit_hash: &str, no_commit: bool, record_origin: bool) -> GitResult {
+pub fn cherry_pick(
+    path: &Path,
+    commit_hash: &str,
+    no_commit: bool,
+    record_origin: bool,
+) -> GitResult {
     let mut args = vec!["cherry-pick"];
-    if no_commit { args.push("-n"); }
-    if record_origin { args.push("-x"); }
+    if no_commit {
+        args.push("-n");
+    }
+    if record_origin {
+        args.push("-x");
+    }
     args.push(commit_hash);
     run_git(path, &args)
 }
@@ -68,31 +77,67 @@ pub fn revert_commit(path: &Path, commit_hash: &str) -> GitResult {
 }
 
 pub fn drop_commit(path: &Path, commit_hash: &str) -> GitResult {
-    run_git(path, &["rebase", "--onto", &format!("{}~1", commit_hash), commit_hash])
+    run_git(
+        path,
+        &[
+            "rebase",
+            "--onto",
+            &format!("{}~1", commit_hash),
+            commit_hash,
+        ],
+    )
 }
 
-pub fn merge_commit(path: &Path, commit_hash: &str, no_ff: bool, squash: bool, no_commit: bool) -> GitResult {
+pub fn merge_commit(
+    path: &Path,
+    commit_hash: &str,
+    no_ff: bool,
+    squash: bool,
+    no_commit: bool,
+) -> GitResult {
     let mut args = vec!["merge"];
-    if no_ff { args.push("--no-ff"); }
-    if squash { args.push("--squash"); }
-    if no_commit { args.push("--no-commit"); }
+    if no_ff {
+        args.push("--no-ff");
+    }
+    if squash {
+        args.push("--squash");
+    }
+    if no_commit {
+        args.push("--no-commit");
+    }
     args.push(commit_hash);
     run_git(path, &args)
 }
 
-pub fn merge_branch(path: &Path, branch: &str, no_ff: bool, squash: bool, no_commit: bool) -> GitResult {
+pub fn merge_branch(
+    path: &Path,
+    branch: &str,
+    no_ff: bool,
+    squash: bool,
+    no_commit: bool,
+) -> GitResult {
     let mut args = vec!["merge"];
-    if no_ff { args.push("--no-ff"); }
-    if squash { args.push("--squash"); }
-    if no_commit { args.push("--no-commit"); }
+    if no_ff {
+        args.push("--no-ff");
+    }
+    if squash {
+        args.push("--squash");
+    }
+    if no_commit {
+        args.push("--no-commit");
+    }
     args.push(branch);
     run_git(path, &args)
 }
 
 pub fn rebase_onto(path: &Path, target: &str, ignore_date: bool, interactive: bool) -> GitResult {
     let mut args = vec!["rebase"];
-    if interactive { args.push("-i"); }
-    if ignore_date { args.push("--ignore-date"); }
+    if interactive {
+        args.push("-i");
+    }
+    if ignore_date {
+        args.push("--ignore-date");
+    }
     args.push(target);
     run_git(path, &args)
 }
@@ -113,7 +158,9 @@ pub fn pull_branch(path: &Path, branch: &str) -> GitResult {
 
 pub fn push_branch(path: &Path, branch: &str, force: bool) -> GitResult {
     let mut args = vec!["push", "origin", branch];
-    if force { args.push("--force-with-lease"); }
+    if force {
+        args.push("--force-with-lease");
+    }
     run_git(path, &args)
 }
 
@@ -192,15 +239,28 @@ pub fn clean_untracked(path: &Path) -> GitResult {
 // --- Branch Metadata ---
 
 pub fn branch_upstream(path: &Path, branch: &str) -> GitResult {
-    run_git(path, &["rev-parse", "--abbrev-ref", &format!("{}@{{upstream}}", branch)])
+    run_git(
+        path,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            &format!("{}@{{upstream}}", branch),
+        ],
+    )
 }
 
 pub fn branch_ahead_count(path: &Path, branch: &str) -> GitResult {
-    run_git(path, &["rev-list", "--count", &format!("@{{upstream}}..{}", branch)])
+    run_git(
+        path,
+        &["rev-list", "--count", &format!("@{{upstream}}..{}", branch)],
+    )
 }
 
 pub fn branch_behind_count(path: &Path, branch: &str) -> GitResult {
-    run_git(path, &["rev-list", "--count", &format!("{}..@{{upstream}}", branch)])
+    run_git(
+        path,
+        &["rev-list", "--count", &format!("{}..@{{upstream}}", branch)],
+    )
 }
 
 pub fn branch_tip_info(path: &Path, branch: &str) -> GitResult {

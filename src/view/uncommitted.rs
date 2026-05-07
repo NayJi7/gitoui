@@ -1,17 +1,15 @@
 use std::rc::Rc;
 
-use ratatui::{
-    crossterm::event::KeyEvent,
-    layout::Rect,
-    Frame,
-};
+use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 
 use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
     git::status::StatusType,
     widget::commit_list::{CommitList, CommitListState},
-    widget::uncommitted::{UncommittedFile, UncommittedSection, UncommittedState, UncommittedWidget},
+    widget::uncommitted::{
+        UncommittedFile, UncommittedSection, UncommittedState, UncommittedWidget,
+    },
 };
 
 #[derive(Debug)]
@@ -66,12 +64,20 @@ impl<'a> UncommittedView<'a> {
         match event {
             UserEvent::NavigateDown => {
                 for _ in 0..count {
-                    self.state.select_next_global(self.staged.len(), self.unstaged.len(), self.untracked.len());
+                    self.state.select_next_global(
+                        self.staged.len(),
+                        self.unstaged.len(),
+                        self.untracked.len(),
+                    );
                 }
             }
             UserEvent::NavigateUp => {
                 for _ in 0..count {
-                    self.state.select_prev_global(self.staged.len(), self.unstaged.len(), self.untracked.len());
+                    self.state.select_prev_global(
+                        self.staged.len(),
+                        self.unstaged.len(),
+                        self.untracked.len(),
+                    );
                 }
             }
             UserEvent::ScrollDown => {
@@ -85,14 +91,28 @@ impl<'a> UncommittedView<'a> {
                 }
             }
             UserEvent::NavigateRight => {
-                self.state.switch_section_forward(self.staged.len(), self.unstaged.len(), self.untracked.len());
+                self.state.switch_section_forward(
+                    self.staged.len(),
+                    self.unstaged.len(),
+                    self.untracked.len(),
+                );
             }
             UserEvent::NavigateLeft => {
-                self.state.switch_section_backward(self.staged.len(), self.unstaged.len(), self.untracked.len());
+                self.state.switch_section_backward(
+                    self.staged.len(),
+                    self.unstaged.len(),
+                    self.untracked.len(),
+                );
             }
             UserEvent::Stage => {
-                if matches!(self.state.section, UncommittedSection::Unstaged | UncommittedSection::Untracked) {
-                    if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                if matches!(
+                    self.state.section,
+                    UncommittedSection::Unstaged | UncommittedSection::Untracked
+                ) {
+                    if let Some(file) =
+                        self.state
+                            .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                    {
                         self.tx.send(AppEvent::StageFile {
                             file: file.path.clone(),
                         });
@@ -101,12 +121,16 @@ impl<'a> UncommittedView<'a> {
             }
             UserEvent::StageAll => {
                 if !self.unstaged.is_empty() || !self.untracked.is_empty() {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
                 }
             }
             UserEvent::Unstage => {
                 if self.state.section == UncommittedSection::Staged {
-                    if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                    if let Some(file) =
+                        self.state
+                            .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                    {
                         self.tx.send(AppEvent::UnstageFile {
                             file: file.path.clone(),
                         });
@@ -115,42 +139,59 @@ impl<'a> UncommittedView<'a> {
             }
             UserEvent::UnstageAll => {
                 if !self.staged.is_empty() {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
                 }
             }
             UserEvent::Discard => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardFile {
-                        file: file.path.clone(),
-                    }));
+                if let Some(file) =
+                    self.state
+                        .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                {
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardFile {
+                            file: file.path.clone(),
+                        }));
                 }
             }
             UserEvent::DiscardAll => {
                 if !self.unstaged.is_empty() || !self.staged.is_empty() {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
                 }
             }
             UserEvent::Stash => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
+                self.tx
+                    .send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
             }
             UserEvent::Commit => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::CommitWithMessage));
+                self.tx
+                    .send(AppEvent::OpenDialog(DialogKind::CommitWithMessage));
             }
             UserEvent::CleanUntracked => {
-                self.tx.send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
+                self.tx
+                    .send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
             }
             UserEvent::Confirm => {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                if let Some(file) =
+                    self.state
+                        .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                {
                     if file.status != StatusType::Untracked && file.status != StatusType::Deleted {
-                        let is_staged = self.state.section == crate::widget::uncommitted::UncommittedSection::Staged;
+                        let is_staged = self.state.section
+                            == crate::widget::uncommitted::UncommittedSection::Staged;
                         self.tx.send(AppEvent::OpenUncommittedDiff {
                             file_path: file.path.clone(),
                             is_staged,
                         });
                     } else if file.status == StatusType::Deleted {
-                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for a deleted file.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Cannot view diff for a deleted file.".to_string(),
+                        ));
                     } else if file.status == StatusType::Untracked {
-                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for an untracked file.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Cannot view diff for an untracked file.".to_string(),
+                        ));
                     }
                 }
             }
@@ -166,37 +207,46 @@ impl<'a> UncommittedView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let detail_height = if self.commit_list_state.is_some() {
-            (area.height - 1).min(self.ctx.ui_config.detail.height)
+            super::adaptive_detail_height(area.height, self.ctx.ui_config.detail.height, 10)
         } else {
             area.height
         };
-        let [list_area, detail_area] =
-            ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(detail_height),
-            ])
-            .areas(area);
+        let [list_area, detail_area] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(detail_height),
+        ])
+        .areas(area);
 
         if let Some(ref mut list_state) = self.commit_list_state {
             let commit_list = CommitList::new(self.ctx.clone());
             f.render_stateful_widget(commit_list, list_area, list_state);
         }
 
-        let widget = UncommittedWidget::new(&self.unstaged, &self.staged, &self.untracked, self.ctx.clone());
+        let widget = UncommittedWidget::new(
+            &self.unstaged,
+            &self.staged,
+            &self.untracked,
+            self.ctx.clone(),
+        );
         f.render_stateful_widget(widget, detail_area, &mut self.state);
         self.detail_area = Some(detail_area);
     }
 
     pub fn update_layout(&mut self, area: Rect) {
         if let Some(ref mut list_state) = self.commit_list_state {
-            let detail_height = (area.height - 1).min(self.ctx.ui_config.detail.height);
-            let [list_area, _] =
-                ratatui::layout::Layout::vertical([
-                    ratatui::layout::Constraint::Min(0),
-                    ratatui::layout::Constraint::Length(detail_height),
-                ])
-                .areas(area);
-            list_state.update_height(list_area.height as usize);
+            let detail_height =
+                super::adaptive_detail_height(area.height, self.ctx.ui_config.detail.height, 10);
+            let [list_area, _] = ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(detail_height),
+            ])
+            .areas(area);
+            let height = if list_area.height >= 2 {
+                list_area.height - 2
+            } else {
+                list_area.height
+            };
+            list_state.update_height(height as usize);
         }
     }
 
@@ -207,11 +257,14 @@ impl<'a> UncommittedView<'a> {
             {
                 let action_bar_row = (row - detail_area.y).saturating_sub(4) as usize;
                 if action_bar_row == 0 {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
                 } else if action_bar_row == 1 {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::CommitWithMessage));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::CommitWithMessage));
                 } else if action_bar_row == 2 {
-                    self.tx.send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
                 }
                 return;
             }
@@ -224,9 +277,21 @@ impl<'a> UncommittedView<'a> {
 
                 // Content layout: each section takes N lines (N=1 if empty, N=len if files)
                 // Separators between sections add 1 line each
-                let staged_rows = if self.staged.is_empty() { 1 } else { self.staged.len() };
-                let unstaged_rows = if self.unstaged.is_empty() { 1 } else { self.unstaged.len() };
-                let untracked_rows = if self.untracked.is_empty() { 1 } else { self.untracked.len() };
+                let staged_rows = if self.staged.is_empty() {
+                    1
+                } else {
+                    self.staged.len()
+                };
+                let unstaged_rows = if self.unstaged.is_empty() {
+                    1
+                } else {
+                    self.unstaged.len()
+                };
+                let untracked_rows = if self.untracked.is_empty() {
+                    1
+                } else {
+                    self.untracked.len()
+                };
                 let total_lines = staged_rows + 1 + unstaged_rows + 1 + untracked_rows;
 
                 // Ignore clicks outside the visible content area or beyond total data
@@ -241,11 +306,17 @@ impl<'a> UncommittedView<'a> {
                             self.state.section = UncommittedSection::Staged;
                             self.state.selected = local_row;
                             clicked_on_file = true;
-                        } else if local_row >= unstaged_start && local_row < unstaged_start + unstaged_rows && !self.unstaged.is_empty() {
+                        } else if local_row >= unstaged_start
+                            && local_row < unstaged_start + unstaged_rows
+                            && !self.unstaged.is_empty()
+                        {
                             self.state.section = UncommittedSection::Unstaged;
                             self.state.selected = local_row - unstaged_start;
                             clicked_on_file = true;
-                        } else if local_row >= untracked_start && local_row < untracked_start + untracked_rows && !self.untracked.is_empty() {
+                        } else if local_row >= untracked_start
+                            && local_row < untracked_start + untracked_rows
+                            && !self.untracked.is_empty()
+                        {
                             self.state.section = UncommittedSection::Untracked;
                             self.state.selected = local_row - untracked_start;
                             clicked_on_file = true;
@@ -253,20 +324,28 @@ impl<'a> UncommittedView<'a> {
                     }
                 }
             }
-            
+
             // Open diff only when clicking directly on a file
             if clicked_on_file {
-                if let Some(file) = self.state.selected_file(&self.unstaged, &self.staged, &self.untracked) {
+                if let Some(file) =
+                    self.state
+                        .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                {
                     if file.status != StatusType::Untracked && file.status != StatusType::Deleted {
-                        let is_staged = self.state.section == crate::widget::uncommitted::UncommittedSection::Staged;
+                        let is_staged = self.state.section
+                            == crate::widget::uncommitted::UncommittedSection::Staged;
                         self.tx.send(AppEvent::OpenUncommittedDiff {
                             file_path: file.path.clone(),
                             is_staged,
                         });
                     } else if file.status == StatusType::Deleted {
-                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for a deleted file.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Cannot view diff for a deleted file.".to_string(),
+                        ));
                     } else if file.status == StatusType::Untracked {
-                        self.tx.send(AppEvent::NotifyWarn("Cannot view diff for an untracked file.".to_string()));
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Cannot view diff for an untracked file.".to_string(),
+                        ));
                     }
                 }
             }
@@ -308,9 +387,21 @@ impl<'a> UncommittedView<'a> {
 
                 // Content layout: each section takes N lines (N=1 if empty, N=len if files)
                 // Separators between sections add 1 line each
-                let staged_rows = if self.staged.is_empty() { 1 } else { self.staged.len() };
-                let unstaged_rows = if self.unstaged.is_empty() { 1 } else { self.unstaged.len() };
-                let untracked_rows = if self.untracked.is_empty() { 1 } else { self.untracked.len() };
+                let staged_rows = if self.staged.is_empty() {
+                    1
+                } else {
+                    self.staged.len()
+                };
+                let unstaged_rows = if self.unstaged.is_empty() {
+                    1
+                } else {
+                    self.unstaged.len()
+                };
+                let untracked_rows = if self.untracked.is_empty() {
+                    1
+                } else {
+                    self.untracked.len()
+                };
                 let total_lines = staged_rows + 1 + unstaged_rows + 1 + untracked_rows;
 
                 // Only update selection if mouse is inside visible content and within data bounds
@@ -324,10 +415,16 @@ impl<'a> UncommittedView<'a> {
                         if local_row < staged_rows && !self.staged.is_empty() {
                             self.state.section = UncommittedSection::Staged;
                             self.state.selected = local_row;
-                        } else if local_row >= unstaged_start && local_row < unstaged_start + unstaged_rows && !self.unstaged.is_empty() {
+                        } else if local_row >= unstaged_start
+                            && local_row < unstaged_start + unstaged_rows
+                            && !self.unstaged.is_empty()
+                        {
                             self.state.section = UncommittedSection::Unstaged;
                             self.state.selected = local_row - unstaged_start;
-                        } else if local_row >= untracked_start && local_row < untracked_start + untracked_rows && !self.untracked.is_empty() {
+                        } else if local_row >= untracked_start
+                            && local_row < untracked_start + untracked_rows
+                            && !self.untracked.is_empty()
+                        {
                             self.state.section = UncommittedSection::Untracked;
                             self.state.selected = local_row - untracked_start;
                         }
@@ -344,7 +441,8 @@ impl<'a> UncommittedView<'a> {
     }
 
     pub fn selected_path(&self) -> Option<&str> {
-        self.state.selected_file(&self.unstaged, &self.staged, &self.untracked)
+        self.state
+            .selected_file(&self.unstaged, &self.staged, &self.untracked)
             .map(|f| f.path.as_str())
     }
 
@@ -383,7 +481,11 @@ impl<'a> UncommittedView<'a> {
     pub fn prepare_graph_uploads(&mut self) {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.ensure_visible_graph_uploaded();
-            list_state.ensure_visible_avatars_uploaded(&mut self.ctx.avatar_manager.lock().unwrap(), self.ctx.color_theme.bg, self.ctx.color_theme.list_selected_bg);
+            list_state.ensure_visible_avatars_uploaded(
+                &mut self.ctx.avatar_manager.lock().unwrap(),
+                self.ctx.color_theme.bg,
+                self.ctx.color_theme.list_selected_bg,
+            );
         }
     }
 

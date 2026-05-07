@@ -126,11 +126,11 @@ impl<'a> RefsView<'a> {
         f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
 
         // Split refs area into header (2 lines) and ref list
-        let [header_area, refs_list_area] =
-            ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Length(2),
-                ratatui::layout::Constraint::Min(0),
-            ]).areas(refs_area);
+        let [header_area, refs_list_area] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Length(2),
+            ratatui::layout::Constraint::Min(0),
+        ])
+        .areas(refs_area);
 
         self.render_refs_header(f, header_area);
 
@@ -151,7 +151,10 @@ impl<'a> RefsView<'a> {
             .add_modifier(Modifier::BOLD);
         let line = Line::from(Span::styled(header_text.to_string(), style));
         let para = Paragraph::new(line);
-        f.render_widget(para, ratatui::layout::Rect::new(area.x, area.y, area.width, 1));
+        f.render_widget(
+            para,
+            ratatui::layout::Rect::new(area.x, area.y, area.width, 1),
+        );
 
         // Draw separator line below header
         let sep_style = Style::default().fg(Color::Rgb(59, 66, 97));
@@ -161,20 +164,30 @@ impl<'a> RefsView<'a> {
         );
         let sep_line = Line::from(sep_span);
         let sep_para = Paragraph::new(sep_line);
-        f.render_widget(sep_para, ratatui::layout::Rect::new(area.x, area.y + 1, area.width, 1));
+        f.render_widget(
+            sep_para,
+            ratatui::layout::Rect::new(area.x, area.y + 1, area.width, 1),
+        );
     }
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
-        self.as_mut_list_state()
-            .update_height(list_area.height as usize);
+        let height = if list_area.height >= 2 {
+            list_area.height - 2
+        } else {
+            list_area.height
+        };
+        self.as_mut_list_state().update_height(height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
         self.as_mut_list_state().ensure_visible_graph_uploaded();
         let ctx = self.ctx.clone();
-        self.as_mut_list_state()
-            .ensure_visible_avatars_uploaded(&mut ctx.avatar_manager.lock().unwrap(), ctx.color_theme.bg, ctx.color_theme.list_selected_bg);
+        self.as_mut_list_state().ensure_visible_avatars_uploaded(
+            &mut ctx.avatar_manager.lock().unwrap(),
+            ctx.color_theme.bg,
+            ctx.color_theme.list_selected_bg,
+        );
     }
 
     pub fn clear_graph_images(&mut self) {

@@ -150,12 +150,13 @@ impl Repository {
                 let fake_hash = CommitHash("0000000000000000000000000000000000000000".to_string());
                 let parent_hash = match &head {
                     Head::Detached { target } => Some(target.clone()),
-                    Head::Branch { name } => {
-                        ref_map.values().flatten().find_map(|r| match r {
-                            Ref::Branch { name: branch_name, target } if branch_name == name => Some(target.clone()),
-                            _ => None,
-                        })
-                    }
+                    Head::Branch { name } => ref_map.values().flatten().find_map(|r| match r {
+                        Ref::Branch {
+                            name: branch_name,
+                            target,
+                        } if branch_name == name => Some(target.clone()),
+                        _ => None,
+                    }),
                     Head::None => None,
                 };
                 let parent_commit_hashes = if let Some(h) = parent_hash {
@@ -670,10 +671,25 @@ fn get_current_branch(path: &Path) -> Option<String> {
 
 #[derive(Debug)]
 pub enum FileChange {
-    Add { path: String, additions: usize },
-    Modify { path: String, additions: usize, deletions: usize },
-    Delete { path: String, deletions: usize },
-    Move { from: String, to: String, additions: usize, deletions: usize },
+    Add {
+        path: String,
+        additions: usize,
+    },
+    Modify {
+        path: String,
+        additions: usize,
+        deletions: usize,
+    },
+    Delete {
+        path: String,
+        deletions: usize,
+    },
+    Move {
+        from: String,
+        to: String,
+        additions: usize,
+        deletions: usize,
+    },
 }
 
 pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {
@@ -738,12 +754,27 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
     for (path_name, (status, rename_to)) in status_map {
         let (additions, deletions) = stats_map.get(&path_name).copied().unwrap_or((0, 0));
         match status {
-            'A' => changes.push(FileChange::Add { path: path_name, additions }),
-            'M' => changes.push(FileChange::Modify { path: path_name, additions, deletions }),
-            'D' => changes.push(FileChange::Delete { path: path_name, deletions }),
+            'A' => changes.push(FileChange::Add {
+                path: path_name,
+                additions,
+            }),
+            'M' => changes.push(FileChange::Modify {
+                path: path_name,
+                additions,
+                deletions,
+            }),
+            'D' => changes.push(FileChange::Delete {
+                path: path_name,
+                deletions,
+            }),
             'R' => {
                 let to = rename_to.unwrap_or_else(|| path_name.clone());
-                changes.push(FileChange::Move { from: path_name, to, additions, deletions });
+                changes.push(FileChange::Move {
+                    from: path_name,
+                    to,
+                    additions,
+                    deletions,
+                });
             }
             _ => {}
         }

@@ -1,9 +1,9 @@
 use std::{path::Path, process::Command};
 
 use chrono::{DateTime, Days, NaiveDate, TimeZone, Utc};
+use gitui::{color, config, git, graph};
 use image::{GenericImage, GenericImageView};
 use rustc_hash::FxHashSet;
-use gitui::{color, config, git, graph};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 

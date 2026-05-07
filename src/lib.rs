@@ -2,8 +2,9 @@ pub mod avatar;
 pub mod color;
 pub mod config;
 pub mod git;
-pub mod highlight;
+pub mod github_auth;
 pub mod graph;
+pub mod highlight;
 pub mod protocol;
 
 mod app;
@@ -147,15 +148,15 @@ pub fn run() -> Result<()> {
     let mut terminal = None;
 
     let ret = loop {
-        let (core_config, ui_config, graph_config, color_theme, keybind_patch) = match config::load()
-        {
-            Ok(config) => config,
-            Err(e) if terminal.is_none() => break Err(e),
-            Err(e) => {
-                eprintln!("Failed to reload config: {}", e);
-                continue;
-            }
-        };
+        let (core_config, ui_config, graph_config, color_theme, keybind_patch) =
+            match config::load() {
+                Ok(config) => config,
+                Err(e) if terminal.is_none() => break Err(e),
+                Err(e) => {
+                    eprintln!("Failed to reload config: {}", e);
+                    continue;
+                }
+            };
         let keybind = keybind::KeyBind::new(keybind_patch);
 
         let max_count = args.max_count;
@@ -176,18 +177,35 @@ pub fn run() -> Result<()> {
             .args(["config", "user.name"])
             .output()
             .ok()
-            .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
             .unwrap_or_else(|| "Not set".into());
         let git_user_email = std::process::Command::new("git")
             .args(["config", "user.email"])
             .output()
             .ok()
-            .and_then(|o| if o.status.success() { Some(String::from_utf8_lossy(&o.stdout).trim().to_string()) } else { None })
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
             .unwrap_or_else(|| "Not set".into());
+        let github_auth_state = github_auth::load_state();
         let avatar_manager = avatar::AvatarManager::new(
             image_protocol,
             github_repos_from_remotes(),
+            github_auth_state.token.clone(),
+            Some(ec.sender()),
         );
+        let mut avatar_manager = avatar_manager;
+        avatar_manager.set_github_avatars(core_config.github_avatars());
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
@@ -197,29 +215,11 @@ pub fn run() -> Result<()> {
             avatar_manager: std::sync::Mutex::new(avatar_manager),
             git_user_name,
             git_user_email,
+            github_auth_state,
             branch_color_map: rustc_hash::FxHashMap::default(),
         });
 
         let repository = git::Repository::load(Path::new("."), order, max_count)?;
-
-        {
-            let mgr = ctx.avatar_manager.lock().unwrap();
-            let mut commits_by_email: rustc_hash::FxHashMap<String, Vec<String>> =
-                rustc_hash::FxHashMap::default();
-            for commit in repository.all_commits() {
-                commits_by_email
-                    .entry(commit.author_email.clone())
-                    .or_default()
-                    .push(commit.commit_hash.as_str().to_string());
-                commits_by_email
-                    .entry(commit.committer_email.clone())
-                    .or_default()
-                    .push(commit.commit_hash.as_str().to_string());
-            }
-            for (email, commit_hashes) in commits_by_email {
-                mgr.prefetch(commit_hashes, &email);
-            }
-        }
 
         let graph = graph::calc_graph(&repository);
 
@@ -331,9 +331,18 @@ mod tests {
 
     #[test]
     fn parse_github_repo_from_common_remote_urls() {
-        assert_eq!(parse_github_repo("git@github.com:owner/repo.git"), Some("owner/repo".to_string()));
-        assert_eq!(parse_github_repo("https://github.com/org/repo"), Some("org/repo".to_string()));
-        assert_eq!(parse_github_repo("ssh://git@github.com/user/repo.git"), Some("user/repo".to_string()));
+        assert_eq!(
+            parse_github_repo("git@github.com:owner/repo.git"),
+            Some("owner/repo".to_string())
+        );
+        assert_eq!(
+            parse_github_repo("https://github.com/org/repo"),
+            Some("org/repo".to_string())
+        );
+        assert_eq!(
+            parse_github_repo("ssh://git@github.com/user/repo.git"),
+            Some("user/repo".to_string())
+        );
         assert_eq!(parse_github_repo("https://example.com/user/repo"), None);
     }
 }

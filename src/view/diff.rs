@@ -84,7 +84,7 @@ impl<'a> DiffView<'a> {
         tx: Sender,
         title: String,
         commit_hash: String,
-    all_file_paths: Vec<(String, bool)>,
+        all_file_paths: Vec<(String, bool)>,
         repo_path: std::path::PathBuf,
     ) -> DiffView<'a> {
         let file_path = title
@@ -92,7 +92,12 @@ impl<'a> DiffView<'a> {
             .or_else(|| title.strip_prefix("Diff (unstaged): "))
             .or_else(|| title.strip_prefix("Diff: "))
             .unwrap_or("");
-        let (old_lines, new_lines) = Self::load_file_versions(&repo_path, &commit_hash, file_path, title.contains("(staged)"));
+        let (old_lines, new_lines) = Self::load_file_versions(
+            &repo_path,
+            &commit_hash,
+            file_path,
+            title.contains("(staged)"),
+        );
 
         let file_line_count = new_lines.len() as u32;
         let gap_states = Self::compute_initial_gap_states(&diff_entries, file_line_count);
@@ -118,7 +123,12 @@ impl<'a> DiffView<'a> {
         }
     }
 
-    fn load_file_versions(repo_path: &std::path::Path, commit_hash: &str, file_path: &str, is_staged: bool) -> (Vec<String>, Vec<String>) {
+    fn load_file_versions(
+        repo_path: &std::path::Path,
+        commit_hash: &str,
+        file_path: &str,
+        is_staged: bool,
+    ) -> (Vec<String>, Vec<String>) {
         let old_cmd = if commit_hash.is_empty() {
             if is_staged {
                 Command::new("git")
@@ -145,31 +155,50 @@ impl<'a> DiffView<'a> {
                 .map(|s| s.to_string())
                 .collect()
         } else {
-            let hash = if commit_hash.is_empty() { "HEAD".to_string() } else { commit_hash.to_string() };
+            let hash = if commit_hash.is_empty() {
+                "HEAD".to_string()
+            } else {
+                commit_hash.to_string()
+            };
             match Command::new("git")
                 .args(["show", &format!("{}:{}", hash, file_path)])
                 .current_dir(repo_path)
                 .output()
             {
-                Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).lines().map(|s| s.to_string()).collect(),
+                Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(|s| s.to_string())
+                    .collect(),
                 _ => Vec::new(),
             }
         };
 
         let old_lines = match old_cmd {
-            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).lines().map(|s| s.to_string()).collect(),
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|s| s.to_string())
+                .collect(),
             _ => Vec::new(),
         };
 
         (old_lines, new_lines)
     }
 
-    fn compute_initial_gap_states(diff_entries: &[DiffEntry], file_line_count: u32) -> Vec<GapState> {
+    fn compute_initial_gap_states(
+        diff_entries: &[DiffEntry],
+        file_line_count: u32,
+    ) -> Vec<GapState> {
         let mut states = Vec::new();
         if let Some(entry) = diff_entries.first() {
             // Gap before first hunk — no lines shown by default, single button
             if let Some(first_new) = entry.hunks.first().and_then(|h| {
-                h.lines.iter().find_map(|l| if l.line_type == DiffLineType::Context { l.new_line_no } else { None })
+                h.lines.iter().find_map(|l| {
+                    if l.line_type == DiffLineType::Context {
+                        l.new_line_no
+                    } else {
+                        None
+                    }
+                })
             }) {
                 if first_new > 1 {
                     let gap = (first_new - 1) as usize;
@@ -183,12 +212,22 @@ impl<'a> DiffView<'a> {
 
             // Gaps between hunks — show some context by default
             for hunk_idx in 1..entry.hunks.len() {
-                if let (Some(prev), Some(curr)) = (entry.hunks.get(hunk_idx - 1), entry.hunks.get(hunk_idx)) {
+                if let (Some(prev), Some(curr)) =
+                    (entry.hunks.get(hunk_idx - 1), entry.hunks.get(hunk_idx))
+                {
                     let prev_end = prev.lines.iter().rev().find_map(|l| {
-                        if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+                        if l.line_type == DiffLineType::Context {
+                            l.new_line_no
+                        } else {
+                            None
+                        }
                     });
                     let curr_start = curr.lines.iter().find_map(|l| {
-                        if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+                        if l.line_type == DiffLineType::Context {
+                            l.new_line_no
+                        } else {
+                            None
+                        }
                     });
                     if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
                         if cs > pe + 1 {
@@ -206,7 +245,13 @@ impl<'a> DiffView<'a> {
 
             // Gap after last hunk — no lines shown by default, single button
             if let Some(last_new) = entry.hunks.last().and_then(|h| {
-                h.lines.iter().rev().find_map(|l| if l.line_type == DiffLineType::Context { l.new_line_no } else { None })
+                h.lines.iter().rev().find_map(|l| {
+                    if l.line_type == DiffLineType::Context {
+                        l.new_line_no
+                    } else {
+                        None
+                    }
+                })
             }) {
                 if last_new < file_line_count {
                     let gap = (file_line_count - last_new) as usize;
@@ -269,15 +314,21 @@ impl<'a> DiffView<'a> {
                 self.copy_commit_hash();
             }
             UserEvent::NavigateRight => {
-                if let Some(idx) = self.focused_button {
-                    let next = (idx + 1).min(self.expand_buttons.len().saturating_sub(1));
+                if let Some(next) = next_button_focus(
+                    self.focused_button,
+                    self.expand_buttons.len(),
+                    ExpandDirection::Down,
+                ) {
                     self.focused_button = Some(next);
                     self.scroll_to_button(next);
                 }
             }
             UserEvent::NavigateLeft => {
-                if let Some(idx) = self.focused_button {
-                    let prev = idx.saturating_sub(1);
+                if let Some(prev) = next_button_focus(
+                    self.focused_button,
+                    self.expand_buttons.len(),
+                    ExpandDirection::Up,
+                ) {
                     self.focused_button = Some(prev);
                     self.scroll_to_button(prev);
                 }
@@ -319,7 +370,7 @@ impl<'a> DiffView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let [list_area, diff_area] = self.split_areas(area);
-        
+
         if let Some(ref mut list_state) = self.commit_list_state {
             let commit_list = CommitList::new(self.ctx.clone());
             f.render_stateful_widget(commit_list, list_area, list_state);
@@ -339,37 +390,50 @@ impl<'a> DiffView<'a> {
             .areas(diff_area);
 
             let separator = Line::from(
-                "─".repeat(diff_area.width as usize)
+                "─"
+                    .repeat(diff_area.width as usize)
                     .fg(self.ctx.color_theme.divider_fg),
             );
             f.render_widget(Paragraph::new(separator), separator_area);
 
             // Build title with diff stats
             let (add_count, del_count) = if let Some(entry) = self.diff_entries.first() {
-                let a = entry.hunks.iter().flat_map(|h| h.lines.iter()).filter(|l| l.line_type == DiffLineType::Addition).count();
-                let d = entry.hunks.iter().flat_map(|h| h.lines.iter()).filter(|l| l.line_type == DiffLineType::Deletion).count();
+                let a = entry
+                    .hunks
+                    .iter()
+                    .flat_map(|h| h.lines.iter())
+                    .filter(|l| l.line_type == DiffLineType::Addition)
+                    .count();
+                let d = entry
+                    .hunks
+                    .iter()
+                    .flat_map(|h| h.lines.iter())
+                    .filter(|l| l.line_type == DiffLineType::Deletion)
+                    .count();
                 (a, d)
             } else {
                 (0, 0)
             };
-            let mut title_spans = vec![
-                Span::styled(
-                    format!("─── {} ", self.title),
-                    Style::default()
-                        .fg(self.ctx.color_theme.fg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ];
+            let mut title_spans = vec![Span::styled(
+                format!("─── {} ", self.title),
+                Style::default()
+                    .fg(self.ctx.color_theme.fg)
+                    .add_modifier(Modifier::BOLD),
+            )];
             if add_count > 0 {
                 title_spans.push(Span::styled(
                     format!("+{add_count} "),
-                    Style::default().fg(Color::Rgb(0, 255, 135)).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Rgb(0, 255, 135))
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
             if del_count > 0 {
                 title_spans.push(Span::styled(
                     format!("-{del_count} "),
-                    Style::default().fg(Color::Rgb(255, 80, 80)).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Rgb(255, 80, 80))
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
             title_spans.push(Span::styled(
@@ -392,12 +456,17 @@ impl<'a> DiffView<'a> {
         if self.needs_rebuild || self.base_lines.is_empty() {
             self.base_lines = self.build_diff_lines(&content_area);
             self.needs_rebuild = false;
-            self.focused_button = if self.expand_buttons.is_empty() { None } else { Some(0) };
+            self.focused_button = if self.expand_buttons.is_empty() {
+                None
+            } else {
+                Some(0)
+            };
         }
         self.content_height = self.base_lines.len();
 
         // Build visible lines from cache, applying hover only to button lines
-        let mut visible_lines: Vec<Line> = self.base_lines
+        let mut visible_lines: Vec<Line> = self
+            .base_lines
             .iter()
             .skip(self.scroll_offset)
             .take(content_area.height as usize)
@@ -410,7 +479,8 @@ impl<'a> DiffView<'a> {
                 if btn.line_idx >= self.scroll_offset {
                     let visible_idx = btn.line_idx - self.scroll_offset;
                     if visible_idx < visible_lines.len() {
-                        visible_lines[visible_idx] = self.build_button_line(btn, true, content_area.width);
+                        visible_lines[visible_idx] =
+                            self.build_button_line(btn, true, content_area.width);
                     }
                 }
             }
@@ -423,14 +493,23 @@ impl<'a> DiffView<'a> {
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
         if let Some(ref mut state) = self.commit_list_state {
-            state.update_height(list_area.height as usize);
+            let height = if list_area.height >= 2 {
+                list_area.height - 2
+            } else {
+                list_area.height
+            };
+            state.update_height(height as usize);
         }
     }
 
     pub fn prepare_graph_uploads(&mut self) {
         if let Some(ref mut state) = self.commit_list_state {
             state.ensure_visible_graph_uploaded();
-            state.ensure_visible_avatars_uploaded(&mut self.ctx.avatar_manager.lock().unwrap(), self.ctx.color_theme.bg, self.ctx.color_theme.list_selected_bg);
+            state.ensure_visible_avatars_uploaded(
+                &mut self.ctx.avatar_manager.lock().unwrap(),
+                self.ctx.color_theme.bg,
+                self.ctx.color_theme.list_selected_bg,
+            );
         }
     }
 
@@ -604,8 +683,6 @@ impl<'a> DiffView<'a> {
                     }
                 }
             }
-
-            lines.push(Line::from(""));
         }
 
         lines
@@ -619,11 +696,13 @@ impl<'a> DiffView<'a> {
             None => return lines,
         };
 
-        let file_path = entry.new_path.as_deref().or(entry.old_path.as_deref()).unwrap_or("");
-        let mut highlighter = SyntaxHighlighter::new_with_theme(
-            file_path,
-            &self.ctx.core_config.option.syntax_theme,
-        );
+        let file_path = entry
+            .new_path
+            .as_deref()
+            .or(entry.old_path.as_deref())
+            .unwrap_or("");
+        let mut highlighter =
+            SyntaxHighlighter::new_with_theme(file_path, &self.ctx.core_config.option.syntax_theme);
 
         // VS Code-style diff colors
         let add_bg = Color::Rgb(32, 68, 45);
@@ -643,14 +722,22 @@ impl<'a> DiffView<'a> {
         // Helper: last context line's new_line_no in a hunk
         fn hunk_last_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
             hunk.lines.iter().rev().find_map(|l| {
-                if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+                if l.line_type == DiffLineType::Context {
+                    l.new_line_no
+                } else {
+                    None
+                }
             })
         }
 
         // Helper: first context line's new_line_no in a hunk
         fn hunk_first_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
             hunk.lines.iter().find_map(|l| {
-                if l.line_type == DiffLineType::Context { l.new_line_no } else { None }
+                if l.line_type == DiffLineType::Context {
+                    l.new_line_no
+                } else {
+                    None
+                }
             })
         }
 
@@ -660,7 +747,13 @@ impl<'a> DiffView<'a> {
         let new_file_lines = &self.new_file_lines;
 
         // Helper: render a gap block. is_edge: None=middle, Some(true)=top, Some(false)=bottom
-        let mut render_gap = |lines: &mut Vec<Line<'static>>, gap_start: u32, gap_end: u32, gidx: usize, hl: &mut Option<SyntaxHighlighter>, edge: Option<bool>| -> usize {
+        let mut render_gap = |lines: &mut Vec<Line<'static>>,
+                              gap_start: u32,
+                              gap_end: u32,
+                              gidx: usize,
+                              hl: &mut Option<SyntaxHighlighter>,
+                              edge: Option<bool>|
+         -> usize {
             if gap_end <= gap_start {
                 return gidx;
             }
@@ -694,7 +787,12 @@ impl<'a> DiffView<'a> {
                         let col_end = col_start + label_len as u16;
                         lines.push(Line::from(vec![
                             Span::styled(" ".repeat(left), Style::default()),
-                            Span::styled(label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                label.to_string(),
+                                Style::default()
+                                    .fg(Color::Rgb(122, 162, 247))
+                                    .add_modifier(Modifier::BOLD),
+                            ),
                         ]));
                         self.expand_buttons.push(ButtonInfo {
                             line_idx: idx,
@@ -706,7 +804,9 @@ impl<'a> DiffView<'a> {
                         });
                         lines.push(Line::from(vec![Span::styled(
                             unchanged_text,
-                            Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(self.ctx.color_theme.fg)
+                                .add_modifier(Modifier::ITALIC),
                         )]));
                     }
                     for i in 0..visible_up {
@@ -715,7 +815,9 @@ impl<'a> DiffView<'a> {
                             let content = &new_file_lines[line_no - 1];
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
-                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                                lines.extend(wrap_diff_line_with_syntax(
+                                    content, &line_num, ctx_style, width, h,
+                                ));
                             } else {
                                 lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
                             }
@@ -730,7 +832,9 @@ impl<'a> DiffView<'a> {
                             let content = &new_file_lines[line_no - 1];
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
-                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                                lines.extend(wrap_diff_line_with_syntax(
+                                    content, &line_num, ctx_style, width, h,
+                                ));
                             } else {
                                 lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
                             }
@@ -742,7 +846,9 @@ impl<'a> DiffView<'a> {
                         let unchanged_width = unchanged_text.chars().count();
                         lines.push(Line::from(vec![Span::styled(
                             unchanged_text,
-                            Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(self.ctx.color_theme.fg)
+                                .add_modifier(Modifier::ITALIC),
                         )]));
                         let label = "  ⩖  show more  ";
                         let label_len = label.chars().count();
@@ -753,7 +859,12 @@ impl<'a> DiffView<'a> {
                         let col_end = col_start + label_len as u16;
                         lines.push(Line::from(vec![
                             Span::styled(" ".repeat(left), Style::default()),
-                            Span::styled(label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                label.to_string(),
+                                Style::default()
+                                    .fg(Color::Rgb(122, 162, 247))
+                                    .add_modifier(Modifier::BOLD),
+                            ),
                         ]));
                         self.expand_buttons.push(ButtonInfo {
                             line_idx: idx,
@@ -773,7 +884,9 @@ impl<'a> DiffView<'a> {
                             let content = &new_file_lines[line_no - 1];
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
-                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                                lines.extend(wrap_diff_line_with_syntax(
+                                    content, &line_num, ctx_style, width, h,
+                                ));
                             } else {
                                 lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
                             }
@@ -794,7 +907,12 @@ impl<'a> DiffView<'a> {
                         let col_end = col_start + up_label_len as u16;
                         lines.push(Line::from(vec![
                             Span::styled(" ".repeat(up_left), Style::default()),
-                            Span::styled(up_label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                up_label.to_string(),
+                                Style::default()
+                                    .fg(Color::Rgb(122, 162, 247))
+                                    .add_modifier(Modifier::BOLD),
+                            ),
                         ]));
                         self.expand_buttons.push(ButtonInfo {
                             line_idx: up_idx,
@@ -806,7 +924,9 @@ impl<'a> DiffView<'a> {
                         });
                         lines.push(Line::from(vec![Span::styled(
                             unchanged_text,
-                            Style::default().fg(self.ctx.color_theme.fg).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(self.ctx.color_theme.fg)
+                                .add_modifier(Modifier::ITALIC),
                         )]));
                         let down_label = "  ⩕  show more  ";
                         let down_label_len = down_label.chars().count();
@@ -817,7 +937,12 @@ impl<'a> DiffView<'a> {
                         let col_end = col_start + down_label_len as u16;
                         lines.push(Line::from(vec![
                             Span::styled(" ".repeat(down_left), Style::default()),
-                            Span::styled(down_label.to_string(), Style::default().fg(Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                down_label.to_string(),
+                                Style::default()
+                                    .fg(Color::Rgb(122, 162, 247))
+                                    .add_modifier(Modifier::BOLD),
+                            ),
                         ]));
                         self.expand_buttons.push(ButtonInfo {
                             line_idx: down_idx,
@@ -835,7 +960,9 @@ impl<'a> DiffView<'a> {
                             let content = &new_file_lines[line_no - 1];
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
-                                lines.extend(wrap_diff_line_with_syntax(content, &line_num, ctx_style, width, h));
+                                lines.extend(wrap_diff_line_with_syntax(
+                                    content, &line_num, ctx_style, width, h,
+                                ));
                             } else {
                                 lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
                             }
@@ -850,7 +977,14 @@ impl<'a> DiffView<'a> {
         if let Some(first_hunk) = entry.hunks.first() {
             if let Some(first_new) = hunk_first_new_line(first_hunk) {
                 if first_new > 1 {
-                    gap_idx = render_gap(&mut lines, 1, first_new, gap_idx, &mut highlighter, Some(true));
+                    gap_idx = render_gap(
+                        &mut lines,
+                        1,
+                        first_new,
+                        gap_idx,
+                        &mut highlighter,
+                        Some(true),
+                    );
                 }
             }
         }
@@ -863,7 +997,8 @@ impl<'a> DiffView<'a> {
                     let curr_start = hunk_first_new_line(hunk);
                     if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
                         if cs > pe + 1 {
-                            gap_idx = render_gap(&mut lines, pe + 1, cs, gap_idx, &mut highlighter, None);
+                            gap_idx =
+                                render_gap(&mut lines, pe + 1, cs, gap_idx, &mut highlighter, None);
                         }
                     }
                 }
@@ -876,11 +1011,20 @@ impl<'a> DiffView<'a> {
                         let line_num = format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
                         if let Some(ref mut h) = highlighter {
                             lines.extend(wrap_diff_line_with_syntax_and_bar(
-                                &diff_line.content, &line_num, add_style, width, h, Some(bar_add.clone()),
+                                &diff_line.content,
+                                &line_num,
+                                add_style,
+                                width,
+                                h,
+                                Some(bar_add.clone()),
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
-                                &diff_line.content, &line_num, add_style, width, Some(bar_add.clone()),
+                                &diff_line.content,
+                                &line_num,
+                                add_style,
+                                width,
+                                Some(bar_add.clone()),
                             ));
                         }
                     }
@@ -888,11 +1032,20 @@ impl<'a> DiffView<'a> {
                         let line_num = "     │ ".to_string();
                         if let Some(ref mut h) = highlighter {
                             lines.extend(wrap_diff_line_with_syntax_and_bar(
-                                &diff_line.content, &line_num, del_style, width, h, Some(bar_del.clone()),
+                                &diff_line.content,
+                                &line_num,
+                                del_style,
+                                width,
+                                h,
+                                Some(bar_del.clone()),
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
-                                &diff_line.content, &line_num, del_style, width, Some(bar_del.clone()),
+                                &diff_line.content,
+                                &line_num,
+                                del_style,
+                                width,
+                                Some(bar_del.clone()),
                             ));
                         }
                     }
@@ -900,11 +1053,18 @@ impl<'a> DiffView<'a> {
                         let line_num = format!("{:>4} │ ", diff_line.new_line_no.unwrap_or(0));
                         if let Some(ref mut h) = highlighter {
                             lines.extend(wrap_diff_line_with_syntax(
-                                &diff_line.content, &line_num, ctx_style, width, h,
+                                &diff_line.content,
+                                &line_num,
+                                ctx_style,
+                                width,
+                                h,
                             ));
                         } else {
                             lines.extend(wrap_diff_line(
-                                &diff_line.content, &line_num, ctx_style, width,
+                                &diff_line.content,
+                                &line_num,
+                                ctx_style,
+                                width,
                             ));
                         }
                     }
@@ -912,14 +1072,34 @@ impl<'a> DiffView<'a> {
                         for chunk in wrap_text(&diff_line.content, width as usize) {
                             lines.push(Line::from(vec![Span::styled(
                                 chunk.to_string(),
-                                Style::default().fg(Color::Rgb(192, 202, 245)).add_modifier(Modifier::DIM),
+                                Style::default()
+                                    .fg(Color::Rgb(192, 202, 245))
+                                    .add_modifier(Modifier::DIM),
                             )]));
                         }
                     }
                     _ => {}
                 }
             }
-            lines.push(Line::from(""));
+            if hunk_idx + 1 < entry.hunks.len() {
+                let next_gap_has_hidden_lines = entry.hunks.get(hunk_idx + 1).is_some_and(|next| {
+                    hunk_last_new_line(hunk)
+                        .zip(hunk_first_new_line(next))
+                        .is_some_and(|(pe, cs)| {
+                            cs > pe + 1
+                                && self.gap_states.get(gap_idx).is_some_and(|gap| {
+                                    gap_has_hidden_lines(
+                                        (cs - pe - 1) as usize,
+                                        gap.visible_up,
+                                        gap.visible_down,
+                                    )
+                                })
+                        })
+                });
+                if next_gap_has_hidden_lines {
+                    lines.push(Line::from(""));
+                }
+            }
         }
 
         // Gap after last hunk — single button at bottom
@@ -927,7 +1107,14 @@ impl<'a> DiffView<'a> {
             if let Some(last_new) = hunk_last_new_line(last_hunk) {
                 let file_total = self.new_file_lines.len() as u32;
                 if last_new < file_total {
-                    render_gap(&mut lines, last_new + 1, file_total + 1, gap_idx, &mut highlighter, Some(false));
+                    render_gap(
+                        &mut lines,
+                        last_new + 1,
+                        file_total + 1,
+                        gap_idx,
+                        &mut highlighter,
+                        Some(false),
+                    );
                 }
             }
         }
@@ -1020,7 +1207,11 @@ impl<'a> DiffView<'a> {
 
     fn copy_file_path(&self) {
         if let Some(entry) = self.diff_entries.first() {
-            let path = entry.new_path.as_deref().or(entry.old_path.as_deref()).unwrap_or("");
+            let path = entry
+                .new_path
+                .as_deref()
+                .or(entry.old_path.as_deref())
+                .unwrap_or("");
             self.copy_to_clipboard("File path".into(), path.into());
         }
     }
@@ -1041,13 +1232,17 @@ impl<'a> DiffView<'a> {
             return;
         }
         let is_staged = self.title.contains("(staged)");
-        let current = self.title.strip_prefix("Diff (staged): ")
+        let current = self
+            .title
+            .strip_prefix("Diff (staged): ")
             .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
             .or_else(|| self.title.strip_prefix("Diff: "))
             .unwrap_or("");
 
         let position = if self.commit_hash.is_empty() {
-            self.all_file_paths.iter().position(|(p, s)| p == current && *s == is_staged)
+            self.all_file_paths
+                .iter()
+                .position(|(p, s)| p == current && *s == is_staged)
         } else {
             self.all_file_paths.iter().position(|(p, _)| p == current)
         };
@@ -1059,7 +1254,10 @@ impl<'a> DiffView<'a> {
             }
             let (new_path, new_staged) = self.all_file_paths[new_idx].clone();
             if self.commit_hash.is_empty() {
-                self.tx.send(AppEvent::OpenUncommittedDiff { file_path: new_path, is_staged: new_staged });
+                self.tx.send(AppEvent::OpenUncommittedDiff {
+                    file_path: new_path,
+                    is_staged: new_staged,
+                });
             } else {
                 self.tx.send(AppEvent::OpenFileDiff {
                     hash: self.commit_hash.clone(),
@@ -1070,7 +1268,8 @@ impl<'a> DiffView<'a> {
     }
 
     pub fn refresh(&self) {
-        let file_path = self.title
+        let file_path = self
+            .title
             .strip_prefix("Diff (staged): ")
             .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
             .or_else(|| self.title.strip_prefix("Diff: "))
@@ -1092,18 +1291,22 @@ impl<'a> DiffView<'a> {
     pub fn footer_hint(&self) -> String {
         let mut parts = Vec::new();
         if !self.expand_buttons.is_empty() {
-            parts.push("←→:buttons");
+            parts.push("⇆:buttons");
             parts.push("Enter:expand");
         }
         if !self.all_file_paths.is_empty() {
             let is_staged = self.title.contains("(staged)");
-            let current = self.title.strip_prefix("Diff (staged): ")
+            let current = self
+                .title
+                .strip_prefix("Diff (staged): ")
                 .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
                 .or_else(|| self.title.strip_prefix("Diff: "))
                 .unwrap_or("");
 
             let position = if self.commit_hash.is_empty() {
-                self.all_file_paths.iter().position(|(p, s)| p == current && *s == is_staged)
+                self.all_file_paths
+                    .iter()
+                    .position(|(p, s)| p == current && *s == is_staged)
             } else {
                 self.all_file_paths.iter().position(|(p, _)| p == current)
             };
@@ -1202,7 +1405,8 @@ impl<'a> DiffView<'a> {
                     ExpandDirection::Down => {
                         let max_expand = gap_state.total.saturating_sub(gap_state.visible_up);
                         let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
-                        gap_state.visible_down = (gap_state.visible_down + increment).min(max_expand);
+                        gap_state.visible_down =
+                            (gap_state.visible_down + increment).min(max_expand);
                     }
                 }
                 self.needs_rebuild = true;
@@ -1213,7 +1417,10 @@ impl<'a> DiffView<'a> {
     fn scroll_to_button(&mut self, idx: usize) {
         if let Some(btn) = self.expand_buttons.get(idx) {
             let line = btn.line_idx;
-            let viewport = self.diff_content_area.map(|a| a.height as usize).unwrap_or(0);
+            let viewport = self
+                .diff_content_area
+                .map(|a| a.height as usize)
+                .unwrap_or(0);
             if line < self.scroll_offset {
                 self.scroll_offset = line;
             } else if viewport > 0 && line >= self.scroll_offset + viewport {
@@ -1232,18 +1439,27 @@ impl<'a> DiffView<'a> {
                 let local_row = (self.scroll_offset + (row - area.y) as usize) as usize;
                 let local_col = col.saturating_sub(area.x);
                 for btn in self.expand_buttons.iter() {
-                    if btn.line_idx == local_row && local_col >= btn.col_start && local_col < btn.col_end {
+                    if btn.line_idx == local_row
+                        && local_col >= btn.col_start
+                        && local_col < btn.col_end
+                    {
                         if let Some(gap_state) = self.gap_states.get_mut(btn.gap_idx) {
                             match btn.direction {
                                 ExpandDirection::Up => {
-                                    let max_expand = gap_state.total.saturating_sub(gap_state.visible_down);
-                                    let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
-                                    gap_state.visible_up = (gap_state.visible_up + increment).min(max_expand);
+                                    let max_expand =
+                                        gap_state.total.saturating_sub(gap_state.visible_down);
+                                    let increment =
+                                        max_expand.min(15.max(gap_state.total / 3).min(100));
+                                    gap_state.visible_up =
+                                        (gap_state.visible_up + increment).min(max_expand);
                                 }
                                 ExpandDirection::Down => {
-                                    let max_expand = gap_state.total.saturating_sub(gap_state.visible_up);
-                                    let increment = max_expand.min(15.max(gap_state.total / 3).min(100));
-                                    gap_state.visible_down = (gap_state.visible_down + increment).min(max_expand);
+                                    let max_expand =
+                                        gap_state.total.saturating_sub(gap_state.visible_up);
+                                    let increment =
+                                        max_expand.min(15.max(gap_state.total / 3).min(100));
+                                    gap_state.visible_down =
+                                        (gap_state.visible_down + increment).min(max_expand);
                                 }
                             }
                             self.needs_rebuild = true;
@@ -1300,6 +1516,58 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
     lines
 }
 
+fn next_button_focus(
+    focused_button: Option<usize>,
+    button_count: usize,
+    direction: ExpandDirection,
+) -> Option<usize> {
+    if button_count == 0 {
+        return None;
+    }
+    match (focused_button, direction) {
+        (Some(idx), ExpandDirection::Down) => Some((idx + 1).min(button_count - 1)),
+        (Some(idx), ExpandDirection::Up) => Some(idx.saturating_sub(1)),
+        (None, ExpandDirection::Down) => Some(0),
+        (None, ExpandDirection::Up) => Some(button_count - 1),
+    }
+}
+
+fn gap_has_hidden_lines(total: usize, visible_up: usize, visible_down: usize) -> bool {
+    visible_up.saturating_add(visible_down) < total
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arrow_navigation_restores_button_focus_when_none_is_selected() {
+        assert_eq!(next_button_focus(None, 3, ExpandDirection::Down), Some(0));
+        assert_eq!(next_button_focus(None, 3, ExpandDirection::Up), Some(2));
+    }
+
+    #[test]
+    fn arrow_navigation_keeps_existing_bounds() {
+        assert_eq!(next_button_focus(Some(0), 3, ExpandDirection::Up), Some(0));
+        assert_eq!(
+            next_button_focus(Some(2), 3, ExpandDirection::Down),
+            Some(2)
+        );
+        assert_eq!(
+            next_button_focus(Some(1), 3, ExpandDirection::Down),
+            Some(2)
+        );
+        assert_eq!(next_button_focus(Some(1), 3, ExpandDirection::Up), Some(0));
+    }
+
+    #[test]
+    fn fully_expanded_gaps_are_not_hidden() {
+        assert!(!gap_has_hidden_lines(10, 5, 5));
+        assert!(!gap_has_hidden_lines(10, 12, 0));
+        assert!(gap_has_hidden_lines(10, 4, 5));
+    }
+}
+
 fn wrap_diff_line_with_syntax(
     content: &str,
     line_num_str: &str,
@@ -1313,7 +1581,10 @@ fn wrap_diff_line_with_syntax(
     let mut lines = Vec::new();
     if content_width == 0 {
         let spans = highlighter.highlight_line(content, base_style, None);
-        let mut all_spans = vec![Span::styled(line_num_str.to_string(), Style::default().fg(Color::Rgb(59, 66, 97)))];
+        let mut all_spans = vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )];
         all_spans.extend(spans);
         lines.push(Line::from(all_spans));
         return lines;
@@ -1352,9 +1623,15 @@ fn wrap_diff_line_with_syntax(
         };
 
         let num_span = if first {
-            Span::styled(line_num_str.to_string(), Style::default().fg(Color::Rgb(59, 66, 97)))
+            Span::styled(
+                line_num_str.to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
         } else {
-            Span::styled("     │ ".to_string(), Style::default().fg(Color::Rgb(59, 66, 97)))
+            Span::styled(
+                "     │ ".to_string(),
+                Style::default().fg(Color::Rgb(59, 66, 97)),
+            )
         };
 
         let mut spans = vec![num_span];

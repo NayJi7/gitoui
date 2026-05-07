@@ -1,6 +1,6 @@
+use regex::Regex;
 use std::path::Path;
 use std::process::Command;
-use regex::Regex;
 
 #[derive(Debug, Clone)]
 pub struct DiffEntry {
@@ -41,15 +41,27 @@ impl DiffEntry {
         Self::load_for_commit_with_context(repo_path, hash, 3)
     }
 
-    pub fn load_for_commit_with_context(repo_path: &Path, hash: &str, context_lines: u32) -> Result<Vec<Self>, String> {
+    pub fn load_for_commit_with_context(
+        repo_path: &Path,
+        hash: &str,
+        context_lines: u32,
+    ) -> Result<Vec<Self>, String> {
         let output = Command::new("git")
-            .args(["diff", &format!("--unified={}", context_lines), &format!("{}^", hash), hash])
+            .args([
+                "diff",
+                &format!("--unified={}", context_lines),
+                &format!("{}^", hash),
+                hash,
+            ])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!("git diff failed: {}", String::from_utf8_lossy(&output.stderr)));
+            return Err(format!(
+                "git diff failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -60,48 +72,88 @@ impl DiffEntry {
         Self::load_for_file_with_context(repo_path, hash, file_path, 3)
     }
 
-    pub fn load_for_file_with_context(repo_path: &Path, hash: &str, file_path: &str, context_lines: u32) -> Result<Self, String> {
+    pub fn load_for_file_with_context(
+        repo_path: &Path,
+        hash: &str,
+        file_path: &str,
+        context_lines: u32,
+    ) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["diff", &format!("--unified={}", context_lines), &format!("{}^", hash), hash, "--", file_path])
+            .args([
+                "diff",
+                &format!("--unified={}", context_lines),
+                &format!("{}^", hash),
+                hash,
+                "--",
+                file_path,
+            ])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries = parse_diff(&stdout)?;
-        entries.into_iter().next().ok_or_else(|| "No diff output".to_string())
+        entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No diff output".to_string())
     }
 
     pub fn load_unstaged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
         Self::load_unstaged_for_file_with_context(repo_path, file_path, 3)
     }
 
-    pub fn load_unstaged_for_file_with_context(repo_path: &Path, file_path: &str, context_lines: u32) -> Result<Self, String> {
+    pub fn load_unstaged_for_file_with_context(
+        repo_path: &Path,
+        file_path: &str,
+        context_lines: u32,
+    ) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["diff", &format!("--unified={}", context_lines), "--", file_path])
+            .args([
+                "diff",
+                &format!("--unified={}", context_lines),
+                "--",
+                file_path,
+            ])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries = parse_diff(&stdout)?;
-        entries.into_iter().next().ok_or_else(|| "No diff output".to_string())
+        entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No diff output".to_string())
     }
 
     pub fn load_staged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
         Self::load_staged_for_file_with_context(repo_path, file_path, 3)
     }
 
-    pub fn load_staged_for_file_with_context(repo_path: &Path, file_path: &str, context_lines: u32) -> Result<Self, String> {
+    pub fn load_staged_for_file_with_context(
+        repo_path: &Path,
+        file_path: &str,
+        context_lines: u32,
+    ) -> Result<Self, String> {
         let output = Command::new("git")
-            .args(["diff", &format!("--unified={}", context_lines), "--cached", "--", file_path])
+            .args([
+                "diff",
+                &format!("--unified={}", context_lines),
+                "--cached",
+                "--",
+                file_path,
+            ])
             .current_dir(repo_path)
             .output()
             .map_err(|e| format!("Failed to run git diff: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries = parse_diff(&stdout)?;
-        entries.into_iter().next().ok_or_else(|| "No diff output".to_string())
+        entries
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No diff output".to_string())
     }
 }
 
@@ -152,8 +204,14 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
             if let Some(caps) = hunk_re.captures(line) {
                 old_line = caps[1].parse().unwrap_or(1);
                 new_line = caps[3].parse().unwrap_or(1);
-                let oc = caps.get(2).map(|m| m.as_str().parse().unwrap_or(1)).unwrap_or(1);
-                let nc = caps.get(4).map(|m| m.as_str().parse().unwrap_or(1)).unwrap_or(1);
+                let oc = caps
+                    .get(2)
+                    .map(|m| m.as_str().parse().unwrap_or(1))
+                    .unwrap_or(1);
+                let nc = caps
+                    .get(4)
+                    .map(|m| m.as_str().parse().unwrap_or(1))
+                    .unwrap_or(1);
                 current_hunk = Some(Hunk {
                     old_start: old_line,
                     old_count: oc,
@@ -220,7 +278,7 @@ impl DiffEntry {
     pub fn count_additions_and_deletions(&self) -> (usize, usize) {
         let mut additions = 0;
         let mut deletions = 0;
-        
+
         for hunk in &self.hunks {
             for line in &hunk.lines {
                 match line.line_type {
@@ -230,7 +288,7 @@ impl DiffEntry {
                 }
             }
         }
-        
+
         (additions, deletions)
     }
 }

@@ -158,15 +158,22 @@ impl<'a> UserCommandView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
-        self.as_mut_list_state()
-            .update_height(list_area.height as usize);
+        let height = if list_area.height >= 2 {
+            list_area.height - 2
+        } else {
+            list_area.height
+        };
+        self.as_mut_list_state().update_height(height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
         self.as_mut_list_state().ensure_visible_graph_uploaded();
         let ctx = self.ctx.clone();
-        self.as_mut_list_state()
-            .ensure_visible_avatars_uploaded(&mut ctx.avatar_manager.lock().unwrap(), ctx.color_theme.bg, ctx.color_theme.list_selected_bg);
+        self.as_mut_list_state().ensure_visible_avatars_uploaded(
+            &mut ctx.avatar_manager.lock().unwrap(),
+            ctx.color_theme.bg,
+            ctx.color_theme.list_selected_bg,
+        );
     }
 
     pub fn clear_graph_images(&mut self) {
@@ -196,7 +203,8 @@ impl<'a> UserCommandView<'a> {
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
-        let user_command_height = (area.height - 1).min(self.ctx.ui_config.user_command.height);
+        let user_command_height =
+            super::adaptive_detail_height(area.height, self.ctx.ui_config.user_command.height, 8);
         Layout::vertical([Constraint::Min(0), Constraint::Length(user_command_height)]).areas(area)
     }
 
