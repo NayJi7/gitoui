@@ -13,7 +13,7 @@ use serde::{
     Deserialize,
 };
 
-use crate::view::RefreshViewContext;
+use crate::{github_auth::GithubAuthState, view::RefreshViewContext};
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -32,14 +32,27 @@ pub enum AppEvent {
     CloseHelp,
     OpenConfig,
     CloseConfig,
-    OpenFileDiff { hash: String, file_path: String },
+    GithubAuthFinished(GithubAuthState),
+    OpenFileDiff {
+        hash: String,
+        file_path: String,
+    },
     CloseDiff,
     CloseDiffToDetail,
     SelectNewerCommit,
     SelectOlderCommit,
     SelectParentCommit,
-    CopyToClipboard { name: String, value: String },
+    CopyToClipboard {
+        name: String,
+        value: String,
+    },
+    CopyRawToClipboard {
+        value: String,
+        success_message: String,
+    },
+    OpenUrl(String),
     Refresh(RefreshViewContext),
+    AvatarsUpdated,
     ClearStatusLine,
     UpdateStatusInput(String, Option<u16>, Option<String>),
     NotifyInfo(String),
@@ -54,14 +67,30 @@ pub enum AppEvent {
     DialogConfirm,
     DialogCancel,
     DialogInput(String),
-    ExecuteGitAction { target: String, action: GitAction },
-    OpenBranchDetail { branch_name: String },
-    OpenTagDetail { tag_name: String },
-    StageFile { file: String },
-    UnstageFile { file: String },
-    DiscardFile { file: String },
+    ExecuteGitAction {
+        target: String,
+        action: GitAction,
+    },
+    OpenBranchDetail {
+        branch_name: String,
+    },
+    OpenTagDetail {
+        tag_name: String,
+    },
+    StageFile {
+        file: String,
+    },
+    UnstageFile {
+        file: String,
+    },
+    DiscardFile {
+        file: String,
+    },
     RefreshUncommitted,
-    OpenUncommittedDiff { file_path: String, is_staged: bool },
+    OpenUncommittedDiff {
+        file_path: String,
+        is_staged: bool,
+    },
     CloseDiffToUncommitted,
     Tick,
 }
@@ -105,19 +134,46 @@ pub enum DialogKind {
 pub enum GitAction {
     // Commit actions
     Checkout,
-    CreateBranch { name: String, checkout: bool },
-    AddTag { name: String, annotated: bool, message: Option<String> },
-    CherryPick { no_commit: bool, record_origin: bool },
+    CreateBranch {
+        name: String,
+        checkout: bool,
+    },
+    AddTag {
+        name: String,
+        annotated: bool,
+        message: Option<String>,
+    },
+    CherryPick {
+        no_commit: bool,
+        record_origin: bool,
+    },
     Revert,
     Drop,
-    Merge { no_ff: bool, squash: bool, no_commit: bool },
-    Rebase { ignore_date: bool, interactive: bool },
-    Reset { mode: String },
+    Merge {
+        no_ff: bool,
+        squash: bool,
+        no_commit: bool,
+    },
+    Rebase {
+        ignore_date: bool,
+        interactive: bool,
+    },
+    Reset {
+        mode: String,
+    },
     // Branch actions
-    DeleteBranch { force: bool },
-    RenameBranch { new_name: String },
-    PushBranch { force: bool },
-    PullBranch { rebase: bool },
+    DeleteBranch {
+        force: bool,
+    },
+    RenameBranch {
+        new_name: String,
+    },
+    PushBranch {
+        force: bool,
+    },
+    PullBranch {
+        rebase: bool,
+    },
     Fetch,
     CreateArchive,
     // Tag actions
@@ -127,16 +183,29 @@ pub enum GitAction {
     ApplyStash,
     PopStash,
     DropStash,
-    CreateBranchFromStash { branch_name: String },
+    CreateBranchFromStash {
+        branch_name: String,
+    },
     // Uncommitted actions
-    StageFile { file: String },
+    StageFile {
+        file: String,
+    },
     StageAll,
-    UnstageFile { file: String },
+    UnstageFile {
+        file: String,
+    },
     UnstageAll,
-    DiscardFile { file: String },
+    DiscardFile {
+        file: String,
+    },
     DiscardAll,
-    Stash { message: Option<String> },
-    Commit { message: String, amend: bool },
+    Stash {
+        message: Option<String>,
+    },
+    Commit {
+        message: String,
+        amend: bool,
+    },
     CleanUntracked,
     Push,
 }
@@ -149,6 +218,10 @@ pub struct Sender {
 impl Sender {
     pub fn send(&self, event: AppEvent) {
         self.tx.send(event).unwrap();
+    }
+
+    pub fn try_send(&self, event: AppEvent) {
+        let _ = self.tx.send(event);
     }
 }
 

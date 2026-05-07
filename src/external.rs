@@ -26,6 +26,14 @@ pub fn copy_to_clipboard(value: String, config: &ClipboardConfig) -> Result<(), 
     }
 }
 
+pub fn open_url(url: &str) -> Result<(), String> {
+    Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map_err(|e| format!("Failed to open {url}: {e}"))?;
+    Ok(())
+}
+
 fn copy_to_clipboard_custom(value: String, commands: &[String]) -> Result<(), String> {
     use std::io::Write;
     use std::process::Stdio;

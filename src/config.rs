@@ -243,6 +243,8 @@ pub struct CoreOptionConfig {
     pub date_time_local: bool,
     pub user_name: Option<String>,
     pub user_email: Option<String>,
+    #[default = true]
+    pub github_avatars: bool,
 }
 
 #[optional(derives = [Deserialize])]
@@ -546,7 +548,9 @@ pub struct GraphColorConfig {
 
 impl CoreConfig {
     pub fn graph_style(&self) -> crate::GraphStyle {
-        self.option.graph_style.unwrap_or(crate::GraphStyle::Rounded)
+        self.option
+            .graph_style
+            .unwrap_or(crate::GraphStyle::Rounded)
     }
     pub fn set_graph_style(&mut self, style: crate::GraphStyle) {
         self.option.graph_style = Some(style);
@@ -581,6 +585,12 @@ impl CoreConfig {
     pub fn set_user_email(&mut self, email: Option<String>) {
         self.option.user_email = email;
     }
+    pub fn github_avatars(&self) -> bool {
+        self.option.github_avatars
+    }
+    pub fn set_github_avatars(&mut self, enabled: bool) {
+        self.option.github_avatars = enabled;
+    }
 }
 
 impl UiCommonConfig {
@@ -602,9 +612,10 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
     let path = config_file_path().ok_or("Could not determine config path")?;
 
     let mut doc = if path.exists() {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read config: {}", e))?;
-        content.parse::<toml::Table>()
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
+        content
+            .parse::<toml::Table>()
             .map_err(|e| format!("Failed to parse config: {}", e))?
     } else {
         if let Some(parent) = path.parent() {
@@ -615,85 +626,136 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
     };
 
     if let Some(style) = core.option.graph_style {
-        set_nested_string(&mut doc, &["core", "option", "graph_style"],
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "graph_style"],
             match style {
                 crate::GraphStyle::Rounded => "rounded",
                 crate::GraphStyle::Angular => "angular",
                 crate::GraphStyle::Smooth => "smooth",
-            });
+            },
+        );
     }
 
     if let Some(protocol) = core.option.protocol {
-        set_nested_string(&mut doc, &["core", "option", "protocol"],
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "protocol"],
             match protocol {
                 crate::ImageProtocolType::Auto => "auto",
                 crate::ImageProtocolType::Iterm => "iterm",
                 crate::ImageProtocolType::Kitty => "kitty",
                 crate::ImageProtocolType::KittyUnicode => "kitty-unicode",
                 crate::ImageProtocolType::Sixel => "sixel",
-            });
+            },
+        );
     }
 
-    set_nested_string(&mut doc, &["ui", "common", "diff_mode"],
+    set_nested_string(
+        &mut doc,
+        &["ui", "common", "diff_mode"],
         match ui.common.diff_mode {
             DiffMode::Enhanced => "enhanced",
             DiffMode::Raw => "raw",
-        });
+        },
+    );
 
-    set_nested_bool(&mut doc, &["ui", "common", "mouse_enabled"], ui.common.mouse_enabled);
+    set_nested_bool(
+        &mut doc,
+        &["ui", "common", "mouse_enabled"],
+        ui.common.mouse_enabled,
+    );
 
-    set_nested_bool(&mut doc, &["core", "search", "ignore_case"], core.search.ignore_case);
+    set_nested_bool(
+        &mut doc,
+        &["core", "search", "ignore_case"],
+        core.search.ignore_case,
+    );
     set_nested_bool(&mut doc, &["core", "search", "fuzzy"], core.search.fuzzy);
 
-    set_nested_string(&mut doc, &["core", "option", "syntax_theme"], &core.option.syntax_theme);
+    set_nested_string(
+        &mut doc,
+        &["core", "option", "syntax_theme"],
+        &core.option.syntax_theme,
+    );
 
-    set_nested_string(&mut doc, &["core", "option", "date_time_format"], match core.option.date_time_format {
-        DateTimeFormat::DDMMYYYY_HHMM => "ddmmyyyy_hhmm",
-        DateTimeFormat::DDMMYYYY => "ddmmyyyy",
-        DateTimeFormat::MMDDYYYY_HHMM => "mmddyyyy_hhmm",
-        DateTimeFormat::YYYYMMDD_HHMM => "yyyymmdd_hhmm",
-        DateTimeFormat::ISO => "iso",
-        DateTimeFormat::YYYYMMDD_HHMM_DASH => "yyyymmdd_hhmm_dash",
-    });
+    set_nested_string(
+        &mut doc,
+        &["core", "option", "date_time_format"],
+        match core.option.date_time_format {
+            DateTimeFormat::DDMMYYYY_HHMM => "ddmmyyyy_hhmm",
+            DateTimeFormat::DDMMYYYY => "ddmmyyyy",
+            DateTimeFormat::MMDDYYYY_HHMM => "mmddyyyy_hhmm",
+            DateTimeFormat::YYYYMMDD_HHMM => "yyyymmdd_hhmm",
+            DateTimeFormat::ISO => "iso",
+            DateTimeFormat::YYYYMMDD_HHMM_DASH => "yyyymmdd_hhmm_dash",
+        },
+    );
 
-    set_nested_bool(&mut doc, &["core", "option", "date_time_local"], core.option.date_time_local);
+    set_nested_bool(
+        &mut doc,
+        &["core", "option", "date_time_local"],
+        core.option.date_time_local,
+    );
 
-    set_nested_option_string(&mut doc, &["core", "option", "user_name"], &core.option.user_name);
-    set_nested_option_string(&mut doc, &["core", "option", "user_email"], &core.option.user_email);
+    set_nested_option_string(
+        &mut doc,
+        &["core", "option", "user_name"],
+        &core.option.user_name,
+    );
+    set_nested_option_string(
+        &mut doc,
+        &["core", "option", "user_email"],
+        &core.option.user_email,
+    );
 
-    let toml_string = toml::to_string_pretty(&doc)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&path, toml_string)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
+    set_nested_bool(
+        &mut doc,
+        &["core", "option", "github_avatars"],
+        core.option.github_avatars,
+    );
+
+    let toml_string =
+        toml::to_string_pretty(&doc).map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&path, toml_string).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
 
 fn set_nested_string(doc: &mut toml::Table, keys: &[&str], value: &str) {
     let mut table = doc;
     for key in &keys[..keys.len() - 1] {
-        table = table.entry(key.to_string())
+        table = table
+            .entry(key.to_string())
             .or_insert_with(|| toml::Value::Table(toml::Table::new()))
             .as_table_mut()
             .unwrap();
     }
-    table.insert(keys.last().unwrap().to_string(), toml::Value::String(value.to_string()));
+    table.insert(
+        keys.last().unwrap().to_string(),
+        toml::Value::String(value.to_string()),
+    );
 }
 
 fn set_nested_bool(doc: &mut toml::Table, keys: &[&str], value: bool) {
     let mut table = doc;
     for key in &keys[..keys.len() - 1] {
-        table = table.entry(key.to_string())
+        table = table
+            .entry(key.to_string())
             .or_insert_with(|| toml::Value::Table(toml::Table::new()))
             .as_table_mut()
             .unwrap();
     }
-    table.insert(keys.last().unwrap().to_string(), toml::Value::Boolean(value));
+    table.insert(
+        keys.last().unwrap().to_string(),
+        toml::Value::Boolean(value),
+    );
 }
 
 fn set_nested_option_string(doc: &mut toml::Table, keys: &[&str], value: &Option<String>) {
     let mut table = doc;
     for key in &keys[..keys.len() - 1] {
-        table = table.entry(key.to_string())
+        table = table
+            .entry(key.to_string())
             .or_insert_with(|| toml::Value::Table(toml::Table::new()))
             .as_table_mut()
             .unwrap();
@@ -733,6 +795,7 @@ mod tests {
                     date_time_local: true,
                     user_name: None,
                     user_email: None,
+                    github_avatars: true,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,
@@ -873,6 +936,7 @@ mod tests {
                     date_time_local: true,
                     user_name: None,
                     user_email: None,
+                    github_avatars: true,
                 },
                 search: CoreSearchConfig {
                     ignore_case: true,
@@ -993,6 +1057,7 @@ mod tests {
                     date_time_local: true,
                     user_name: None,
                     user_email: None,
+                    github_avatars: true,
                 },
                 search: CoreSearchConfig {
                     ignore_case: false,

@@ -397,10 +397,8 @@ impl<'a> DialogView<'a> {
                         f.set_cursor_position((cursor_x, cursor_y));
                     }
                     CursorType::Virtual(cursor) => {
-                        let style =
-                            Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
-                        f.buffer_mut()
-                            .set_string(cursor_x, cursor_y, cursor, style);
+                        let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
+                        f.buffer_mut().set_string(cursor_x, cursor_y, cursor, style);
                     }
                 }
             }
@@ -923,12 +921,8 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmStageAll => (String::new(), GitAction::StageAll),
             DialogKind::ConfirmUnstageAll => (String::new(), GitAction::UnstageAll),
             DialogKind::CleanUntracked => (String::new(), GitAction::CleanUntracked),
-            DialogKind::ConfirmPopStash { stash_ref } => {
-                (stash_ref.clone(), GitAction::PopStash)
-            }
-            DialogKind::ConfirmDropStash { stash_ref } => {
-                (stash_ref.clone(), GitAction::DropStash)
-            }
+            DialogKind::ConfirmPopStash { stash_ref } => (stash_ref.clone(), GitAction::PopStash),
+            DialogKind::ConfirmDropStash { stash_ref } => (stash_ref.clone(), GitAction::DropStash),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

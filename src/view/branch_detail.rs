@@ -106,12 +106,12 @@ impl<'a> BranchDetailView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        let detail_height = (area.height - 1).min(12);
-        let [list_area, detail_area] =
-            ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(detail_height),
-            ]).areas(area);
+        let detail_height = crate::view::adaptive_detail_height(area.height, 12, 5);
+        let [list_area, detail_area] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(detail_height),
+        ])
+        .areas(area);
 
         if let Some(ref mut list_state) = self.commit_list_state {
             let commit_list = CommitList::new(self.ctx.clone());
@@ -124,12 +124,12 @@ impl<'a> BranchDetailView<'a> {
     }
 
     pub fn update_layout(&mut self, area: Rect) {
-        let detail_height = (area.height - 1).min(12);
-        let [list_area, _] =
-            ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(detail_height),
-            ]).areas(area);
+        let detail_height = crate::view::adaptive_detail_height(area.height, 12, 5);
+        let [list_area, _] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(detail_height),
+        ])
+        .areas(area);
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.update_height(list_area.height as usize);
         }
@@ -154,7 +154,11 @@ impl<'a> BranchDetailView<'a> {
     pub fn prepare_graph_uploads(&mut self) {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.ensure_visible_graph_uploaded();
-            list_state.ensure_visible_avatars_uploaded(&mut self.ctx.avatar_manager.lock().unwrap(), self.ctx.color_theme.bg, self.ctx.color_theme.list_selected_bg);
+            list_state.ensure_visible_avatars_uploaded(
+                &mut self.ctx.avatar_manager.lock().unwrap(),
+                self.ctx.color_theme.bg,
+                self.ctx.color_theme.list_selected_bg,
+            );
         }
     }
 
@@ -274,9 +278,9 @@ impl<'a> BranchDetailView<'a> {
                     target: name,
                     is_branch: true,
                 })),
-                4 => self.tx.send(AppEvent::OpenDialog(DialogKind::Rebase {
-                    target: name,
-                })),
+                4 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Rebase { target: name })),
                 5 => self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
                     branch: name,
                 })),

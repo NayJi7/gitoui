@@ -1,4 +1,8 @@
-use std::rc::Rc;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    rc::Rc,
+};
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use laurier::highlight::highlight_matched_text;
@@ -269,7 +273,15 @@ pub struct CommitListState<'a> {
     // Tracks the (offset, height, area) of the last graph render so we can skip
     // re-rendering graph image cells when visible commits haven't changed.
     graph_render_state: Option<(usize, usize, Rect)>,
-    avatar_render_state: Option<(usize, usize, Rect, Vec<(String, bool, bool)>)>,
+    // Stable hash of (offset, height, area, visible_emails+prepared flags) — does NOT
+    // include `selected`, so hover-driven selection changes don't trigger a full re-render.
+    avatar_stable_key: Option<u64>,
+    // Which visual row was selected in the last avatar render.  Tracked separately from
+    // the stable key so we can do a targeted 2-row re-render on selection change.
+    avatar_prev_selected: Option<usize>,
+    // Set to true when all visible commits have their avatars prepared; cleared on
+    // scroll/resize so `ensure_visible_avatars_uploaded` can skip its iteration.
+    avatars_fully_prepared: bool,
 }
 
 impl<'a> CommitListState<'a> {
@@ -320,7 +332,9 @@ impl<'a> CommitListState<'a> {
             hovered_tag: None,
             hovered_row: None,
             graph_render_state: None,
-            avatar_render_state: None,
+            avatar_stable_key: None,
+            avatar_prev_selected: None,
+            avatars_fully_prepared: false,
         }
     }
 
@@ -329,6 +343,9 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn update_height(&mut self, height: usize) {
+        if height != self.height {
+            self.avatars_fully_prepared = false; // visible set may change
+        }
         self.height = height;
 
         if self.total > self.height && self.total - self.height < self.offset {
@@ -377,17 +394,53 @@ impl<'a> CommitListState<'a> {
         if !avatar_manager.is_enabled() {
             return;
         }
-        self.commits
+        // Fast path: if we already confirmed all visible avatars are ready, skip
+        if self.avatars_fully_prepared {
+            return;
+        }
+        let selected_idx = self.selected;
+        let mut all_prepared = true;
+        for (i, commit_info) in self
+            .commits
             .iter()
             .skip(self.offset)
             .take(self.height)
             .enumerate()
-            .filter(|(_, commit_info)| !commit_info.is_uncommitted)
-            .for_each(|(i, commit_info)| {
-                let selected = i == self.selected;
-                let row_bg = if selected { selected_bg } else { bg };
-                avatar_manager.ensure_uploaded(&commit_info.commit.author_email, 1, selected, row_bg)
-            });
+            .filter(|(_, ci)| !ci.is_uncommitted)
+        {
+            let email = &commit_info.commit.author_email;
+            // Transparent version for non-selected rows
+            if avatar_manager.prepared_image(email, 1, false).is_none() {
+                all_prepared = false;
+                if avatar_manager.cached_avatar_exists(email) {
+                    avatar_manager.ensure_uploaded(email, 1, false, bg);
+                } else {
+                    // Collect multiple commit hashes for this email so the GitHub API
+                    // has several chances to find a commit where `author` is not null.
+                    // (A single hash often returns `author: null` when the commit email
+                    // is not linked to a GitHub account, even if other commits by the
+                    // same person are properly linked.)
+                    let hashes: Vec<String> = self
+                        .commits
+                        .iter()
+                        .filter(|ci| {
+                            !ci.is_uncommitted && ci.commit.author_email == *email
+                        })
+                        .map(|ci| ci.commit.commit_hash.as_str().to_string())
+                        .take(8)
+                        .collect();
+                    avatar_manager.prefetch(hashes, email);
+                }
+            }
+            // Pre-baked selected variant for the selected row
+            if i == selected_idx && avatar_manager.prepared_image(email, 1, true).is_none() {
+                all_prepared = false;
+                if avatar_manager.cached_avatar_exists(email) {
+                    avatar_manager.ensure_uploaded(email, 1, true, selected_bg);
+                }
+            }
+        }
+        self.avatars_fully_prepared = all_prepared;
     }
 
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
@@ -397,7 +450,9 @@ impl<'a> CommitListState<'a> {
     pub fn clear_graph_images(&mut self) {
         self.graph_image_manager.clear_prepared_images();
         self.graph_render_state = None; // images cleared, must re-render
-        self.avatar_render_state = None;
+        self.avatar_stable_key = None;
+        self.avatar_prev_selected = None;
+        self.avatars_fully_prepared = false;
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
@@ -414,8 +469,10 @@ impl<'a> CommitListState<'a> {
     pub fn select_next(&mut self) {
         if self.selected < (self.total - 1).min(self.height - 1) {
             self.selected += 1;
+            self.avatars_fully_prepared = false; // selected row changed
         } else if self.selected + self.offset < self.total - 1 {
             self.offset += 1;
+            self.avatars_fully_prepared = false; // visible set scrolled
         }
     }
 
@@ -439,20 +496,24 @@ impl<'a> CommitListState<'a> {
     pub fn select_prev(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            self.avatars_fully_prepared = false;
         } else if self.offset > 0 {
             self.offset -= 1;
+            self.avatars_fully_prepared = false;
         }
     }
 
     pub fn select_first(&mut self) {
         self.selected = 0;
         self.offset = 0;
+        self.avatars_fully_prepared = false;
     }
 
     pub fn select_last(&mut self) {
         self.selected = (self.height - 1).min(self.total - 1);
         if self.height < self.total {
             self.offset = self.total - self.height;
+            self.avatars_fully_prepared = false;
         }
     }
 
@@ -460,12 +521,14 @@ impl<'a> CommitListState<'a> {
         let max_offset = self.total.saturating_sub(self.height);
         if self.offset < max_offset {
             self.offset += 1;
+            self.avatars_fully_prepared = false;
         }
     }
 
     pub fn scroll_up(&mut self) {
         if self.offset > 0 {
             self.offset -= 1;
+            self.avatars_fully_prepared = false;
         }
     }
 
@@ -474,6 +537,7 @@ impl<'a> CommitListState<'a> {
         let max_offset = self.total.saturating_sub(self.height);
         self.offset = current_index.saturating_sub(visual_row).min(max_offset);
         self.selected = current_index.saturating_sub(self.offset);
+        self.avatars_fully_prepared = false;
     }
 
     pub fn scroll_down_page(&mut self) {
@@ -504,6 +568,7 @@ impl<'a> CommitListState<'a> {
                 self.selected = size - 1;
             }
         }
+        self.avatars_fully_prepared = false;
     }
 
     fn scroll_up_height(&mut self, scroll_height: usize) {
@@ -516,6 +581,7 @@ impl<'a> CommitListState<'a> {
                 .selected
                 .saturating_sub(scroll_height - (old_offset - self.offset));
         }
+        self.avatars_fully_prepared = false;
     }
 
     pub fn select_high(&mut self) {
@@ -543,6 +609,7 @@ impl<'a> CommitListState<'a> {
             if self.total > self.height {
                 self.selected = 0;
                 self.offset = index;
+                self.avatars_fully_prepared = false;
             } else {
                 self.selected = index;
             }
@@ -555,6 +622,7 @@ impl<'a> CommitListState<'a> {
             if self.selected >= self.height {
                 self.selected = self.height - 1;
                 self.offset = index - self.height + 1;
+                self.avatars_fully_prepared = false;
             }
         }
     }
@@ -603,6 +671,7 @@ impl<'a> CommitListState<'a> {
             if self.total > self.height {
                 self.selected = 0;
                 self.offset = index;
+                self.avatars_fully_prepared = false;
             } else {
                 self.selected = index;
             }
@@ -618,6 +687,7 @@ impl<'a> CommitListState<'a> {
                 if self.total > self.height {
                     self.selected = 0;
                     self.offset = i;
+                    self.avatars_fully_prepared = false;
                 } else {
                     self.selected = i;
                 }
@@ -983,6 +1053,9 @@ impl<'a> StatefulWidget for CommitList<'a> {
 
         state.ref_hit_areas.clear();
 
+        // Compute once per render — avoids 4 separate mutex lock/unlock cycles
+        let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+
         let (header_area, rows_area) = if area.height >= 2 {
             (
                 Some(Rect::new(area.x, area.y, area.width, 2)),
@@ -995,15 +1068,14 @@ impl<'a> StatefulWidget for CommitList<'a> {
         self.update_state(rows_area, state);
 
         if let Some(header_area) = header_area {
-            self.render_header(buf, header_area, state);
+            self.render_header(buf, header_area, state, avatars_enabled);
         }
 
+        let widths = self.content_column_widths(rows_area.width, state, avatars_enabled);
         let constraints = calc_cell_widths(
             rows_area.width,
             self.ctx.ui_config.list.commit_message_min_width,
-            state.graph_area_cell_width(),
-            self.ctx.ui_config.list.name_width,
-            self.ctx.ui_config.list.date_width,
+            widths,
             &self.ctx.ui_config.list.columns,
         );
         let chunks = Layout::horizontal(constraints).split(rows_area);
@@ -1017,10 +1089,10 @@ impl<'a> StatefulWidget for CommitList<'a> {
                     self.render_marker(buf, chunks[i], state);
                 }
                 UserListColumnType::CommitMessage => {
-                    self.render_commit_message(buf, chunks[i], state);
+                    self.render_commit_message(buf, chunks[i], state, avatars_enabled);
                 }
                 UserListColumnType::Name => {
-                    self.render_name(buf, chunks[i], state);
+                    self.render_name(buf, chunks[i], state, avatars_enabled);
                 }
                 UserListColumnType::Hash => {
                     self.render_hash(buf, chunks[i], state);
@@ -1034,30 +1106,67 @@ impl<'a> StatefulWidget for CommitList<'a> {
 }
 
 impl CommitList<'_> {
+    fn content_column_widths(
+        &self,
+        area_width: u16,
+        state: &CommitListState,
+        avatars_enabled: bool,
+    ) -> CommitListColumnWidths {
+        let avatar_width = if avatars_enabled { 3 } else { 0 };
+        let names: Vec<&str> = state
+            .commits
+            .iter()
+            .filter(|commit_info| !commit_info.is_uncommitted)
+            .map(|commit_info| commit_info.commit.author_name.as_str())
+            .collect();
+        let dates: Vec<String> = state
+            .commits
+            .iter()
+            .map(|commit_info| {
+                if commit_info.is_uncommitted {
+                    commit_info
+                        .uncommitted_last_modified
+                        .as_ref()
+                        .map(|dt| {
+                            self.ctx
+                                .core_config
+                                .date_time_format()
+                                .format(dt, self.ctx.core_config.date_time_local())
+                        })
+                        .unwrap_or_else(|| "-".to_string())
+                } else {
+                    self.ctx.core_config.date_time_format().format(
+                        &commit_info.commit.author_date,
+                        self.ctx.core_config.date_time_local(),
+                    )
+                }
+            })
+            .collect();
+
+        CommitListColumnWidths {
+            graph: state.graph_area_cell_width().min(area_width),
+            author: author_column_width(area_width, avatar_width, &names),
+            hash: 9,
+            date: date_column_width(&dates),
+        }
+    }
+
     fn update_state(&self, area: Rect, state: &mut CommitListState) {
         state.update_height(area.height as usize);
     }
 
-    fn render_header(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
+    fn render_header(&self, buf: &mut Buffer, area: Rect, state: &CommitListState, avatars_enabled: bool) {
+        let widths = self.content_column_widths(area.width, state, avatars_enabled);
         let constraints = calc_cell_widths(
             area.width,
             self.ctx.ui_config.list.commit_message_min_width,
-            state.graph_area_cell_width(),
-            self.ctx.ui_config.list.name_width,
-            self.ctx.ui_config.list.date_width,
+            widths,
             &self.ctx.ui_config.list.columns,
         );
         let chunks = Layout::horizontal(constraints).split(area);
 
         for (i, col_type) in self.ctx.ui_config.list.columns.iter().enumerate() {
-            let text = match col_type {
-                UserListColumnType::Graph => "Graph",
-                UserListColumnType::Marker => "",
-                UserListColumnType::CommitMessage => "Commit message",
-                UserListColumnType::Name => "Committer",
-                UserListColumnType::Hash => "SHA",
-                UserListColumnType::Date => "Date",
-            };
+            let text = column_header_text(col_type, avatars_enabled);
 
             if !text.is_empty() {
                 let style = Style::default()
@@ -1104,7 +1213,12 @@ impl CommitList<'_> {
                 .for_each(|(i, commit_info)| {
                     let prepared_image = state_ref.prepared_image(commit_info, i);
                     let y = area.top() + i as u16;
-                    for (x, image_cell) in prepared_image.cells().iter().take(max_graph_width).enumerate() {
+                    for (x, image_cell) in prepared_image
+                        .cells()
+                        .iter()
+                        .take(max_graph_width)
+                        .enumerate()
+                    {
                         let cell = &mut buf[(area.left() + x as u16, y)];
                         cell.set_symbol(image_cell.symbol());
                         cell.set_style(image_cell.style());
@@ -1131,7 +1245,7 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf)
     }
 
-    fn render_commit_message(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
+    fn render_commit_message(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState, avatars_enabled: bool) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
@@ -1181,19 +1295,21 @@ impl CommitList<'_> {
                     commit.commit_message.to_string()
                 };
 
-                let sub_spans =
-                    if let Some(pos) = state.search_matches[state.offset + i].commit_message.clone() {
-                        highlighted_spans(
-                            commit_message.into(),
-                            pos,
-                            self.ctx.color_theme.list_commit_message_fg,
-                            Modifier::empty(),
-                            &self.ctx.color_theme,
-                            truncate,
-                        )
-                    } else {
-                        vec![commit_message.fg(self.ctx.color_theme.list_commit_message_fg)]
-                    };
+                let sub_spans = if let Some(pos) = state.search_matches[state.offset + i]
+                    .commit_message
+                    .clone()
+                {
+                    highlighted_spans(
+                        commit_message.into(),
+                        pos,
+                        self.ctx.color_theme.list_commit_message_fg,
+                        Modifier::empty(),
+                        &self.ctx.color_theme,
+                        truncate,
+                    )
+                } else {
+                    vec![commit_message.fg(self.ctx.color_theme.list_commit_message_fg)]
+                };
 
                 spans.extend(sub_spans)
             }
@@ -1202,12 +1318,11 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf);
     }
 
-    fn render_name(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
+    fn render_name(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState, avatars_enabled: bool) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
         }
-        let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let avatar_width = 3; // 2 cells image + 1 space
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
@@ -1256,52 +1371,133 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf);
 
         if !avatars_enabled || max_width <= 10 {
-            state.avatar_render_state = None;
+            state.avatar_stable_key = None;
+            state.avatar_prev_selected = None;
             return;
         }
 
+        // Single lock for the entire avatar render — avoids repeated lock/unlock cycles
         let avatar_manager = self.ctx.avatar_manager.lock().unwrap();
-        let visible: Vec<(String, bool, bool)> = self
-            .rendering_commit_info_iter(state)
-            .map(|(i, commit_info)| {
+
+        // Stable key: excludes `selected` so hover-driven selection changes don't trigger a
+        // full re-render of all avatar cells (which would flash every image on screen).
+        let stable_key = {
+            let mut h = DefaultHasher::new();
+            state.offset.hash(&mut h);
+            state.height.hash(&mut h);
+            area.hash(&mut h);
+            for (_, commit_info) in self.rendering_commit_info_iter(state) {
                 if commit_info.is_uncommitted {
-                    return (String::new(), false, false);
-                }
-                let email = commit_info.commit.author_email.clone();
-                let selected = i == state.selected;
-                let is_prepared = avatar_manager.prepared_image(&email, 1, selected).is_some();
-                (email, is_prepared, selected)
-            })
-            .collect();
-        let key = (state.offset, state.height, area, visible.clone());
-        if state.avatar_render_state == Some(key.clone()) {
-            for (i, (_, is_prepared, _)) in visible.iter().enumerate().take(area.height as usize) {
-                if !is_prepared {
+                    false.hash(&mut h);
                     continue;
                 }
-                let y = area.top() + i as u16;
-                for x in 0..2 {
-                    buf[(area.left() + x + 1, y)].set_skip(true);
+                let email = &commit_info.commit.author_email;
+                email.hash(&mut h);
+                avatar_manager.prepared_image(email.as_str(), 1, false).is_some().hash(&mut h);
+            }
+            h.finish()
+        };
+
+        let stable_matches = state.avatar_stable_key == Some(stable_key);
+        let selected_matches = state.avatar_prev_selected == Some(state.selected);
+
+        // --- FAST PATH: nothing changed ---
+        if stable_matches && selected_matches {
+            for (i, (_, commit_info)) in self.rendering_commit_info_iter(state).enumerate() {
+                if commit_info.is_uncommitted {
+                    continue;
+                }
+                let email = &commit_info.commit.author_email;
+                let is_selected = i == state.selected;
+                if avatar_manager.prepared_image(email.as_str(), 1, is_selected).is_some()
+                    || avatar_manager.prepared_image(email.as_str(), 1, false).is_some()
+                {
+                    let y = area.top() + i as u16;
+                    for x in 0..2 {
+                        buf[(area.left() + x as u16 + 1, y)].set_skip(true);
+                    }
                 }
             }
             return;
         }
 
-        for (i, (email, is_prepared, selected)) in visible.iter().enumerate() {
-            if !is_prepared {
+        // --- SELECTIVE PATH: only the selected row changed, re-render just the two affected rows ---
+        if stable_matches && !selected_matches {
+            let old_selected = state.avatar_prev_selected;
+            let clear_cell = self.ctx.image_protocol.clear_cell();
+            for (i, (_, commit_info)) in self.rendering_commit_info_iter(state).enumerate() {
+                if commit_info.is_uncommitted {
+                    continue;
+                }
+                let email = &commit_info.commit.author_email;
+                let is_newly_selected = i == state.selected;
+                let is_previously_selected = old_selected == Some(i);
+                if is_newly_selected || is_previously_selected {
+                    // Re-render this row with the correct variant
+                    let is_selected = is_newly_selected;
+                    let prepared = avatar_manager
+                        .prepared_image(email.as_str(), 1, is_selected)
+                        .or_else(|| avatar_manager.prepared_image(email.as_str(), 1, false));
+                    let y = area.top() + i as u16;
+                    if let Some(prepared) = prepared {
+                        for (x, image_cell) in prepared.cells().iter().enumerate() {
+                            let cell = &mut buf[(area.left() + x as u16 + 1, y)];
+                            cell.set_symbol(image_cell.symbol());
+                            cell.set_style(image_cell.style());
+                            cell.set_skip(image_cell.skip());
+                        }
+                    } else {
+                        for x in 0..2 {
+                            let cell = &mut buf[(area.left() + x as u16 + 1, y)];
+                            cell.set_symbol(clear_cell.symbol());
+                            cell.set_style(clear_cell.style());
+                            cell.set_skip(clear_cell.skip());
+                        }
+                    }
+                } else {
+                    // Unchanged row — preserve terminal state
+                    if avatar_manager.prepared_image(email.as_str(), 1, false).is_some() {
+                        let y = area.top() + i as u16;
+                        for x in 0..2 {
+                            buf[(area.left() + x as u16 + 1, y)].set_skip(true);
+                        }
+                    }
+                }
+            }
+            state.avatar_prev_selected = Some(state.selected);
+            return;
+        }
+
+        // --- FULL RENDER PATH: offset/height/area/loading changed ---
+        let clear_cell = self.ctx.image_protocol.clear_cell();
+        for (i, (_, commit_info)) in self.rendering_commit_info_iter(state).enumerate() {
+            let y = area.top() + i as u16;
+            if commit_info.is_uncommitted {
                 continue;
             }
-            if let Some(prepared) = avatar_manager.prepared_image(email, 1, *selected) {
-                let y = area.top() + i as u16;
+            let email = &commit_info.commit.author_email;
+            let is_selected = i == state.selected;
+            let prepared = avatar_manager
+                .prepared_image(email.as_str(), 1, is_selected)
+                .or_else(|| avatar_manager.prepared_image(email.as_str(), 1, false));
+            if let Some(prepared) = prepared {
                 for (x, image_cell) in prepared.cells().iter().enumerate() {
                     let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                     cell.set_symbol(image_cell.symbol());
                     cell.set_style(image_cell.style());
                     cell.set_skip(image_cell.skip());
                 }
+            } else {
+                for x in 0..2 {
+                    let cell = &mut buf[(area.left() + x as u16 + 1, y)];
+                    cell.set_symbol(clear_cell.symbol());
+                    cell.set_style(clear_cell.style());
+                    cell.set_skip(clear_cell.skip());
+                }
             }
         }
-        state.avatar_render_state = Some(key);
+        state.avatar_stable_key = Some(stable_key);
+        state.avatar_prev_selected = Some(state.selected);
     }
 
     fn render_hash(&self, buf: &mut Buffer, area: Rect, state: &CommitListState) {
@@ -1580,10 +1776,14 @@ fn refs_spans<'a>(
 
         // HEAD indicator (always cyan, non-hoverable)
         if is_head_branch {
-            let head_icon = Span::styled("಄ ", Style::default().fg(color_theme.list_head_fg).bold());
+            let head_icon =
+                Span::styled("಄ ", Style::default().fg(color_theme.list_head_fg).bold());
             spans.push(head_icon);
             current_width += 1;
-            let head_text = Span::styled("HEAD -> ", Style::default().fg(color_theme.list_head_fg).bold());
+            let head_text = Span::styled(
+                "HEAD -> ",
+                Style::default().fg(color_theme.list_head_fg).bold(),
+            );
             let head_text_width = head_text.width();
             spans.push(head_text);
             current_width += head_text_width;
@@ -1611,11 +1811,7 @@ fn refs_spans<'a>(
             }
         };
 
-        let icon_text = if *is_tag {
-            "🏷  "
-        } else {
-            "⎇ "
-        };
+        let icon_text = if *is_tag { "🏷  " } else { "⎇ " };
         let icon = Span::styled(icon_text, style);
         let icon_width = icon.width();
 
@@ -1708,63 +1904,110 @@ fn highlighted_spans(
     hm.into_spans()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CommitListColumnWidths {
+    graph: u16,
+    author: u16,
+    hash: u16,
+    date: u16,
+}
+
+const AUTHOR_MIN_WIDTH: u16 = 7;
+const DATE_MIN_WIDTH: u16 = 7;
+const AUTHOR_MAX_WIDTH: u16 = 24;
+const DATE_MAX_WIDTH: u16 = 22;
+
+fn author_column_width(area_width: u16, avatar_width: u16, names: &[&str]) -> u16 {
+    let content_width = names
+        .iter()
+        .map(|name| console::measure_text_width(name) as u16)
+        .max()
+        .unwrap_or(0);
+    let max_width = AUTHOR_MAX_WIDTH.min(area_width);
+    (content_width + avatar_width + 2).max(9).min(max_width)
+}
+
+fn date_column_width(dates: &[String]) -> u16 {
+    let content_width = dates
+        .iter()
+        .map(|date| console::measure_text_width(date) as u16)
+        .max()
+        .unwrap_or(0);
+    (content_width + 2).max(4).min(DATE_MAX_WIDTH)
+}
+
+fn column_header_text(col_type: &UserListColumnType, avatars_enabled: bool) -> &'static str {
+    match col_type {
+        UserListColumnType::Graph => "Graph",
+        UserListColumnType::Marker => "",
+        UserListColumnType::CommitMessage => " Commit message",
+        UserListColumnType::Name if avatars_enabled => "  Author",
+        UserListColumnType::Name => " Author",
+        UserListColumnType::Hash => " SHA",
+        UserListColumnType::Date => " Date",
+    }
+}
+
 fn calc_cell_widths(
     area_width: u16,
     commit_message_min_width: u16,
-    graph_width: u16,
-    name_width: u16,
-    date_width: u16,
+    widths: CommitListColumnWidths,
     columns: &[UserListColumnType],
 ) -> Vec<Constraint> {
-    let pad = 2;
-    let (
-        mut graph_cell_width,
-        mut marker_cell_width,
-        mut name_cell_width,
-        mut hash_cell_width,
-        mut date_cell_width,
-    ) = (0, 0, 0, 0, 0);
+    let mut graph_cell_width = 0;
+    let mut marker_cell_width = 0;
+    let mut author_cell_width = 0;
+    let mut hash_cell_width = 0;
+    let mut date_cell_width = 0;
 
     for col in columns {
         match col {
             UserListColumnType::Graph => {
-                graph_cell_width = graph_width.max(5);
+                graph_cell_width = widths.graph;
             }
             UserListColumnType::Marker => {
                 marker_cell_width = 1;
             }
             UserListColumnType::Name => {
-                name_cell_width = (name_width + pad).max(9);
+                author_cell_width = widths.author;
             }
             UserListColumnType::Hash => {
-                hash_cell_width = (7 + pad).max(3);
+                hash_cell_width = widths.hash;
             }
             UserListColumnType::Date => {
-                date_cell_width = (date_width + pad).max(4);
+                date_cell_width = widths.date;
             }
             UserListColumnType::CommitMessage => {}
         }
     }
 
     let commit_message_min_width = commit_message_min_width.max(14);
+    let fixed_total = |author: u16, date: u16, hash: u16| {
+        graph_cell_width + marker_cell_width + author + date + hash + commit_message_min_width
+    };
 
-    let mut total_width = graph_cell_width
-        + marker_cell_width
-        + hash_cell_width
-        + name_cell_width
-        + date_cell_width
-        + commit_message_min_width;
-
-    if total_width > area_width {
-        total_width = total_width.saturating_sub(name_cell_width);
-        name_cell_width = 0;
+    if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
+        let overflow = fixed_total(author_cell_width, date_cell_width, hash_cell_width)
+            .saturating_sub(area_width);
+        let reducible = author_cell_width.saturating_sub(AUTHOR_MIN_WIDTH);
+        let reduce_by = overflow.min(reducible);
+        author_cell_width = author_cell_width.saturating_sub(reduce_by);
     }
-    if total_width > area_width {
-        total_width = total_width.saturating_sub(date_cell_width);
-        date_cell_width = 0;
+    if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
+        let overflow = fixed_total(author_cell_width, date_cell_width, hash_cell_width)
+            .saturating_sub(area_width);
+        let reducible = date_cell_width.saturating_sub(DATE_MIN_WIDTH);
+        let reduce_by = overflow.min(reducible);
+        date_cell_width = date_cell_width.saturating_sub(reduce_by);
     }
-    if total_width > area_width {
+    if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
         hash_cell_width = 0;
+    }
+    if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
+        author_cell_width = 0;
+    }
+    if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
+        date_cell_width = 0;
     }
 
     let mut constraints = Vec::new();
@@ -1780,7 +2023,7 @@ fn calc_cell_widths(
                 constraints.push(Constraint::Min(0));
             }
             UserListColumnType::Name => {
-                constraints.push(Constraint::Length(name_cell_width));
+                constraints.push(Constraint::Length(author_cell_width));
             }
             UserListColumnType::Hash => {
                 constraints.push(Constraint::Length(hash_cell_width));
@@ -1798,12 +2041,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_calc_cell_widths_all_columns() {
-        let area_width = 80;
-        let commit_message_min_width = 20;
-        let graph_width = 6;
-        let name_width = 10;
-        let date_width = 15;
+    fn calc_cell_widths_uses_content_widths() {
+        let widths = CommitListColumnWidths {
+            graph: 6,
+            author: 18,
+            hash: 9,
+            date: 12,
+        };
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
@@ -1813,33 +2057,29 @@ mod tests {
             UserListColumnType::Date,
         ];
 
-        let actual = calc_cell_widths(
-            area_width,
-            commit_message_min_width,
-            graph_width,
-            name_width,
-            date_width,
-            &columns,
-        );
+        let actual = calc_cell_widths(80, 20, widths, &columns);
 
-        let expected = vec![
-            Constraint::Length(6),  // Graph
-            Constraint::Length(1),  // Marker
-            Constraint::Min(0),     // Message
-            Constraint::Length(12), // Name (10 + 2 pad)
-            Constraint::Length(9),  // Hash (7 + 2 pad)
-            Constraint::Length(17), // Date (15 + 2 pad)
-        ];
-        assert_eq!(actual, expected);
+        assert_eq!(
+            actual,
+            vec![
+                Constraint::Length(6),
+                Constraint::Length(1),
+                Constraint::Min(0),
+                Constraint::Length(18),
+                Constraint::Length(9),
+                Constraint::Length(12),
+            ]
+        );
     }
 
     #[test]
-    fn test_calc_cell_width_all_columns_small_area_remove_name_date_hash() {
-        let area_width = 30;
-        let commit_message_min_width = 20;
-        let graph_width = 6;
-        let name_width = 10;
-        let date_width = 15;
+    fn calc_cell_widths_reduces_author_before_date_and_hash() {
+        let widths = CommitListColumnWidths {
+            graph: 6,
+            author: 30,
+            hash: 9,
+            date: 17,
+        };
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
@@ -1849,35 +2089,29 @@ mod tests {
             UserListColumnType::Date,
         ];
 
-        let actual = calc_cell_widths(
-            area_width,
-            commit_message_min_width,
-            graph_width,
-            name_width,
-            date_width,
-            &columns,
-        );
+        let actual = calc_cell_widths(60, 20, widths, &columns);
 
-        // Graph + Marker + Message + Hash = 6 + 1 + 20 + 9 = 36 > 30
-        // => Name, Date, and Hash are removed
-        let expected = vec![
-            Constraint::Length(6), // Graph
-            Constraint::Length(1), // Marker
-            Constraint::Min(0),    // Message
-            Constraint::Length(0), // Name removed
-            Constraint::Length(0), // Hash removed
-            Constraint::Length(0), // Date removed
-        ];
-        assert_eq!(actual, expected);
+        assert_eq!(
+            actual,
+            vec![
+                Constraint::Length(6),
+                Constraint::Length(1),
+                Constraint::Min(0),
+                Constraint::Length(7),
+                Constraint::Length(9),
+                Constraint::Length(17),
+            ]
+        );
     }
 
     #[test]
-    fn test_calc_cell_width_all_columns_small_area_remove_name_date() {
-        let area_width = 40;
-        let commit_message_min_width = 20;
-        let graph_width = 6;
-        let name_width = 10;
-        let date_width = 15;
+    fn calc_cell_widths_hides_hash_on_very_narrow_area() {
+        let widths = CommitListColumnWidths {
+            graph: 6,
+            author: 30,
+            hash: 9,
+            date: 17,
+        };
         let columns = vec![
             UserListColumnType::Graph,
             UserListColumnType::Marker,
@@ -1887,97 +2121,65 @@ mod tests {
             UserListColumnType::Date,
         ];
 
-        let actual = calc_cell_widths(
-            area_width,
-            commit_message_min_width,
-            graph_width,
-            name_width,
-            date_width,
-            &columns,
-        );
+        let actual = calc_cell_widths(34, 20, widths, &columns);
 
-        // Graph + Marker + Message + Hash = 6 + 1 + 20 + 9 = 36
-        // Graph + Marker + Message + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 > 40
-        // => Name and Date are removed
-        let expected = vec![
-            Constraint::Length(6), // Graph
-            Constraint::Length(1), // Marker
-            Constraint::Min(0),    // Message
-            Constraint::Length(0), // Name removed
-            Constraint::Length(9), // Hash (7 + 2 pad)
-            Constraint::Length(0), // Date removed
-        ];
-        assert_eq!(actual, expected);
+        assert_eq!(
+            actual,
+            vec![
+                Constraint::Length(6),
+                Constraint::Length(1),
+                Constraint::Min(0),
+                Constraint::Length(0),
+                Constraint::Length(0),
+                Constraint::Length(7),
+            ]
+        );
     }
 
     #[test]
-    fn test_calc_cell_width_all_columns_small_area_remove_name() {
-        let area_width = 60;
-        let commit_message_min_width = 20;
-        let graph_width = 6;
-        let name_width = 10;
-        let date_width = 15;
-        let columns = vec![
-            UserListColumnType::Graph,
-            UserListColumnType::Marker,
-            UserListColumnType::CommitMessage,
-            UserListColumnType::Name,
-            UserListColumnType::Hash,
-            UserListColumnType::Date,
-        ];
-
-        let actual = calc_cell_widths(
-            area_width,
-            commit_message_min_width,
-            graph_width,
-            name_width,
-            date_width,
-            &columns,
-        );
-
-        // Graph + Marker + Message + Date + Hash = 6 + 1 + 20 + 17 + 9 = 53 <= 60
-        // Graph + Marker + Message + Name + Date + Hash = 6 + 1 + 20 + 12 + 17 + 9 = 65 > 60
-        // => Name is removed
-        let expected = vec![
-            Constraint::Length(6),  // Graph
-            Constraint::Length(1),  // Marker
-            Constraint::Min(0),     // Message
-            Constraint::Length(0),  // Name removed
-            Constraint::Length(9),  // Hash (7 + 2 pad)
-            Constraint::Length(17), // Date (15 + 2 pad)
-        ];
-        assert_eq!(actual, expected);
+    fn content_widths_clamp_long_author_names() {
+        let width = author_column_width(80, 3, &["Short", "A Very Very Very Long Author Name"]);
+        assert_eq!(width, 24);
     }
 
     #[test]
-    fn test_calc_cell_width_columns_order() {
-        let area_width = 80;
-        let commit_message_min_width = 20;
-        let graph_width = 6;
-        let name_width = 10;
-        let date_width = 15;
-        let columns = vec![
-            UserListColumnType::Date,
-            UserListColumnType::CommitMessage,
-            UserListColumnType::Hash,
-            UserListColumnType::Graph,
-        ];
+    fn content_widths_keep_short_author_names_compact() {
+        let width = author_column_width(80, 0, &["Al", "Bob"]);
+        assert_eq!(width, 9);
+    }
 
-        let actual = calc_cell_widths(
-            area_width,
-            commit_message_min_width,
-            graph_width,
-            name_width,
-            date_width,
-            &columns,
+    #[test]
+    fn date_column_width_clamps_long_dates() {
+        let dates = vec![
+            "06/05/2026 - 11:30".to_string(),
+            "2026-05-06T11:30:00+02:00".to_string(),
+        ];
+        let width = date_column_width(&dates);
+        assert_eq!(width, 22);
+    }
+
+    #[test]
+    fn name_column_header_is_author() {
+        assert_eq!(
+            column_header_text(&UserListColumnType::Name, true),
+            "  Author"
         );
+        assert_eq!(
+            column_header_text(&UserListColumnType::Name, false),
+            " Author"
+        );
+    }
 
-        let expected = vec![
-            Constraint::Length(17), // Date (15 + 2 pad)
-            Constraint::Min(0),     // Message
-            Constraint::Length(9),  // Hash (7 + 2 pad)
-            Constraint::Length(6),  // Graph
-        ];
-        assert_eq!(actual, expected);
+    #[test]
+    fn non_graph_column_headers_use_one_leading_space() {
+        assert_eq!(
+            column_header_text(&UserListColumnType::CommitMessage, false),
+            " Commit message"
+        );
+        assert_eq!(column_header_text(&UserListColumnType::Hash, false), " SHA");
+        assert_eq!(
+            column_header_text(&UserListColumnType::Date, false),
+            " Date"
+        );
     }
 }

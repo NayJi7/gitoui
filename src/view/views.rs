@@ -8,9 +8,8 @@ use crate::{
     git::{Commit, FileChange, Ref},
     view::{
         branch_detail::BranchDetailView, config::ConfigView, detail::DetailView,
-        dialog::DialogView, diff::DiffView, help::HelpView, list::ListView,
-        refs::RefsView, tag_detail::TagDetailView, uncommitted::UncommittedView,
-        user_command::UserCommandView,
+        dialog::DialogView, diff::DiffView, help::HelpView, list::ListView, refs::RefsView,
+        tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -115,6 +114,13 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
+        match self {
+            View::Detail(view) => view.drain_pending_avatar_deletes(),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
         match self {
             View::Default => Vec::new(),
@@ -154,7 +160,9 @@ impl<'a> View<'a> {
             View::Default => false,
             View::List(view) => view.as_list_state().search_state().is_active(),
             View::Detail(view) => view.as_list_state().search_state().is_active(),
-            View::Diff(view) => view.as_list_state().map_or(false, |s| s.search_state().is_active()),
+            View::Diff(view) => view
+                .as_list_state()
+                .map_or(false, |s| s.search_state().is_active()),
             View::UserCommand(view) => view.as_list_state().search_state().is_active(),
             View::Refs(view) => view.as_list_state().search_state().is_active(),
             View::Help(view) => view.is_search_active(),
@@ -171,7 +179,9 @@ impl<'a> View<'a> {
             View::Default => false,
             View::List(view) => view.as_list_state().search_state().is_querying(),
             View::Detail(view) => view.as_list_state().search_state().is_querying(),
-            View::Diff(view) => view.as_list_state().map_or(false, |s| s.search_state().is_querying()),
+            View::Diff(view) => view
+                .as_list_state()
+                .map_or(false, |s| s.search_state().is_querying()),
             View::UserCommand(view) => view.as_list_state().search_state().is_querying(),
             View::Refs(view) => view.as_list_state().search_state().is_querying(),
             View::Help(view) => view.is_search_querying(),
@@ -214,6 +224,13 @@ impl<'a> View<'a> {
     pub fn uncommitted_footer_hint(&self) -> Option<String> {
         match self {
             View::Uncommitted(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn config_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Config(view) => Some(view.footer_hint()),
             _ => None,
         }
     }
@@ -341,15 +358,39 @@ impl<'a> View<'a> {
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
         match self {
             View::List(view) => view.handle_mouse_move(col, row),
-            View::Detail(view) => { view.handle_mouse_move(col, row); true }
-            View::Diff(view) => { view.handle_mouse_move(col, row); true }
-            View::Refs(view) => { view.handle_mouse_move(col, row); true }
-            View::Config(view) => { view.handle_mouse_move(col, row); true }
-            View::Dialog(view) => { view.handle_mouse_move(col, row); true }
-            View::BranchDetail(view) => { view.handle_mouse_move(col, row); true }
-            View::TagDetail(view) => { view.handle_mouse_move(col, row); true }
-            View::Uncommitted(view) => { view.handle_mouse_move(col, row); true }
-            _ => false
+            View::Detail(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Diff(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Refs(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Config(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Dialog(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::BranchDetail(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::TagDetail(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Uncommitted(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            _ => false,
         }
     }
 

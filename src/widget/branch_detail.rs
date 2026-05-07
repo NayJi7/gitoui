@@ -66,7 +66,8 @@ impl StatefulWidget for BranchDetail<'_> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let [metadata_area, action_bar_area] =
-            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(area);
 
         // Metadata area: top border forms the horizontal separator
         let meta_block = Block::default()
@@ -92,22 +93,33 @@ impl StatefulWidget for BranchDetail<'_> {
         let title_left = title_pad / 2;
         let title_line = Line::from(vec![
             Span::styled(" ".repeat(title_left as usize), Style::default()),
-            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title_text.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         Paragraph::new(title_line).render(meta_title_area, buf);
 
         // Render small underline
         let underline_len = (title_len as usize).saturating_sub(4).max(3);
-        let underline_pad = meta_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_pad = meta_underline_area
+            .width
+            .saturating_sub(underline_len as u16);
         let underline_left = underline_pad / 2;
         let underline_line = Line::from(vec![
             Span::styled(" ".repeat(underline_left as usize), Style::default()),
-            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+            Span::styled(
+                "─".repeat(underline_len),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ),
         ]);
         Paragraph::new(underline_line).render(meta_underline_area, buf);
 
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(meta_scroll_area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)])
+                .areas(meta_scroll_area);
 
         let (label_lines, value_lines) = self.contents();
 
@@ -157,23 +169,32 @@ impl BranchDetail<'_> {
         let title_left = title_pad / 2;
         let title_line = Line::from(vec![
             Span::styled(" ".repeat(title_left as usize), Style::default()),
-            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title_text.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         Paragraph::new(title_line).render(action_title_area, buf);
 
         // Render small underline
         let underline_len = (title_len as usize).saturating_sub(4).max(3);
-        let underline_pad = action_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_pad = action_underline_area
+            .width
+            .saturating_sub(underline_len as u16);
         let underline_left = underline_pad / 2;
         let underline_line = Line::from(vec![
             Span::styled(" ".repeat(underline_left as usize), Style::default()),
-            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+            Span::styled(
+                "─".repeat(underline_len),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ),
         ]);
         Paragraph::new(underline_line).render(action_underline_area, buf);
 
         // Action content padding matching left column
-        let action_block = Block::default()
-            .padding(Padding::new(2, 1, 0, 0));
+        let action_block = Block::default().padding(Padding::new(2, 1, 0, 0));
         let action_inner = action_block.inner(action_actions_area);
         action_block.render(action_actions_area, buf);
 

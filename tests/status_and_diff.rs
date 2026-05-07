@@ -43,8 +43,7 @@ fn test_uncommitted_changes_untracked() {
     let dir = create_test_repo();
     std::fs::write(dir.path().join("new.txt"), "hello").unwrap();
 
-    let changes =
-        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
+    let changes = gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(changes.is_dirty());
     assert_eq!(changes.untracked.len(), 1);
     assert_eq!(changes.untracked[0].path, "new.txt");
@@ -62,8 +61,7 @@ fn test_uncommitted_changes_staged() {
         .output()
         .unwrap();
 
-    let changes =
-        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
+    let changes = gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(changes.is_dirty());
     assert_eq!(changes.staged.len(), 1);
     assert_eq!(changes.untracked.len(), 0);
@@ -82,8 +80,7 @@ fn test_uncommitted_changes_modified() {
 
     std::fs::write(dir.path().join("a.txt"), "modified").unwrap();
 
-    let changes =
-        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
+    let changes = gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(changes.is_dirty());
     assert_eq!(changes.unstaged.len(), 1);
 }
@@ -99,8 +96,7 @@ fn test_uncommitted_changes_clean() {
         .unwrap();
     commit(&dir, "initial");
 
-    let changes =
-        gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
+    let changes = gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
     assert!(!changes.is_dirty());
     assert_eq!(changes.total_files(), 0);
 }
@@ -124,16 +120,13 @@ fn test_diff_for_commit() {
         .unwrap();
     let hash2 = commit(&dir, "modify a.txt");
 
-    let entries =
-        gitui::git::diff::DiffEntry::load_for_commit(dir.path(), &hash2).unwrap();
+    let entries = gitui::git::diff::DiffEntry::load_for_commit(dir.path(), &hash2).unwrap();
     assert!(!entries.is_empty());
 
     let has_modified = entries.iter().any(|e| {
-        e.hunks.iter().any(|h| {
-            h.lines
-                .iter()
-                .any(|l| l.content.contains("modified"))
-        })
+        e.hunks
+            .iter()
+            .any(|h| h.lines.iter().any(|l| l.content.contains("modified")))
     });
     assert!(has_modified);
 }
@@ -158,15 +151,11 @@ fn test_diff_for_file() {
         .unwrap();
     let hash = commit(&dir, "modify a");
 
-    let entry = gitui::git::diff::DiffEntry::load_for_file(
-        dir.path(),
-        &hash,
-        "a.txt",
-    )
-    .unwrap();
+    let entry = gitui::git::diff::DiffEntry::load_for_file(dir.path(), &hash, "a.txt").unwrap();
     assert!(entry.new_path.is_some());
-    let has_change = entry.hunks.iter().any(|h| {
-        h.lines.iter().any(|l| l.content.contains("changed"))
-    });
+    let has_change = entry
+        .hunks
+        .iter()
+        .any(|h| h.lines.iter().any(|l| l.content.contains("changed")));
     assert!(has_change);
 }

@@ -129,7 +129,12 @@ impl UncommittedChanges {
 
         // Calculer la date de dernière modification parmi tous les fichiers
         let mut max_mtime: Option<SystemTime> = None;
-        for file_status in changes.staged.iter().chain(&changes.unstaged).chain(&changes.untracked) {
+        for file_status in changes
+            .staged
+            .iter()
+            .chain(&changes.unstaged)
+            .chain(&changes.untracked)
+        {
             // Ignorer les fichiers supprimés (n'existent plus sur le disque)
             if matches!(file_status.status, StatusType::Deleted) {
                 continue;
@@ -145,7 +150,9 @@ impl UncommittedChanges {
             }
         }
         changes.last_modified = max_mtime.map(|mtime| {
-            let duration = mtime.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+            let duration = mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default();
             DateTime::from_timestamp(duration.as_secs() as i64, 0)
                 .map(|dt| dt.with_timezone(&Local))
                 .unwrap_or_else(|| Local::now())

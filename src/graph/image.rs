@@ -397,13 +397,15 @@ fn calc_circle_edge_drawing_pixels(image_params: &ImageParams) -> Pixels {
 
 fn calc_circle_gap_drawing_pixels(image_params: &ImageParams) -> Pixels {
     let inner = calc_circle_drawing_pixels(image_params, image_params.circle_outer_radius as i32);
-    let outer = calc_circle_drawing_pixels(image_params, (image_params.circle_outer_radius + 1) as i32);
+    let outer =
+        calc_circle_drawing_pixels(image_params, (image_params.circle_outer_radius + 1) as i32);
     outer.difference(&inner).cloned().collect()
 }
 
 fn calc_commit_circle_gap_drawing_pixels(image_params: &ImageParams) -> Pixels {
     let inner = calc_circle_drawing_pixels(image_params, image_params.circle_inner_radius as i32);
-    let outer = calc_circle_drawing_pixels(image_params, (image_params.circle_inner_radius + 1) as i32);
+    let outer =
+        calc_circle_drawing_pixels(image_params, (image_params.circle_inner_radius + 1) as i32);
     outer.difference(&inner).cloned().collect()
 }
 
@@ -795,7 +797,12 @@ pub fn calc_graph_row_image(
 
             let mut segs: Vec<_> = branch_segments.iter().collect();
             // Uncommitted segments first (behind); then sort by rightmost column.
-            segs.sort_by_key(|s| (!is_uncommitted_segment(s) as usize, s.source_pos_x.max(s.target_pos_x)));
+            segs.sort_by_key(|s| {
+                (
+                    !is_uncommitted_segment(s) as usize,
+                    s.source_pos_x.max(s.target_pos_x),
+                )
+            });
 
             for seg in segs {
                 let min_y = seg.target_pos_y.min(seg.source_pos_y);
@@ -828,7 +835,12 @@ pub fn calc_graph_row_image(
     if graph_style != GraphStyle::Smooth {
         if let Some((lane_x, head_y, lane_color)) = uncommitted_lane {
             draw_uncommitted_overlay(
-                &mut img_buf, lane_x, head_y, pos_y, image_params, lane_color,
+                &mut img_buf,
+                lane_x,
+                head_y,
+                pos_y,
+                image_params,
+                lane_color,
             );
         }
     }

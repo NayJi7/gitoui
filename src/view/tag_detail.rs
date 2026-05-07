@@ -68,16 +68,15 @@ impl<'a> TagDetailView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let detail_height = if self.commit_list_state.is_some() {
-            (area.height - 1).min(10)
+            crate::view::adaptive_detail_height(area.height, 10, 5)
         } else {
             area.height.min(10)
         };
-        let [list_area, detail_area] =
-            ratatui::layout::Layout::vertical([
-                ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(detail_height),
-            ])
-            .areas(area);
+        let [list_area, detail_area] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(detail_height),
+        ])
+        .areas(area);
 
         if let Some(ref mut list_state) = self.commit_list_state {
             let commit_list = CommitList::new(self.ctx.clone());
@@ -91,13 +90,12 @@ impl<'a> TagDetailView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         if let Some(ref mut list_state) = self.commit_list_state {
-            let detail_height = (area.height - 1).min(10);
-            let [list_area, _] =
-                ratatui::layout::Layout::vertical([
-                    ratatui::layout::Constraint::Min(0),
-                    ratatui::layout::Constraint::Length(detail_height),
-                ])
-                .areas(area);
+            let detail_height = crate::view::adaptive_detail_height(area.height, 10, 5);
+            let [list_area, _] = ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(detail_height),
+            ])
+            .areas(area);
             list_state.update_height(list_area.height as usize);
         }
     }
@@ -143,7 +141,11 @@ impl<'a> TagDetailView<'a> {
     pub fn prepare_graph_uploads(&mut self) {
         if let Some(ref mut list_state) = self.commit_list_state {
             list_state.ensure_visible_graph_uploaded();
-            list_state.ensure_visible_avatars_uploaded(&mut self.ctx.avatar_manager.lock().unwrap(), self.ctx.color_theme.bg, self.ctx.color_theme.list_selected_bg);
+            list_state.ensure_visible_avatars_uploaded(
+                &mut self.ctx.avatar_manager.lock().unwrap(),
+                self.ctx.color_theme.bg,
+                self.ctx.color_theme.list_selected_bg,
+            );
         }
     }
 
@@ -180,8 +182,12 @@ impl<'a> TagDetailView<'a> {
     fn execute_action(&self, action_idx: usize) {
         let name = self.metadata.tag_name.clone();
         match action_idx {
-            0 => self.tx.send(AppEvent::OpenDialog(DialogKind::PushTag { tag: name })),
-            1 => self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteTag { tag: name })),
+            0 => self
+                .tx
+                .send(AppEvent::OpenDialog(DialogKind::PushTag { tag: name })),
+            1 => self
+                .tx
+                .send(AppEvent::OpenDialog(DialogKind::DeleteTag { tag: name })),
             2 => self.tx.send(AppEvent::CopyToClipboard {
                 name: "Tag Name".into(),
                 value: name,

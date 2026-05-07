@@ -63,7 +63,12 @@ impl UncommittedState {
         }
     }
 
-    pub fn select_next_global(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+    pub fn select_next_global(
+        &mut self,
+        staged_len: usize,
+        unstaged_len: usize,
+        untracked_len: usize,
+    ) {
         // Order: Staged -> Unstaged -> Untracked, skipping empty sections
         match self.section {
             UncommittedSection::Staged => {
@@ -93,7 +98,12 @@ impl UncommittedState {
         }
     }
 
-    pub fn select_prev_global(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+    pub fn select_prev_global(
+        &mut self,
+        staged_len: usize,
+        unstaged_len: usize,
+        untracked_len: usize,
+    ) {
         // Order: Staged -> Unstaged -> Untracked, skipping empty sections
         match self.section {
             UncommittedSection::Untracked => {
@@ -123,7 +133,12 @@ impl UncommittedState {
         }
     }
 
-    pub fn switch_section_forward(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+    pub fn switch_section_forward(
+        &mut self,
+        staged_len: usize,
+        unstaged_len: usize,
+        untracked_len: usize,
+    ) {
         // Cycle: Staged -> Unstaged -> Untracked -> Staged, skipping empty
         let (next_section, _) = match self.section {
             UncommittedSection::Staged => {
@@ -159,7 +174,12 @@ impl UncommittedState {
         self.offset = 0;
     }
 
-    pub fn switch_section_backward(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+    pub fn switch_section_backward(
+        &mut self,
+        staged_len: usize,
+        unstaged_len: usize,
+        untracked_len: usize,
+    ) {
         // Cycle: Staged -> Untracked -> Unstaged -> Staged, skipping empty
         let (next_section, _) = match self.section {
             UncommittedSection::Staged => {
@@ -208,7 +228,12 @@ impl UncommittedState {
         }
     }
 
-    pub fn total_in_section(&self, unstaged_len: usize, staged_len: usize, untracked_len: usize) -> usize {
+    pub fn total_in_section(
+        &self,
+        unstaged_len: usize,
+        staged_len: usize,
+        untracked_len: usize,
+    ) -> usize {
         match self.section {
             UncommittedSection::Unstaged => unstaged_len,
             UncommittedSection::Staged => staged_len,
@@ -216,7 +241,12 @@ impl UncommittedState {
         }
     }
 
-    pub fn selected_global_line(&self, staged_len: usize, unstaged_len: usize, untracked_len: usize) -> usize {
+    pub fn selected_global_line(
+        &self,
+        staged_len: usize,
+        unstaged_len: usize,
+        untracked_len: usize,
+    ) -> usize {
         let staged_rows = if staged_len == 0 { 1 } else { staged_len };
         let unstaged_rows = if unstaged_len == 0 { 1 } else { unstaged_len };
         match self.section {
@@ -226,7 +256,12 @@ impl UncommittedState {
         }
     }
 
-    pub fn ensure_selected_visible(&mut self, staged_len: usize, unstaged_len: usize, untracked_len: usize) {
+    pub fn ensure_selected_visible(
+        &mut self,
+        staged_len: usize,
+        unstaged_len: usize,
+        untracked_len: usize,
+    ) {
         let selected_line = self.selected_global_line(staged_len, unstaged_len, untracked_len);
         if selected_line < self.offset {
             self.offset = selected_line;
@@ -276,11 +311,9 @@ impl<'a> StatefulWidget for UncommittedWidget<'a> {
     type State = UncommittedState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let [files_area, action_bar_area] = Layout::horizontal([
-            Constraint::Percentage(60),
-            Constraint::Percentage(40),
-        ])
-        .areas(area);
+        let [files_area, action_bar_area] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(area);
 
         self.render_files(files_area, buf, state);
         self.render_action_bar(action_bar_area, buf, state);
@@ -313,17 +346,27 @@ impl<'a> UncommittedWidget<'a> {
         let title_left = title_pad / 2;
         let title_line = Line::from(vec![
             Span::styled(" ".repeat(title_left as usize), Style::default()),
-            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title_text.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         Paragraph::new(title_line).render(files_title_area, buf);
 
         // Render small underline
         let underline_len = (title_len as usize).saturating_sub(4).max(3);
-        let underline_pad = files_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_pad = files_underline_area
+            .width
+            .saturating_sub(underline_len as u16);
         let underline_left = underline_pad / 2;
         let underline_line = Line::from(vec![
             Span::styled(" ".repeat(underline_left as usize), Style::default()),
-            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+            Span::styled(
+                "─".repeat(underline_len),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ),
         ]);
         Paragraph::new(underline_line).render(files_underline_area, buf);
 
@@ -361,9 +404,24 @@ impl<'a> UncommittedWidget<'a> {
 
         // Order: Staged, Unstaged, Untracked
         let sections = [
-            ("Staged", "(no staged changes)", &self.staged, UncommittedSection::Staged),
-            ("Unstaged", "(no unstaged changes)", &self.unstaged, UncommittedSection::Unstaged),
-            ("Untracked", "(no untracked files)", &self.untracked, UncommittedSection::Untracked),
+            (
+                "Staged",
+                "(no staged changes)",
+                &self.staged,
+                UncommittedSection::Staged,
+            ),
+            (
+                "Unstaged",
+                "(no unstaged changes)",
+                &self.unstaged,
+                UncommittedSection::Unstaged,
+            ),
+            (
+                "Untracked",
+                "(no untracked files)",
+                &self.untracked,
+                UncommittedSection::Untracked,
+            ),
         ];
 
         for (idx, (title, empty_msg, files, section)) in sections.iter().enumerate() {
@@ -398,7 +456,9 @@ impl<'a> UncommittedWidget<'a> {
     ) {
         labels.push(Line::from(Span::styled(
             title.to_string(),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         )));
 
         if files.is_empty() {
@@ -426,7 +486,9 @@ impl<'a> UncommittedWidget<'a> {
         let status_color = match file.status {
             StatusType::Added => self.ctx.color_theme.detail_file_change_add_fg,
             StatusType::Modified => self.ctx.color_theme.detail_file_change_modify_fg,
-            StatusType::Deleted | StatusType::Unmerged => self.ctx.color_theme.detail_file_change_delete_fg,
+            StatusType::Deleted | StatusType::Unmerged => {
+                self.ctx.color_theme.detail_file_change_delete_fg
+            }
             _ => self.ctx.color_theme.detail_file_change_move_fg,
         };
         let path_style = if matches!(file.status, StatusType::Deleted | StatusType::Unmerged) {
@@ -492,23 +554,32 @@ impl<'a> UncommittedWidget<'a> {
         let title_left = title_pad / 2;
         let title_line = Line::from(vec![
             Span::styled(" ".repeat(title_left as usize), Style::default()),
-            Span::styled(title_text.to_string(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title_text.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         Paragraph::new(title_line).render(action_title_area, buf);
 
         // Render small underline
         let underline_len = (title_len as usize).saturating_sub(4).max(3);
-        let underline_pad = action_underline_area.width.saturating_sub(underline_len as u16);
+        let underline_pad = action_underline_area
+            .width
+            .saturating_sub(underline_len as u16);
         let underline_left = underline_pad / 2;
         let underline_line = Line::from(vec![
             Span::styled(" ".repeat(underline_left as usize), Style::default()),
-            Span::styled("─".repeat(underline_len), Style::default().fg(self.ctx.color_theme.divider_fg)),
+            Span::styled(
+                "─".repeat(underline_len),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ),
         ]);
         Paragraph::new(underline_line).render(action_underline_area, buf);
 
         // Action content padding matching left column
-        let action_block = Block::default()
-            .padding(Padding::new(2, 1, 0, 0));
+        let action_block = Block::default().padding(Padding::new(2, 1, 0, 0));
         let action_inner = action_block.inner(action_actions_area);
         action_block.render(action_actions_area, buf);
 
@@ -529,8 +600,7 @@ impl<'a> UncommittedWidget<'a> {
             ]));
         }
 
-        let paragraph = Paragraph::new(lines)
-            .style(Style::default().fg(self.ctx.color_theme.fg));
+        let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));
         paragraph.render(action_inner, buf);
     }
 }

@@ -177,7 +177,9 @@ impl<'a> ListView<'a> {
                     self.update_matched_message();
                 }
                 UserEvent::IgnoreCaseToggle => {
-                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_ignore_case() {
+                    if let Some((ignore_case, fuzzy)) =
+                        self.as_mut_list_state().toggle_ignore_case()
+                    {
                         let ctx = Rc::make_mut(&mut self.ctx);
                         ctx.core_config.search.ignore_case = ignore_case;
                         ctx.core_config.search.fuzzy = fuzzy;
@@ -210,15 +212,22 @@ impl<'a> ListView<'a> {
     }
 
     pub fn update_layout(&mut self, area: Rect) {
-        let height = if area.height >= 2 { area.height - 2 } else { area.height };
+        let height = if area.height >= 2 {
+            area.height - 2
+        } else {
+            area.height
+        };
         self.as_mut_list_state().update_height(height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
         self.as_mut_list_state().ensure_visible_graph_uploaded();
         let ctx = self.ctx.clone();
-        self.as_mut_list_state()
-            .ensure_visible_avatars_uploaded(&mut ctx.avatar_manager.lock().unwrap(), ctx.color_theme.bg, ctx.color_theme.list_selected_bg);
+        self.as_mut_list_state().ensure_visible_avatars_uploaded(
+            &mut ctx.avatar_manager.lock().unwrap(),
+            ctx.color_theme.bg,
+            ctx.color_theme.list_selected_bg,
+        );
     }
 
     pub fn clear_graph_images(&mut self) {
@@ -296,7 +305,10 @@ impl<'a> ListView<'a> {
     pub fn refresh(&self) {
         let list_state = self.as_list_state();
         let list_context = ListRefreshViewContext::from(list_state);
-        let context = RefreshViewContext::List { list_context, pending_notification: None };
+        let context = RefreshViewContext::List {
+            list_context,
+            pending_notification: None,
+        };
         self.tx.send(AppEvent::Refresh(context));
     }
 

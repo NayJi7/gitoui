@@ -2,6 +2,7 @@ use std::{
     io::{self, Write},
     rc::Rc,
     sync::Mutex,
+    thread,
 };
 
 use ratatui::{
@@ -22,12 +23,16 @@ use crate::{
         AppEvent, DialogKind, EventController, GitAction, Sender, UserEvent, UserEventWithCount,
     },
     external::{
-        copy_to_clipboard, exec_user_command, exec_user_command_suspend, ExternalCommandParameters,
+        copy_to_clipboard, exec_user_command, exec_user_command_suspend, open_url,
+        ExternalCommandParameters,
     },
-     git::{
-         actions, diff::DiffEntry, status::{StatusType, UncommittedChanges}, Commit, CommitHash, FileChange, Head,
-         Ref, Repository,
-     },
+    git::{
+        actions,
+        diff::DiffEntry,
+        status::{StatusType, UncommittedChanges},
+        Commit, CommitHash, FileChange, Head, Ref, Repository,
+    },
+    github_auth::GithubAuthState,
     graph::{CellWidthType, Graph, GraphImageManager, GraphStyle},
     keybind::KeyBind,
     protocol::ImageProtocol,
@@ -71,9 +76,10 @@ impl Clone for AppContext {
             ui_config: self.ui_config.clone(),
             color_theme: self.color_theme.clone(),
             image_protocol: self.image_protocol,
-            avatar_manager: Mutex::new(AvatarManager::new(self.image_protocol, Vec::new())),
+            avatar_manager: Mutex::new(self.avatar_manager.lock().unwrap().clone()),
             git_user_name: self.git_user_name.clone(),
             git_user_email: self.git_user_email.clone(),
+            github_auth_state: self.github_auth_state.clone(),
             branch_color_map: self.branch_color_map.clone(),
         }
     }
@@ -90,6 +96,7 @@ impl std::fmt::Debug for AppContext {
             .field("avatar_manager", &"Mutex<AvatarManager>")
             .field("git_user_name", &self.git_user_name)
             .field("git_user_email", &self.git_user_email)
+            .field("github_auth_state", &self.github_auth_state)
             .field("branch_color_map", &self.branch_color_map)
             .finish()
     }
@@ -104,6 +111,7 @@ pub struct AppContext {
     pub avatar_manager: Mutex<AvatarManager>,
     pub git_user_name: String,
     pub git_user_email: String,
+    pub github_auth_state: GithubAuthState,
     pub branch_color_map: FxHashMap<String, Color>,
 }
 
@@ -115,9 +123,15 @@ impl Default for AppContext {
             ui_config: UiConfig::default(),
             color_theme: ColorTheme::default(),
             image_protocol: ImageProtocol::Iterm2,
-            avatar_manager: Mutex::new(AvatarManager::new(ImageProtocol::Iterm2, Vec::new())),
+            avatar_manager: Mutex::new(AvatarManager::new(
+                ImageProtocol::Iterm2,
+                Vec::new(),
+                None,
+                None,
+            )),
             git_user_name: String::new(),
             git_user_email: String::new(),
+            github_auth_state: GithubAuthState::default(),
             branch_color_map: FxHashMap::default(),
         }
     }
@@ -276,7 +290,7 @@ impl App<'_> {
         terminal.clear()?;
 
         let mut needs_draw = true;
-         loop {
+        loop {
             // Clear notifications after 3 seconds
             if let Some(timestamp) = self.app_status.notification_timestamp {
                 if timestamp.elapsed() >= std::time::Duration::from_secs(2) {
@@ -290,6 +304,7 @@ impl App<'_> {
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
                 terminal.draw(|f| self.render(f))?;
+                self.flush_pending_avatar_deletes()?;
             }
             needs_draw = true;
             match self.ec.recv() {
@@ -335,14 +350,22 @@ impl App<'_> {
                                 && matches!(ue, UserEvent::NavigateLeft | UserEvent::NavigateRight)
                             {
                                 self.app_status.numeric_prefix.clear();
-                                self.view.handle_event(
+                                self.handle_view_event_clearing_detail_avatar(
                                     UserEventWithCount::from_event(UserEvent::Unknown),
                                     key,
-                                );
+                                    terminal,
+                                )?;
                             } else {
-                                let event_with_count =
-                                    process_numeric_prefix(&self.app_status.numeric_prefix, *ue, key);
-                                self.view.handle_event(event_with_count, key);
+                                let event_with_count = process_numeric_prefix(
+                                    &self.app_status.numeric_prefix,
+                                    *ue,
+                                    key,
+                                );
+                                self.handle_view_event_clearing_detail_avatar(
+                                    event_with_count,
+                                    key,
+                                    terminal,
+                                )?;
                                 self.app_status.numeric_prefix.clear();
                             }
                         }
@@ -352,17 +375,19 @@ impl App<'_> {
                                 // fixme: currently, the only thing that processes key_event is searching the list,
                                 //        so this probably works, but it's not the right process...
                                 self.app_status.numeric_prefix.clear();
-                                self.view.handle_event(
+                                self.handle_view_event_clearing_detail_avatar(
                                     UserEventWithCount::from_event(UserEvent::Unknown),
                                     key,
-                                );
+                                    terminal,
+                                )?;
                             } else if self.view.is_input_active() {
                                 // Config text edit mode: pass all key events
                                 self.app_status.numeric_prefix.clear();
-                                self.view.handle_event(
+                                self.handle_view_event_clearing_detail_avatar(
                                     UserEventWithCount::from_event(UserEvent::Unknown),
                                     key,
-                                );
+                                    terminal,
+                                )?;
                             } else if let KeyCode::Char(c) = key.code {
                                 // Accumulate numeric prefix
                                 if c.is_ascii_digit()
@@ -375,14 +400,14 @@ impl App<'_> {
                             } else {
                                 needs_draw = false; // unbound non-char key: nothing changed
                             }
-                         }
-                     }
-                 }
+                        }
+                    }
+                }
                 AppEvent::Resize(w, h) => {
                     let _ = (w, h);
                 }
                 AppEvent::Mouse(mouse) => {
-                    needs_draw = self.handle_mouse_event(mouse);
+                    needs_draw = self.handle_mouse_event(mouse, terminal)?;
                 }
                 AppEvent::Quit => {
                     self.cleanup_graph_images()?;
@@ -394,7 +419,6 @@ impl App<'_> {
                     self.open_detail();
                 }
                 AppEvent::CloseDetail => {
-                    terminal.clear()?;
                     if !self.close_detail() {
                         // No commit list state available (e.g. opened from Refs panel)
                         // Force a full refresh to rebuild the list view
@@ -411,6 +435,8 @@ impl App<'_> {
                             },
                         }));
                     }
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                 }
                 AppEvent::OpenUserCommand(n) => {
                     self.clear_image(Some(terminal))?;
@@ -418,13 +444,16 @@ impl App<'_> {
                     self.open_user_command(n, Some(terminal));
                 }
                 AppEvent::CloseUserCommand => {
-                    terminal.clear()?;
                     self.close_user_command();
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                 }
                 AppEvent::OpenRefs => {
+                    self.clear_image(None)?;
                     self.open_refs();
                 }
                 AppEvent::CloseRefs => {
+                    self.clear_image(None)?;
                     self.close_refs();
                 }
                 AppEvent::OpenHelp => {
@@ -432,16 +461,21 @@ impl App<'_> {
                     self.open_help();
                 }
                 AppEvent::CloseHelp => {
-                    terminal.clear()?;
                     self.close_help();
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                 }
                 AppEvent::OpenConfig => {
                     self.clear_image(None)?;
                     self.open_config();
                 }
                 AppEvent::CloseConfig => {
-                    terminal.clear()?;
                     self.close_config();
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
+                }
+                AppEvent::GithubAuthFinished(state) => {
+                    self.finish_github_auth(state);
                 }
                 AppEvent::OpenFileDiff { hash, file_path } => {
                     self.clear_image(Some(terminal))?;
@@ -449,12 +483,14 @@ impl App<'_> {
                     self.open_file_diff(hash, file_path);
                 }
                 AppEvent::CloseDiff => {
-                    terminal.clear()?;
                     self.close_diff();
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                 }
                 AppEvent::CloseDiffToDetail => {
-                    terminal.clear()?;
                     self.close_diff_to_detail();
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
                 }
                 AppEvent::SelectOlderCommit => {
                     self.select_older_commit();
@@ -468,11 +504,23 @@ impl App<'_> {
                 AppEvent::CopyToClipboard { name, value } => {
                     self.copy_to_clipboard(name, value);
                 }
+                AppEvent::CopyRawToClipboard {
+                    value,
+                    success_message,
+                } => {
+                    self.copy_raw_to_clipboard(value, success_message);
+                }
+                AppEvent::OpenUrl(url) => {
+                    if let Err(msg) = open_url(&url) {
+                        self.error_notification(msg);
+                    }
+                }
                 AppEvent::Refresh(context) => {
                     self.cleanup_graph_images()?;
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
                 }
+                AppEvent::AvatarsUpdated => {}
                 AppEvent::ClearStatusLine => {
                     self.clear_status_line();
                 }
@@ -536,15 +584,18 @@ impl App<'_> {
                         .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
                         .unwrap_or(false);
                 }
-                AppEvent::OpenUncommittedDiff { file_path, is_staged } => {
+                AppEvent::OpenUncommittedDiff {
+                    file_path,
+                    is_staged,
+                } => {
                     self.clear_image(Some(terminal))?;
                     terminal.clear()?;
                     self.open_uncommitted_diff(file_path, is_staged);
                 }
                 AppEvent::CloseDiffToUncommitted => {
+                    self.close_diff_to_uncommitted();
                     self.clear_image(Some(terminal))?;
                     terminal.clear()?;
-                    self.close_diff_to_uncommitted();
                 }
             }
         }
@@ -559,9 +610,25 @@ impl App<'_> {
         Ok(())
     }
 
+    fn handle_view_event_clearing_detail_avatar(
+        &mut self,
+        event_with_count: UserEventWithCount,
+        key: KeyEvent,
+        _terminal: &mut DefaultTerminal,
+    ) -> Result<(), std::io::Error> {
+        self.view.handle_event(event_with_count, key);
+        Ok(())
+    }
+
     fn flush_pending_graph_uploads(&mut self) -> Result<(), std::io::Error> {
         let mut uploads = self.view.drain_pending_graph_uploads();
-        uploads.extend(self.ctx.avatar_manager.lock().unwrap().drain_pending_uploads());
+        uploads.extend(
+            self.ctx
+                .avatar_manager
+                .lock()
+                .unwrap()
+                .drain_pending_uploads(),
+        );
         if uploads.is_empty() {
             return Ok(());
         }
@@ -571,6 +638,14 @@ impl App<'_> {
             stdout.write_all(upload.as_bytes())?;
         }
         stdout.flush()
+    }
+
+    fn flush_pending_avatar_deletes(&mut self) -> Result<(), std::io::Error> {
+        let rows = self.view.drain_pending_avatar_deletes();
+        for row in rows {
+            self.ctx.image_protocol.delete_row(row)?;
+        }
+        Ok(())
     }
 
     fn cleanup_graph_images(&self) -> Result<(), std::io::Error> {
@@ -682,7 +757,9 @@ impl App<'_> {
                 let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
                 format!("⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏n:next▕▏N:prev▕▏Esc:clear")
             } else if is_config_active {
-                "⌘ Enter/⇆:cycle▕▏Esc:close".into()
+                self.view
+                    .config_footer_hint()
+                    .unwrap_or_else(|| "⌘ Enter/⇆:cycle▕▏Esc:close".into())
             } else {
                 match &self.view {
                     View::List(_) => {
@@ -722,11 +799,35 @@ impl App<'_> {
             f.render_widget(shortcut_paragraph, right_area);
 
             if is_config_active {
-                let config_hint = Line::from(vec![Span::styled(
-                    "Changes are applied to your config.toml",
-                    dim_text,
-                )]);
-                let config_hint_paragraph = Paragraph::new(config_hint)
+                let config_hint_line = match &self.app_status.status_line {
+                    StatusLine::NotificationSuccess(msg) => Line::from(vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_success_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    StatusLine::NotificationError(msg) => Line::from(vec![Span::styled(
+                        format!("ERROR: {msg}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_error_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    StatusLine::NotificationInfo(msg) => Line::from(vec![Span::styled(
+                        msg.as_str(),
+                        Style::default().fg(self.ctx.color_theme.status_info_fg),
+                    )]),
+                    StatusLine::NotificationWarn(msg) => Line::from(vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_warn_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    _ => Line::from(vec![Span::styled(
+                        "Changes are applied to your config.toml",
+                        dim_text,
+                    )]),
+                };
+                let config_hint_paragraph = Paragraph::new(config_hint_line)
                     .style(Style::default().bg(Color::Rgb(36, 40, 59)))
                     .block(Block::default().padding(Padding::horizontal(1)));
                 f.render_widget(config_hint_paragraph, left_area);
@@ -849,6 +950,11 @@ impl App<'_> {
     ) -> Result<(), std::io::Error> {
         // Clear prepared images so they get re-uploaded after terminal clear
         self.view.clear_graph_images();
+        self.ctx
+            .avatar_manager
+            .lock()
+            .unwrap()
+            .clear_prepared_images();
         // Sometimes the first image fails to render after a full screen clear
         // As a workaround, the first area is preserved when a full clear is not required
         if let Some(t) = terminal {
@@ -994,14 +1100,21 @@ impl App<'_> {
         let (commit_list_state, all_files) = match self.view {
             View::Uncommitted(ref mut view) => {
                 let list_state = view.take_list_state();
-                let all_files: Vec<(String, bool)> = view.staged
+                let all_files: Vec<(String, bool)> = view
+                    .staged
                     .iter()
-                    .filter(|f| f.status != StatusType::Deleted && f.status != StatusType::Untracked)
+                    .filter(|f| {
+                        f.status != StatusType::Deleted && f.status != StatusType::Untracked
+                    })
                     .map(|f| (f.path.clone(), true))
-                    .chain(view.unstaged
-                        .iter()
-                        .filter(|f| f.status != StatusType::Deleted && f.status != StatusType::Untracked)
-                        .map(|f| (f.path.clone(), false)))
+                    .chain(
+                        view.unstaged
+                            .iter()
+                            .filter(|f| {
+                                f.status != StatusType::Deleted && f.status != StatusType::Untracked
+                            })
+                            .map(|f| (f.path.clone(), false)),
+                    )
                     .collect();
                 (list_state, all_files)
             }
@@ -1054,16 +1167,17 @@ impl App<'_> {
                         } else {
                             DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
                         };
-                        
+
                         match diff_result {
                             Ok(diff_entry) => {
-                                let (additions, deletions) = diff_entry.count_additions_and_deletions();
+                                let (additions, deletions) =
+                                    diff_entry.count_additions_and_deletions();
                                 (additions, deletions)
                             }
                             Err(_) => (0, 0),
                         }
                     };
-                    
+
                     let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
                         let (additions, deletions) = load_diff_stats(f, is_staged);
                         crate::widget::uncommitted::UncommittedFile {
@@ -1074,16 +1188,20 @@ impl App<'_> {
                             deletions,
                         }
                     };
-                    
+
                     self.view = View::Uncommitted(Box::new(
                         crate::view::uncommitted::UncommittedView::new(
                             changes.unstaged.iter().map(|f| convert(f, false)).collect(),
                             changes.staged.iter().map(|f| convert(f, true)).collect(),
-                            changes.untracked.iter().map(|f| convert(f, false)).collect(),
+                            changes
+                                .untracked
+                                .iter()
+                                .map(|f| convert(f, false))
+                                .collect(),
                             list_state,
                             self.ctx.clone(),
                             self.ec.sender(),
-                        )
+                        ),
                     ));
                 }
                 Err(err) => {
@@ -1270,11 +1388,22 @@ impl App<'_> {
         if let View::Config(ref mut view) = self.view {
             let core = view.core_config().clone();
             let ui = view.ui_config().clone();
+            let github_auth_state = view.github_auth_state().clone();
             let old_mouse = self.ctx.ui_config.common.mouse_enabled;
             self.view = view.take_before_view();
+            let github_avatars = core.github_avatars();
             let ctx = Rc::make_mut(&mut self.ctx);
             ctx.core_config = core;
             ctx.ui_config = ui.clone();
+            ctx.github_auth_state = github_auth_state.clone();
+            ctx.avatar_manager
+                .lock()
+                .unwrap()
+                .set_github_token(github_auth_state.token.clone());
+            ctx.avatar_manager
+                .lock()
+                .unwrap()
+                .set_github_avatars(github_avatars);
             let new_mouse = ui.common.mouse_enabled;
             if old_mouse != new_mouse {
                 let _ = if new_mouse {
@@ -1299,6 +1428,34 @@ impl App<'_> {
                 },
                 pending_notification: None,
             }));
+        }
+    }
+
+    fn finish_github_auth(&mut self, state: GithubAuthState) {
+        let authenticated = state.is_authenticated();
+        if let View::Config(ref mut view) = self.view {
+            view.finish_github_auth(state.clone());
+        }
+        let ctx = Rc::make_mut(&mut self.ctx);
+        ctx.github_auth_state = state.clone();
+        ctx.avatar_manager
+            .lock()
+            .unwrap()
+            .set_github_token(state.token.clone());
+        if authenticated {
+            let tx = self.ec.sender();
+            thread::spawn(move || {
+                thread::sleep(std::time::Duration::from_secs(3));
+                let _ = tx.send(AppEvent::Refresh(RefreshViewContext::List {
+                    list_context: crate::view::ListRefreshViewContext {
+                        commit_hash: String::new(),
+                        selected: 0,
+                        height: 20,
+                        scroll_to_top: false,
+                    },
+                    pending_notification: None,
+                }));
+            });
         }
     }
 
@@ -1373,7 +1530,10 @@ impl App<'_> {
             view.reset_commit_list_with(context.list_context());
         }
         match context {
-            RefreshViewContext::List { pending_notification, .. } => {
+            RefreshViewContext::List {
+                pending_notification,
+                ..
+            } => {
                 if let Some(msg) = pending_notification {
                     self.ec.send(AppEvent::NotifySuccess(msg));
                 }
@@ -1404,39 +1564,44 @@ impl App<'_> {
         self.app_status.notification_timestamp = None;
     }
 
-    fn handle_mouse_event(&mut self, mouse: ratatui::crossterm::event::MouseEvent) -> bool {
+    fn handle_mouse_event(
+        &mut self,
+        mouse: ratatui::crossterm::event::MouseEvent,
+        terminal: &mut DefaultTerminal,
+    ) -> Result<bool, std::io::Error> {
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
 
-        match mouse.kind {
+        let needs_draw = match mouse.kind {
             MouseEventKind::ScrollUp => {
-                let _ = self.view.handle_event(
+                self.handle_view_event_clearing_detail_avatar(
                     crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollUp, 3),
                     ratatui::crossterm::event::KeyEvent::new(
                         ratatui::crossterm::event::KeyCode::Up,
                         ratatui::crossterm::event::KeyModifiers::NONE,
                     ),
-                );
+                    terminal,
+                )?;
                 true
             }
             MouseEventKind::ScrollDown => {
-                let _ = self.view.handle_event(
+                self.handle_view_event_clearing_detail_avatar(
                     crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollDown, 3),
                     ratatui::crossterm::event::KeyEvent::new(
                         ratatui::crossterm::event::KeyCode::Down,
                         ratatui::crossterm::event::KeyModifiers::NONE,
                     ),
-                );
+                    terminal,
+                )?;
                 true
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 self.view.handle_click(mouse.column, mouse.row);
                 true
             }
-            MouseEventKind::Moved => {
-                self.view.handle_mouse_move(mouse.column, mouse.row)
-            }
-            _ => false
-        }
+            MouseEventKind::Moved => self.view.handle_mouse_move(mouse.column, mouse.row),
+            _ => false,
+        };
+        Ok(needs_draw)
     }
 
     fn update_status_input(
@@ -1477,6 +1642,13 @@ impl App<'_> {
             Err(msg) => {
                 self.ec.send(AppEvent::NotifyError(msg));
             }
+        }
+    }
+
+    fn copy_raw_to_clipboard(&mut self, value: String, success_message: String) {
+        match copy_to_clipboard(value, &self.ctx.core_config.external.clipboard) {
+            Ok(_) => self.success_notification(success_message),
+            Err(msg) => self.error_notification(msg),
         }
     }
 
@@ -1566,9 +1738,10 @@ impl App<'_> {
                 };
                 (r, None)
             }
-            GitAction::CreateBranch { name, checkout } => {
-                (actions::create_branch_at(repo_path, &name, &target, checkout), None)
-            }
+            GitAction::CreateBranch { name, checkout } => (
+                actions::create_branch_at(repo_path, &name, &target, checkout),
+                None,
+            ),
             GitAction::AddTag {
                 name,
                 annotated,
@@ -1580,24 +1753,37 @@ impl App<'_> {
             GitAction::CherryPick {
                 no_commit,
                 record_origin,
-            } => (actions::cherry_pick(repo_path, &target, no_commit, record_origin), None),
+            } => (
+                actions::cherry_pick(repo_path, &target, no_commit, record_origin),
+                None,
+            ),
             GitAction::Revert => (actions::revert_commit(repo_path, &target), None),
             GitAction::Drop => (actions::drop_commit(repo_path, &target), None),
             GitAction::Merge {
                 no_ff,
                 squash,
                 no_commit,
-            } => (actions::merge_commit(repo_path, &target, no_ff, squash, no_commit), None),
+            } => (
+                actions::merge_commit(repo_path, &target, no_ff, squash, no_commit),
+                None,
+            ),
             GitAction::Rebase {
                 ignore_date,
                 interactive,
-            } => (actions::rebase_onto(repo_path, &target, ignore_date, interactive), None),
+            } => (
+                actions::rebase_onto(repo_path, &target, ignore_date, interactive),
+                None,
+            ),
             GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),
-            GitAction::DeleteBranch { force } => (actions::delete_branch(repo_path, &target, force), None),
+            GitAction::DeleteBranch { force } => {
+                (actions::delete_branch(repo_path, &target, force), None)
+            }
             GitAction::RenameBranch { new_name } => {
                 (actions::rename_branch(repo_path, &target, &new_name), None)
             }
-            GitAction::PushBranch { force } => (actions::push_branch(repo_path, &target, force), None),
+            GitAction::PushBranch { force } => {
+                (actions::push_branch(repo_path, &target, force), None)
+            }
             GitAction::PullBranch { rebase } => {
                 let r = if rebase {
                     actions::pull_branch(repo_path, &target)
@@ -1612,21 +1798,49 @@ impl App<'_> {
             GitAction::ApplyStash => (actions::apply_stash(repo_path, &target), None),
             GitAction::PopStash => (actions::pop_stash(repo_path, &target), None),
             GitAction::DropStash => (actions::drop_stash(repo_path, &target), None),
-            GitAction::CreateBranchFromStash { branch_name } => {
-                (actions::create_branch_from_stash(repo_path, &branch_name, &target), None)
-            }
-            GitAction::StageFile { file } => (actions::stage_file(repo_path, &file), Some(format!("Staged {}", file))),
-            GitAction::StageAll => (actions::stage_all(repo_path), Some("Staged all files".into())),
-            GitAction::UnstageFile { file } => (actions::unstage_file(repo_path, &file), Some(format!("Unstaged {}", file))),
-            GitAction::UnstageAll => (actions::unstage_all(repo_path), Some("Unstaged all files".into())),
-            GitAction::DiscardFile { file } => (actions::discard_file(repo_path, &file), Some(format!("Discarded {}", file))),
-            GitAction::DiscardAll => (actions::discard_all(repo_path), Some("Discarded all changes".into())),
-            GitAction::Stash { message } => (actions::stash(repo_path, message.as_deref()), Some("Stashed changes".into())),
+            GitAction::CreateBranchFromStash { branch_name } => (
+                actions::create_branch_from_stash(repo_path, &branch_name, &target),
+                None,
+            ),
+            GitAction::StageFile { file } => (
+                actions::stage_file(repo_path, &file),
+                Some(format!("Staged {}", file)),
+            ),
+            GitAction::StageAll => (
+                actions::stage_all(repo_path),
+                Some("Staged all files".into()),
+            ),
+            GitAction::UnstageFile { file } => (
+                actions::unstage_file(repo_path, &file),
+                Some(format!("Unstaged {}", file)),
+            ),
+            GitAction::UnstageAll => (
+                actions::unstage_all(repo_path),
+                Some("Unstaged all files".into()),
+            ),
+            GitAction::DiscardFile { file } => (
+                actions::discard_file(repo_path, &file),
+                Some(format!("Discarded {}", file)),
+            ),
+            GitAction::DiscardAll => (
+                actions::discard_all(repo_path),
+                Some("Discarded all changes".into()),
+            ),
+            GitAction::Stash { message } => (
+                actions::stash(repo_path, message.as_deref()),
+                Some("Stashed changes".into()),
+            ),
             GitAction::Commit { message, amend } => {
                 let label = if amend { "Amended commit" } else { "Committed" };
-                (actions::commit(repo_path, &message, amend), Some(label.to_string()))
+                (
+                    actions::commit(repo_path, &message, amend),
+                    Some(label.to_string()),
+                )
             }
-            GitAction::CleanUntracked => (actions::clean_untracked(repo_path), Some("Cleaned untracked files".into())),
+            GitAction::CleanUntracked => (
+                actions::clean_untracked(repo_path),
+                Some("Cleaned untracked files".into()),
+            ),
             GitAction::Push => (actions::push_commit(repo_path, &target), None),
             GitAction::CreateArchive => {
                 let r = std::process::Command::new("git")
@@ -1752,7 +1966,7 @@ impl App<'_> {
             _ => None,
         };
         let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
-        
+
         let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
             let diff_result = if is_staged {
                 DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
@@ -1778,7 +1992,11 @@ impl App<'_> {
 
         let staged: Vec<_> = changes.staged.iter().map(|f| convert(f, true)).collect();
         let unstaged: Vec<_> = changes.unstaged.iter().map(|f| convert(f, false)).collect();
-        let untracked: Vec<_> = changes.untracked.iter().map(|f| convert(f, false)).collect();
+        let untracked: Vec<_> = changes
+            .untracked
+            .iter()
+            .map(|f| convert(f, false))
+            .collect();
         self.view = View::Uncommitted(Box::new(crate::view::uncommitted::UncommittedView::new(
             unstaged,
             staged,
@@ -1792,7 +2010,8 @@ impl App<'_> {
     fn stage_file(&mut self, file: String) {
         match actions::stage_file(self.repository.path(), &file) {
             Ok(_) => {
-                self.ec.send(AppEvent::NotifySuccess(format!("Staged {}", file)));
+                self.ec
+                    .send(AppEvent::NotifySuccess(format!("Staged {}", file)));
                 self.ec.send(AppEvent::RefreshUncommitted);
             }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
@@ -1802,7 +2021,8 @@ impl App<'_> {
     fn unstage_file(&mut self, file: String) {
         match actions::unstage_file(self.repository.path(), &file) {
             Ok(_) => {
-                self.ec.send(AppEvent::NotifySuccess(format!("Unstaged {}", file)));
+                self.ec
+                    .send(AppEvent::NotifySuccess(format!("Unstaged {}", file)));
                 self.ec.send(AppEvent::RefreshUncommitted);
             }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
@@ -1812,7 +2032,8 @@ impl App<'_> {
     fn discard_file(&mut self, file: String) {
         match actions::discard_file(self.repository.path(), &file) {
             Ok(_) => {
-                self.ec.send(AppEvent::NotifySuccess(format!("Discarded {}", file)));
+                self.ec
+                    .send(AppEvent::NotifySuccess(format!("Discarded {}", file)));
                 self.ec.send(AppEvent::RefreshUncommitted);
             }
             Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
@@ -1825,14 +2046,14 @@ impl App<'_> {
             let was_section = view.section();
 
             let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
-            
+
             let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
                 let diff_result = if is_staged {
                     DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
                 } else {
                     DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
                 };
-                
+
                 match diff_result {
                     Ok(diff_entry) => {
                         let (additions, deletions) = diff_entry.count_additions_and_deletions();
@@ -1841,7 +2062,7 @@ impl App<'_> {
                     Err(_) => (0, 0),
                 }
             };
-            
+
             let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
                 let (additions, deletions) = load_diff_stats(f, is_staged);
                 crate::widget::uncommitted::UncommittedFile {
@@ -1852,10 +2073,14 @@ impl App<'_> {
                     deletions,
                 }
             };
-            
+
             view.staged = changes.staged.iter().map(|f| convert(f, true)).collect();
             view.unstaged = changes.unstaged.iter().map(|f| convert(f, false)).collect();
-            view.untracked = changes.untracked.iter().map(|f| convert(f, false)).collect();
+            view.untracked = changes
+                .untracked
+                .iter()
+                .map(|f| convert(f, false))
+                .collect();
 
             if let Some(ref path) = selected_path {
                 view.reselect(path);

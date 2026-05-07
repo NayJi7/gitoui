@@ -24,14 +24,20 @@ pub fn auto_detect() -> ImageProtocol {
 
 fn detect_kitty_graphics_protocol() -> bool {
     env::var("KITTY_WINDOW_ID").is_ok()
-        || env::var("TERM").ok().is_some_and(|t| t == "xterm-ghostty" || t == "xterm-kitty")
+        || env::var("TERM")
+            .ok()
+            .is_some_and(|t| t == "xterm-ghostty" || t == "xterm-kitty")
         || env::var("GHOSTTY_RESOURCES_DIR").is_ok()
-        || env::var("TERM_PROGRAM").ok().is_some_and(|tp| tp == "ghostty")
+        || env::var("TERM_PROGRAM")
+            .ok()
+            .is_some_and(|tp| tp == "ghostty")
 }
 
 fn detect_sixel_support() -> bool {
     env::var("TERM").ok().is_some_and(|t| t.contains("sixel"))
-        || env::var("TERM_PROGRAM").ok().is_some_and(|tp| tp == "wezterm")
+        || env::var("TERM_PROGRAM")
+            .ok()
+            .is_some_and(|tp| tp == "wezterm")
 }
 
 pub fn detect_tmux() -> bool {
@@ -56,6 +62,14 @@ pub struct PreparedImageCell {
 }
 
 impl PreparedImageCell {
+    pub fn new(symbol: String, style: Style, skip: bool) -> Self {
+        Self {
+            symbol,
+            style,
+            skip,
+        }
+    }
+
     pub fn symbol(&self) -> &str {
         &self.symbol
     }
@@ -73,16 +87,30 @@ impl PreparedImageCell {
 pub struct PreparedImage {
     cells: Vec<PreparedImageCell>,
     cell_width: usize,
+    image_id: Option<u32>,
     upload_data: Option<String>,
 }
 
 impl PreparedImage {
+    pub fn from_cells(cells: Vec<PreparedImageCell>) -> Self {
+        Self {
+            cell_width: cells.len(),
+            cells,
+            image_id: None,
+            upload_data: None,
+        }
+    }
+
     pub fn cells(&self) -> &[PreparedImageCell] {
         &self.cells
     }
 
     pub fn cell_width(&self) -> usize {
         self.cell_width
+    }
+
+    pub fn image_id(&self) -> Option<u32> {
+        self.image_id
     }
 
     pub fn take_upload_data(&mut self) -> Option<String> {
@@ -94,7 +122,7 @@ impl ImageProtocol {
     pub fn prepare_image(&self, bytes: &[u8], cell_width: usize, image_id: u32) -> PreparedImage {
         let symbol = match self {
             ImageProtocol::Iterm2 | ImageProtocol::Sixel => iterm2_encode(bytes, cell_width, 1),
-            ImageProtocol::Kitty => kitty_encode(bytes, cell_width, 1),
+            ImageProtocol::Kitty => kitty_encode(bytes, cell_width, 1, image_id),
             ImageProtocol::KittyUnicode { tmux } => {
                 return kitty_unicode_prepare(bytes, cell_width, image_id, *tmux);
             }
@@ -107,14 +135,15 @@ impl ImageProtocol {
         });
         for _ in 1..cell_width {
             cells.push(PreparedImageCell {
-                symbol: String::new(),
+                symbol: " ".to_string(),
                 style: Style::default(),
-                skip: true,
+                skip: false,
             });
         }
         PreparedImage {
             cells,
             cell_width,
+            image_id: Some(image_id),
             upload_data: None,
         }
     }
@@ -137,8 +166,35 @@ impl ImageProtocol {
 
     pub fn delete_images(&self, image_ids: &[u32]) -> Result<(), std::io::Error> {
         match self {
-            ImageProtocol::Iterm2 | ImageProtocol::Kitty | ImageProtocol::Sixel => Ok(()),
+            ImageProtocol::Iterm2 | ImageProtocol::Sixel => Ok(()),
+            ImageProtocol::Kitty => kitty_delete_images(image_ids),
             ImageProtocol::KittyUnicode { tmux } => kitty_unicode_delete_images(image_ids, *tmux),
+        }
+    }
+
+    pub fn clear_cell(&self) -> PreparedImageCell {
+        match self {
+            // Persistent Kitty placements (a=T) render on top of terminal content and stay
+            // until explicitly deleted — a bare space does not remove them.  Prefix with
+            // a=d,d=C so any ghost image at this cell is evicted before the space is written.
+            ImageProtocol::Kitty => PreparedImageCell::new(
+                "\x1b_Ga=d,d=C;\x1b\\ ".to_string(),
+                Style::default(),
+                false,
+            ),
+            // KittyUnicode uses virtual placements driven by placeholder characters; writing
+            // a plain space removes the placeholder and the image disappears automatically.
+            // Iterm2/Sixel also require no special deletion step.
+            _ => PreparedImageCell::new(" ".to_string(), Style::default(), false),
+        }
+    }
+
+    /// Delete all image placements on terminal row `y` (0-based).
+    /// Scoped to a single row — does not touch images on other rows.
+    pub fn delete_row(&self, y: u16) -> Result<(), std::io::Error> {
+        match self {
+            ImageProtocol::Kitty => kitty_delete_row(y),
+            _ => Ok(()),
         }
     }
 }
@@ -460,11 +516,14 @@ fn iterm2_encode(bytes: &[u8], cell_width: usize, cell_height: usize) -> String 
 }
 
 // https://sw.kovidgoyal.net/kitty/graphics-protocol/
-fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize) -> String {
+fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize, image_id: u32) -> String {
     let base64_str = to_base64_str(bytes);
     let chunk_size = 4096;
 
-    let mut s = String::new();
+    let total_chunks = base64_str.len().div_ceil(chunk_size).max(1);
+    // Pre-allocate: delete prefix (14) + per-chunk overhead (~55) + base64 data
+    let capacity = 14 + total_chunks * 55 + base64_str.len();
+    let mut s = String::with_capacity(capacity);
 
     let chunks = base64_str.as_bytes().chunks(chunk_size);
     let total_chunks = chunks.len();
@@ -473,7 +532,9 @@ fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize) -> String {
     for (i, chunk) in chunks.enumerate() {
         s.push_str("\x1b_G");
         if i == 0 {
-            s.push_str(&format!("a=T,f=100,c={cell_width},r={cell_height},"));
+            s.push_str(&format!(
+                "a=T,f=100,q=2,i={image_id},c={cell_width},r={cell_height},"
+            ));
         }
         if i < total_chunks - 1 {
             s.push_str("m=1;");
@@ -522,6 +583,7 @@ fn kitty_unicode_prepare(
     PreparedImage {
         cells,
         cell_width,
+        image_id: Some(image_id),
         upload_data: Some(upload_symbol),
     }
 }
@@ -536,7 +598,10 @@ fn kitty_unicode_encode(
     let base64_str = to_base64_str(bytes);
     let chunk_size = 4096;
 
-    let mut s = String::new();
+    let total_chunks_est = base64_str.len().div_ceil(chunk_size).max(1);
+    // Per-chunk overhead: passthrough escapes (~20) + Kitty header (~60) + data
+    let capacity = total_chunks_est * 80 + base64_str.len();
+    let mut s = String::with_capacity(capacity);
 
     let chunks = base64_str.as_bytes().chunks(chunk_size);
     let total_chunks = chunks.len();
@@ -575,8 +640,31 @@ fn kitty_clear_line(y: u16) {
     print!("\x1b_Ga=d,d=Y,y={y};\x1b\\");
 }
 
+fn kitty_delete_row(y: u16) -> Result<(), std::io::Error> {
+    let y = y + 1; // 1-based
+    let mut stdout = std::io::stdout().lock();
+    write!(stdout, "\x1b_Ga=d,d=Y,y={y};\x1b\\")?;
+    stdout.flush()
+}
+
 fn kitty_clear() {
     print!("\x1b_Ga=d,d=A;\x1b\\");
+}
+
+fn kitty_delete_image_encode(image_id: u32) -> String {
+    format!("\x1b_Ga=d,d=I,i={image_id};\x1b\\")
+}
+
+fn kitty_delete_images(image_ids: &[u32]) -> Result<(), io::Error> {
+    if image_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut stdout = io::stdout().lock();
+    for image_id in image_ids {
+        write!(stdout, "{}", kitty_delete_image_encode(*image_id))?;
+    }
+    stdout.flush()
 }
 
 fn kitty_unicode_delete_images(image_ids: &[u32], tmux: bool) -> Result<(), io::Error> {
@@ -605,5 +693,26 @@ fn passthrough_escapes(tmux: bool) -> (&'static str, &'static str, &'static str)
         ("\x1bPtmux;", "\x1b\x1b", "\x1b\\")
     } else {
         ("", "\x1b", "")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kitty_clear_cell_deletes_then_writes_space() {
+        let cell = ImageProtocol::Kitty.clear_cell();
+        // Must start with delete-at-cursor so ghost persistent placements are evicted
+        assert!(cell.symbol().starts_with("\x1b_Ga=d,d=C;\x1b\\"));
+        assert!(cell.symbol().ends_with(' '));
+        assert!(!cell.skip());
+    }
+
+    #[test]
+    fn kitty_prepared_image_uses_stable_image_id() {
+        let prepared = ImageProtocol::Kitty.prepare_image(&[1, 2, 3], 2, 42);
+        assert_eq!(prepared.image_id(), Some(42));
+        assert!(prepared.cells()[0].symbol().contains("i=42,"));
     }
 }
