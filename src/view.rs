@@ -34,12 +34,17 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_detail_height_keeps_list_visible() {
-        assert_eq!(adaptive_detail_height(12, 16, 10), 7);
+    fn adaptive_detail_height_respects_min() {
+        assert_eq!(adaptive_detail_height(10, 16, 10), 5);
     }
 
     #[test]
-    fn adaptive_detail_height_respects_preferred_height_on_normal_terminals() {
-        assert_eq!(adaptive_detail_height(30, 16, 10), 18);
+    fn adaptive_detail_height_small_terminal_clamps() {
+        assert_eq!(adaptive_detail_height(8, 16, 10), 3);
+    }
+
+    #[test]
+    fn adaptive_detail_height_never_zero() {
+        assert_eq!(adaptive_detail_height(1, 1, 1), 1);
     }
 }

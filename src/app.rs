@@ -304,6 +304,7 @@ impl App<'_> {
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
                 terminal.draw(|f| self.render(f))?;
+                self.flush_pending_avatar_deletes()?;
             }
             needs_draw = true;
             match self.ec.recv() {
@@ -631,6 +632,14 @@ impl App<'_> {
             stdout.write_all(upload.as_bytes())?;
         }
         stdout.flush()
+    }
+
+    fn flush_pending_avatar_deletes(&mut self) -> Result<(), std::io::Error> {
+        let rows = self.view.drain_pending_avatar_deletes();
+        for row in rows {
+            self.ctx.image_protocol.delete_row(row)?;
+        }
+        Ok(())
     }
 
     fn cleanup_graph_images(&self) -> Result<(), std::io::Error> {

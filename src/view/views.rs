@@ -114,6 +114,13 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
+        match self {
+            View::Detail(view) => view.drain_pending_avatar_deletes(),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
         match self {
             View::Default => Vec::new(),

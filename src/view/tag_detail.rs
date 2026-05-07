@@ -68,7 +68,7 @@ impl<'a> TagDetailView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let detail_height = if self.commit_list_state.is_some() {
-            super::adaptive_detail_height(area.height, 10, 8)
+            crate::view::adaptive_detail_height(area.height, 10, 5)
         } else {
             area.height.min(10)
         };
@@ -90,18 +90,13 @@ impl<'a> TagDetailView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         if let Some(ref mut list_state) = self.commit_list_state {
-            let detail_height = super::adaptive_detail_height(area.height, 10, 8);
+            let detail_height = crate::view::adaptive_detail_height(area.height, 10, 5);
             let [list_area, _] = ratatui::layout::Layout::vertical([
                 ratatui::layout::Constraint::Min(0),
                 ratatui::layout::Constraint::Length(detail_height),
             ])
             .areas(area);
-            let height = if list_area.height >= 2 {
-                list_area.height - 2
-            } else {
-                list_area.height
-            };
-            list_state.update_height(height as usize);
+            list_state.update_height(list_area.height as usize);
         }
     }
 

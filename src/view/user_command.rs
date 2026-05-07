@@ -203,8 +203,11 @@ impl<'a> UserCommandView<'a> {
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
-        let user_command_height =
-            super::adaptive_detail_height(area.height, self.ctx.ui_config.user_command.height, 8);
+        let user_command_height = crate::view::adaptive_detail_height(
+            area.height,
+            self.ctx.ui_config.user_command.height,
+            5,
+        );
         Layout::vertical([Constraint::Min(0), Constraint::Length(user_command_height)]).areas(area)
     }
 

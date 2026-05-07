@@ -255,13 +255,8 @@ impl<'a> DetailView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
-        let height = if list_area.height >= 2 {
-            list_area.height - 2
-        } else {
-            list_area.height
-        };
         self.list_height = list_area.height as usize;
-        self.as_mut_list_state().update_height(height as usize);
+        self.as_mut_list_state().update_height(list_area.height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
@@ -296,12 +291,23 @@ impl<'a> DetailView<'a> {
         self.as_mut_list_state().drain_pending_graph_uploads()
     }
 
+    pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
+        self.commit_detail_state
+            .drain_pending_avatar_delete()
+            .into_iter()
+            .collect()
+    }
+
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         self.as_list_state().graph_image_ids_sorted()
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
-        let detail_height = super::adaptive_detail_height(area.height, self.ctx.ui_config.detail.height, 10);
+        let detail_height = crate::view::adaptive_detail_height(
+            area.height,
+            self.ctx.ui_config.detail.height,
+            5,
+        );
         Layout::vertical([Constraint::Min(0), Constraint::Length(detail_height)]).areas(area)
     }
 
@@ -364,7 +370,7 @@ impl<'a> DetailView<'a> {
         if let Some(detail_area) = self.detail_area {
             let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(5);
+                let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
                 if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
                     self.execute_action(action_idx);
                 }
@@ -392,7 +398,7 @@ impl<'a> DetailView<'a> {
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         let row = row as usize;
         if row < self.list_height {
-            // Ignore mouse movement in the commit list pane
+            self.commit_detail_state.hover_file = None;
             return;
         }
 
@@ -402,6 +408,7 @@ impl<'a> DetailView<'a> {
             if col >= action_bar_x && row >= detail_area.y as usize {
                 let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
                 self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
+                self.commit_detail_state.hover_file = None;
                 return;
             } else {
                 self.commit_detail_state.hovered_action = None;
@@ -411,7 +418,8 @@ impl<'a> DetailView<'a> {
         let detail_local_row = row - self.list_height;
         // Detail widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
         if detail_local_row < 4 {
-            return; // hovering header area
+            self.commit_detail_state.hover_file = None;
+            return;
         }
 
         let content_row = detail_local_row - 4;
@@ -419,10 +427,9 @@ impl<'a> DetailView<'a> {
         let changes_start = self.compute_changes_start_line();
 
         if hover_line >= changes_start && hover_line < changes_start + self.changes.len() {
-            let file_idx = hover_line - changes_start;
-            if file_idx != self.commit_detail_state.selected_file {
-                self.commit_detail_state.selected_file = file_idx;
-            }
+            self.commit_detail_state.hover_file = Some(hover_line - changes_start);
+        } else {
+            self.commit_detail_state.hover_file = None;
         }
     }
 

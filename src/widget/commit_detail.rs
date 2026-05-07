@@ -19,7 +19,16 @@ pub struct CommitDetailState {
     offset: usize,
     pub selected_file: usize,
     pub hovered_action: Option<usize>,
+    pub hover_file: Option<usize>,
     last_selected_file: usize,
+    avatar_row: Option<u16>,
+    pending_avatar_delete_row: Option<u16>,
+}
+
+impl CommitDetailState {
+    pub fn drain_pending_avatar_delete(&mut self) -> Option<u16> {
+        self.pending_avatar_delete_row.take()
+    }
 }
 
 impl CommitDetailState {
@@ -160,12 +169,11 @@ impl StatefulWidget for CommitDetail<'_> {
         let content_inner = content_block.inner(content_area);
         content_block.render(content_area, buf);
 
-        // Content inner: title + underline + fixed author header + spacer + scrollable content
-        let [content_title_area, content_underline_area, author_header_area, _content_spacer_area, content_scroll_area] =
+        // Content inner: title + underline + spacer + scrollable content
+        let [content_title_area, content_underline_area, _content_spacer_area, content_scroll_area] =
             Layout::vertical([
                 Constraint::Length(1),
                 Constraint::Length(1),
-                Constraint::Length(2),
                 Constraint::Length(1),
                 Constraint::Min(0),
             ])
@@ -202,8 +210,6 @@ impl StatefulWidget for CommitDetail<'_> {
         ]);
         Paragraph::new(underline_line).render(content_underline_area, buf);
 
-        self.render_author_header(author_header_area, buf);
-
         let [labels_area, value_area] =
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)])
                 .areas(content_scroll_area);
@@ -217,9 +223,10 @@ impl StatefulWidget for CommitDetail<'_> {
         label_lines = label_lines.into_iter().skip(state.offset).collect();
         value_lines = value_lines.into_iter().skip(state.offset).collect();
 
-        // Apply selection highlight to the selected file line (after skipping offset)
+        // Highlight hovered file (mouse) or keyboard-selected file
+        let highlight_file = state.hover_file.unwrap_or(state.selected_file);
         if !self.changes.is_empty() {
-            let selected_line = changes_start + state.selected_file;
+            let selected_line = changes_start + highlight_file;
             let visible_selected = selected_line.saturating_sub(state.offset);
             if visible_selected < value_lines.len() {
                 value_lines[visible_selected].style =
@@ -229,6 +236,16 @@ impl StatefulWidget for CommitDetail<'_> {
 
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
+
+        if state.offset == 0 && content_scroll_area.height > 0 {
+            // Overlay avatar in the value column, right before the author name
+            if self.render_author_avatar(value_area, buf) {
+                state.avatar_row = Some(content_scroll_area.top());
+            }
+        } else if state.avatar_row.is_some() {
+            // Avatar scrolled out of view — schedule row-scoped deletion
+            state.pending_avatar_delete_row = state.avatar_row.take();
+        }
         self.render_action_bar(action_bar_area, buf, state);
     }
 }
@@ -248,49 +265,13 @@ impl CommitDetail<'_> {
         paragraph.render(area, buf);
     }
 
-    fn render_author_header(&self, area: Rect, buf: &mut Buffer) {
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-
-        let avatar_width = self.render_author_avatar(area, buf);
-        let text_x = area.left() + avatar_width + 1;
-        if text_x >= area.right() {
-            return;
-        }
-
-        let text_width = area.right().saturating_sub(text_x);
-        let name_line = Line::from(vec![
-            self.commit
-                .author_name
-                .as_str()
-                .fg(self.ctx.color_theme.detail_name_fg),
-            " <".into(),
-            self.commit
-                .author_email
-                .as_str()
-                .fg(self.ctx.color_theme.detail_email_fg),
-            ">".into(),
-        ]);
-        Paragraph::new(name_line).render(Rect::new(text_x, area.top(), text_width, 1), buf);
-
-        if area.height > 1 {
-            let date_str = self.ctx.core_config.date_time_format().format(
-                &self.commit.author_date,
-                self.ctx.core_config.date_time_local(),
-            );
-            let date_line = Line::from(date_str.fg(self.ctx.color_theme.detail_date_fg));
-            Paragraph::new(date_line).render(Rect::new(text_x, area.top() + 1, text_width, 1), buf);
-        }
-    }
-
-    fn render_author_avatar(&self, area: Rect, buf: &mut Buffer) -> u16 {
+    fn render_author_avatar(&self, area: Rect, buf: &mut Buffer) -> bool {
         if area.width <= 5 || area.height == 0 {
-            return 0;
+            return false;
         }
         let mut avatar_manager = self.ctx.avatar_manager.lock().unwrap();
         if !avatar_manager.is_enabled() {
-            return 0;
+            return false;
         }
         avatar_manager.prefetch(
             vec![self.commit.commit_hash.as_str().to_string()],
@@ -309,9 +290,9 @@ impl CommitDetail<'_> {
                 cell.set_style(image_cell.style());
                 cell.set_skip(image_cell.skip());
             }
-            return prepared.cell_width() as u16 + 1;
+            return true;
         }
-        0
+        false
     }
 
     fn render_action_bar(&self, area: Rect, buf: &mut Buffer, state: &CommitDetailState) {
@@ -402,6 +383,26 @@ impl CommitDetail<'_> {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
+        // Reserve 3 chars before the author name when avatars are on (2 cells avatar + 1 gap)
+        let avatar_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let author_prefix: &'static str = if avatar_enabled { "   " } else { "" };
+
+        label_lines.push(Line::from("   Author: ").fg(self.ctx.color_theme.detail_label_fg));
+        value_lines.push(self.author_line(author_prefix));
+        label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
+        value_lines.push(self.author_date_line());
+
+        if self.commit.author_name != self.commit.committer_name
+            || self.commit.author_email != self.commit.committer_email
+            || self.commit.author_date != self.commit.committer_date
+        {
+            label_lines
+                .push(Line::from("Committer: ").fg(self.ctx.color_theme.detail_label_fg));
+            value_lines.push(self.committer_line());
+            label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
+            value_lines.push(self.committer_date_line());
+        }
+
         label_lines.push(Line::from("      SHA: ").fg(self.ctx.color_theme.detail_label_fg));
         value_lines.push(self.sha_line());
 
@@ -435,6 +436,59 @@ impl CommitDetail<'_> {
         let changes_start = value_lines.len() - self.changes.len();
 
         (label_lines, value_lines, changes_start)
+    }
+
+    fn author_line(&self, prefix: &'static str) -> Line<'_> {
+        let mut spans = Vec::new();
+        if !prefix.is_empty() {
+            spans.push(Span::raw(prefix));
+        }
+        spans.push(
+            self.commit
+                .author_name
+                .as_str()
+                .fg(self.ctx.color_theme.detail_name_fg),
+        );
+        spans.push(" <".into());
+        spans.push(
+            self.commit
+                .author_email
+                .as_str()
+                .fg(self.ctx.color_theme.detail_email_fg),
+        );
+        spans.push(">".into());
+        Line::from(spans)
+    }
+
+    fn author_date_line(&self) -> Line<'_> {
+        let date_str = self.ctx.core_config.date_time_format().format(
+            &self.commit.author_date,
+            self.ctx.core_config.date_time_local(),
+        );
+        Line::from(date_str.fg(self.ctx.color_theme.detail_date_fg))
+    }
+
+    fn committer_line(&self) -> Line<'_> {
+        Line::from(vec![
+            self.commit
+                .committer_name
+                .as_str()
+                .fg(self.ctx.color_theme.detail_name_fg),
+            " <".into(),
+            self.commit
+                .committer_email
+                .as_str()
+                .fg(self.ctx.color_theme.detail_email_fg),
+            ">".into(),
+        ])
+    }
+
+    fn committer_date_line(&self) -> Line<'_> {
+        let date_str = self.ctx.core_config.date_time_format().format(
+            &self.commit.committer_date,
+            self.ctx.core_config.date_time_local(),
+        );
+        Line::from(date_str.fg(self.ctx.color_theme.detail_date_fg))
     }
 
     fn sha_line(&self) -> Line<'_> {
@@ -712,7 +766,7 @@ mod tests {
     }
 
     #[test]
-    fn scrollable_contents_do_not_include_author_label_or_identity() {
+    fn scrollable_contents_include_author_and_identity() {
         let commit = test_commit();
         let changes = Vec::new();
         let refs = Vec::new();
@@ -731,8 +785,20 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(!labels.contains("Author"));
-        assert!(!values.contains("Adam"));
-        assert!(!values.contains("adamterraka@gmail.com"));
+        assert!(labels.contains("Author"));
+        assert!(values.contains("Adam"));
+        assert!(values.contains("adamterraka@gmail.com"));
+    }
+
+    #[test]
+    fn scrollable_contents_start_with_author_line() {
+        let commit = test_commit();
+        let changes = Vec::new();
+        let refs = Vec::new();
+        let ctx = Rc::new(AppContext::default());
+        let detail = CommitDetail::new(&commit, &changes, &refs, ctx, None);
+
+        let (label_lines, _, _) = detail.contents(80);
+        assert_eq!(line_text(&label_lines[0]).trim(), "Author:");
     }
 }

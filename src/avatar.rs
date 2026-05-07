@@ -2,7 +2,10 @@ use std::{
     fs,
     io::Cursor,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread,
 };
 
@@ -21,6 +24,17 @@ use crate::{
 #[cfg(test)]
 use crate::protocol::PreparedImageCell;
 
+/// Max concurrent HTTP avatar fetches.  Keeps the thread count bounded and
+/// avoids saturating the connection pool or triggering GitHub rate limits.
+const MAX_CONCURRENT_FETCHES: usize = 4;
+
+/// State shared between the main thread and fetch threads.  A single Mutex
+/// instead of two avoids double-locking on every `prefetch()` call.
+struct FetchState {
+    in_flight: FxHashSet<String>,
+    missing: FxHashSet<String>,
+}
+
 pub struct AvatarManager {
     cache_dir: PathBuf,
     image_protocol: ImageProtocol,
@@ -31,8 +45,9 @@ pub struct AvatarManager {
     github_repos: Vec<String>,
     github_token: Option<String>,
     github_avatars: bool,
-    in_flight_fetches: Arc<Mutex<FxHashSet<String>>>,
-    missing_avatars: Arc<Mutex<FxHashSet<String>>>,
+    fetch_state: Arc<Mutex<FetchState>>,
+    active_fetches: Arc<AtomicUsize>,
+    http_client: Arc<reqwest::blocking::Client>,
     event_sender: Option<Sender>,
 }
 
@@ -48,8 +63,9 @@ impl Clone for AvatarManager {
             github_repos: self.github_repos.clone(),
             github_token: self.github_token.clone(),
             github_avatars: self.github_avatars,
-            in_flight_fetches: self.in_flight_fetches.clone(),
-            missing_avatars: self.missing_avatars.clone(),
+            fetch_state: self.fetch_state.clone(),
+            active_fetches: self.active_fetches.clone(),
+            http_client: self.http_client.clone(),
             event_sender: self.event_sender.clone(),
         }
     }
@@ -67,6 +83,15 @@ impl AvatarManager {
             .join("gitui")
             .join("avatars-v5");
         let _ = fs::create_dir_all(&cache_dir);
+
+        let http_client = Arc::new(
+            reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .redirect(reqwest::redirect::Policy::limited(3))
+                .build()
+                .unwrap_or_default(),
+        );
+
         Self {
             cache_dir,
             image_protocol: _image_protocol,
@@ -77,8 +102,12 @@ impl AvatarManager {
             github_repos,
             github_token,
             github_avatars: true,
-            in_flight_fetches: Arc::new(Mutex::new(FxHashSet::default())),
-            missing_avatars: Arc::new(Mutex::new(FxHashSet::default())),
+            fetch_state: Arc::new(Mutex::new(FetchState {
+                in_flight: FxHashSet::default(),
+                missing: FxHashSet::default(),
+            })),
+            active_fetches: Arc::new(AtomicUsize::new(0)),
+            http_client,
             event_sender,
         }
     }
@@ -102,8 +131,10 @@ impl AvatarManager {
 
     pub fn set_github_token(&mut self, github_token: Option<String>) {
         self.github_token = github_token;
-        self.in_flight_fetches.lock().unwrap().clear();
-        self.missing_avatars.lock().unwrap().clear();
+        let mut state = self.fetch_state.lock().unwrap();
+        state.in_flight.clear();
+        state.missing.clear();
+        drop(state);
         if !self.is_enabled() {
             self.prepared_image_map.clear();
             self.pending_uploads.clear();
@@ -115,8 +146,13 @@ impl AvatarManager {
         self.cache_dir.join(format!("{hash}.png"))
     }
 
-    fn image_key(email: &str, height_cells: u16, _selected: bool) -> String {
-        format!("{}:{}", height_cells, email.trim().to_lowercase())
+    fn image_key(email: &str, height_cells: u16, selected: bool) -> String {
+        format!(
+            "{}:{}:{}",
+            height_cells,
+            if selected { "s" } else { "n" },
+            email.trim().to_lowercase()
+        )
     }
 
     pub fn ensure_uploaded(
@@ -140,18 +176,27 @@ impl AvatarManager {
         if bytes.is_empty() {
             return false;
         }
-        let Some(source) = image::load_from_memory(&bytes).ok() else {
-            let _ = fs::remove_file(path);
-            return false;
+        let png_data = if selected {
+            let Some(source) = image::load_from_memory(&bytes).ok() else {
+                let _ = fs::remove_file(path);
+                return false;
+            };
+            let Some(avatar) = rounded_avatar_on_background(&source, ratatui_color_to_rgba(bg))
+            else {
+                return false;
+            };
+            let mut out = Cursor::new(Vec::new());
+            if avatar.write_to(&mut out, ImageFormat::Png).is_err() {
+                return false;
+            }
+            out.into_inner()
+        } else {
+            let Some(png) = rounded_avatar_png(&bytes) else {
+                let _ = fs::remove_file(path);
+                return false;
+            };
+            png
         };
-        let Some(avatar) = rounded_avatar_on_background(&source, ratatui_color_to_rgba(bg)) else {
-            return false;
-        };
-        let mut png_bytes = Cursor::new(Vec::new());
-        if avatar.write_to(&mut png_bytes, ImageFormat::Png).is_err() {
-            return false;
-        }
-        let png_data = png_bytes.into_inner();
         let cell_width = height_cells as usize * 2;
         let image_id = self.next_image_id;
         self.next_image_id = self.next_image_id.wrapping_add(1);
@@ -186,6 +231,8 @@ impl AvatarManager {
         self.prepared_image_map.clear();
         self.pending_uploads.clear();
         self.image_ids.clear();
+        // Allow previously-failed lookups to be retried on the next upload cycle.
+        self.fetch_state.lock().unwrap().missing.clear();
     }
 
     pub fn drain_pending_uploads(&mut self) -> Vec<String> {
@@ -206,60 +253,69 @@ impl AvatarManager {
             return;
         }
         let email_key = email.trim().to_lowercase();
-        if self.missing_avatars.lock().unwrap().contains(&email_key) {
-            return;
+
+        // Single lock for all state checks — avoids double-locking
+        {
+            let mut state = self.fetch_state.lock().unwrap();
+            if state.missing.contains(&email_key) {
+                return;
+            }
+            // Don't add to in_flight if we're already at the concurrency limit —
+            // the next prefetch call on the following frame will retry.
+            if self.active_fetches.load(Ordering::Relaxed) >= MAX_CONCURRENT_FETCHES {
+                return;
+            }
+            if !state.in_flight.insert(email_key.clone()) {
+                return; // already fetching
+            }
         }
+
         let path = self.email_to_path(email);
         if let Ok(metadata) = path.metadata() {
             if metadata.len() > 0 {
+                // Already on disk — remove from in_flight without fetch
+                self.fetch_state
+                    .lock()
+                    .unwrap()
+                    .in_flight
+                    .remove(&email_key);
                 return;
             }
             let _ = fs::remove_file(&path);
         }
-        {
-            let mut in_flight = self.in_flight_fetches.lock().unwrap();
-            if !in_flight.insert(email_key.clone()) {
-                return;
-            }
-        }
+
+        self.active_fetches.fetch_add(1, Ordering::Relaxed);
+
         let path_clone = path.clone();
         let repos = self.github_repos.clone();
-        let in_flight_fetches = self.in_flight_fetches.clone();
-        let missing_avatars = self.missing_avatars.clone();
+        let fetch_state = self.fetch_state.clone();
+        let active_fetches = self.active_fetches.clone();
         let event_sender = self.event_sender.clone();
+        let client = self.http_client.clone();
+
         thread::spawn(move || {
             let mut found_avatar = false;
-            let Some(url) = resolve_github_commit_avatar_url(&repos, &commit_hashes, &token) else {
-                finish_avatar_fetch(&in_flight_fetches, &missing_avatars, &email_key, false);
-                return;
-            };
-            let Ok(client) = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(5))
-                .redirect(reqwest::redirect::Policy::limited(3))
-                .build()
-            else {
-                finish_avatar_fetch(&in_flight_fetches, &missing_avatars, &email_key, false);
-                return;
-            };
-            match client.get(&url).send() {
-                Ok(resp) if resp.status().is_success() => {
-                    if let Ok(bytes) = resp.bytes() {
-                        if bytes.len() > 100 {
-                            if image::load_from_memory(&bytes).is_ok() {
+
+            let url =
+                resolve_github_commit_avatar_url(&client, &repos, &commit_hashes, &token);
+
+            if let Some(url) = url {
+                match client.get(&url).send() {
+                    Ok(resp) if resp.status().is_success() => {
+                        if let Ok(bytes) = resp.bytes() {
+                            if bytes.len() > 100 && image::load_from_memory(&bytes).is_ok() {
                                 write_avatar_atomic(&path_clone, bytes.to_vec());
                                 found_avatar = true;
                             }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
-            finish_avatar_fetch(
-                &in_flight_fetches,
-                &missing_avatars,
-                &email_key,
-                found_avatar,
-            );
+
+            active_fetches.fetch_sub(1, Ordering::Relaxed);
+            finish_avatar_fetch(&fetch_state, &email_key, found_avatar);
+
             if found_avatar {
                 if let Some(sender) = event_sender {
                     sender.try_send(AppEvent::AvatarsUpdated);
@@ -270,30 +326,23 @@ impl AvatarManager {
 }
 
 fn finish_avatar_fetch(
-    in_flight_fetches: &Arc<Mutex<FxHashSet<String>>>,
-    missing_avatars: &Arc<Mutex<FxHashSet<String>>>,
+    fetch_state: &Arc<Mutex<FetchState>>,
     email_key: &str,
     found_avatar: bool,
 ) {
-    in_flight_fetches.lock().unwrap().remove(email_key);
+    let mut state = fetch_state.lock().unwrap();
+    state.in_flight.remove(email_key);
     if !found_avatar {
-        missing_avatars
-            .lock()
-            .unwrap()
-            .insert(email_key.to_string());
+        state.missing.insert(email_key.to_string());
     }
 }
 
 fn resolve_github_commit_avatar_url(
+    client: &reqwest::blocking::Client,
     repos: &[String],
     commit_hashes: &[String],
     token: &str,
 ) -> Option<String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .build()
-        .ok()?;
     for repo in repos {
         for commit_hash in commit_hashes.iter().take(8) {
             let url = format!("https://api.github.com/repos/{repo}/commits/{commit_hash}");
@@ -354,13 +403,12 @@ fn fallback_avatar_png(seed: &str) -> Vec<u8> {
         255,
     ];
     let mut avatar = image::RgbaImage::new(128, 128);
-    let radius = 64.0f32;
+    let radius_sq = 64.0f32 * 64.0f32; // squared — no sqrt needed
     let center = 63.5f32;
     for (x, y, pixel) in avatar.enumerate_pixels_mut() {
         let dx = x as f32 - center;
         let dy = y as f32 - center;
-        let distance = (dx * dx + dy * dy).sqrt();
-        if distance > radius {
+        if dx * dx + dy * dy > radius_sq {
             *pixel = Rgba([0, 0, 0, 0]);
         } else if ((x / 16 + y / 16 + digest[((x / 16) % 16) as usize] as u32) % 3) == 0 {
             *pixel = Rgba(fg);
@@ -432,7 +480,6 @@ fn indexed_color_to_rgba(index: u8) -> [u8; 4] {
     [gray, gray, gray, 255]
 }
 
-#[cfg(test)]
 fn rounded_avatar_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let image = image::load_from_memory(bytes).ok()?;
     let (width, height) = image.dimensions();
@@ -441,14 +488,14 @@ fn rounded_avatar_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let y = (height - side) / 2;
     let mut avatar = image
         .crop_imm(x, y, side, side)
-        .resize_exact(128, 128, FilterType::Lanczos3)
+        .resize_exact(128, 128, FilterType::Triangle) // bilinear — much faster than Lanczos3
         .to_rgba8();
-    let radius = 64.0f32;
+    let radius_sq = 64.0f32 * 64.0f32; // compare squared to avoid sqrt
     let center = 63.5f32;
     for (x, y, pixel) in avatar.enumerate_pixels_mut() {
         let dx = x as f32 - center;
         let dy = y as f32 - center;
-        if (dx * dx + dy * dy).sqrt() > radius {
+        if dx * dx + dy * dy > radius_sq {
             *pixel = Rgba([pixel[0], pixel[1], pixel[2], 0]);
         }
     }
@@ -473,23 +520,23 @@ fn rounded_avatar_on_background(source: &image::DynamicImage, bg: [u8; 4]) -> Op
     let y = (height - side) / 2;
     let mut image = source
         .crop_imm(x, y, side, side)
-        .resize_exact(128, 128, FilterType::Lanczos3)
+        .resize_exact(128, 128, FilterType::Triangle) // bilinear — much faster than Lanczos3
         .to_rgba8();
-    let radius = 64.0f32;
+    let radius_sq = 64.0f32 * 64.0f32; // compare squared to avoid sqrt
     let center = 63.5f32;
-    for pixel in image.pixels_mut() {
-        let alpha = pixel[3] as u16;
-        let inv_alpha = 255 - alpha;
-        pixel[0] = ((pixel[0] as u16 * alpha + bg[0] as u16 * inv_alpha) / 255) as u8;
-        pixel[1] = ((pixel[1] as u16 * alpha + bg[1] as u16 * inv_alpha) / 255) as u8;
-        pixel[2] = ((pixel[2] as u16 * alpha + bg[2] as u16 * inv_alpha) / 255) as u8;
-        pixel[3] = 255;
-    }
+    // Single pass: composite alpha onto bg AND apply circular mask
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         let dx = x as f32 - center;
         let dy = y as f32 - center;
-        if (dx * dx + dy * dy).sqrt() > radius {
+        if dx * dx + dy * dy > radius_sq {
             *pixel = Rgba(bg);
+        } else {
+            let alpha = pixel[3] as u16;
+            let inv_alpha = 255 - alpha;
+            pixel[0] = ((pixel[0] as u16 * alpha + bg[0] as u16 * inv_alpha) / 255) as u8;
+            pixel[1] = ((pixel[1] as u16 * alpha + bg[1] as u16 * inv_alpha) / 255) as u8;
+            pixel[2] = ((pixel[2] as u16 * alpha + bg[2] as u16 * inv_alpha) / 255) as u8;
+            pixel[3] = 255;
         }
     }
     Some(image)
@@ -684,8 +731,8 @@ mod tests {
     }
 
     #[test]
-    fn avatar_cache_key_does_not_change_for_selected_rows() {
-        assert_eq!(
+    fn avatar_cache_key_differs_for_selected_and_normal() {
+        assert_ne!(
             AvatarManager::image_key("user@example.com", 1, false),
             AvatarManager::image_key("user@example.com", 1, true)
         );

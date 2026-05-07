@@ -135,9 +135,9 @@ impl ImageProtocol {
         });
         for _ in 1..cell_width {
             cells.push(PreparedImageCell {
-                symbol: String::new(),
+                symbol: " ".to_string(),
                 style: Style::default(),
-                skip: true,
+                skip: false,
             });
         }
         PreparedImage {
@@ -173,10 +173,30 @@ impl ImageProtocol {
     }
 
     pub fn clear_cell(&self) -> PreparedImageCell {
-        PreparedImageCell::new(" ".to_string(), Style::default(), false)
+        match self {
+            // Persistent Kitty placements (a=T) render on top of terminal content and stay
+            // until explicitly deleted — a bare space does not remove them.  Prefix with
+            // a=d,d=C so any ghost image at this cell is evicted before the space is written.
+            ImageProtocol::Kitty => PreparedImageCell::new(
+                "\x1b_Ga=d,d=C;\x1b\\ ".to_string(),
+                Style::default(),
+                false,
+            ),
+            // KittyUnicode uses virtual placements driven by placeholder characters; writing
+            // a plain space removes the placeholder and the image disappears automatically.
+            // Iterm2/Sixel also require no special deletion step.
+            _ => PreparedImageCell::new(" ".to_string(), Style::default(), false),
+        }
     }
 
-
+    /// Delete all image placements on terminal row `y` (0-based).
+    /// Scoped to a single row — does not touch images on other rows.
+    pub fn delete_row(&self, y: u16) -> Result<(), std::io::Error> {
+        match self {
+            ImageProtocol::Kitty => kitty_delete_row(y),
+            _ => Ok(()),
+        }
+    }
 }
 
 const KITTY_PLACEHOLDER: char = '\u{10EEEE}';
@@ -500,7 +520,10 @@ fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize, image_id: u
     let base64_str = to_base64_str(bytes);
     let chunk_size = 4096;
 
-    let mut s = String::new();
+    let total_chunks = base64_str.len().div_ceil(chunk_size).max(1);
+    // Pre-allocate: delete prefix (14) + per-chunk overhead (~55) + base64 data
+    let capacity = 14 + total_chunks * 55 + base64_str.len();
+    let mut s = String::with_capacity(capacity);
 
     let chunks = base64_str.as_bytes().chunks(chunk_size);
     let total_chunks = chunks.len();
@@ -510,7 +533,7 @@ fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize, image_id: u
         s.push_str("\x1b_G");
         if i == 0 {
             s.push_str(&format!(
-                "a=T,f=100,i={image_id},c={cell_width},r={cell_height},"
+                "a=T,f=100,q=2,i={image_id},c={cell_width},r={cell_height},"
             ));
         }
         if i < total_chunks - 1 {
@@ -575,7 +598,10 @@ fn kitty_unicode_encode(
     let base64_str = to_base64_str(bytes);
     let chunk_size = 4096;
 
-    let mut s = String::new();
+    let total_chunks_est = base64_str.len().div_ceil(chunk_size).max(1);
+    // Per-chunk overhead: passthrough escapes (~20) + Kitty header (~60) + data
+    let capacity = total_chunks_est * 80 + base64_str.len();
+    let mut s = String::with_capacity(capacity);
 
     let chunks = base64_str.as_bytes().chunks(chunk_size);
     let total_chunks = chunks.len();
@@ -612,6 +638,13 @@ fn row_column_diacritic(index: usize) -> char {
 fn kitty_clear_line(y: u16) {
     let y = y + 1; // 1-based
     print!("\x1b_Ga=d,d=Y,y={y};\x1b\\");
+}
+
+fn kitty_delete_row(y: u16) -> Result<(), std::io::Error> {
+    let y = y + 1; // 1-based
+    let mut stdout = std::io::stdout().lock();
+    write!(stdout, "\x1b_Ga=d,d=Y,y={y};\x1b\\")?;
+    stdout.flush()
 }
 
 fn kitty_clear() {
@@ -668,9 +701,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kitty_clear_cell_is_space() {
+    fn kitty_clear_cell_deletes_then_writes_space() {
         let cell = ImageProtocol::Kitty.clear_cell();
-        assert_eq!(cell.symbol(), " ");
+        // Must start with delete-at-cursor so ghost persistent placements are evicted
+        assert!(cell.symbol().starts_with("\x1b_Ga=d,d=C;\x1b\\"));
+        assert!(cell.symbol().ends_with(' '));
         assert!(!cell.skip());
     }
 

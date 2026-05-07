@@ -47,6 +47,9 @@ pub struct DiffView<'a> {
     new_file_lines: Vec<String>,
     // Per-gap state: (visible_up, visible_down, total_gap_size)
     gap_states: Vec<GapState>,
+
+    // Last known list_area.height; used to detect when commit-list shrinks
+    cached_list_height: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +123,7 @@ impl<'a> DiffView<'a> {
             old_file_lines: old_lines,
             new_file_lines: new_lines,
             gap_states,
+            cached_list_height: 0,
         }
     }
 
@@ -492,6 +496,18 @@ impl<'a> DiffView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
+
+        // When the commit-list shrinks, Kitty images that were placed in the now-gone
+        // rows persist over the diff content. Delete them before the next render.
+        if self.cached_list_height > list_area.height {
+            let first_orphaned = area.y + list_area.height;
+            let last_orphaned = area.y + self.cached_list_height;
+            for y in first_orphaned..last_orphaned {
+                let _ = self.ctx.image_protocol.delete_row(y);
+            }
+        }
+        self.cached_list_height = list_area.height;
+
         if let Some(ref mut state) = self.commit_list_state {
             let height = if list_area.height >= 2 {
                 list_area.height - 2
@@ -571,8 +587,13 @@ impl<'a> DiffView<'a> {
     }
 
     fn count_diff_lines(&mut self, width: u16) -> usize {
+        // Fast path: base_lines are already built
         if !self.base_lines.is_empty() {
             return self.base_lines.len();
+        }
+        // If the content hasn't changed and we have a cached count, use it
+        if !self.needs_rebuild {
+            return 0; // height already known to be minimal — avoid rebuild
         }
         let dummy_area = Rect::new(0, 0, width, 1);
         self.build_diff_lines(&dummy_area).len()
@@ -1481,36 +1502,9 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
             lines.push(remaining);
             break;
         }
-
-        let char_indices: Vec<(usize, char)> =
-            remaining.char_indices().take(max_width + 1).collect();
-        let mut break_at = max_width;
-
-        while break_at > 0 {
-            if char_indices[break_at - 1].1.is_ascii_whitespace() {
-                break;
-            }
-            break_at -= 1;
-        }
-
-        if break_at == 0 {
-            break_at = max_width;
-        }
-
-        let byte_break = if break_at < char_indices.len() {
-            char_indices[break_at].0
-        } else {
-            remaining.len()
-        };
-
-        let (before, after) = remaining.split_at(byte_break);
-        if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
-            lines.push(before.trim_end());
-            remaining = after.trim_start();
-        } else {
-            lines.push(before);
-            remaining = after;
-        }
+        let (head, tail) = split_at_width(remaining, max_width);
+        lines.push(head);
+        remaining = tail;
     }
 
     lines
@@ -1568,6 +1562,30 @@ mod tests {
     }
 }
 
+/// Split `s` at the nearest whitespace boundary before `max_chars` characters,
+/// returning `(head, tail)`.  Falls back to a hard break at `max_chars` if no
+/// whitespace is found.  Avoids allocating a Vec of char indices.
+fn split_at_width(s: &str, max_chars: usize) -> (&str, &str) {
+    // Find the byte offset of the char AFTER `max_chars` chars
+    let hard_byte = s
+        .char_indices()
+        .nth(max_chars)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len());
+
+    let candidate = &s[..hard_byte];
+
+    // Search backwards for whitespace in the candidate region
+    if let Some(ws_byte) = candidate.rfind(|c: char| c.is_ascii_whitespace()) {
+        let head = candidate[..ws_byte].trim_end();
+        let tail = s[ws_byte + 1..].trim_start();
+        (head, tail)
+    } else {
+        // No whitespace — hard break
+        (&s[..hard_byte], &s[hard_byte..])
+    }
+}
+
 fn wrap_diff_line_with_syntax(
     content: &str,
     line_num_str: &str,
@@ -1593,31 +1611,17 @@ fn wrap_diff_line_with_syntax(
     let mut remaining = content;
     let mut first = true;
 
+    if remaining.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )]));
+        return lines;
+    }
+
     while !remaining.is_empty() {
         let (chunk, rest) = if remaining.chars().count() > content_width {
-            let char_indices: Vec<(usize, char)> =
-                remaining.char_indices().take(content_width + 1).collect();
-            let mut break_at = content_width;
-            while break_at > 0 {
-                if char_indices[break_at - 1].1.is_ascii_whitespace() {
-                    break;
-                }
-                break_at -= 1;
-            }
-            if break_at == 0 {
-                break_at = content_width;
-            }
-            let byte_break = if break_at < char_indices.len() {
-                char_indices[break_at].0
-            } else {
-                remaining.len()
-            };
-            let (before, after) = remaining.split_at(byte_break);
-            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
-                (before.trim_end(), after.trim_start())
-            } else {
-                (before, after)
-            }
+            split_at_width(remaining, content_width)
         } else {
             (remaining, "")
         };
@@ -1669,35 +1673,18 @@ fn wrap_diff_line(
     let mut remaining = content;
     let mut first = true;
 
+    // Blank lines (empty content) must still be rendered so line numbers stay correct
+    if remaining.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )]));
+        return lines;
+    }
+
     while !remaining.is_empty() {
         let (chunk, rest) = if remaining.chars().count() > content_width {
-            let char_indices: Vec<(usize, char)> =
-                remaining.char_indices().take(content_width + 1).collect();
-            let mut break_at = content_width;
-
-            while break_at > 0 {
-                if char_indices[break_at - 1].1.is_ascii_whitespace() {
-                    break;
-                }
-                break_at -= 1;
-            }
-
-            if break_at == 0 {
-                break_at = content_width;
-            }
-
-            let byte_break = if break_at < char_indices.len() {
-                char_indices[break_at].0
-            } else {
-                remaining.len()
-            };
-
-            let (before, after) = remaining.split_at(byte_break);
-            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
-                (before.trim_end(), after.trim_start())
-            } else {
-                (before, after)
-            }
+            split_at_width(remaining, content_width)
         } else {
             (remaining, "")
         };
@@ -1755,31 +1742,22 @@ fn wrap_diff_line_with_bar(
     let mut remaining = content;
     let mut first = true;
 
+    if remaining.is_empty() {
+        let mut spans = vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )];
+        if let Some(bar) = bar_span {
+            spans.push(bar);
+        }
+        spans.push(Span::styled(" ".repeat(200), content_style));
+        lines.push(Line::from(spans));
+        return lines;
+    }
+
     while !remaining.is_empty() {
         let (chunk, rest) = if remaining.chars().count() > content_width {
-            let char_indices: Vec<(usize, char)> =
-                remaining.char_indices().take(content_width + 1).collect();
-            let mut break_at = content_width;
-            while break_at > 0 {
-                if char_indices[break_at - 1].1.is_ascii_whitespace() {
-                    break;
-                }
-                break_at -= 1;
-            }
-            if break_at == 0 {
-                break_at = content_width;
-            }
-            let byte_break = if break_at < char_indices.len() {
-                char_indices[break_at].0
-            } else {
-                remaining.len()
-            };
-            let (before, after) = remaining.split_at(byte_break);
-            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
-                (before.trim_end(), after.trim_start())
-            } else {
-                (before, after)
-            }
+            split_at_width(remaining, content_width)
         } else {
             (remaining, "")
         };
@@ -1841,31 +1819,22 @@ fn wrap_diff_line_with_syntax_and_bar(
     let mut remaining = content;
     let mut first = true;
 
+    if remaining.is_empty() {
+        let mut spans = vec![Span::styled(
+            line_num_str.to_string(),
+            Style::default().fg(Color::Rgb(59, 66, 97)),
+        )];
+        if let Some(bar) = bar_span {
+            spans.push(bar);
+        }
+        spans.push(Span::styled(" ".repeat(200), base_style));
+        lines.push(Line::from(spans));
+        return lines;
+    }
+
     while !remaining.is_empty() {
         let (chunk, rest) = if remaining.chars().count() > content_width {
-            let char_indices: Vec<(usize, char)> =
-                remaining.char_indices().take(content_width + 1).collect();
-            let mut break_at = content_width;
-            while break_at > 0 {
-                if char_indices[break_at - 1].1.is_ascii_whitespace() {
-                    break;
-                }
-                break_at -= 1;
-            }
-            if break_at == 0 {
-                break_at = content_width;
-            }
-            let byte_break = if break_at < char_indices.len() {
-                char_indices[break_at].0
-            } else {
-                remaining.len()
-            };
-            let (before, after) = remaining.split_at(byte_break);
-            if break_at > 0 && char_indices[break_at - 1].1.is_ascii_whitespace() {
-                (before.trim_end(), after.trim_start())
-            } else {
-                (before, after)
-            }
+            split_at_width(remaining, content_width)
         } else {
             (remaining, "")
         };
