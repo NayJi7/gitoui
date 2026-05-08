@@ -51,6 +51,7 @@ enum StatusLine {
     NotificationSuccess(String),
     NotificationWarn(String),
     NotificationError(String),
+    Spinner(String),
 }
 
 #[derive(Clone, Copy)]
@@ -143,6 +144,8 @@ struct AppStatus {
     numeric_prefix: String,
     view_area: Rect,
     notification_timestamp: Option<std::time::Instant>,
+    spinner_active: bool,
+    spinner_frame: usize,
 }
 
 #[derive(Debug)]
@@ -319,7 +322,9 @@ impl App<'_> {
             match self.ec.recv() {
                 AppEvent::Key(key) => {
                     match self.app_status.status_line {
-                        StatusLine::None | StatusLine::Input(_, _, _) => {
+                        StatusLine::None
+                        | StatusLine::Input(_, _, _)
+                        | StatusLine::Spinner(_) => {
                             // do nothing
                         }
                         StatusLine::NotificationInfo(_)
@@ -525,6 +530,7 @@ impl App<'_> {
                     }
                 }
                 AppEvent::Refresh(context) => {
+                    self.stop_spinner();
                     self.cleanup_graph_images()?;
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
@@ -537,15 +543,19 @@ impl App<'_> {
                     self.update_status_input(msg, cursor_pos, msg_r);
                 }
                 AppEvent::NotifyInfo(msg) => {
+                    self.stop_spinner();
                     self.info_notification(msg);
                 }
                 AppEvent::NotifySuccess(msg) => {
+                    self.stop_spinner();
                     self.success_notification(msg);
                 }
                 AppEvent::NotifyWarn(msg) => {
+                    self.stop_spinner();
                     self.warn_notification(msg);
                 }
                 AppEvent::NotifyError(msg) => {
+                    self.stop_spinner();
                     self.error_notification(msg);
                 }
                 AppEvent::PushCurrentBranch => {
@@ -617,7 +627,13 @@ impl App<'_> {
                     } else {
                         false
                     };
-                    needs_draw = notif_expiring || streaming;
+                    if self.app_status.spinner_active {
+                        self.app_status.spinner_frame =
+                            (self.app_status.spinner_frame + 1) % 10;
+                        needs_draw = true;
+                    } else {
+                        needs_draw = notif_expiring || streaming;
+                    }
                 }
                 AppEvent::OpenUncommittedDiff {
                     file_path,
@@ -633,6 +649,7 @@ impl App<'_> {
                     terminal.clear()?;
                 }
                 AppEvent::BackgroundFetch => {
+                    self.start_spinner("Fetching\u{2026}");
                     self.start_background_fetch();
                 }
                 AppEvent::OpenFileHistory { file_path } => {
@@ -812,6 +829,17 @@ impl App<'_> {
                         .add_modifier(Modifier::BOLD),
                 )]
             }
+            StatusLine::Spinner(msg) => {
+                const FRAMES: [&str; 10] =
+                    ["\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}"];
+                let frame = FRAMES[self.app_status.spinner_frame % 10];
+                vec![Span::styled(
+                    format!("{frame} {msg}"),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_info_fg)
+                        .add_modifier(Modifier::BOLD),
+                )]
+            }
         };
 
         let dim_separator = Style::default().fg(self.ctx.color_theme.divider_fg);
@@ -824,8 +852,10 @@ impl App<'_> {
             StatusLine::None | StatusLine::NotificationInfo(_)
         ) && !is_search_active
             && !is_config_active;
-        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None)
-            || is_search_active
+        let show_shortcuts = matches!(
+            &self.app_status.status_line,
+            StatusLine::None
+        ) || is_search_active
             || is_config_active;
         let _is_diff = matches!(&self.view, View::Diff(_));
 
@@ -1854,6 +1884,17 @@ impl App<'_> {
         self.app_status.status_line = StatusLine::Input(msg, cursor_pos, transient_msg);
     }
 
+    fn start_spinner(&mut self, msg: &str) {
+        self.app_status.spinner_active = true;
+        self.app_status.spinner_frame = 0;
+        self.app_status.status_line = StatusLine::Spinner(msg.to_string());
+    }
+
+    fn stop_spinner(&mut self) {
+        self.app_status.spinner_active = false;
+        // status_line will be overwritten by the next NotifySuccess/NotifyError/Refresh
+    }
+
     fn info_notification(&mut self, msg: String) {
         self.app_status.status_line = StatusLine::NotificationInfo(msg);
         self.app_status.notification_timestamp = Some(std::time::Instant::now());
@@ -1944,42 +1985,57 @@ impl App<'_> {
 
     fn execute_push_current_branch(&mut self) {
         let repo_path = self.repository.path();
-        match actions::push_commit(repo_path, "") {
-            Ok(msg) => {
-                let msg = if msg.is_empty() {
-                    "Pushed successfully".into()
-                } else {
-                    msg
-                };
-                self.ec.send(AppEvent::NotifySuccess(msg));
+        // Detect the upstream first (synchronously, fast).
+        // We need to know the branch & remote before spawning the thread.
+        let branch = match self.repository.head() {
+            Head::Branch { name } => name.clone(),
+            _ => {
+                self.ec
+                    .send(AppEvent::NotifyError("Cannot push: not on a branch".into()));
+                return;
             }
-            Err(msg) => {
-                let no_upstream = msg.contains("has no upstream branch")
-                    || msg.contains("no tracking information")
-                    || msg.contains("--set-upstream");
-                if no_upstream {
-                    let branch = match self.repository.head() {
-                        Head::Branch { name } => name.clone(),
-                        _ => {
-                            self.ec.send(AppEvent::NotifyError(msg));
-                            return;
-                        }
-                    };
-                    match actions::get_remotes(repo_path) {
-                        Ok(remotes) if !remotes.is_empty() => {
-                            self.open_dialog(DialogKind::ChooseRemote { remotes, branch });
-                        }
-                        _ => {
-                            self.ec.send(AppEvent::NotifyError(
-                                "No remotes configured. Add a remote first.".into(),
-                            ));
-                        }
-                    }
-                } else {
-                    self.ec.send(AppEvent::NotifyError(msg));
+        };
+        let upstream = actions::branch_upstream(repo_path, &branch);
+        let no_upstream = upstream.as_ref().map_or(true, |u| u.is_empty());
+        if no_upstream {
+            // Ask the user to pick a remote before pushing.
+            match actions::get_remotes(repo_path) {
+                Ok(remotes) if !remotes.is_empty() => {
+                    self.open_dialog(DialogKind::ChooseRemote { remotes, branch });
+                }
+                _ => {
+                    self.ec.send(AppEvent::NotifyError(
+                        "No remotes configured. Add a remote first.".into(),
+                    ));
                 }
             }
+            return;
         }
+        let remote = upstream
+            .unwrap_or_default()
+            .split('/')
+            .next()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "origin".to_string());
+        self.start_spinner("Pushing\u{2026}");
+        let tx = self.ec.sender();
+        let repo_path_buf = repo_path.to_path_buf();
+        thread::spawn(move || {
+            let result = actions::push_branch(&repo_path_buf, &remote, &branch, false);
+            match result {
+                Ok(msg) => {
+                    let msg = if msg.is_empty() {
+                        "Pushed successfully".into()
+                    } else {
+                        msg
+                    };
+                    let _ = tx.send(AppEvent::NotifySuccess(msg));
+                }
+                Err(msg) => {
+                    let _ = tx.send(AppEvent::NotifyError(msg));
+                }
+            }
+        });
     }
 
     fn execute_pull_current_branch(&mut self) {
@@ -1997,27 +2053,32 @@ impl App<'_> {
             .ok()
             .and_then(|u| u.split('/').next().map(|s| s.to_string()))
             .unwrap_or_else(|| "origin".to_string());
-        match actions::pull_branch(repo_path, &remote, &branch) {
-            Ok(msg) => {
-                let msg = if msg.is_empty() {
-                    "Pulled successfully".into()
-                } else {
-                    msg
-                };
-                self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
-                    list_context: crate::view::ListRefreshViewContext {
-                        commit_hash: String::new(),
-                        selected: 0,
-                        height: 20,
-                        scroll_to_top: false,
-                    },
-                    pending_notification: Some(msg),
-                }));
+        self.start_spinner("Pulling\u{2026}");
+        let tx = self.ec.sender();
+        let repo_path_buf = repo_path.to_path_buf();
+        thread::spawn(move || {
+            match actions::pull_branch(&repo_path_buf, &remote, &branch) {
+                Ok(msg) => {
+                    let msg = if msg.is_empty() {
+                        "Pulled successfully".into()
+                    } else {
+                        msg
+                    };
+                    let _ = tx.send(AppEvent::Refresh(RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: Some(msg),
+                    }));
+                }
+                Err(msg) => {
+                    let _ = tx.send(AppEvent::NotifyError(msg));
+                }
             }
-            Err(msg) => {
-                self.ec.send(AppEvent::NotifyError(msg));
-            }
-        }
+        });
     }
 
     // Phase 2 - Git Actions execution
@@ -2047,6 +2108,12 @@ impl App<'_> {
                 | GitAction::PushTag
                 | GitAction::AddTag { .. }
         );
+        if matches!(&action, GitAction::Rebase { .. }) {
+            self.start_spinner("Rebasing\u{2026}");
+        }
+        if matches!(&action, GitAction::Merge { .. }) {
+            self.start_spinner("Merging\u{2026}");
+        }
         let (result, success_label) = match action {
             GitAction::Checkout => {
                 let r = if target.starts_with("refs/stash") {
