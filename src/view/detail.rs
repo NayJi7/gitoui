@@ -265,6 +265,7 @@ impl<'a> DetailView<'a> {
             &self.refs,
             self.ctx.clone(),
             self.head_branch_name.clone(),
+            self.is_head_commit(),
         );
         f.render_stateful_widget(commit_detail, detail_area, &mut self.commit_detail_state);
     }
@@ -418,25 +419,30 @@ impl<'a> DetailView<'a> {
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         let row = row as usize;
-        if row < self.list_height {
+        let Some(detail_area) = self.detail_area else {
             self.commit_detail_state.hover_file = None;
+            return;
+        };
+        let detail_y = detail_area.y as usize;
+
+        if row < detail_y {
+            self.commit_detail_state.hover_file = None;
+            self.commit_detail_state.hovered_action = None;
             return;
         }
 
         // Check if hover is in action bar area (right 40%)
-        if let Some(detail_area) = self.detail_area {
-            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
-            if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
-                self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
-                self.commit_detail_state.hover_file = None;
-                return;
-            } else {
-                self.commit_detail_state.hovered_action = None;
-            }
+        let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+        if col >= action_bar_x {
+            let action_bar_row = (row - detail_y).saturating_sub(4);
+            self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
+            self.commit_detail_state.hover_file = None;
+            return;
+        } else {
+            self.commit_detail_state.hovered_action = None;
         }
 
-        let detail_local_row = row - self.list_height;
+        let detail_local_row = row - detail_y;
         // Detail widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
         if detail_local_row < 4 {
             self.commit_detail_state.hover_file = None;
@@ -455,11 +461,11 @@ impl<'a> DetailView<'a> {
     }
 
     fn action_index_at_row(&self, action_bar_row: usize) -> Option<usize> {
-        use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
+        use crate::widget::commit_detail::{commit_actions, STASH_ACTIONS};
         let actions = if self.is_stash() {
             STASH_ACTIONS
         } else {
-            COMMIT_ACTIONS
+            commit_actions(self.is_head_commit())
         };
         if action_bar_row < actions.len() {
             Some(action_bar_row)
@@ -469,11 +475,11 @@ impl<'a> DetailView<'a> {
     }
 
     fn execute_action(&self, action_idx: usize) {
-        use crate::widget::commit_detail::{COMMIT_ACTIONS, STASH_ACTIONS};
+        use crate::widget::commit_detail::{commit_actions, STASH_ACTIONS};
         let actions = if self.is_stash() {
             STASH_ACTIONS
         } else {
-            COMMIT_ACTIONS
+            commit_actions(self.is_head_commit())
         };
         if action_idx >= actions.len() {
             return;
@@ -611,10 +617,11 @@ impl<'a> DetailView<'a> {
                         file_path: to.clone(),
                     });
                 }
-                FileChange::Delete { .. } => {
-                    let _ = self.tx.send(AppEvent::NotifyWarn(
-                        "Cannot view diff for a deleted file.".to_string(),
-                    ));
+                FileChange::Delete { path, .. } => {
+                    let _ = self.tx.send(AppEvent::OpenFileDiff {
+                        hash: self.commit.commit_hash.as_str().to_string(),
+                        file_path: path.clone(),
+                    });
                 }
             }
         }

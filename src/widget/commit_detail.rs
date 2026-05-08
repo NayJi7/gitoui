@@ -115,6 +115,7 @@ pub struct CommitDetail<'a> {
     refs: &'a Vec<Ref>,
     ctx: Rc<AppContext>,
     head_branch_name: Option<String>,
+    is_head_commit: bool,
 }
 
 impl<'a> CommitDetail<'a> {
@@ -124,6 +125,7 @@ impl<'a> CommitDetail<'a> {
         refs: &'a Vec<Ref>,
         ctx: Rc<AppContext>,
         head_branch_name: Option<String>,
+        is_head_commit: bool,
     ) -> Self {
         Self {
             commit,
@@ -131,6 +133,7 @@ impl<'a> CommitDetail<'a> {
             refs,
             ctx,
             head_branch_name,
+            is_head_commit,
         }
     }
 }
@@ -145,8 +148,17 @@ pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
     ("Merge into current", "m"),
     ("Rebase current on", "e"),
     ("Reset current to", "S"),
-    ("Amend (HEAD only)", "Ctrl+M"),
+    ("Amend", "Ctrl+M"),
 ];
+
+/// Actions slice to use: HEAD commit gets Amend, others don't.
+pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, &'static str)] {
+    if is_head_commit {
+        COMMIT_ACTIONS
+    } else {
+        &COMMIT_ACTIONS[..9]
+    }
+}
 
 pub const STASH_ACTIONS: &[(&str, &str)] = &[
     ("Apply Stash", "y"),
@@ -355,7 +367,7 @@ impl CommitDetail<'_> {
         let actions = if self.is_stash() {
             STASH_ACTIONS
         } else {
-            COMMIT_ACTIONS
+            commit_actions(self.is_head_commit)
         };
 
         let mut lines = Vec::new();

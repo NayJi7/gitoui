@@ -757,13 +757,19 @@ impl App<'_> {
         let base = Block::default().fg(self.ctx.color_theme.fg).bg(self.ctx.color_theme.bg);
         f.render_widget(base, f.area());
 
-        let [header_area, view_area, _gap, status_line_area] =
+        let [header_area, view_area, gap_area, status_line_area] =
             split_app_areas_with_header(f.area());
 
         self.update_state(view_area);
 
         self.render_header(f, header_area);
         self.view.render(f, view_area);
+
+        // Dotted separator between view content and shortcuts bar
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let sep_span = Span::styled("╌".repeat(gap_area.width as usize), sep_style);
+        f.render_widget(Paragraph::new(Line::from(sep_span)), gap_area);
+
         self.render_status_line(f, status_line_area);
     }
 }
