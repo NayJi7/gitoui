@@ -189,7 +189,7 @@ impl StatefulWidget for CommitDetail<'_> {
             Span::styled(
                 title_text.to_string(),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);
@@ -323,7 +323,7 @@ impl CommitDetail<'_> {
             Span::styled(
                 title_text.to_string(),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);

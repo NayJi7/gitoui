@@ -90,7 +90,7 @@ impl<'a> ConfigView<'a> {
             "Diff Mode",
             "Mouse",
             "Image Protocol",
-            "Thème",
+            "Theme",
             "Date Format",
             "Git Name",
             "Git Email",
@@ -635,7 +635,7 @@ impl<'a> ConfigView<'a> {
                 false,
             ),
             (
-                "Thème",
+                "Theme",
                 self.core_config.option.theme.clone(),
                 false,
             ),

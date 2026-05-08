@@ -349,7 +349,7 @@ impl<'a> UncommittedWidget<'a> {
             Span::styled(
                 title_text.to_string(),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);
@@ -457,14 +457,14 @@ impl<'a> UncommittedWidget<'a> {
         labels.push(Line::from(Span::styled(
             title.to_string(),
             Style::default()
-                .fg(Color::White)
+                .fg(self.ctx.color_theme.fg)
                 .add_modifier(Modifier::BOLD),
         )));
 
         if files.is_empty() {
             values.push(Line::from(Span::styled(
                 empty_msg.to_string(),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(self.ctx.color_theme.detail_label_fg),
             )));
         } else {
             for (i, file) in files.iter().enumerate() {
@@ -557,7 +557,7 @@ impl<'a> UncommittedWidget<'a> {
             Span::styled(
                 title_text.to_string(),
                 Style::default()
-                    .fg(Color::White)
+                    .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);

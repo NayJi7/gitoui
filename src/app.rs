@@ -617,6 +617,12 @@ impl App<'_> {
         _terminal: &mut DefaultTerminal,
     ) -> Result<(), std::io::Error> {
         self.view.handle_event(event_with_count, key);
+        // Apply theme live when cycling in config view.
+        if let View::Config(ref view) = self.view {
+            if let Some(def) = crate::themes::get_theme(&view.core_config().option.theme) {
+                Rc::make_mut(&mut self.ctx).color_theme = def.color_theme;
+            }
+        }
         Ok(())
     }
 
@@ -792,7 +798,7 @@ impl App<'_> {
             let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
             let shortcut_line = Line::from(shortcut_spans);
             let shortcut_paragraph = Paragraph::new(shortcut_line)
-                .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+                .style(Style::default().bg(self.ctx.color_theme.bg))
                 .alignment(Alignment::Right)
                 .block(Block::default().padding(Padding::horizontal(1)));
 
@@ -828,7 +834,7 @@ impl App<'_> {
                     )]),
                 };
                 let config_hint_paragraph = Paragraph::new(config_hint_line)
-                    .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+                    .style(Style::default().bg(self.ctx.color_theme.bg))
                     .block(Block::default().padding(Padding::horizontal(1)));
                 f.render_widget(config_hint_paragraph, left_area);
                 // We still need a valid area for the rest, use a zero-height area
@@ -911,7 +917,7 @@ impl App<'_> {
 
         let line = Line::from(spans);
         let paragraph = Paragraph::new(line)
-            .style(Style::default().bg(Color::Rgb(36, 40, 59)))
+            .style(Style::default().bg(self.ctx.color_theme.bg))
             .block(Block::default().padding(Padding::horizontal(1)));
         f.render_widget(paragraph, status_area);
 
