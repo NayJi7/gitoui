@@ -76,6 +76,8 @@ impl<'a> DialogView<'a> {
         // Pre-fill input_value for dialogs that need pre-populated text
         let input_value = if let DialogKind::AmendMessage { current_message } = &kind {
             current_message.clone()
+        } else if matches!(kind, DialogKind::AddWorktree) {
+            "feat/".to_string()
         } else {
             String::new()
         };

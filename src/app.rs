@@ -2473,15 +2473,8 @@ impl App<'_> {
     }
 }
 
-/// Derive a sibling-directory path for a new worktree from the branch name.
-/// e.g. repo at `/home/user/gitui`, branch `feature/search` → `../gitui-feature-search`
-fn worktree_path_for_branch(repo_path: &std::path::Path, branch: &str) -> String {
-    let branch_slug = branch
-        .replace('/', "-")
-        .replace(' ', "-")
-        .trim_matches('-')
-        .to_string();
-    format!("../{}", branch_slug)
+fn worktree_path_for_branch(_repo_path: &std::path::Path, name: &str) -> String {
+    name.to_string()
 }
 
 fn selected_commit_details(
