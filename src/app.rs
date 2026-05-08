@@ -305,6 +305,9 @@ impl App<'_> {
                 self.flush_pending_graph_uploads()?;
                 terminal.draw(|f| self.render(f))?;
                 self.flush_pending_avatar_deletes()?;
+                if matches!(self.view, View::Dialog(_)) {
+                    self.ctx.image_protocol.clear();
+                }
             }
             needs_draw = true;
             match self.ec.recv() {
@@ -1678,6 +1681,7 @@ impl App<'_> {
     fn close_dialog(&mut self) {
         if let View::Dialog(mut dialog) = std::mem::take(&mut self.view) {
             self.view = dialog.take_before_view();
+            self.view.clear_graph_images();
         }
     }
 

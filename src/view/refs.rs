@@ -108,13 +108,6 @@ impl<'a> RefsView<'a> {
                     self.update_commit_list_selected();
                 }
             }
-            UserEvent::DeleteBranch => {
-                if let Some(remote_name) = self.ref_list_state.selected_remote_name() {
-                    self.tx.send(AppEvent::OpenDialog(
-                        DialogKind::ConfirmDeleteRemote { name: remote_name },
-                    ));
-                }
-            }
             UserEvent::ShortCopy | UserEvent::FullCopy => {
                 self.copy_ref_name();
             }
@@ -275,7 +268,9 @@ impl<'a> RefsView<'a> {
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         self.ref_list_state.handle_click(col, row);
-        if self.ref_list_state.selected_is_node() {
+        if self.ref_list_state.selected_is_add_remote_item() {
+            self.tx.send(AppEvent::OpenDialog(DialogKind::AddRemote));
+        } else if self.ref_list_state.selected_is_node() {
             self.update_commit_list_selected();
         } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
             self.tx.send(AppEvent::OpenBranchDetail { branch_name });
