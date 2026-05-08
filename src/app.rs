@@ -2029,13 +2029,8 @@ impl App<'_> {
         );
         let should_checkout_worktree =
             matches!(&action, GitAction::AddWorktree { checkout: true, .. });
-        let worktree_abs_path = if let GitAction::AddWorktree { worktree_path, .. } = &action {
-            std::path::Path::new(repo_path)
-                .join(worktree_path)
-                .canonicalize()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| worktree_path.clone())
+        let worktree_raw_path = if let GitAction::AddWorktree { worktree_path, .. } = &action {
+            worktree_path.clone()
         } else {
             String::new()
         };
@@ -2229,9 +2224,25 @@ impl App<'_> {
                             pending_notification: None,
                         }));
                     }
-                    if should_checkout_worktree && !worktree_abs_path.is_empty() {
-                        self.ec
-                            .send(AppEvent::SwitchWorktree { path: worktree_abs_path });
+                    if should_checkout_worktree && !worktree_raw_path.is_empty() {
+                        // Resolve the absolute path now that git has created the worktree.
+                        let abs_path = actions::list_worktrees(repo_path)
+                            .into_iter()
+                            .find(|wt| {
+                                // Match by last path component or suffix
+                                std::path::Path::new(&wt.path)
+                                    .to_string_lossy()
+                                    .ends_with(worktree_raw_path.trim_start_matches("../").trim_start_matches("./"))
+                                    || wt.path == worktree_raw_path
+                            })
+                            .map(|wt| wt.path)
+                            .unwrap_or_else(|| {
+                                // Fallback: join with repo_path and normalize manually
+                                repo_path.join(&worktree_raw_path)
+                                    .to_string_lossy()
+                                    .to_string()
+                            });
+                        self.ec.send(AppEvent::SwitchWorktree { path: abs_path });
                     }
                 } else if let Some(label) = success_label {
                     self.ec.send(AppEvent::NotifySuccess(label));
