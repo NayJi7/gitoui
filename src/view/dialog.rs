@@ -17,6 +17,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DialogElement {
     Input,
+    SecondInput,
     Checkbox(usize),
     Radio(usize),
     Validate,
@@ -29,6 +30,8 @@ pub struct DialogView<'a> {
     kind: DialogKind,
     input_value: String,
     input_cursor: usize,
+    second_input_value: String,
+    second_input_cursor: usize,
     dropdown_selected: usize,
     checkboxes: Vec<bool>,
     focused: DialogElement,
@@ -36,6 +39,7 @@ pub struct DialogView<'a> {
     dialog_area: Rect,
     inner_area: Rect,
     input_row: Option<usize>,
+    second_input_row: Option<usize>,
     checkbox_rows: Vec<usize>,
     radio_rows: Vec<usize>,
     button_row: usize,
@@ -83,6 +87,8 @@ impl<'a> DialogView<'a> {
             kind,
             input_value: String::new(),
             input_cursor: 0,
+            second_input_value: String::new(),
+            second_input_cursor: 0,
             dropdown_selected,
             checkboxes,
             focused,
@@ -90,6 +96,7 @@ impl<'a> DialogView<'a> {
             dialog_area: Rect::default(),
             inner_area: Rect::default(),
             input_row: None,
+            second_input_row: None,
             checkbox_rows: Vec::new(),
             radio_rows: Vec::new(),
             button_row: 0,
@@ -113,6 +120,7 @@ impl<'a> DialogView<'a> {
                 | DialogKind::CreateBranchFromStash { .. }
                 | DialogKind::StashWithMessage
                 | DialogKind::CommitWithMessage
+                | DialogKind::AddRemote
         )
     }
 
@@ -120,10 +128,17 @@ impl<'a> DialogView<'a> {
         Self::has_input_for(&self.kind)
     }
 
+    fn has_second_input_field(&self) -> bool {
+        matches!(self.kind, DialogKind::AddRemote)
+    }
+
     fn elements(&self) -> Vec<DialogElement> {
         let mut els = vec![];
         if self.has_input_field() {
             els.push(DialogElement::Input);
+        }
+        if self.has_second_input_field() {
+            els.push(DialogElement::SecondInput);
         }
         if matches!(self.kind, DialogKind::Reset { .. }) {
             for i in 0..3 {
@@ -202,6 +217,50 @@ impl<'a> DialogView<'a> {
             }
         }
 
+        if matches!(self.focused, DialogElement::SecondInput) {
+            match key.code {
+                ratatui::crossterm::event::KeyCode::Char(c) => {
+                    self.second_input_value.insert(self.second_input_cursor, c);
+                    self.second_input_cursor += 1;
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Backspace => {
+                    if self.second_input_cursor > 0 {
+                        self.second_input_cursor -= 1;
+                        self.second_input_value.remove(self.second_input_cursor);
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Delete => {
+                    if self.second_input_cursor < self.second_input_value.len() {
+                        self.second_input_value.remove(self.second_input_cursor);
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Left => {
+                    if self.second_input_cursor > 0 {
+                        self.second_input_cursor -= 1;
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Right => {
+                    if self.second_input_cursor < self.second_input_value.len() {
+                        self.second_input_cursor += 1;
+                    }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Home => {
+                    self.second_input_cursor = 0;
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::End => {
+                    self.second_input_cursor = self.second_input_value.len();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         let event = event_with_count.event;
         match event {
             UserEvent::Confirm => match self.focused {
@@ -212,6 +271,9 @@ impl<'a> DialogView<'a> {
                     self.dropdown_selected = i;
                 }
                 DialogElement::Input => {
+                    self.focus_next();
+                }
+                DialogElement::SecondInput => {
                     self.focused = DialogElement::Validate;
                 }
             },
@@ -236,6 +298,10 @@ impl<'a> DialogView<'a> {
                     if self.input_cursor > 0 {
                         self.input_cursor -= 1;
                     }
+                } else if matches!(self.focused, DialogElement::SecondInput) {
+                    if self.second_input_cursor > 0 {
+                        self.second_input_cursor -= 1;
+                    }
                 } else {
                     match self.focused {
                         DialogElement::Validate => self.focused = DialogElement::Cancel,
@@ -249,6 +315,10 @@ impl<'a> DialogView<'a> {
                 if matches!(self.focused, DialogElement::Input) {
                     if self.input_cursor < self.input_value.len() {
                         self.input_cursor += 1;
+                    }
+                } else if matches!(self.focused, DialogElement::SecondInput) {
+                    if self.second_input_cursor < self.second_input_value.len() {
+                        self.second_input_cursor += 1;
                     }
                 } else {
                     match self.focused {
@@ -282,7 +352,7 @@ impl<'a> DialogView<'a> {
                 DialogElement::Radio(i) => {
                     self.dropdown_selected = i;
                 }
-                DialogElement::Input => {}
+                DialogElement::Input | DialogElement::SecondInput => {}
             }
         }
     }
@@ -331,6 +401,12 @@ impl<'a> DialogView<'a> {
         if let Some(input_row) = self.input_row {
             if row == input_row {
                 return Some(DialogElement::Input);
+            }
+        }
+
+        if let Some(second_input_row) = self.second_input_row {
+            if row == second_input_row {
+                return Some(DialogElement::SecondInput);
             }
         }
 
@@ -403,12 +479,29 @@ impl<'a> DialogView<'a> {
                 }
             }
         }
+
+        if self.is_highlighted(DialogElement::SecondInput) {
+            if let Some(second_input_row) = self.second_input_row {
+                let cursor_x = self.inner_area.x + 2 + self.second_input_cursor as u16;
+                let cursor_y = self.inner_area.y + second_input_row as u16;
+                match &self.ctx.ui_config.common.cursor_type {
+                    CursorType::Native => {
+                        f.set_cursor_position((cursor_x, cursor_y));
+                    }
+                    CursorType::Virtual(cursor) => {
+                        let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
+                        f.buffer_mut().set_string(cursor_x, cursor_y, cursor, style);
+                    }
+                }
+            }
+        }
     }
 
     fn build_lines(&mut self, inner_width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
 
         self.input_row = None;
+        self.second_input_row = None;
         self.checkbox_rows.clear();
         self.radio_rows.clear();
 
@@ -620,6 +713,31 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(warning_line("This action cannot be undone.", warn_fg));
             }
+            DialogKind::AddRemote => {
+                lines.push(label_line("Name:", dim_fg));
+                self.input_row = Some(lines.len());
+                lines.push(self.input_line(fg));
+                lines.push(Line::from(""));
+                lines.push(label_line("URL:", dim_fg));
+                self.second_input_row = Some(lines.len());
+                lines.push(self.second_input_line(fg));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  The name groups branches: \"origin\" \u{2192} origin/main\u{2026}",
+                    Style::default().fg(dim_fg),
+                )));
+            }
+            DialogKind::ConfirmDeleteRemote { name } => {
+                lines.push(Line::from(Span::styled(
+                    format!("Remove remote '{}'?", name),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(""));
+                lines.push(warning_line(
+                    "This will only remove the remote configuration.",
+                    warn_fg,
+                ));
+            }
         }
 
         lines.push(Line::from(""));
@@ -661,6 +779,8 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmUnstageAll => " Unstage All ",
             DialogKind::ConfirmPopStash { .. } => " Pop Stash ",
             DialogKind::ConfirmDropStash { .. } => " Drop Stash ",
+            DialogKind::AddRemote => " Add Remote ",
+            DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
         }
         .to_string()
     }
@@ -675,6 +795,19 @@ impl<'a> DialogView<'a> {
         Line::from(vec![
             Span::raw("  "),
             Span::styled(self.input_value.clone(), style),
+        ])
+    }
+
+    fn second_input_line(&self, fg: Color) -> Line<'static> {
+        let focused = self.is_highlighted(DialogElement::SecondInput);
+        let style = if focused {
+            Style::default().fg(fg)
+        } else {
+            Style::default().fg(self.ctx.color_theme.list_commit_message_fg)
+        };
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(self.second_input_value.clone(), style),
         ])
     }
 
@@ -923,6 +1056,25 @@ impl<'a> DialogView<'a> {
             DialogKind::CleanUntracked => (String::new(), GitAction::CleanUntracked),
             DialogKind::ConfirmPopStash { stash_ref } => (stash_ref.clone(), GitAction::PopStash),
             DialogKind::ConfirmDropStash { stash_ref } => (stash_ref.clone(), GitAction::DropStash),
+            DialogKind::AddRemote => {
+                if self.input_value.trim().is_empty() {
+                    self.tx
+                        .send(AppEvent::NotifyError("Remote name cannot be empty".into()));
+                    return;
+                }
+                if self.second_input_value.trim().is_empty() {
+                    self.tx
+                        .send(AppEvent::NotifyError("Remote URL cannot be empty".into()));
+                    return;
+                }
+                (
+                    self.input_value.trim().to_string(),
+                    GitAction::AddRemote {
+                        url: self.second_input_value.trim().to_string(),
+                    },
+                )
+            }
+            DialogKind::ConfirmDeleteRemote { name } => (name.clone(), GitAction::RemoveRemote),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }
