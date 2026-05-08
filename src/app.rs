@@ -860,7 +860,7 @@ impl App<'_> {
                     spans.push(Span::styled(
                         "HEAD → ",
                         Style::default()
-                            .fg(self.ctx.color_theme.list_ref_remote_branch_fg)
+                            .fg(self.ctx.color_theme.list_head_fg)
                             .add_modifier(Modifier::BOLD),
                     ));
                     spans.push(Span::styled("⎇ ", Style::default().fg(branch_color)));
@@ -875,7 +875,7 @@ impl App<'_> {
                     spans.push(Span::styled(
                         "HEAD → ",
                         Style::default()
-                            .fg(self.ctx.color_theme.list_ref_remote_branch_fg)
+                            .fg(self.ctx.color_theme.list_head_fg)
                             .add_modifier(Modifier::BOLD),
                     ));
                     spans.push(Span::styled(
@@ -1869,6 +1869,14 @@ impl App<'_> {
                     .map_err(|e| format!("Failed to create archive: {}", e));
                 (r, None)
             }
+            GitAction::AddRemote { url } => (
+                actions::add_remote(repo_path, &target, &url),
+                Some(format!("Remote '{}' added.", target)),
+            ),
+            GitAction::RemoveRemote => (
+                actions::remove_remote(repo_path, &target),
+                Some(format!("Remote '{}' removed.", target)),
+            ),
         };
 
         match result {
