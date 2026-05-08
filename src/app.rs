@@ -620,7 +620,9 @@ impl App<'_> {
         // Apply theme live when cycling in config view.
         if let View::Config(ref view) = self.view {
             if let Some(def) = crate::themes::get_theme(&view.core_config().option.theme) {
-                Rc::make_mut(&mut self.ctx).color_theme = def.color_theme;
+                let color_theme = def.color_theme;
+                Rc::make_mut(&mut self.ctx).color_theme = color_theme.clone();
+                self.view.update_color_theme(color_theme);
             }
         }
         Ok(())

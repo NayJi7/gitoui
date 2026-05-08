@@ -927,6 +927,11 @@ impl<'a> DialogView<'a> {
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }
 
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme.clone();
+        self.before.update_color_theme(theme);
+    }
+
     pub fn take_before_view(&mut self) -> View<'a> {
         std::mem::take(&mut self.before)
     }

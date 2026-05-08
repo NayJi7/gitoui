@@ -275,6 +275,10 @@ impl<'a> UserCommandView<'a> {
         self.commit_user_command_state.select_first();
     }
 
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
+    }
+
     pub fn refresh(&self) {
         let list_state = self.as_list_state();
         let list_context = ListRefreshViewContext::from(list_state);

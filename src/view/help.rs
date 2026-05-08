@@ -160,6 +160,10 @@ impl<'a> HelpView<'a> {
         std::mem::take(&mut self.before)
     }
 
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        self.before.update_color_theme(theme);
+    }
+
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         self.before.graph_image_ids_sorted()
     }

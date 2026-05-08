@@ -1288,6 +1288,10 @@ impl<'a> DiffView<'a> {
         }
     }
 
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
+    }
+
     pub fn refresh(&self) {
         let file_path = self
             .title

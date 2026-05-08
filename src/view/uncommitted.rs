@@ -476,6 +476,10 @@ impl<'a> UncommittedView<'a> {
         self.commit_list_state = Some(state);
     }
 
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
+    }
+
     pub fn refresh(&self) {
         self.tx.send(AppEvent::RefreshUncommitted);
     }

@@ -418,6 +418,23 @@ impl<'a> View<'a> {
             _ => false,
         }
     }
+
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        match self {
+            View::Default => {}
+            View::List(v) => v.update_color_theme(theme),
+            View::Detail(v) => v.update_color_theme(theme),
+            View::Diff(v) => v.update_color_theme(theme),
+            View::UserCommand(v) => v.update_color_theme(theme),
+            View::Refs(v) => v.update_color_theme(theme),
+            View::Help(v) => v.update_color_theme(theme),
+            View::Config(v) => v.update_color_theme(theme),
+            View::Dialog(v) => v.update_color_theme(theme),
+            View::BranchDetail(v) => v.update_color_theme(theme),
+            View::TagDetail(v) => v.update_color_theme(theme),
+            View::Uncommitted(v) => v.update_color_theme(theme),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

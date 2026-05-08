@@ -530,14 +530,14 @@ pub struct GraphConfig {
 pub struct GraphColorConfig {
     #[garde(length(min = 1), inner(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")))]
     #[default(vec![
-        "#3366ff".into(),
-        "#ff3366".into(),
-        "#33ff66".into(),
-        "#ff33ff".into(),
-        "#33ffff".into(),
-        "#ffff33".into(),
-        "#ff9933".into(),
-        "#9933ff".into(),
+        "#1f77b4".into(), // steel blue
+        "#d62728".into(), // brick red
+        "#2ca02c".into(), // forest green
+        "#ff7f0e".into(), // orange
+        "#9467bd".into(), // purple
+        "#8c564b".into(), // brown
+        "#e377c2".into(), // pink/rose
+        "#17becf".into(), // teal
     ])]
     pub branches: Vec<String>,
     #[garde(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"))]
@@ -866,14 +866,14 @@ mod tests {
                 row_image_width: GraphImageWidthMode::Compact,
                 color: GraphColorConfig {
                     branches: vec![
-                        "#3366ff".into(),
-                        "#ff3366".into(),
-                        "#33ff66".into(),
-                        "#ff33ff".into(),
-                        "#33ffff".into(),
-                        "#ffff33".into(),
-                        "#ff9933".into(),
-                        "#9933ff".into(),
+                        "#1f77b4".into(), // steel blue
+                        "#d62728".into(), // brick red
+                        "#2ca02c".into(), // forest green
+                        "#ff7f0e".into(), // orange
+                        "#9467bd".into(), // purple
+                        "#8c564b".into(), // brown
+                        "#e377c2".into(), // pink/rose
+                        "#17becf".into(), // teal
                     ],
                     edge: "#00000000".into(),
                     background: "#00000000".into(),
@@ -1130,14 +1130,14 @@ mod tests {
                 row_image_width: GraphImageWidthMode::Compact,
                 color: GraphColorConfig {
                     branches: vec![
-                        "#3366ff".into(),
-                        "#ff3366".into(),
-                        "#33ff66".into(),
-                        "#ff33ff".into(),
-                        "#33ffff".into(),
-                        "#ffff33".into(),
-                        "#ff9933".into(),
-                        "#9933ff".into(),
+                        "#1f77b4".into(), // steel blue
+                        "#d62728".into(), // brick red
+                        "#2ca02c".into(), // forest green
+                        "#ff7f0e".into(), // orange
+                        "#9467bd".into(), // purple
+                        "#8c564b".into(), // brown
+                        "#e377c2".into(), // pink/rose
+                        "#17becf".into(), // teal
                     ],
                     edge: "#00000000".into(),
                     background: "#00000000".into(),

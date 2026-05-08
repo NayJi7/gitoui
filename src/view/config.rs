@@ -556,7 +556,7 @@ impl<'a> ConfigView<'a> {
             Span::styled(
                 "Configuration",
                 Style::default()
-                    .fg(self.ctx.color_theme.status_info_fg)
+                    .fg(self.ctx.color_theme.list_ref_stash_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -772,7 +772,7 @@ impl<'a> ConfigView<'a> {
                 Span::styled(
                     "Details",
                     Style::default()
-                        .fg(self.ctx.color_theme.status_info_fg)
+                        .fg(self.ctx.color_theme.list_ref_stash_fg)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -894,6 +894,11 @@ impl<'a> ConfigView<'a> {
 impl<'a> ConfigView<'a> {
     pub fn take_before_view(&mut self) -> View<'a> {
         std::mem::take(&mut self.before)
+    }
+
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme.clone();
+        self.before.update_color_theme(theme);
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
@@ -1033,7 +1038,7 @@ fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -
 }
 
 fn config_section_line(title: &str, theme: &crate::color::ColorTheme) -> Line<'static> {
-    let color = theme.status_info_fg;
+    let color = theme.list_ref_stash_fg;
     Line::from(vec![
         Span::styled("▍ ", Style::default().fg(color)),
         Span::styled(
