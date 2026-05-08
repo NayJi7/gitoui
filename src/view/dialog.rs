@@ -533,7 +533,7 @@ impl<'a> DialogView<'a> {
 
         if self.is_highlighted(DialogElement::Input) {
             if let Some(input_row) = self.input_row {
-                let cursor_x = self.inner_area.x + 2 + self.input_cursor as u16;
+                let cursor_x = self.inner_area.x + 1 + self.input_cursor as u16;
                 let cursor_y = self.inner_area.y + input_row as u16;
                 match &self.ctx.ui_config.common.cursor_type {
                     CursorType::Native => {
@@ -549,7 +549,7 @@ impl<'a> DialogView<'a> {
 
         if self.is_highlighted(DialogElement::SecondInput) {
             if let Some(second_input_row) = self.second_input_row {
-                let cursor_x = self.inner_area.x + 2 + self.second_input_cursor as u16;
+                let cursor_x = self.inner_area.x + 1 + self.second_input_cursor as u16;
                 let cursor_y = self.inner_area.y + second_input_row as u16;
                 match &self.ctx.ui_config.common.cursor_type {
                     CursorType::Native => {
@@ -587,7 +587,7 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("Tag name:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Annotated tag"));
@@ -597,7 +597,7 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("Branch name:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Checkout after creation"));
@@ -670,7 +670,7 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("New name:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
             }
             DialogKind::DeleteBranch { branch, is_remote } => {
                 let kind_str = if *is_remote {
@@ -709,7 +709,7 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("Branch name:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Checkout after creation"));
@@ -717,7 +717,7 @@ impl<'a> DialogView<'a> {
             DialogKind::StashWithMessage => {
                 lines.push(label_line("Message (optional):", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Include untracked files"));
@@ -725,7 +725,7 @@ impl<'a> DialogView<'a> {
             DialogKind::CommitWithMessage => {
                 lines.push(label_line("Message:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Amend previous commit"));
@@ -783,11 +783,11 @@ impl<'a> DialogView<'a> {
             DialogKind::AddRemote => {
                 lines.push(label_line("Name:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 lines.push(label_line("URL:", dim_fg));
                 self.second_input_row = Some(lines.len());
-                lines.push(self.second_input_line(fg));
+                lines.push(self.second_input_line(fg, inner_width));
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "  The name groups branches: \"origin\" \u{2192} origin/main\u{2026}",
@@ -849,12 +849,12 @@ impl<'a> DialogView<'a> {
             DialogKind::AmendMessage { .. } => {
                 lines.push(label_line("New commit message:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
             }
             DialogKind::AddWorktree => {
                 lines.push(label_line("Name:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg));
+                lines.push(self.input_line(fg, inner_width));
                 lines.push(Line::from(Span::styled(
                     "  Used as branch name and to derive the worktree path.",
                     Style::default().fg(dim_fg),
@@ -963,29 +963,31 @@ impl<'a> DialogView<'a> {
         .to_string()
     }
 
-    fn input_line(&self, fg: Color) -> Line<'static> {
+    fn input_line(&self, fg: Color, inner_width: u16) -> Line<'static> {
         let focused = self.is_highlighted(DialogElement::Input);
-        let style = if focused {
-            Style::default().fg(fg)
-        } else {
-            Style::default().fg(self.ctx.color_theme.list_commit_message_fg)
-        };
+        let theme = &self.ctx.color_theme;
+        let input_bg = theme.list_selected_bg;
+        let text_fg = if focused { fg } else { theme.detail_label_fg };
+        let content_width = inner_width.saturating_sub(2) as usize;
+        let padded = format!("{:<width$}", self.input_value, width = content_width);
         Line::from(vec![
-            Span::raw("  "),
-            Span::styled(self.input_value.clone(), style),
+            Span::raw(" "),
+            Span::styled(padded, Style::default().fg(text_fg).bg(input_bg)),
+            Span::raw(" "),
         ])
     }
 
-    fn second_input_line(&self, fg: Color) -> Line<'static> {
+    fn second_input_line(&self, fg: Color, inner_width: u16) -> Line<'static> {
         let focused = self.is_highlighted(DialogElement::SecondInput);
-        let style = if focused {
-            Style::default().fg(fg)
-        } else {
-            Style::default().fg(self.ctx.color_theme.list_commit_message_fg)
-        };
+        let theme = &self.ctx.color_theme;
+        let input_bg = theme.list_selected_bg;
+        let text_fg = if focused { fg } else { theme.detail_label_fg };
+        let content_width = inner_width.saturating_sub(2) as usize;
+        let padded = format!("{:<width$}", self.second_input_value, width = content_width);
         Line::from(vec![
-            Span::raw("  "),
-            Span::styled(self.second_input_value.clone(), style),
+            Span::raw(" "),
+            Span::styled(padded, Style::default().fg(text_fg).bg(input_bg)),
+            Span::raw(" "),
         ])
     }
 

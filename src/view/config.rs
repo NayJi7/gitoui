@@ -732,14 +732,23 @@ impl<'a> ConfigView<'a> {
             } else {
                 config_value_fg(config_value_kind(i), &self.ctx.color_theme)
             };
+            let value_style = if self.editing_text && i == self.selected {
+                Style::default()
+                    .fg(self.ctx.color_theme.fg)
+                    .bg(self.ctx.color_theme.list_selected_bg)
+            } else if config_value_kind(i) == ConfigValueKind::Input && !is_grayed {
+                Style::default()
+                    .fg(self.ctx.color_theme.detail_label_fg)
+                    .bg(self.ctx.color_theme.list_selected_bg)
+                    .add_modifier(config_value_modifier(i))
+            } else {
+                Style::default()
+                    .fg(value_fg)
+                    .add_modifier(config_value_modifier(i))
+            };
             let spans = vec![
                 Span::styled(format!("{:<18}", label), Style::default().fg(label_fg)),
-                Span::styled(
-                    format!("{value_prefix}{display}"),
-                    Style::default()
-                        .fg(value_fg)
-                        .add_modifier(config_value_modifier(i)),
-                ),
+                Span::styled(format!("{value_prefix}{display}"), value_style),
             ];
             let mut line = Line::from(spans);
             if i == self.selected && !is_grayed {
@@ -867,7 +876,7 @@ impl<'a> ConfigView<'a> {
             && self.selected != GITHUB_AUTH_INDEX
             && self.selected != GITHUB_AVATARS_INDEX
         {
-            let cursor_x = left_area.x + 18 + 2 + self.editing_value.len() as u16;
+            let cursor_x = left_area.x + 18 + self.editing_value.len() as u16;
             let cursor_y = self
                 .left_item_rows
                 .iter()
@@ -1120,11 +1129,11 @@ fn config_value_modifier(index: usize) -> Modifier {
 //   - value -  = button (enter/press to activate)
 fn config_value_display(index: usize, value: &str, editing: bool, editing_value: &str) -> String {
     if editing {
-        format!("[ {editing_value} ]")
+        editing_value.to_string()
     } else {
         match config_value_kind(index) {
             ConfigValueKind::Button => value.to_string(),
-            ConfigValueKind::Input => format!("[ {value} ]"),
+            ConfigValueKind::Input => value.to_string(),
             ConfigValueKind::Cycle => format!("< {value} >"),
         }
     }
