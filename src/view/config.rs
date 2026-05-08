@@ -556,7 +556,7 @@ impl<'a> ConfigView<'a> {
             Span::styled(
                 "Configuration",
                 Style::default()
-                    .fg(Color::Rgb(122, 162, 247))
+                    .fg(self.ctx.color_theme.status_info_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -681,18 +681,18 @@ impl<'a> ConfigView<'a> {
 
         let avatars_selectable = self.github_avatars_selectable();
         let dim_fg = self.ctx.color_theme.divider_fg;
-        let mut lines: Vec<Line> = vec![config_section_line("Interface")];
+        let mut lines: Vec<Line> = vec![config_section_line("Interface", &self.ctx.color_theme)];
         let mut item_rows: Vec<Option<usize>> = vec![None];
         for (i, (name, value, indented)) in items.iter().enumerate() {
             if i == 6 {
                 lines.push(Line::from(""));
                 item_rows.push(None);
-                lines.push(config_section_line("Git Identity"));
+                lines.push(config_section_line("Git Identity", &self.ctx.color_theme));
                 item_rows.push(None);
             } else if i == GITHUB_AUTH_INDEX {
                 lines.push(Line::from(""));
                 item_rows.push(None);
-                lines.push(config_section_line("GitHub"));
+                lines.push(config_section_line("GitHub", &self.ctx.color_theme));
                 item_rows.push(None);
             }
 
@@ -708,12 +708,12 @@ impl<'a> ConfigView<'a> {
             let label_fg = if is_grayed {
                 dim_fg
             } else {
-                Color::Rgb(192, 202, 245)
+                self.ctx.color_theme.fg
             };
             let value_fg = if is_grayed {
                 dim_fg
             } else {
-                config_value_fg(config_value_kind(i))
+                config_value_fg(config_value_kind(i), &self.ctx.color_theme)
             };
             let spans = vec![
                 Span::styled(format!("{:<18}", label), Style::default().fg(label_fg)),
@@ -772,7 +772,7 @@ impl<'a> ConfigView<'a> {
                 Span::styled(
                     "Details",
                     Style::default()
-                        .fg(Color::Rgb(122, 162, 247))
+                        .fg(self.ctx.color_theme.status_info_fg)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -784,11 +784,11 @@ impl<'a> ConfigView<'a> {
         ];
         for line in descriptions[self.selected].lines() {
             let style = if line.contains("Might cause") {
-                Style::default().fg(Color::Rgb(224, 175, 104))
+                Style::default().fg(self.ctx.color_theme.status_warn_fg)
             } else if line.starts_with("Current git config") {
-                Style::default().fg(Color::Rgb(158, 206, 106))
+                Style::default().fg(self.ctx.color_theme.status_success_fg)
             } else {
-                Style::default().fg(Color::Rgb(192, 202, 245))
+                Style::default().fg(self.ctx.color_theme.fg)
             };
             right_lines.push(Line::from(Span::styled(line.to_string(), style)));
         }
@@ -1032,14 +1032,13 @@ fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -
     }
 }
 
-fn config_section_line(title: &str) -> Line<'static> {
+fn config_section_line(title: &str, theme: &crate::color::ColorTheme) -> Line<'static> {
+    let color = theme.status_info_fg;
     Line::from(vec![
-        Span::styled("▍ ", Style::default().fg(Color::Rgb(122, 162, 247))),
+        Span::styled("▍ ", Style::default().fg(color)),
         Span::styled(
             title.to_string(),
-            Style::default()
-                .fg(Color::Rgb(122, 162, 247))
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
     ])
 }
@@ -1065,11 +1064,11 @@ fn config_value_kind(index: usize) -> ConfigValueKind {
     }
 }
 
-fn config_value_fg(kind: ConfigValueKind) -> Color {
+fn config_value_fg(kind: ConfigValueKind, theme: &crate::color::ColorTheme) -> Color {
     match kind {
-        ConfigValueKind::Cycle => Color::Rgb(122, 162, 247),
-        ConfigValueKind::Input => Color::Rgb(158, 206, 106),
-        ConfigValueKind::Button => Color::Rgb(224, 175, 104),
+        ConfigValueKind::Cycle => theme.status_info_fg,
+        ConfigValueKind::Input => theme.status_success_fg,
+        ConfigValueKind::Button => theme.status_warn_fg,
     }
 }
 

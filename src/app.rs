@@ -193,7 +193,7 @@ impl<'a> App<'a> {
                     let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
                     CommitInfo::new_uncommitted(
                         commit,
-                        ratatui::style::Color::Rgb(0x80, 0x80, 0x80),
+                        ctx.color_theme.list_ref_paren_fg,
                         changes.staged.len(),
                         changes.unstaged.len(),
                         changes.untracked.len(),
@@ -661,7 +661,7 @@ impl App<'_> {
     }
 
     fn render(&mut self, f: &mut Frame) {
-        let base = Block::default().fg(self.ctx.color_theme.fg);
+        let base = Block::default().fg(self.ctx.color_theme.fg).bg(self.ctx.color_theme.bg);
         f.render_widget(base, f.area());
 
         let [view_area, _gap, status_line_area] = split_app_areas(f.area());

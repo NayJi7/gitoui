@@ -140,14 +140,14 @@ impl<'a> RefsView<'a> {
 
     fn render_refs_header(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::{
-            style::{Color, Modifier, Style},
+            style::{Modifier, Style},
             text::{Line, Span},
             widgets::Paragraph,
         };
 
         let header_text = "Refs";
         let style = Style::default()
-            .fg(Color::Rgb(86, 95, 137))
+            .fg(self.ctx.color_theme.list_head_fg)
             .add_modifier(Modifier::BOLD);
         let line = Line::from(Span::styled(header_text.to_string(), style));
         let para = Paragraph::new(line);
@@ -157,10 +157,9 @@ impl<'a> RefsView<'a> {
         );
 
         // Draw separator line below header
-        let sep_style = Style::default().fg(Color::Rgb(59, 66, 97));
         let sep_span = Span::styled(
             "─".repeat(area.width as usize),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(self.ctx.color_theme.divider_fg),
         );
         let sep_line = Line::from(sep_span);
         let sep_para = Paragraph::new(sep_line);
