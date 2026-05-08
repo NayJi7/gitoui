@@ -455,6 +455,12 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
+    pub fn invalidate_image_caches(&mut self) {
+        self.graph_render_state = None;
+        self.avatar_stable_key = None;
+        self.avatars_fully_prepared = false;
+    }
+
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         let mut image_ids: Vec<u32> = self
             .graph_image_manager

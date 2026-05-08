@@ -304,6 +304,7 @@ impl<'a> ListView<'a> {
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
         std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
+        self.as_mut_list_state().invalidate_image_caches();
     }
 
     pub fn refresh(&self) {
