@@ -2196,10 +2196,9 @@ impl App<'_> {
             GitAction::AddWorktree {
                 worktree_path,
                 branch,
-                new_branch,
                 ..
             } => (
-                actions::add_worktree(repo_path, &worktree_path, &branch, new_branch),
+                actions::add_worktree(repo_path, &worktree_path, &branch),
                 Some(format!("Worktree '{}' created", worktree_path)),
             ),
         };

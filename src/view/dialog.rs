@@ -69,7 +69,7 @@ impl<'a> DialogView<'a> {
             DialogKind::CleanUntracked => (vec![], 0),
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
-            DialogKind::AddWorktree => (vec![false, false], 0),
+            DialogKind::AddWorktree => (vec![false], 0),
             _ => (vec![], 0),
         };
 
@@ -857,11 +857,13 @@ impl<'a> DialogView<'a> {
                 lines.push(label_line("Branch:", dim_fg));
                 self.second_input_row = Some(lines.len());
                 lines.push(self.second_input_line(fg));
+                lines.push(Line::from(Span::styled(
+                    "  Existing branch to check out, or new branch name (auto-detected).",
+                    Style::default().fg(dim_fg),
+                )));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
-                lines.push(self.checkbox_line(0, "Create new branch (-b)"));
-                self.checkbox_rows.push(lines.len());
-                lines.push(self.checkbox_line(1, "Switch to new worktree"));
+                lines.push(self.checkbox_line(0, "Switch to new worktree"));
             }
             DialogKind::ConfirmSwitchWorktree {
                 path,
@@ -1299,14 +1301,12 @@ impl<'a> DialogView<'a> {
                         .send(AppEvent::NotifyError("Branch cannot be empty".into()));
                     return;
                 }
-                let new_branch = self.checkboxes.get(0).copied().unwrap_or(false);
-                let checkout = self.checkboxes.get(1).copied().unwrap_or(false);
+                let checkout = self.checkboxes.get(0).copied().unwrap_or(false);
                 (
                     String::new(),
                     GitAction::AddWorktree {
                         worktree_path,
                         branch,
-                        new_branch,
                         checkout,
                     },
                 )

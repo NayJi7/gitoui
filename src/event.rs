@@ -249,7 +249,6 @@ pub enum GitAction {
     AddWorktree {
         worktree_path: String,
         branch: String,
-        new_branch: bool,
         checkout: bool,
     },
 }
