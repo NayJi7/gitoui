@@ -175,7 +175,23 @@ pub fn run() -> Result<()> {
             .or(core_config.option.initial_selection)
             .into();
 
-        let graph_color_set = color::GraphColorSet::new(&graph_config.color);
+        // If the config graph background is transparent (default), override it with the
+        // theme's bg color so Kitty composites against the correct color instead of the
+        // terminal's native background. Kitty images composite against the terminal-native bg
+        // for their transparent pixels, ignoring ANSI cell bg codes.
+        let graph_color_set = {
+            if graph_config.color.background == "#00000000" {
+                if let ratatui::style::Color::Rgb(r, g, b) = color_theme.bg {
+                    let mut patched = graph_config.color.clone();
+                    patched.background = format!("#{:02x}{:02x}{:02x}ff", r, g, b);
+                    color::GraphColorSet::new(&patched)
+                } else {
+                    color::GraphColorSet::new(&graph_config.color)
+                }
+            } else {
+                color::GraphColorSet::new(&graph_config.color)
+            }
+        };
 
         let mouse_enabled = ui_config.common.mouse_enabled;
         let git_user_name = std::process::Command::new("git")
