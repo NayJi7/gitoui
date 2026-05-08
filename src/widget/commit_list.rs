@@ -1192,12 +1192,6 @@ impl CommitList<'_> {
             }
         }
 
-        // Draw separator line below header
-        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
-        for col in area.left()..area.right() {
-            buf[(col, area.top() + 1)].set_symbol("─");
-            buf[(col, area.top() + 1)].set_style(sep_style);
-        }
     }
 
     fn render_graph(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
