@@ -174,10 +174,19 @@ impl<'a> DialogView<'a> {
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         if matches!(self.focused, DialogElement::Input) {
+            use ratatui::crossterm::event::KeyModifiers;
             match key.code {
                 ratatui::crossterm::event::KeyCode::Char(c) => {
                     self.input_value.insert(self.input_cursor, c);
                     self.input_cursor += 1;
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Backspace
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_left(&self.input_value, self.input_cursor);
+                    self.input_value.drain(new_pos..self.input_cursor);
+                    self.input_cursor = new_pos;
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Backspace => {
@@ -193,10 +202,22 @@ impl<'a> DialogView<'a> {
                     }
                     return;
                 }
+                ratatui::crossterm::event::KeyCode::Left
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    self.input_cursor = word_left(&self.input_value, self.input_cursor);
+                    return;
+                }
                 ratatui::crossterm::event::KeyCode::Left => {
                     if self.input_cursor > 0 {
                         self.input_cursor -= 1;
                     }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Right
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    self.input_cursor = word_right(&self.input_value, self.input_cursor);
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Right => {
@@ -218,10 +239,19 @@ impl<'a> DialogView<'a> {
         }
 
         if matches!(self.focused, DialogElement::SecondInput) {
+            use ratatui::crossterm::event::KeyModifiers;
             match key.code {
                 ratatui::crossterm::event::KeyCode::Char(c) => {
                     self.second_input_value.insert(self.second_input_cursor, c);
                     self.second_input_cursor += 1;
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Backspace
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_left(&self.second_input_value, self.second_input_cursor);
+                    self.second_input_value.drain(new_pos..self.second_input_cursor);
+                    self.second_input_cursor = new_pos;
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Backspace => {
@@ -237,10 +267,24 @@ impl<'a> DialogView<'a> {
                     }
                     return;
                 }
+                ratatui::crossterm::event::KeyCode::Left
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    self.second_input_cursor =
+                        word_left(&self.second_input_value, self.second_input_cursor);
+                    return;
+                }
                 ratatui::crossterm::event::KeyCode::Left => {
                     if self.second_input_cursor > 0 {
                         self.second_input_cursor -= 1;
                     }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Right
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    self.second_input_cursor =
+                        word_right(&self.second_input_value, self.second_input_cursor);
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Right => {
@@ -1091,6 +1135,30 @@ impl<'a> DialogView<'a> {
     pub fn dialog_area(&self) -> Rect {
         self.dialog_area
     }
+}
+
+fn word_left(s: &str, cursor: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = cursor;
+    while i > 0 && !bytes[i - 1].is_ascii_alphanumeric() {
+        i -= 1;
+    }
+    while i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
+        i -= 1;
+    }
+    i
+}
+
+fn word_right(s: &str, cursor: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = cursor;
+    while i < bytes.len() && !bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    i
 }
 
 fn centered_rect_exact(width: u16, height: u16, area: Rect) -> Rect {

@@ -19,10 +19,10 @@ use crate::{
     GraphStyle, ImageProtocolType,
 };
 
-const CONFIG_ITEM_COUNT: usize = 10;
+const CONFIG_ITEM_COUNT: usize = 11;
 const TEXT_EDIT_START_INDEX: usize = 6;
-const GITHUB_AUTH_INDEX: usize = 8;
-const GITHUB_AVATARS_INDEX: usize = 9;
+const GITHUB_AUTH_INDEX: usize = 9;
+const GITHUB_AVATARS_INDEX: usize = 10;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -78,6 +78,7 @@ impl<'a> ConfigView<'a> {
                 .user_email()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "(from git)".into()),
+            self.core_config.default_branch().to_string(),
             github_auth_display(&self.github_auth_state, self.github_auth_pending),
             if self.core_config.github_avatars() {
                 "enabled".to_string()
@@ -86,14 +87,15 @@ impl<'a> ConfigView<'a> {
             },
         ];
         let names = [
+            "Theme",
             "Graph Style",
             "Diff Mode",
             "Mouse",
-            "Image Protocol",
-            "Theme",
             "Date Format",
+            "Image Protocol",
             "Git Name",
             "Git Email",
+            "Default Branch",
             "GitHub Auth",
             "Github Avatars",
         ];
@@ -385,9 +387,18 @@ impl<'a> ConfigView<'a> {
             }
             _ => {}
         }
+        use ratatui::crossterm::event::KeyModifiers;
         match key.code {
             KeyCode::Char(c) => {
                 self.editing_value.push(c);
+            }
+            KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                while self.editing_value.chars().last().map(|c| !c.is_alphanumeric()).unwrap_or(false) {
+                    self.editing_value.pop();
+                }
+                while self.editing_value.chars().last().map(|c| c.is_alphanumeric()).unwrap_or(false) {
+                    self.editing_value.pop();
+                }
             }
             KeyCode::Backspace => {
                 self.editing_value.pop();
@@ -406,6 +417,7 @@ impl<'a> ConfigView<'a> {
         match self.selected {
             6 => self.core_config.set_user_name(value),
             7 => self.core_config.set_user_email(value),
+            8 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -420,6 +432,18 @@ impl<'a> ConfigView<'a> {
     fn cycle_option_prev(&mut self) {
         match self.selected {
             0 => {
+                let themes = crate::themes::list_themes();
+                let current = self.core_config.option.theme.as_str();
+                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
+                let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
+                let new_theme = themes[prev_idx];
+                self.core_config.option.theme = new_theme.to_string();
+                if let Some(def) = crate::themes::get_theme(new_theme) {
+                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                }
+                self.theme_preview = None;
+            }
+            1 => {
                 let current = self.core_config.graph_style();
                 let prev = match current {
                     GraphStyle::Rounded => GraphStyle::Smooth,
@@ -428,19 +452,23 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_graph_style(prev);
             }
-            1 => {
+            2 => {
                 let prev = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::Enhanced,
                 };
                 self.ui_config.common.set_diff_mode(prev);
             }
-            2 => {
+            3 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            3 => {
+            4 => {
+                let prev = self.core_config.date_time_format().cycle_prev();
+                self.core_config.set_date_time_format(prev);
+            }
+            5 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -453,22 +481,6 @@ impl<'a> ConfigView<'a> {
                     ImageProtocolType::KittyUnicode => ImageProtocolType::Sixel,
                 };
                 self.core_config.set_protocol(prev);
-            }
-            4 => {
-                let themes = crate::themes::list_themes();
-                let current = self.core_config.option.theme.as_str();
-                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
-                let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
-                let new_theme = themes[prev_idx];
-                self.core_config.option.theme = new_theme.to_string();
-                if let Some(def) = crate::themes::get_theme(new_theme) {
-                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
-                }
-                self.theme_preview = None;
-            }
-            5 => {
-                let prev = self.core_config.date_time_format().cycle_prev();
-                self.core_config.set_date_time_format(prev);
             }
             GITHUB_AVATARS_INDEX => {
                 self.core_config
@@ -485,6 +497,18 @@ impl<'a> ConfigView<'a> {
     fn cycle_option(&mut self) {
         match self.selected {
             0 => {
+                let themes = crate::themes::list_themes();
+                let current = self.core_config.option.theme.as_str();
+                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
+                let next_idx = (idx + 1) % themes.len();
+                let new_theme = themes[next_idx];
+                self.core_config.option.theme = new_theme.to_string();
+                if let Some(def) = crate::themes::get_theme(new_theme) {
+                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                }
+                self.theme_preview = None;
+            }
+            1 => {
                 let current = self.core_config.graph_style();
                 let next = match current {
                     GraphStyle::Rounded => GraphStyle::Angular,
@@ -493,19 +517,23 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_graph_style(next);
             }
-            1 => {
+            2 => {
                 let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::Enhanced,
                 };
                 self.ui_config.common.set_diff_mode(next);
             }
-            2 => {
+            3 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            3 => {
+            4 => {
+                let next = self.core_config.date_time_format().cycle_next();
+                self.core_config.set_date_time_format(next);
+            }
+            5 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -518,22 +546,6 @@ impl<'a> ConfigView<'a> {
                     ImageProtocolType::KittyUnicode => ImageProtocolType::Auto,
                 };
                 self.core_config.set_protocol(next);
-            }
-            4 => {
-                let themes = crate::themes::list_themes();
-                let current = self.core_config.option.theme.as_str();
-                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
-                let next_idx = (idx + 1) % themes.len();
-                let new_theme = themes[next_idx];
-                self.core_config.option.theme = new_theme.to_string();
-                if let Some(def) = crate::themes::get_theme(new_theme) {
-                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
-                }
-                self.theme_preview = None;
-            }
-            5 => {
-                let next = self.core_config.date_time_format().cycle_next();
-                self.core_config.set_date_time_format(next);
             }
             GITHUB_AVATARS_INDEX => {
                 self.core_config
@@ -615,6 +627,11 @@ impl<'a> ConfigView<'a> {
         // Items list (left column)
         let items = vec![
             (
+                "Theme",
+                self.core_config.option.theme.clone(),
+                false,
+            ),
+            (
                 "Graph Style",
                 graph_style_display(self.core_config.graph_style()),
                 false,
@@ -630,21 +647,16 @@ impl<'a> ConfigView<'a> {
                 false,
             ),
             (
-                "Image Protocol",
-                protocol_display(self.core_config.protocol()),
-                false,
-            ),
-            (
-                "Theme",
-                self.core_config.option.theme.clone(),
-                false,
-            ),
-            (
                 "Date Format",
                 self.core_config
                     .date_time_format()
                     .display_name()
                     .to_string(),
+                false,
+            ),
+            (
+                "Image Protocol",
+                protocol_display(self.core_config.protocol()),
                 false,
             ),
             (
@@ -661,6 +673,11 @@ impl<'a> ConfigView<'a> {
                     .user_email()
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "(from git)".into()),
+                false,
+            ),
+            (
+                "Default Branch",
+                self.core_config.default_branch().to_string(),
                 false,
             ),
             (
@@ -687,7 +704,7 @@ impl<'a> ConfigView<'a> {
             if i == 6 {
                 lines.push(Line::from(""));
                 item_rows.push(None);
-                lines.push(config_section_line("Git Identity", &self.ctx.color_theme));
+                lines.push(config_section_line("Git", &self.ctx.color_theme));
                 item_rows.push(None);
             } else if i == GITHUB_AUTH_INDEX {
                 lines.push(Line::from(""));
@@ -745,12 +762,12 @@ impl<'a> ConfigView<'a> {
         let git_name = &self.ctx.git_user_name;
         let git_email = &self.ctx.git_user_email;
         let descriptions: Vec<String> = vec![
+            "Color theme applied to the entire interface, including diff syntax highlighting.".into(),
             "Controls how commit connection lines are rendered in the graph.".into(),
             "Enhanced shows contextual line numbers; Raw shows plain git diff output.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
-            "Terminal image protocol used for rendering commit graph images.".into(),
-            "Color theme for syntax highlighting in code diffs.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
+            "Terminal image protocol used for rendering commit graph images.".into(),
             format!(
                 "Override git user.name for commits.\n\nCurrent git config: '{}'",
                 git_name
@@ -759,6 +776,7 @@ impl<'a> ConfigView<'a> {
                 "Override git user.email for commits.\n\nCurrent git config: '{}'",
                 git_email
             ),
+            "Default branch name used when initializing a new git repository.".into(),
             github_auth_description(&self.github_auth_state, self.github_auth_pending),
             github_avatars_description(&self.github_auth_state, self.core_config.github_avatars()),
         ];
@@ -794,7 +812,7 @@ impl<'a> ConfigView<'a> {
         }
 
         match self.selected {
-            4 => {
+            0 => {
                 right_lines.push(Line::from(""));
                 right_lines.push(Line::from(vec![Span::styled(
                     "Preview",
@@ -826,6 +844,17 @@ impl<'a> ConfigView<'a> {
                         right_lines.push(Line::from(line));
                     }
                 }
+            }
+            1 => {
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "Preview",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
+                right_lines.push(Line::from(""));
+                let style = self.core_config.graph_style();
+                let preview = graph_style_preview_lines(style, &self.ctx.color_theme);
+                right_lines.extend(preview);
             }
             _ => {}
         }
@@ -1099,6 +1128,50 @@ fn config_value_display(index: usize, value: &str, editing: bool, editing_value:
             ConfigValueKind::Cycle => format!("< {value} >"),
         }
     }
+}
+
+fn graph_style_preview_lines(
+    style: GraphStyle,
+    theme: &crate::color::ColorTheme,
+) -> Vec<ratatui::text::Line<'static>> {
+    let node_style = ratatui::style::Style::default()
+        .fg(theme.list_ref_branch_fg)
+        .add_modifier(ratatui::style::Modifier::BOLD);
+    let line_style = ratatui::style::Style::default().fg(theme.divider_fg);
+    let label_style = ratatui::style::Style::default().fg(theme.detail_label_fg);
+    let accent_style = ratatui::style::Style::default().fg(theme.list_ref_stash_fg);
+
+    use ratatui::text::{Line, Span};
+
+    let (fork_char, conn_char) = match style {
+        GraphStyle::Angular => ("─┐", "│"),
+        GraphStyle::Rounded => ("─╮", "│"),
+        GraphStyle::Smooth  => (" ╲", " "),
+    };
+
+    vec![
+        Line::from(vec![
+            Span::styled("  ● ", node_style),
+            Span::styled(fork_char, line_style),
+            Span::styled("  ● ", node_style),
+            Span::styled("feature", label_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  │ ", line_style),
+            Span::styled(conn_char, line_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  ● ", node_style),
+            Span::styled("  ← fork", accent_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  │", line_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  ●", node_style),
+            Span::styled("  main", label_style),
+        ]),
+    ]
 }
 
 #[cfg(test)]

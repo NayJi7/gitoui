@@ -1246,12 +1246,18 @@ impl CommitList<'_> {
         if area.is_empty() {
             return;
         }
-        use crate::git::CommitType;
         let items: Vec<ListItem> = self
             .rendering_commit_info_iter(state)
-            .map(|(_, commit_info)| {
-                let marker = "│";
-                ListItem::new(marker.fg(commit_info.graph_color))
+            .map(|(i, commit_info)| {
+                let span = Span::raw("│").fg(commit_info.graph_color);
+                if i == state.selected
+                    && state.hovered_branch.is_none()
+                    && state.hovered_tag.is_none()
+                {
+                    ListItem::new(Line::from(span).bg(self.ctx.color_theme.list_selected_bg))
+                } else {
+                    ListItem::new(span)
+                }
             })
             .collect();
         Widget::render(List::new(items), area, buf)
