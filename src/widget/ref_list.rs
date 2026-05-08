@@ -16,6 +16,7 @@ const TREE_BRANCH_ROOT_IDENT: &str = "__branches__";
 const TREE_REMOTE_ROOT_IDENT: &str = "__remotes__";
 const TREE_TAG_ROOT_IDENT: &str = "__tags__";
 const TREE_STASH_ROOT_IDENT: &str = "__stashes__";
+const ADD_REMOTE_IDENT: &str = "__add_remote__";
 
 const TREE_BRANCH_ROOT_TEXT: &str = "◈ Local";
 const TREE_REMOTE_ROOT_TEXT: &str = "⇄ Remotes";
@@ -105,6 +106,30 @@ impl RefListState {
         } else {
             None
         }
+    }
+
+    /// Returns the remote name when the selected item is a top-level remote
+    /// node (e.g. `origin`) directly under the remotes root, but not the
+    /// special `[+ Add remote]` entry.
+    pub fn selected_remote_name(&self) -> Option<String> {
+        let selected = self.tree_state.selected();
+        if selected.len() == 2
+            && selected[0] == TREE_REMOTE_ROOT_IDENT
+            && selected.last().map(String::as_str) != Some(ADD_REMOTE_IDENT)
+            && self.nodes_with_children.contains(selected)
+        {
+            selected.last().cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Returns `true` when the selected item is the `[+ Add remote]` leaf.
+    pub fn selected_is_add_remote_item(&self) -> bool {
+        let selected = self.tree_state.selected();
+        selected.len() == 2
+            && selected[0] == TREE_REMOTE_ROOT_IDENT
+            && selected.last().map(String::as_str) == Some(ADD_REMOTE_IDENT)
     }
 
     pub fn current_tree_status(&self) -> (Vec<String>, Vec<Vec<String>>) {
@@ -220,8 +245,19 @@ fn build_ref_tree_items(refs: &[Ref], ctx: &AppContext) -> Vec<TreeItem<'static,
     sort_stash_tree_nodes(&mut stash_nodes);
 
     let branch_items = branch_tree_nodes_to_tree_items(branch_nodes, branch_color_map, color_theme);
-    let remote_items =
+    let mut remote_items =
         remote_tree_nodes_to_tree_items(remote_nodes, branch_color_map, color_theme, 0);
+    remote_items.push(
+        TreeItem::new_leaf(
+            ADD_REMOTE_IDENT.to_string(),
+            ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+                "+ Add remote",
+                ratatui::style::Style::default()
+                    .fg(color_theme.status_info_fg)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )]),
+        ),
+    );
     let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme);
     let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
@@ -498,4 +534,35 @@ fn tree_item_with_line(
     children: Vec<TreeItem<'static, String>>,
 ) -> TreeItem<'static, String> {
     TreeItem::new(identifier, line, children).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_remote_name_returns_name_for_remote_node() {
+        let path: Vec<String> = vec![TREE_REMOTE_ROOT_IDENT.into(), "origin".into()];
+        let result = if path.len() == 2 && path[0] == TREE_REMOTE_ROOT_IDENT {
+            Some(path[1].clone())
+        } else {
+            None
+        };
+        assert_eq!(result, Some("origin".to_string()));
+    }
+
+    #[test]
+    fn selected_remote_name_returns_none_for_branch_under_remote() {
+        let path: Vec<String> = vec![
+            TREE_REMOTE_ROOT_IDENT.into(),
+            "origin".into(),
+            "main".into(),
+        ];
+        let result = if path.len() == 2 && path[0] == TREE_REMOTE_ROOT_IDENT {
+            Some(path[1].clone())
+        } else {
+            None
+        };
+        assert_eq!(result, None);
+    }
 }
