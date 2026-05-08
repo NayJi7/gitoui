@@ -1394,6 +1394,10 @@ impl App<'_> {
             let github_avatars = core.github_avatars();
             let ctx = Rc::make_mut(&mut self.ctx);
             ctx.core_config = core;
+            if let Some(def) = crate::themes::get_theme(&ctx.core_config.option.theme) {
+                ctx.color_theme = def.color_theme;
+                ctx.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+            }
             ctx.ui_config = ui.clone();
             ctx.github_auth_state = github_auth_state.clone();
             ctx.avatar_manager
