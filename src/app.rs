@@ -1871,11 +1871,11 @@ impl App<'_> {
             }
             GitAction::AddRemote { url } => (
                 actions::add_remote(repo_path, &target, &url),
-                Some(format!("Remote '{}' added.", target)),
+                None,
             ),
             GitAction::RemoveRemote => (
                 actions::remove_remote(repo_path, &target),
-                Some(format!("Remote '{}' removed.", target)),
+                None,
             ),
         };
 
