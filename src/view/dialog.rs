@@ -863,6 +863,33 @@ impl<'a> DialogView<'a> {
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Switch to new worktree"));
             }
+            DialogKind::ConfirmDeleteWorktree {
+                path,
+                display_name,
+                is_dirty,
+            } => {
+                lines.push(Line::from(Span::styled(
+                    format!("Remove worktree '{}'?", display_name),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("Path: {}", path),
+                    Style::default().fg(dim_fg),
+                )));
+                lines.push(Line::from(""));
+                if *is_dirty {
+                    lines.push(warning_line(
+                        "Worktree has uncommitted changes — will use --force.",
+                        warn_fg,
+                    ));
+                } else {
+                    lines.push(warning_line(
+                        "The working directory will be removed.",
+                        warn_fg,
+                    ));
+                }
+            }
             DialogKind::ConfirmSwitchWorktree {
                 path,
                 display_name,
@@ -930,6 +957,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmAbortOperation { .. } => " Abort Operation ",
             DialogKind::AmendMessage { .. } => " Amend Commit ",
             DialogKind::ConfirmSwitchWorktree { .. } => " Switch Worktree ",
+            DialogKind::ConfirmDeleteWorktree { .. } => " Remove Worktree ",
             DialogKind::AddWorktree => " Add Worktree ",
         }
         .to_string()
@@ -1056,6 +1084,15 @@ impl<'a> DialogView<'a> {
     }
 
     fn confirm(&mut self) {
+        if let DialogKind::ConfirmDeleteWorktree { path, is_dirty, .. } = &self.kind {
+            let force = *is_dirty;
+            let path = path.clone();
+            self.tx.send(AppEvent::ExecuteGitAction {
+                target: path,
+                action: GitAction::DeleteWorktree { force },
+            });
+            return;
+        }
         if let DialogKind::ConfirmSwitchWorktree { path, .. } = &self.kind {
             let path = path.clone();
             self.tx.send(AppEvent::CloseDialog);
@@ -1299,8 +1336,9 @@ impl<'a> DialogView<'a> {
                     GitAction::AddWorktree { name, checkout },
                 )
             }
-            // Handled by early-return above; this arm is unreachable at runtime.
+            // Handled by early-return above; these arms are unreachable at runtime.
             DialogKind::ConfirmSwitchWorktree { .. } => unreachable!(),
+            DialogKind::ConfirmDeleteWorktree { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

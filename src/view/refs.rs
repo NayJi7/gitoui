@@ -128,6 +128,31 @@ impl<'a> RefsView<'a> {
                     self.update_commit_list_selected();
                 }
             }
+            UserEvent::DeleteBranch => {
+                if let Some(wt_path) = self.ref_list_state.selected_worktree_path() {
+                    if let Some(wt) = self.worktrees.iter().find(|w| w.path == wt_path) {
+                        if wt.is_current {
+                            self.tx.send(AppEvent::NotifyError(
+                                "Cannot remove the currently active worktree.".into(),
+                            ));
+                        } else {
+                            let display_name = wt
+                                .branch
+                                .as_deref()
+                                .and_then(|b| b.strip_prefix("refs/heads/"))
+                                .unwrap_or(&wt.path)
+                                .to_string();
+                            self.tx.send(AppEvent::OpenDialog(
+                                DialogKind::ConfirmDeleteWorktree {
+                                    path: wt_path,
+                                    display_name,
+                                    is_dirty: wt.is_dirty,
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
             UserEvent::ShortCopy | UserEvent::FullCopy => {
                 self.copy_ref_name();
             }

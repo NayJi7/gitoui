@@ -2025,7 +2025,10 @@ impl App<'_> {
         let repo_path = self.repository.path();
         let is_refs_action = matches!(
             &action,
-            GitAction::AddRemote { .. } | GitAction::RemoveRemote | GitAction::AddWorktree { .. }
+            GitAction::AddRemote { .. }
+                | GitAction::RemoveRemote
+                | GitAction::AddWorktree { .. }
+                | GitAction::DeleteWorktree { .. }
         );
         let should_checkout_worktree =
             matches!(&action, GitAction::AddWorktree { checkout: true, .. });
@@ -2201,6 +2204,10 @@ impl App<'_> {
                     Some(format!("Worktree '{}' created", wt_path)),
                 )
             }
+            GitAction::DeleteWorktree { force } => (
+                actions::delete_worktree(repo_path, &target, force),
+                Some("Worktree removed".to_string()),
+            ),
         };
 
         match result {

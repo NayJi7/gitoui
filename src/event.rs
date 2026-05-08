@@ -154,6 +154,8 @@ pub enum DialogKind {
     AmendMessage { current_message: String },
     // Worktree switch confirmation
     ConfirmSwitchWorktree { path: String, display_name: String },
+    // Worktree delete confirmation
+    ConfirmDeleteWorktree { path: String, display_name: String, is_dirty: bool },
     // Add new worktree
     AddWorktree,
 }
@@ -249,6 +251,9 @@ pub enum GitAction {
     AddWorktree {
         name: String,
         checkout: bool,
+    },
+    DeleteWorktree {
+        force: bool,
     },
 }
 

@@ -441,6 +441,28 @@ pub fn add_worktree(path: &Path, worktree_path: &str, branch: &str) -> GitResult
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+pub fn delete_worktree(repo_path: &Path, worktree_path: &str, force: bool) -> GitResult {
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(worktree_path);
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run git worktree remove: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "git worktree remove failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
     let output = match Command::new("git")
         .args(["worktree", "list", "--porcelain"])
