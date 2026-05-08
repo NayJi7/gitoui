@@ -4,7 +4,7 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 
 use crate::{
     app::AppContext,
-    event::{DialogKind, Sender, UserEventWithCount},
+    event::{Sender, UserEventWithCount},
     git::{Commit, CommitHash, FileChange, Ref},
     view::{
         branch_detail::BranchDetailView, config::ConfigView, detail::DetailView,

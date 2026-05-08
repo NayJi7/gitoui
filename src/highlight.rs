@@ -2,8 +2,8 @@ use once_cell::sync::Lazy;
 use ratatui::style::{Color, Style};
 use syntect::{
     easy::HighlightLines,
-    highlighting::{Style as SyntectStyle, ThemeSet},
-    parsing::{SyntaxSet, SyntaxSetBuilder},
+    highlighting::ThemeSet,
+    parsing::SyntaxSet,
 };
 
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {

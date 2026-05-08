@@ -1,7 +1,8 @@
+#![allow(dead_code)]
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, StatefulWidget, Widget, Wrap},
 };

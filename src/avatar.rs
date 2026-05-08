@@ -429,6 +429,7 @@ fn fallback_avatar_png(seed: &str) -> Vec<u8> {
     out.into_inner()
 }
 
+#[allow(dead_code)]
 fn ratatui_color_to_rgba(color: Color) -> [u8; 4] {
     match color {
         Color::Rgb(r, g, b) => [r, g, b, 255],
@@ -488,6 +489,7 @@ fn indexed_color_to_rgba(index: u8) -> [u8; 4] {
     [gray, gray, gray, 255]
 }
 
+#[allow(dead_code)]
 fn rounded_avatar_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let image = image::load_from_memory(bytes).ok()?;
     let (width, height) = image.dimensions();

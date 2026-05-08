@@ -3,7 +3,7 @@ use std::rc::Rc;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
@@ -14,6 +14,7 @@ use crate::{app::AppContext, git::status::StatusType};
 pub struct UncommittedFile {
     pub status: StatusType,
     pub path: String,
+    #[allow(dead_code)]
     pub old_path: Option<String>,
     pub additions: usize,
     pub deletions: usize,
@@ -50,6 +51,7 @@ pub struct UncommittedState {
     pub hovered_action: Option<usize>,
 }
 
+#[allow(dead_code)]
 impl UncommittedState {
     pub fn select_next(&mut self, total: usize) {
         if self.selected < total.saturating_sub(1) {
@@ -102,7 +104,7 @@ impl UncommittedState {
         &mut self,
         staged_len: usize,
         unstaged_len: usize,
-        untracked_len: usize,
+        _untracked_len: usize,
     ) {
         // Order: Staged -> Unstaged -> Untracked, skipping empty sections
         match self.section {
@@ -228,6 +230,7 @@ impl UncommittedState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn total_in_section(
         &self,
         unstaged_len: usize,
@@ -245,7 +248,7 @@ impl UncommittedState {
         &self,
         staged_len: usize,
         unstaged_len: usize,
-        untracked_len: usize,
+        _untracked_len: usize,
     ) -> usize {
         let staged_rows = if staged_len == 0 { 1 } else { staged_len };
         let unstaged_rows = if unstaged_len == 0 { 1 } else { unstaged_len };

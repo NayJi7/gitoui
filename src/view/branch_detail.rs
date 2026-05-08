@@ -146,6 +146,7 @@ impl<'a> BranchDetailView<'a> {
         self.commit_list_state.take()
     }
 
+    #[allow(dead_code)]
     pub fn set_list_state(&mut self, state: CommitListState<'a>) {
         self.commit_list_state = Some(state);
     }

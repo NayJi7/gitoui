@@ -19,6 +19,7 @@ use crate::{
 };
 
 /// Predefined date/time formats for the application.
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, SmartDefault)]
 pub enum DateTimeFormat {
     /// DD/MM/YYYY - HH:MM (default)

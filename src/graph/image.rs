@@ -928,6 +928,7 @@ fn draw_uncommitted_overlay(
     }
 }
 
+#[allow(dead_code)]
 fn ratatui_color_to_rgba(color: ratatui::style::Color) -> image::Rgba<u8> {
     match color {
         ratatui::style::Color::Rgb(r, g, b) => image::Rgba([r, g, b, 0xff]),

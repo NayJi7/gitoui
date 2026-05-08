@@ -18,9 +18,9 @@ use rustc_hash::FxHashMap;
 use crate::{
     avatar::AvatarManager,
     color::{ColorTheme, GraphColorSet},
-    config::{save, CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
+    config::{CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
     event::{
-        AppEvent, DialogKind, EventController, GitAction, Sender, UserEvent, UserEventWithCount,
+        AppEvent, DialogKind, EventController, GitAction, UserEvent, UserEventWithCount,
     },
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, open_url,
@@ -827,7 +827,7 @@ impl App<'_> {
         let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None)
             || is_search_active
             || is_config_active;
-        let is_diff = matches!(&self.view, View::Diff(_));
+        let _is_diff = matches!(&self.view, View::Diff(_));
 
         let status_area = if show_shortcuts {
             let shortcut_text: String = if is_search_querying {
@@ -2322,7 +2322,7 @@ impl App<'_> {
             View::TagDetail(ref mut view) => view.take_list_state(),
             _ => None,
         };
-        let repo_path = self.repository.path();
+        let _repo_path = self.repository.path();
         let metadata = TagMetadata {
             tag_name: tag_name.clone(),
             tag_type: "Tag".to_string(),
@@ -2427,7 +2427,7 @@ impl App<'_> {
     fn refresh_uncommitted(&mut self) {
         if let View::Uncommitted(ref mut view) = self.view {
             let selected_path = view.selected_path().map(|s| s.to_string());
-            let was_section = view.section();
+            let _was_section = view.section();
 
             let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
 

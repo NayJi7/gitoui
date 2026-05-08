@@ -31,6 +31,7 @@ static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default(
 
 const ELLIPSIS: &str = "...";
 
+#[allow(dead_code)]
 pub fn uncommitted_commit_hash() -> CommitHash {
     CommitHash::from("0000000000000000000000000000000000000000")
 }
@@ -296,7 +297,7 @@ impl<'a> CommitListState<'a> {
         default_fuzzy: bool,
     ) -> CommitListState<'a> {
         let total = commits.len();
-        let has_uncommitted = commits.first().map_or(false, |c| c.is_uncommitted);
+        let _has_uncommitted = commits.first().map_or(false, |c| c.is_uncommitted);
         let commit_hash_set = commits
             .iter()
             .filter_map(|c| Some(&c.commit.commit_hash))
@@ -841,7 +842,7 @@ impl<'a> CommitListState<'a> {
         if let SearchState::Applied {
             match_index,
             ignore_case,
-            fuzzy,
+            fuzzy: _,
             ..
         } = &mut self.search_state
         {
@@ -889,7 +890,7 @@ impl<'a> CommitListState<'a> {
         }
         if let SearchState::Applied {
             match_index,
-            ignore_case,
+            ignore_case: _,
             fuzzy,
             ..
         } = &mut self.search_state
@@ -1301,7 +1302,7 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf)
     }
 
-    fn render_commit_message(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState, avatars_enabled: bool) {
+    fn render_commit_message(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState, _avatars_enabled: bool) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
@@ -1721,6 +1722,7 @@ struct RefHitAreaRel {
     pub is_tag: bool,
 }
 
+#[allow(unused_assignments)]
 fn refs_spans<'a>(
     commit_info: &'a CommitInfo,
     head: &'a Head,

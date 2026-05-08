@@ -117,6 +117,7 @@ impl RefListState {
     /// Returns the remote name when the selected item is a top-level remote
     /// node (e.g. `origin`) directly under the remotes root, but not the
     /// special `[+ Add remote]` entry.
+    #[allow(dead_code)]
     pub fn selected_remote_name(&self) -> Option<String> {
         let selected = self.tree_state.selected();
         if selected.len() == 2

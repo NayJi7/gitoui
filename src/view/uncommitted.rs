@@ -464,6 +464,7 @@ impl<'a> UncommittedView<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_list_state(&mut self, state: CommitListState<'a>) {
         self.commit_list_state = Some(state);
     }

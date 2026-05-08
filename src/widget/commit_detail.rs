@@ -3,7 +3,7 @@ use std::rc::Rc;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
@@ -65,6 +65,7 @@ impl CommitDetailState {
         self.selected_file = 0;
     }
 
+    #[allow(dead_code)]
     pub fn select_first_file(&mut self) {
         self.selected_file = 0;
     }
@@ -73,6 +74,7 @@ impl CommitDetailState {
         self.offset = usize::MAX;
     }
 
+    #[allow(dead_code)]
     pub fn select_last_file(&mut self, total: usize) {
         if total > 0 {
             self.selected_file = total - 1;
@@ -666,7 +668,7 @@ impl CommitDetail<'_> {
                         ("D", path.as_str(), 0usize, *deletions)
                     }
                     FileChange::Move {
-                        from,
+                        from: _,
                         to,
                         additions,
                         deletions,

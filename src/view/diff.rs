@@ -43,6 +43,7 @@ pub struct DiffView<'a> {
     focused_button: Option<usize>, // unified selection: set by both keyboard and mouse hover
 
     // Full file contents for directional gap expansion
+    #[allow(dead_code)]
     old_file_lines: Vec<String>,
     new_file_lines: Vec<String>,
     // Per-gap state: (visible_up, visible_down, total_gap_size)
@@ -108,6 +109,7 @@ impl<'a> DiffView<'a> {
         self.needs_rebuild = true;
     }
 
+    #[allow(dead_code)]
     pub fn has_content(&self) -> bool {
         self.diff_entries.iter().any(|e| !e.hunks.is_empty())
     }
@@ -723,6 +725,7 @@ impl<'a> DiffView<'a> {
         self.commit_list_state.take()
     }
 
+    #[allow(dead_code)]
     fn as_mut_list_state(&mut self) -> Option<&mut CommitListState<'a>> {
         self.commit_list_state.as_mut()
     }
