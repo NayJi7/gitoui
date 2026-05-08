@@ -149,7 +149,7 @@ pub fn run() -> Result<()> {
     let mut terminal = None;
 
     let ret = loop {
-        let (mut core_config, ui_config, graph_config, color_theme, keybind_patch) =
+        let (mut core_config, ui_config, graph_config, mut color_theme, keybind_patch) =
             match config::load() {
                 Ok(config) => config,
                 Err(e) if terminal.is_none() => break Err(e),
@@ -158,11 +158,9 @@ pub fn run() -> Result<()> {
                     continue;
                 }
             };
-        let color_theme = crate::themes::get_theme(&core_config.option.theme)
-            .map(|def| def.color_theme)
-            .unwrap_or(color_theme);
         if let Some(def) = crate::themes::get_theme(&core_config.option.theme) {
-            core_config.option.syntax_theme = def.syntax_theme.to_string();
+            color_theme = def.color_theme;
+            core_config.option.syntax_theme = def.syntax_theme.to_owned();
         }
         let keybind = keybind::KeyBind::new(keybind_patch);
 
