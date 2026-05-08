@@ -74,11 +74,10 @@ impl<'a> DetailView<'a> {
                 }
             }
             UserEvent::NavigateRight => {
-                self.commit_detail_state
-                    .select_last_file(self.changes.len());
+                self.tx.send(AppEvent::SelectOlderCommit);
             }
             UserEvent::NavigateLeft => {
-                self.commit_detail_state.select_first_file();
+                self.tx.send(AppEvent::SelectNewerCommit);
             }
             UserEvent::PageDown => {
                 for _ in 0..count {
