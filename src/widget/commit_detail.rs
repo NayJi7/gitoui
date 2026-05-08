@@ -786,7 +786,7 @@ mod tests {
         let changes = Vec::new();
         let refs = Vec::new();
         let ctx = Rc::new(AppContext::default());
-        let detail = CommitDetail::new(&commit, &changes, &refs, ctx, None);
+        let detail = CommitDetail::new(&commit, &changes, &refs, ctx, None, false);
 
         let (label_lines, value_lines, _) = detail.contents(80);
         let labels = label_lines
@@ -811,7 +811,7 @@ mod tests {
         let changes = Vec::new();
         let refs = Vec::new();
         let ctx = Rc::new(AppContext::default());
-        let detail = CommitDetail::new(&commit, &changes, &refs, ctx, None);
+        let detail = CommitDetail::new(&commit, &changes, &refs, ctx, None, false);
 
         let (label_lines, _, _) = detail.contents(80);
         assert_eq!(line_text(&label_lines[0]).trim(), "Author:");

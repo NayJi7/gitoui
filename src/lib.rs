@@ -218,6 +218,18 @@ pub fn run() -> Result<()> {
                 }
             })
             .unwrap_or_else(|| "Not set".into());
+        let git_default_branch = std::process::Command::new("git")
+            .args(["config", "init.defaultBranch"])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "main".into());
         let github_auth_state = github_auth::load_state();
         let avatar_manager = avatar::AvatarManager::new(
             image_protocol,
@@ -227,7 +239,11 @@ pub fn run() -> Result<()> {
         );
         let mut avatar_manager = avatar_manager;
         avatar_manager.set_github_avatars(core_config.github_avatars());
-        let default_branch = core_config.option.default_branch.clone();
+        let default_branch = core_config
+            .option
+            .default_branch
+            .clone()
+            .unwrap_or_else(|| git_default_branch.clone());
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
@@ -237,6 +253,7 @@ pub fn run() -> Result<()> {
             avatar_manager: std::sync::Mutex::new(avatar_manager),
             git_user_name,
             git_user_email,
+            git_default_branch: git_default_branch.clone(),
             github_auth_state,
             branch_color_map: rustc_hash::FxHashMap::default(),
         });

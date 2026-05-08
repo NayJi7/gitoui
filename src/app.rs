@@ -80,6 +80,7 @@ impl Clone for AppContext {
             avatar_manager: Mutex::new(self.avatar_manager.lock().unwrap().clone()),
             git_user_name: self.git_user_name.clone(),
             git_user_email: self.git_user_email.clone(),
+            git_default_branch: self.git_default_branch.clone(),
             github_auth_state: self.github_auth_state.clone(),
             branch_color_map: self.branch_color_map.clone(),
         }
@@ -112,6 +113,7 @@ pub struct AppContext {
     pub avatar_manager: Mutex<AvatarManager>,
     pub git_user_name: String,
     pub git_user_email: String,
+    pub git_default_branch: String,
     pub github_auth_state: GithubAuthState,
     pub branch_color_map: FxHashMap<String, Color>,
 }
@@ -132,6 +134,7 @@ impl Default for AppContext {
             )),
             git_user_name: String::new(),
             git_user_email: String::new(),
+            git_default_branch: String::new(),
             github_auth_state: GithubAuthState::default(),
             branch_color_map: FxHashMap::default(),
         }

@@ -246,8 +246,7 @@ pub struct CoreOptionConfig {
     pub date_time_local: bool,
     pub user_name: Option<String>,
     pub user_email: Option<String>,
-    #[default("main".to_string())]
-    pub default_branch: String,
+    pub default_branch: Option<String>,
     #[default = true]
     pub github_avatars: bool,
 }
@@ -590,11 +589,11 @@ impl CoreConfig {
     pub fn set_user_email(&mut self, email: Option<String>) {
         self.option.user_email = email;
     }
-    pub fn default_branch(&self) -> &str {
-        &self.option.default_branch
+    pub fn default_branch(&self) -> Option<&str> {
+        self.option.default_branch.as_deref()
     }
     pub fn set_default_branch(&mut self, name: Option<String>) {
-        self.option.default_branch = name.unwrap_or_else(|| "main".to_string());
+        self.option.default_branch = name.filter(|s| !s.is_empty());
     }
     pub fn github_avatars(&self) -> bool {
         self.option.github_avatars
@@ -726,7 +725,7 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
         &core.option.user_email,
     );
 
-    set_nested_string(
+    set_nested_option_string(
         &mut doc,
         &["core", "option", "default_branch"],
         &core.option.default_branch,
@@ -819,7 +818,7 @@ mod tests {
                     date_time_local: true,
                     user_name: None,
                     user_email: None,
-                    default_branch: "main".into(),
+                    default_branch: None,
                     github_avatars: true,
                 },
                 search: CoreSearchConfig {
@@ -962,7 +961,7 @@ mod tests {
                     date_time_local: true,
                     user_name: None,
                     user_email: None,
-                    default_branch: "main".into(),
+                    default_branch: None,
                     github_avatars: true,
                 },
                 search: CoreSearchConfig {
@@ -1085,7 +1084,7 @@ mod tests {
                     date_time_local: true,
                     user_name: None,
                     user_email: None,
-                    default_branch: "main".into(),
+                    default_branch: None,
                     github_avatars: true,
                 },
                 search: CoreSearchConfig {

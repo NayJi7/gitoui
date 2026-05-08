@@ -78,7 +78,10 @@ impl<'a> ConfigView<'a> {
                 .user_email()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "(from git)".into()),
-            self.core_config.default_branch().to_string(),
+            self.core_config
+                .default_branch()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(from git)".into()),
             github_auth_display(&self.github_auth_state, self.github_auth_pending),
             if self.core_config.github_avatars() {
                 "enabled".to_string()
@@ -281,7 +284,7 @@ impl<'a> ConfigView<'a> {
         let current_value = match self.selected {
             6 => self.core_config.user_name().unwrap_or("").to_string(),
             7 => self.core_config.user_email().unwrap_or("").to_string(),
-            8 => self.core_config.default_branch().to_string(),
+            8 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -678,7 +681,10 @@ impl<'a> ConfigView<'a> {
             ),
             (
                 "Default Branch",
-                self.core_config.default_branch().to_string(),
+                self.core_config
+                    .default_branch()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "(from git)".into()),
                 false,
             ),
             (
@@ -786,7 +792,10 @@ impl<'a> ConfigView<'a> {
                 "Override git user.email for commits.\n\nCurrent git config: '{}'",
                 git_email
             ),
-            "Default branch name used when initializing a new git repository.".into(),
+            format!(
+                "Override the branch name used by gitui when initializing a new git repository.\n\nCurrent git config: '{}'",
+                self.ctx.git_default_branch
+            ),
             github_auth_description(&self.github_auth_state, self.github_auth_pending),
             github_avatars_description(&self.github_auth_state, self.core_config.github_avatars()),
         ];
