@@ -861,7 +861,7 @@ impl App<'_> {
         // Separator row: full-width line.
         let sep = Line::from(
             "─".repeat(area.width as usize)
-                .fg(self.ctx.color_theme.divider_fg),
+                .fg(ratatui::style::Color::White),
         );
         f.render_widget(Paragraph::new(sep), separator_row);
     }

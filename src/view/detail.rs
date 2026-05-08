@@ -381,27 +381,28 @@ impl<'a> DetailView<'a> {
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         let row = row as usize;
-        if row < self.list_height {
-            // Ignore clicks in the commit list pane when in detail view
+        let Some(detail_area) = self.detail_area else { return };
+        let detail_y = detail_area.y as usize;
+
+        if row < detail_y {
+            // Click in commit list pane — ignore
             return;
         }
 
         // Check if click is in action bar area (right 40%)
-        if let Some(detail_area) = self.detail_area {
-            let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
-            if col >= action_bar_x && row >= detail_area.y as usize {
-                let action_bar_row = (row - detail_area.y as usize).saturating_sub(4);
-                if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
-                    self.execute_action(action_idx);
-                }
-                return;
+        let action_bar_x = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
+        if col >= action_bar_x {
+            let action_bar_row = (row - detail_y).saturating_sub(4);
+            if let Some(action_idx) = self.action_index_at_row(action_bar_row) {
+                self.execute_action(action_idx);
             }
+            return;
         }
 
-        let detail_local_row = row - self.list_height;
         // Detail widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
+        let detail_local_row = row - detail_y;
         if detail_local_row < 4 {
-            return; // clicked on header area
+            return;
         }
 
         let content_row = detail_local_row - 4;

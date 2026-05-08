@@ -1082,6 +1082,13 @@ impl<'a> StatefulWidget for CommitList<'a> {
 
         if let Some(header_area) = header_area {
             self.render_header(buf, header_area, state, avatars_enabled);
+            // Subtle ▁ separator line below column headers
+            let sep_y = header_area.y + 1;
+            let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+            for x in header_area.left()..header_area.right() {
+                buf[(x, sep_y)].set_symbol("▁");
+                buf[(x, sep_y)].set_style(sep_style);
+            }
         }
 
         let widths = self.content_column_widths(rows_area.width, state, avatars_enabled);
