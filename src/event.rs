@@ -74,6 +74,9 @@ pub enum AppEvent {
     OpenBranchDetail {
         branch_name: String,
     },
+    OpenSetUpstreamDialog {
+        branch: String,
+    },
     OpenTagDetail {
         tag_name: String,
     },
@@ -132,6 +135,7 @@ pub enum DialogKind {
     AddRemote,
     ConfirmDeleteRemote { name: String },
     ChooseRemote { remotes: Vec<String>, branch: String },
+    SetUpstream { remotes: Vec<String>, branch: String },
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +220,7 @@ pub enum GitAction {
     AddRemote { url: String },  // remote name comes from `target` in execute_git_action
     RemoveRemote,               // remote name comes from `target`
     PushSetUpstream { branch: String }, // target = remote name
+    SetUpstream { branch: String }, // target = remote name
 }
 
 #[derive(Clone)]
@@ -460,6 +465,8 @@ pub enum UserEvent {
     // Diff view file cycling
     CycleFileNext,
     CycleFilePrev,
+    // Branch upstream
+    SetUpstream,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -561,6 +568,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "copy_stash_hash" => Ok(UserEvent::CopyStashHash),
                         "cycle_file_next" => Ok(UserEvent::CycleFileNext),
                         "cycle_file_prev" => Ok(UserEvent::CycleFilePrev),
+                        "set_upstream" => Ok(UserEvent::SetUpstream),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

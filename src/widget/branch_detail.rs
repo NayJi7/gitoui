@@ -22,6 +22,7 @@ pub const LOCAL_BRANCH_ACTIONS: &[(&str, &str)] = &[
     ("Merge into current", "m"),
     ("Rebase current on", "e"),
     ("Push", "Q"),
+    ("Set Upstream", "I"),
     ("Create Archive", "E"),
     ("Unselect", "T"),
     ("Copy Name", "V"),

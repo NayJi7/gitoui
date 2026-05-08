@@ -566,6 +566,19 @@ impl App<'_> {
                     terminal.clear()?;
                     self.open_branch_detail(branch_name);
                 }
+                AppEvent::OpenSetUpstreamDialog { branch } => {
+                    let repo_path = self.repository.path();
+                    match actions::get_remotes(repo_path) {
+                        Ok(remotes) if !remotes.is_empty() => {
+                            self.open_dialog(DialogKind::SetUpstream { remotes, branch });
+                        }
+                        _ => {
+                            self.ec.send(AppEvent::NotifyError(
+                                "No remotes configured. Add a remote first.".into(),
+                            ));
+                        }
+                    }
+                }
                 AppEvent::OpenTagDetail { tag_name } => {
                     self.clear_image(Some(terminal))?;
                     terminal.clear()?;
@@ -1912,6 +1925,10 @@ impl App<'_> {
             GitAction::PushSetUpstream { branch } => (
                 actions::push_set_upstream(repo_path, &target, &branch),
                 Some(format!("Pushed and set upstream to '{}/{}'.", target, branch)),
+            ),
+            GitAction::SetUpstream { branch } => (
+                actions::set_upstream(repo_path, &target, &branch),
+                Some(format!("Upstream set to '{}/{}'.", target, branch)),
             ),
         };
 

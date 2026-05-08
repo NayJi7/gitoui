@@ -136,6 +136,7 @@ impl<'a> DialogView<'a> {
         match &self.kind {
             DialogKind::Reset { .. } => 3,
             DialogKind::ChooseRemote { remotes, .. } => remotes.len(),
+            DialogKind::SetUpstream { remotes, .. } => remotes.len(),
             _ => 0,
         }
     }
@@ -806,6 +807,21 @@ impl<'a> DialogView<'a> {
                     lines.push(self.radio_line(i, remote));
                 }
             }
+            DialogKind::SetUpstream { remotes, branch } => {
+                lines.push(Line::from(Span::styled(
+                    format!("Set upstream for branch '{}':", branch),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "Choose a remote to track:",
+                    Style::default().fg(dim_fg),
+                )));
+                lines.push(Line::from(""));
+                for (i, remote) in remotes.iter().enumerate() {
+                    self.radio_rows.push(lines.len());
+                    lines.push(self.radio_line(i, remote));
+                }
+            }
         }
 
         lines.push(Line::from(""));
@@ -850,6 +866,7 @@ impl<'a> DialogView<'a> {
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
             DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
+            DialogKind::SetUpstream { .. } => " Set Upstream ",
         }
         .to_string()
     }
@@ -1155,6 +1172,18 @@ impl<'a> DialogView<'a> {
                     .cloned()
                     .unwrap_or_else(|| remotes[0].clone());
                 (remote, GitAction::PushSetUpstream { branch: branch.clone() })
+            }
+            DialogKind::SetUpstream { remotes, branch } => {
+                if remotes.is_empty() {
+                    self.tx
+                        .send(AppEvent::NotifyError("No remotes available".into()));
+                    return;
+                }
+                let remote = remotes
+                    .get(self.dropdown_selected)
+                    .cloned()
+                    .unwrap_or_else(|| remotes[0].clone());
+                (remote, GitAction::SetUpstream { branch: branch.clone() })
             }
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });

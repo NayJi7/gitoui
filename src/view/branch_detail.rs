@@ -98,6 +98,11 @@ impl<'a> BranchDetailView<'a> {
                     value: self.metadata.branch_name.clone(),
                 });
             }
+            UserEvent::SetUpstream => {
+                self.tx.send(AppEvent::OpenSetUpstreamDialog {
+                    branch: self.metadata.branch_name.clone(),
+                });
+            }
             UserEvent::Refresh => {
                 self.refresh();
             }
@@ -288,14 +293,15 @@ impl<'a> BranchDetailView<'a> {
                 5 => self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
                     branch: name,
                 })),
-                6 => self.tx.send(AppEvent::ExecuteGitAction {
+                6 => self.tx.send(AppEvent::OpenSetUpstreamDialog { branch: name }),
+                7 => self.tx.send(AppEvent::ExecuteGitAction {
                     target: name,
                     action: GitAction::CreateArchive,
                 }),
-                7 => self.tx.send(AppEvent::NotifyInfo(
+                8 => self.tx.send(AppEvent::NotifyInfo(
                     "Unselect branch not yet implemented".into(),
                 )),
-                8 => self.tx.send(AppEvent::CopyToClipboard {
+                9 => self.tx.send(AppEvent::CopyToClipboard {
                     name: "Branch Name".into(),
                     value: name,
                 }),

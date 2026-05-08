@@ -169,6 +169,18 @@ pub fn remove_remote(path: &Path, name: &str) -> GitResult {
     run_git(path, &["remote", "remove", name])
 }
 
+pub fn set_upstream(path: &Path, remote: &str, branch: &str) -> GitResult {
+    run_git(
+        path,
+        &[
+            "branch",
+            "--set-upstream-to",
+            &format!("{}/{}", remote, branch),
+            branch,
+        ],
+    )
+}
+
 // --- Branch Actions ---
 
 pub fn delete_remote_branch(path: &Path, remote: &str, branch: &str) -> GitResult {
