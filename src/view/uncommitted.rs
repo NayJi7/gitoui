@@ -137,7 +137,7 @@ impl<'a> UncommittedView<'a> {
                     }
                 }
             }
-            UserEvent::UnstageAll => {
+            UserEvent::UnstageAll | UserEvent::Pull => {
                 if !self.staged.is_empty() {
                     self.tx
                         .send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
@@ -160,7 +160,7 @@ impl<'a> UncommittedView<'a> {
                         .send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
                 }
             }
-            UserEvent::Stash => {
+            UserEvent::Stash | UserEvent::Reset => {
                 self.tx
                     .send(AppEvent::OpenDialog(DialogKind::StashWithMessage));
             }

@@ -20,7 +20,7 @@ page_up = ["ctrl-b", "pageup"]
 page_down = ["ctrl-f", "pagedown", "space"]
 half_page_up = ["ctrl-u"]
 half_page_down = ["ctrl-d"]
-select_top = ["shift-h"]
+select_top = []
 select_middle = ["shift-m"]
 select_bottom = ["shift-l"]
 
@@ -99,4 +99,4 @@ abort_operation = ["ctrl-a"]
 amend_commit = ["ctrl-m"]
 
 # Show file history (git log --follow) from diff view
-file_history = ["ctrl-h"]
+file_history = ["shift-h"]

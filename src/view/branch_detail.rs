@@ -71,17 +71,17 @@ impl<'a> BranchDetailView<'a> {
                     target: self.metadata.branch_name.clone(),
                 }));
             }
-            UserEvent::PushBranch => {
+            UserEvent::PushBranch | UserEvent::Push => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
                     branch: self.metadata.branch_name.clone(),
                 }));
             }
-            UserEvent::PullBranch => {
+            UserEvent::PullBranch | UserEvent::Pull => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::PullBranch {
                     branch: self.metadata.branch_name.clone(),
                 }));
             }
-            UserEvent::CreateArchive => {
+            UserEvent::CreateArchive | UserEvent::StageAll => {
                 self.tx.send(AppEvent::ExecuteGitAction {
                     target: self.metadata.branch_name.clone(),
                     action: GitAction::CreateArchive,

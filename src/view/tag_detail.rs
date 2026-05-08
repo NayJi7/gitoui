@@ -43,12 +43,12 @@ impl<'a> TagDetailView<'a> {
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
             }
-            UserEvent::PushTag => {
+            UserEvent::PushTag | UserEvent::Push => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::PushTag {
                     tag: self.metadata.tag_name.clone(),
                 }));
             }
-            UserEvent::DeleteTag => {
+            UserEvent::DeleteTag | UserEvent::DeleteBranch => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::DeleteTag {
                     tag: self.metadata.tag_name.clone(),
                 }));

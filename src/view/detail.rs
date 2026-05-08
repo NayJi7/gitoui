@@ -237,7 +237,7 @@ impl<'a> DetailView<'a> {
             UserEvent::AbortOperation => {
                 self.tx.send(AppEvent::CheckAbortOperation);
             }
-            UserEvent::AmendCommit => {
+            UserEvent::AmendCommit | UserEvent::StageAll => {
                 if self.is_head_commit() {
                     self.tx.send(AppEvent::OpenDialog(DialogKind::AmendMessage {
                         current_message: self.commit.commit_message.clone(),
