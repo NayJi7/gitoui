@@ -65,7 +65,7 @@ impl<'a> ConfigView<'a> {
             diff_mode_display(self.ui_config.common.diff_mode),
             mouse_display(self.ui_config.common.mouse_enabled),
             protocol_display(self.core_config.protocol()),
-            self.core_config.option.syntax_theme.clone(),
+            self.core_config.option.theme.clone(),
             self.core_config
                 .date_time_format()
                 .display_name()
@@ -90,7 +90,7 @@ impl<'a> ConfigView<'a> {
             "Diff Mode",
             "Mouse",
             "Image Protocol",
-            "Syntax Theme",
+            "Thème",
             "Date Format",
             "Git Name",
             "Git Email",
@@ -455,25 +455,15 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_protocol(prev);
             }
             4 => {
-                let themes = [
-                    "base16-ocean.dark",
-                    "base16-ocean.light",
-                    "base16-mocha.dark",
-                    "base16-eighties.dark",
-                    "InspiredGitHub",
-                    "Solarized (dark)",
-                    "Solarized (light)",
-                    "Dracula",
-                    "Monokai",
-                    "3024 Day",
-                    "Agola Dark",
-                    "Blackboard",
-                    "Cobalt",
-                ];
-                let current = self.core_config.option.syntax_theme.as_str();
+                let themes = crate::themes::list_themes();
+                let current = self.core_config.option.theme.as_str();
                 let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
                 let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
-                self.core_config.option.syntax_theme = themes[prev_idx].to_string();
+                let new_theme = themes[prev_idx];
+                self.core_config.option.theme = new_theme.to_string();
+                if let Some(def) = crate::themes::get_theme(new_theme) {
+                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                }
                 self.theme_preview = None;
             }
             5 => {
@@ -530,25 +520,15 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_protocol(next);
             }
             4 => {
-                let themes = [
-                    "base16-ocean.dark",
-                    "base16-ocean.light",
-                    "base16-mocha.dark",
-                    "base16-eighties.dark",
-                    "InspiredGitHub",
-                    "Solarized (dark)",
-                    "Solarized (light)",
-                    "Dracula",
-                    "Monokai",
-                    "3024 Day",
-                    "Agola Dark",
-                    "Blackboard",
-                    "Cobalt",
-                ];
-                let current = self.core_config.option.syntax_theme.as_str();
+                let themes = crate::themes::list_themes();
+                let current = self.core_config.option.theme.as_str();
                 let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
                 let next_idx = (idx + 1) % themes.len();
-                self.core_config.option.syntax_theme = themes[next_idx].to_string();
+                let new_theme = themes[next_idx];
+                self.core_config.option.theme = new_theme.to_string();
+                if let Some(def) = crate::themes::get_theme(new_theme) {
+                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                }
                 self.theme_preview = None;
             }
             5 => {
@@ -655,8 +635,8 @@ impl<'a> ConfigView<'a> {
                 false,
             ),
             (
-                "Syntax Theme",
-                self.core_config.option.syntax_theme.clone(),
+                "Thème",
+                self.core_config.option.theme.clone(),
                 false,
             ),
             (
