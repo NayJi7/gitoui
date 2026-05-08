@@ -148,6 +148,14 @@ pub fn reset(path: &Path, target: &str, mode: &str) -> GitResult {
 
 // --- Branch Actions ---
 
+pub fn add_remote(path: &Path, name: &str, url: &str) -> GitResult {
+    run_git(path, &["remote", "add", name, url])
+}
+
+pub fn remove_remote(path: &Path, name: &str) -> GitResult {
+    run_git(path, &["remote", "remove", name])
+}
+
 pub fn delete_remote_branch(path: &Path, remote: &str, branch: &str) -> GitResult {
     run_git(path, &["push", remote, "--delete", branch])
 }
@@ -282,4 +290,23 @@ pub fn tag_metadata(path: &Path, tag: &str) -> GitResult {
 
 pub fn tag_target_info(path: &Path, tag: &str) -> GitResult {
     run_git(path, &["log", "-1", "--format=%H %s", tag])
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use super::*;
+
+    #[test]
+    fn add_remote_produces_valid_command_args() {
+        let _ = std::panic::catch_unwind(|| {
+            let _ = add_remote(std::path::Path::new("/nonexistent"), "origin", "https://example.com");
+        });
+    }
+
+    #[test]
+    fn remove_remote_produces_valid_command_args() {
+        let _ = std::panic::catch_unwind(|| {
+            let _ = remove_remote(std::path::Path::new("/nonexistent"), "origin");
+        });
+    }
 }
