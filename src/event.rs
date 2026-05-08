@@ -128,6 +128,9 @@ pub enum DialogKind {
     ConfirmUnstageAll,
     ConfirmPopStash { stash_ref: String },
     ConfirmDropStash { stash_ref: String },
+    // Remote actions
+    AddRemote,
+    ConfirmDeleteRemote { name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +211,9 @@ pub enum GitAction {
     },
     CleanUntracked,
     Push,
+    // Remote actions
+    AddRemote { url: String },  // remote name comes from `target` in execute_git_action
+    RemoveRemote,               // remote name comes from `target`
 }
 
 #[derive(Clone)]
