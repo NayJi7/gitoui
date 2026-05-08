@@ -6,6 +6,7 @@ pub mod github_auth;
 pub mod graph;
 pub mod highlight;
 pub mod protocol;
+pub mod themes;
 
 mod app;
 mod check;

@@ -235,6 +235,8 @@ pub struct CoreOptionConfig {
     pub initial_load_count: usize,
     #[default = 200]
     pub load_more_count: usize,
+    #[default = "Tokyo Night"]
+    pub theme: String,
     #[default = "base16-ocean.dark"]
     pub syntax_theme: String,
     #[default(DateTimeFormat::DDMMYYYY_HHMM)]
@@ -675,6 +677,12 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
 
     set_nested_string(
         &mut doc,
+        &["core", "option", "theme"],
+        &core.option.theme,
+    );
+
+    set_nested_string(
+        &mut doc,
         &["core", "option", "syntax_theme"],
         &core.option.syntax_theme,
     );
@@ -790,6 +798,7 @@ mod tests {
                     auto_refresh_debounce_ms: 500,
                     initial_load_count: 500,
                     load_more_count: 200,
+                    theme: "Tokyo Night".into(),
                     syntax_theme: "base16-ocean.dark".into(),
                     date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
                     date_time_local: true,
@@ -931,6 +940,7 @@ mod tests {
                     auto_refresh_debounce_ms: 500,
                     initial_load_count: 500,
                     load_more_count: 200,
+                    theme: "Tokyo Night".into(),
                     syntax_theme: "base16-ocean.dark".into(),
                     date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
                     date_time_local: true,
@@ -1052,6 +1062,7 @@ mod tests {
                     auto_refresh_debounce_ms: 500,
                     initial_load_count: 500,
                     load_more_count: 200,
+                    theme: "Tokyo Night".into(),
                     syntax_theme: "base16-ocean.dark".into(),
                     date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
                     date_time_local: true,
