@@ -1069,10 +1069,10 @@ impl<'a> StatefulWidget for CommitList<'a> {
         // Compute once per render — avoids 4 separate mutex lock/unlock cycles
         let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
 
-        let (header_area, rows_area) = if area.height >= 2 {
+        let (header_area, rows_area) = if area.height >= 3 {
             (
                 Some(Rect::new(area.x, area.y, area.width, 1)),
-                Rect::new(area.x, area.y + 1, area.width, area.height - 1),
+                Rect::new(area.x, area.y + 2, area.width, area.height - 2),
             )
         } else {
             (None, area)

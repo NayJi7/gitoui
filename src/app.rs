@@ -802,8 +802,7 @@ impl App<'_> {
         let icon_width = icon_text.len() as u16;
         let path_width = area.width.saturating_sub(icon_width + 2);
 
-        let [content_row, separator_row, _blank_row] = ratatui::layout::Layout::vertical([
-            ratatui::layout::Constraint::Length(1),
+        let [content_row, separator_row] = ratatui::layout::Layout::vertical([
             ratatui::layout::Constraint::Length(1),
             ratatui::layout::Constraint::Length(1),
         ])
@@ -1142,7 +1141,7 @@ impl App<'_> {
     }
 }
 
-const HEADER_HEIGHT: u16 = 3;
+const HEADER_HEIGHT: u16 = 2;
 
 fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
     let [header, rest] = Layout::vertical([
