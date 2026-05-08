@@ -148,6 +148,19 @@ pub fn reset(path: &Path, target: &str, mode: &str) -> GitResult {
 
 // --- Remote Actions ---
 
+pub fn get_remotes(path: &Path) -> Result<Vec<String>, String> {
+    let output = run_git(path, &["remote"])?;
+    Ok(output
+        .lines()
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
+pub fn push_set_upstream(path: &Path, remote: &str, branch: &str) -> GitResult {
+    run_git(path, &["push", "--set-upstream", remote, branch])
+}
+
 pub fn add_remote(path: &Path, name: &str, url: &str) -> GitResult {
     run_git(path, &["remote", "add", name, url])
 }

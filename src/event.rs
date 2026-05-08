@@ -131,6 +131,7 @@ pub enum DialogKind {
     // Remote actions
     AddRemote,
     ConfirmDeleteRemote { name: String },
+    ChooseRemote { remotes: Vec<String>, branch: String },
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +215,7 @@ pub enum GitAction {
     // Remote actions
     AddRemote { url: String },  // remote name comes from `target` in execute_git_action
     RemoveRemote,               // remote name comes from `target`
+    PushSetUpstream { branch: String }, // target = remote name
 }
 
 #[derive(Clone)]

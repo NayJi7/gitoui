@@ -132,6 +132,14 @@ impl<'a> DialogView<'a> {
         matches!(self.kind, DialogKind::AddRemote)
     }
 
+    fn radio_count(&self) -> usize {
+        match &self.kind {
+            DialogKind::Reset { .. } => 3,
+            DialogKind::ChooseRemote { remotes, .. } => remotes.len(),
+            _ => 0,
+        }
+    }
+
     fn elements(&self) -> Vec<DialogElement> {
         let mut els = vec![];
         if self.has_input_field() {
@@ -140,8 +148,9 @@ impl<'a> DialogView<'a> {
         if self.has_second_input_field() {
             els.push(DialogElement::SecondInput);
         }
-        if matches!(self.kind, DialogKind::Reset { .. }) {
-            for i in 0..3 {
+        let n = self.radio_count();
+        if n > 0 {
+            for i in 0..n {
                 els.push(DialogElement::Radio(i));
             }
         } else {
@@ -324,7 +333,7 @@ impl<'a> DialogView<'a> {
             UserEvent::Cancel => self.tx.send(AppEvent::DialogCancel),
             UserEvent::Close => self.tx.send(AppEvent::DialogCancel),
             UserEvent::NavigateDown => match self.focused {
-                DialogElement::Radio(i) if i < 2 => {
+                DialogElement::Radio(i) if i + 1 < self.radio_count() => {
                     self.dropdown_selected = i + 1;
                     self.focused = DialogElement::Radio(i + 1);
                 }
@@ -782,6 +791,21 @@ impl<'a> DialogView<'a> {
                     warn_fg,
                 ));
             }
+            DialogKind::ChooseRemote { remotes, branch } => {
+                lines.push(Line::from(Span::styled(
+                    format!("No upstream for branch '{}'.", branch),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "Choose a remote to push and set as upstream:",
+                    Style::default().fg(dim_fg),
+                )));
+                lines.push(Line::from(""));
+                for (i, remote) in remotes.iter().enumerate() {
+                    self.radio_rows.push(lines.len());
+                    lines.push(self.radio_line(i, remote));
+                }
+            }
         }
 
         lines.push(Line::from(""));
@@ -825,6 +849,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmDropStash { .. } => " Drop Stash ",
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
+            DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
         }
         .to_string()
     }
@@ -1119,6 +1144,18 @@ impl<'a> DialogView<'a> {
                 )
             }
             DialogKind::ConfirmDeleteRemote { name } => (name.clone(), GitAction::RemoveRemote),
+            DialogKind::ChooseRemote { remotes, branch } => {
+                if remotes.is_empty() {
+                    self.tx
+                        .send(AppEvent::NotifyError("No remotes available".into()));
+                    return;
+                }
+                let remote = remotes
+                    .get(self.dropdown_selected)
+                    .cloned()
+                    .unwrap_or_else(|| remotes[0].clone());
+                (remote, GitAction::PushSetUpstream { branch: branch.clone() })
+            }
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

@@ -1707,7 +1707,30 @@ impl App<'_> {
                 self.ec.send(AppEvent::NotifySuccess(msg));
             }
             Err(msg) => {
-                self.ec.send(AppEvent::NotifyError(msg));
+                let no_upstream = msg.contains("has no upstream branch")
+                    || msg.contains("no tracking information")
+                    || msg.contains("--set-upstream");
+                if no_upstream {
+                    let branch = match self.repository.head() {
+                        Head::Branch { name } => name.clone(),
+                        _ => {
+                            self.ec.send(AppEvent::NotifyError(msg));
+                            return;
+                        }
+                    };
+                    match actions::get_remotes(repo_path) {
+                        Ok(remotes) if !remotes.is_empty() => {
+                            self.open_dialog(DialogKind::ChooseRemote { remotes, branch });
+                        }
+                        _ => {
+                            self.ec.send(AppEvent::NotifyError(
+                                "No remotes configured. Add a remote first.".into(),
+                            ));
+                        }
+                    }
+                } else {
+                    self.ec.send(AppEvent::NotifyError(msg));
+                }
             }
         }
     }
@@ -1885,6 +1908,10 @@ impl App<'_> {
             GitAction::RemoveRemote => (
                 actions::remove_remote(repo_path, &target),
                 None,
+            ),
+            GitAction::PushSetUpstream { branch } => (
+                actions::push_set_upstream(repo_path, &target, &branch),
+                Some(format!("Pushed and set upstream to '{}/{}'.", target, branch)),
             ),
         };
 
