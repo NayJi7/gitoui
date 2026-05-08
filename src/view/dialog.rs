@@ -140,7 +140,7 @@ impl<'a> DialogView<'a> {
     }
 
     fn has_second_input_field(&self) -> bool {
-        matches!(self.kind, DialogKind::AddRemote | DialogKind::AddWorktree)
+        matches!(self.kind, DialogKind::AddRemote)
     }
 
     fn radio_count(&self) -> usize {
@@ -850,15 +850,11 @@ impl<'a> DialogView<'a> {
                 lines.push(self.input_line(fg));
             }
             DialogKind::AddWorktree => {
-                lines.push(label_line("Path:", dim_fg));
+                lines.push(label_line("Branch:", dim_fg));
                 self.input_row = Some(lines.len());
                 lines.push(self.input_line(fg));
-                lines.push(Line::from(""));
-                lines.push(label_line("Branch:", dim_fg));
-                self.second_input_row = Some(lines.len());
-                lines.push(self.second_input_line(fg));
                 lines.push(Line::from(Span::styled(
-                    "  Existing branch to check out, or new branch name (auto-detected).",
+                    "  Existing branch to check out, or new name (auto-created).",
                     Style::default().fg(dim_fg),
                 )));
                 lines.push(Line::from(""));
@@ -1289,13 +1285,7 @@ impl<'a> DialogView<'a> {
                 )
             }
             DialogKind::AddWorktree => {
-                let worktree_path = self.input_value.trim().to_string();
-                let branch = self.second_input_value.trim().to_string();
-                if worktree_path.is_empty() {
-                    self.tx
-                        .send(AppEvent::NotifyError("Path cannot be empty".into()));
-                    return;
-                }
+                let branch = self.input_value.trim().to_string();
                 if branch.is_empty() {
                     self.tx
                         .send(AppEvent::NotifyError("Branch cannot be empty".into()));
@@ -1304,11 +1294,7 @@ impl<'a> DialogView<'a> {
                 let checkout = self.checkboxes.get(0).copied().unwrap_or(false);
                 (
                     String::new(),
-                    GitAction::AddWorktree {
-                        worktree_path,
-                        branch,
-                        checkout,
-                    },
+                    GitAction::AddWorktree { branch, checkout },
                 )
             }
             // Handled by early-return above; this arm is unreachable at runtime.

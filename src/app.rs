@@ -2029,8 +2029,9 @@ impl App<'_> {
         );
         let should_checkout_worktree =
             matches!(&action, GitAction::AddWorktree { checkout: true, .. });
-        let worktree_raw_path = if let GitAction::AddWorktree { worktree_path, .. } = &action {
-            worktree_path.clone()
+        // Pre-compute the auto-generated worktree path before `action` is consumed.
+        let worktree_raw_path = if let GitAction::AddWorktree { branch, .. } = &action {
+            worktree_path_for_branch(repo_path, branch)
         } else {
             String::new()
         };
@@ -2193,14 +2194,13 @@ impl App<'_> {
                 actions::set_upstream(repo_path, &target, &branch),
                 Some(format!("Upstream set to '{}/{}'.", target, branch)),
             ),
-            GitAction::AddWorktree {
-                worktree_path,
-                branch,
-                ..
-            } => (
-                actions::add_worktree(repo_path, &worktree_path, &branch),
-                Some(format!("Worktree '{}' created", worktree_path)),
-            ),
+            GitAction::AddWorktree { branch, .. } => {
+                let wt_path = worktree_path_for_branch(repo_path, &branch);
+                (
+                    actions::add_worktree(repo_path, &wt_path, &branch),
+                    Some(format!("Worktree '{}' created", wt_path)),
+                )
+            }
         };
 
         match result {
@@ -2471,6 +2471,22 @@ impl App<'_> {
             }
         }
     }
+}
+
+/// Derive a sibling-directory path for a new worktree from the branch name.
+/// e.g. repo at `/home/user/gitui`, branch `feature/search` → `../gitui-feature-search`
+fn worktree_path_for_branch(repo_path: &std::path::Path, branch: &str) -> String {
+    let repo_name = repo_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "repo".to_string());
+    // Sanitize branch: replace `/` and other unsafe chars with `-`
+    let branch_slug = branch
+        .replace('/', "-")
+        .replace(' ', "-")
+        .trim_matches('-')
+        .to_string();
+    format!("../{}-{}", repo_name, branch_slug)
 }
 
 fn selected_commit_details(
