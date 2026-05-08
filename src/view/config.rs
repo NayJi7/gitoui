@@ -281,6 +281,7 @@ impl<'a> ConfigView<'a> {
         let current_value = match self.selected {
             6 => self.core_config.user_name().unwrap_or("").to_string(),
             7 => self.core_config.user_email().unwrap_or("").to_string(),
+            8 => self.core_config.default_branch().to_string(),
             _ => return,
         };
         self.editing_text = true;
