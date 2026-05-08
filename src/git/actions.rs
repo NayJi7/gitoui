@@ -422,6 +422,7 @@ pub struct WorktreeInfo {
     pub head: String,
     pub branch: Option<String>,
     pub is_current: bool,
+    pub is_dirty: bool,
 }
 
 pub fn add_worktree(path: &Path, worktree_path: &str, branch: &str) -> GitResult {
@@ -467,6 +468,7 @@ pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
                     head: current_head.clone(),
                     branch: current_branch.take(),
                     is_current,
+                    is_dirty: false,
                 });
                 current_head.clear();
             }
@@ -484,7 +486,17 @@ pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
             head: current_head,
             branch: current_branch,
             is_current,
+            is_dirty: false,
         });
+    }
+
+    // Check dirty status for each worktree
+    for wt in &mut worktrees {
+        let output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&wt.path)
+            .output();
+        wt.is_dirty = matches!(output, Ok(o) if !o.stdout.is_empty());
     }
 
     worktrees

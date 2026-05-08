@@ -333,21 +333,28 @@ fn build_ref_tree_items(
             let label = format!("{}{}", prefix, branch_short);
             let hint = format!(" ({})", short_path);
 
-            TreeItem::new_leaf(
-                wt.path.clone(),
-                ratatui::text::Line::from(vec![
-                    ratatui::text::Span::styled(
-                        label,
-                        ratatui::style::Style::default()
-                            .fg(color)
-                            .add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    ratatui::text::Span::styled(
-                        hint,
-                        ratatui::style::Style::default().fg(color_theme.detail_label_fg),
-                    ),
-                ]),
-            )
+            let mut spans = vec![
+                ratatui::text::Span::styled(
+                    label,
+                    ratatui::style::Style::default()
+                        .fg(color)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+            ];
+            if wt.is_dirty {
+                spans.push(ratatui::text::Span::styled(
+                    " *",
+                    ratatui::style::Style::default()
+                        .fg(color_theme.status_warn_fg)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+            }
+            spans.push(ratatui::text::Span::styled(
+                hint,
+                ratatui::style::Style::default().fg(color_theme.detail_label_fg),
+            ));
+
+            TreeItem::new_leaf(wt.path.clone(), ratatui::text::Line::from(spans))
         })
         .collect();
 
