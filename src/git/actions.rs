@@ -187,12 +187,12 @@ pub fn delete_remote_branch(path: &Path, remote: &str, branch: &str) -> GitResul
     run_git(path, &["push", remote, "--delete", branch])
 }
 
-pub fn pull_branch(path: &Path, branch: &str) -> GitResult {
-    run_git(path, &["pull", "origin", branch])
+pub fn pull_branch(path: &Path, remote: &str, branch: &str) -> GitResult {
+    run_git(path, &["pull", remote, branch])
 }
 
-pub fn push_branch(path: &Path, branch: &str, force: bool) -> GitResult {
-    let mut args = vec!["push", "origin", branch];
+pub fn push_branch(path: &Path, remote: &str, branch: &str, force: bool) -> GitResult {
+    let mut args = vec!["push", remote, branch];
     if force {
         args.push("--force-with-lease");
     }
@@ -248,11 +248,16 @@ pub fn discard_all(path: &Path) -> GitResult {
     run_git(path, &["checkout", "--", "."])
 }
 
-pub fn stash(path: &Path, message: Option<&str>) -> GitResult {
-    match message {
-        Some(msg) => run_git(path, &["stash", "push", "-m", msg]),
-        None => run_git(path, &["stash", "push"]),
+pub fn stash(path: &Path, message: Option<&str>, include_untracked: bool) -> GitResult {
+    let mut args = vec!["stash", "push"];
+    if include_untracked {
+        args.push("-u");
     }
+    if let Some(msg) = message {
+        args.push("-m");
+        args.push(msg);
+    }
+    run_git(path, &args)
 }
 
 pub fn commit(path: &Path, message: &str, amend: bool) -> GitResult {

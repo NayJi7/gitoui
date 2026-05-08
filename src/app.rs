@@ -1836,7 +1836,11 @@ impl App<'_> {
                 return;
             }
         };
-        match actions::pull_branch(repo_path, &branch) {
+        let remote = actions::branch_upstream(repo_path, &branch)
+            .ok()
+            .and_then(|u| u.split('/').next().map(|s| s.to_string()))
+            .unwrap_or_else(|| "origin".to_string());
+        match actions::pull_branch(repo_path, &remote, &branch) {
             Ok(msg) => {
                 let msg = if msg.is_empty() {
                     "Pulled successfully".into()
@@ -1916,15 +1920,18 @@ impl App<'_> {
                 (actions::rename_branch(repo_path, &target, &new_name), None)
             }
             GitAction::PushBranch { force } => {
-                (actions::push_branch(repo_path, &target, force), None)
+                let remote = actions::branch_upstream(repo_path, &target)
+                    .ok()
+                    .and_then(|u| u.split('/').next().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "origin".to_string());
+                (actions::push_branch(repo_path, &remote, &target, force), None)
             }
-            GitAction::PullBranch { rebase } => {
-                let r = if rebase {
-                    actions::pull_branch(repo_path, &target)
-                } else {
-                    actions::pull_branch(repo_path, &target)
-                };
-                (r, None)
+            GitAction::PullBranch { rebase: _ } => {
+                let remote = actions::branch_upstream(repo_path, &target)
+                    .ok()
+                    .and_then(|u| u.split('/').next().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "origin".to_string());
+                (actions::pull_branch(repo_path, &remote, &target), None)
             }
             GitAction::Fetch => (actions::fetch(repo_path), None),
             GitAction::DeleteTag => (actions::delete_tag(repo_path, &target), None),
@@ -1960,8 +1967,8 @@ impl App<'_> {
                 actions::discard_all(repo_path),
                 Some("Discarded all changes".into()),
             ),
-            GitAction::Stash { message } => (
-                actions::stash(repo_path, message.as_deref()),
+            GitAction::Stash { message, include_untracked } => (
+                actions::stash(repo_path, message.as_deref(), include_untracked),
                 Some("Stashed changes".into()),
             ),
             GitAction::Commit { message, amend } => {

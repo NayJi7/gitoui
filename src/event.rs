@@ -209,6 +209,7 @@ pub enum GitAction {
     DiscardAll,
     Stash {
         message: Option<String>,
+        include_untracked: bool,
     },
     Commit {
         message: String,

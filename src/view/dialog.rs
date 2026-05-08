@@ -1110,12 +1110,19 @@ impl<'a> DialogView<'a> {
                 (branch.clone(), GitAction::PushBranch { force })
             }
             DialogKind::StashWithMessage => {
-                let msg = if self.input_value.is_empty() {
+                let message = if self.input_value.is_empty() {
                     None
                 } else {
                     Some(self.input_value.clone())
                 };
-                (String::new(), GitAction::Stash { message: msg })
+                let include_untracked = self.checkboxes.get(0).copied().unwrap_or(false);
+                (
+                    String::new(),
+                    GitAction::Stash {
+                        message,
+                        include_untracked,
+                    },
+                )
             }
             DialogKind::CommitWithMessage => {
                 if self.input_value.trim().is_empty() {
