@@ -5,7 +5,7 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 use crate::{
     app::AppContext,
     event::{DialogKind, Sender, UserEventWithCount},
-    git::{Commit, FileChange, Ref},
+    git::{Commit, CommitHash, FileChange, Ref},
     view::{
         branch_detail::BranchDetailView, config::ConfigView, detail::DetailView,
         dialog::DialogView, diff::DiffView, help::HelpView, list::ListView, refs::RefsView,
@@ -257,6 +257,7 @@ impl<'a> View<'a> {
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
         head_branch_name: Option<String>,
+        head_commit_hash: Option<CommitHash>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -266,6 +267,7 @@ impl<'a> View<'a> {
             changes,
             refs,
             head_branch_name,
+            head_commit_hash,
             ctx,
             tx,
         )))

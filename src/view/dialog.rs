@@ -72,6 +72,14 @@ impl<'a> DialogView<'a> {
             _ => (vec![], 0),
         };
 
+        // Pre-fill input_value for dialogs that need pre-populated text
+        let input_value = if let DialogKind::AmendMessage { current_message } = &kind {
+            current_message.clone()
+        } else {
+            String::new()
+        };
+        let input_cursor = input_value.len();
+
         let focused = if Self::has_input_for(&kind) {
             DialogElement::Input
         } else if matches!(kind, DialogKind::Reset { .. }) {
@@ -85,8 +93,8 @@ impl<'a> DialogView<'a> {
         Self {
             before,
             kind,
-            input_value: String::new(),
-            input_cursor: 0,
+            input_value,
+            input_cursor,
             second_input_value: String::new(),
             second_input_cursor: 0,
             dropdown_selected,
@@ -121,6 +129,7 @@ impl<'a> DialogView<'a> {
                 | DialogKind::StashWithMessage
                 | DialogKind::CommitWithMessage
                 | DialogKind::AddRemote
+                | DialogKind::AmendMessage { .. }
         )
     }
 
@@ -822,6 +831,22 @@ impl<'a> DialogView<'a> {
                     lines.push(self.radio_line(i, remote));
                 }
             }
+            DialogKind::ConfirmAbortOperation { op_name } => {
+                lines.push(Line::from(Span::styled(
+                    format!("Abort {} in progress?", op_name),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(""));
+                lines.push(warning_line(
+                    "All changes will be preserved in working tree.",
+                    warn_fg,
+                ));
+            }
+            DialogKind::AmendMessage { .. } => {
+                lines.push(label_line("New commit message:", dim_fg));
+                self.input_row = Some(lines.len());
+                lines.push(self.input_line(fg));
+            }
         }
 
         lines.push(Line::from(""));
@@ -867,6 +892,8 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
             DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
             DialogKind::SetUpstream { .. } => " Set Upstream ",
+            DialogKind::ConfirmAbortOperation { .. } => " Abort Operation ",
+            DialogKind::AmendMessage { .. } => " Amend Commit ",
         }
         .to_string()
     }
@@ -1191,6 +1218,30 @@ impl<'a> DialogView<'a> {
                     .cloned()
                     .unwrap_or_else(|| remotes[0].clone());
                 (remote, GitAction::SetUpstream { branch: branch.clone() })
+            }
+            DialogKind::ConfirmAbortOperation { op_name } => {
+                let action = match op_name.as_str() {
+                    "rebase" => GitAction::AbortRebase,
+                    "merge" => GitAction::AbortMerge,
+                    "cherry-pick" => GitAction::AbortCherryPick,
+                    _ => GitAction::AbortRebase,
+                };
+                (String::new(), action)
+            }
+            DialogKind::AmendMessage { .. } => {
+                if self.input_value.trim().is_empty() {
+                    self.tx.send(AppEvent::NotifyError(
+                        "Commit message cannot be empty".into(),
+                    ));
+                    return;
+                }
+                (
+                    String::new(),
+                    GitAction::Commit {
+                        message: self.input_value.trim().to_string(),
+                        amend: true,
+                    },
+                )
             }
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });

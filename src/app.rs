@@ -554,6 +554,9 @@ impl App<'_> {
                 AppEvent::PullCurrentBranch => {
                     self.execute_pull_current_branch();
                 }
+                AppEvent::CheckAbortOperation => {
+                    self.check_abort_operation();
+                }
                 // Phase 2 - Git Actions
                 AppEvent::OpenDialog(kind) => self.open_dialog(kind),
                 AppEvent::CloseDialog => self.close_dialog(),
@@ -1018,12 +1021,14 @@ impl App<'_> {
             Head::Branch { name } => Some(name.clone()),
             _ => None,
         };
+        let head_commit_hash = head_commit_hash_from_repository(self.repository);
         self.view = View::of_detail(
             commit_list_state,
             commit,
             changes,
             refs,
             head_branch_name,
+            head_commit_hash,
             self.ctx.clone(),
             self.ec.sender(),
         );
@@ -1125,12 +1130,14 @@ impl App<'_> {
                 Head::Branch { name } => Some(name.clone()),
                 _ => None,
             };
+            let head_commit_hash = head_commit_hash_from_repository(self.repository);
             self.view = View::of_detail(
                 commit_list_state,
                 commit,
                 changes,
                 refs,
                 head_branch_name,
+                head_commit_hash,
                 self.ctx.clone(),
                 self.ec.sender(),
             );
@@ -1785,6 +1792,31 @@ impl App<'_> {
         // In practice, DialogView sends ExecuteGitAction directly on Confirm
     }
 
+    fn check_abort_operation(&mut self) {
+        let git_dir = self.repository.path();
+        match actions::detect_in_progress(git_dir) {
+            Some(actions::InProgressOperation::Rebase) => {
+                self.open_dialog(DialogKind::ConfirmAbortOperation {
+                    op_name: "rebase".into(),
+                });
+            }
+            Some(actions::InProgressOperation::Merge) => {
+                self.open_dialog(DialogKind::ConfirmAbortOperation {
+                    op_name: "merge".into(),
+                });
+            }
+            Some(actions::InProgressOperation::CherryPick) => {
+                self.open_dialog(DialogKind::ConfirmAbortOperation {
+                    op_name: "cherry-pick".into(),
+                });
+            }
+            None => {
+                self.ec
+                    .send(AppEvent::NotifyInfo("No rebase or merge in progress".into()));
+            }
+        }
+    }
+
     fn execute_push_current_branch(&mut self) {
         let repo_path = self.repository.path();
         match actions::push_commit(repo_path, "") {
@@ -1983,6 +2015,9 @@ impl App<'_> {
                 Some("Cleaned untracked files".into()),
             ),
             GitAction::Push => (actions::push_commit(repo_path, &target), None),
+            GitAction::AbortRebase => (actions::abort_rebase(repo_path), None),
+            GitAction::AbortMerge => (actions::abort_merge(repo_path), None),
+            GitAction::AbortCherryPick => (actions::abort_cherry_pick(repo_path), None),
             GitAction::CreateArchive => {
                 let r = std::process::Command::new("git")
                     .current_dir(repo_path)
@@ -2268,6 +2303,31 @@ fn selected_commit_details(
     let (commit, changes) = repository.commit_detail(&selected);
     let refs: Vec<Ref> = repository.refs(&selected).into_iter().cloned().collect();
     (commit, changes, refs)
+}
+
+fn head_commit_hash_from_repository(repository: &Repository) -> Option<crate::git::CommitHash> {
+    match repository.head() {
+        Head::Detached { target } => Some(target.clone()),
+        Head::Branch { name } => {
+            // Look up the commit hash that the branch points to via refs
+            repository.all_refs().into_iter().find_map(|r| {
+                if let crate::git::Ref::Branch {
+                    name: ref_name,
+                    target,
+                } = r
+                {
+                    if ref_name == name {
+                        Some(target.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        Head::None => None,
+    }
 }
 
 fn process_numeric_prefix(

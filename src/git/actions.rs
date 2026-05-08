@@ -16,6 +16,42 @@ fn run_git(path: &Path, args: &[&str]) -> GitResult {
     }
 }
 
+// --- In-Progress Operation Detection ---
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InProgressOperation {
+    Rebase,
+    Merge,
+    CherryPick,
+}
+
+/// Detect whether a rebase, merge, or cherry-pick is in progress.
+///
+/// `git_dir` must be the `.git/` directory path (e.g. `repository.path()`).
+pub fn detect_in_progress(git_dir: &Path) -> Option<InProgressOperation> {
+    if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        Some(InProgressOperation::Rebase)
+    } else if git_dir.join("MERGE_HEAD").exists() {
+        Some(InProgressOperation::Merge)
+    } else if git_dir.join("CHERRY_PICK_HEAD").exists() {
+        Some(InProgressOperation::CherryPick)
+    } else {
+        None
+    }
+}
+
+pub fn abort_rebase(path: &Path) -> GitResult {
+    run_git(path, &["rebase", "--abort"])
+}
+
+pub fn abort_merge(path: &Path) -> GitResult {
+    run_git(path, &["merge", "--abort"])
+}
+
+pub fn abort_cherry_pick(path: &Path) -> GitResult {
+    run_git(path, &["cherry-pick", "--abort"])
+}
+
 // --- Commit Actions ---
 
 pub fn checkout_commit(path: &Path, commit_hash: &str) -> GitResult {

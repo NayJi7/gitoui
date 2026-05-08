@@ -159,6 +159,9 @@ impl<'a> ListView<'a> {
                 UserEvent::Pull => {
                     self.tx.send(AppEvent::PullCurrentBranch);
                 }
+                UserEvent::AbortOperation => {
+                    self.tx.send(AppEvent::CheckAbortOperation);
+                }
                 UserEvent::Config => {
                     self.tx.send(AppEvent::OpenConfig);
                 }

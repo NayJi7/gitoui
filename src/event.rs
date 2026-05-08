@@ -61,6 +61,7 @@ pub enum AppEvent {
     NotifyError(String),
     PushCurrentBranch,
     PullCurrentBranch,
+    CheckAbortOperation,
     // Phase 2 - Git Actions
     OpenDialog(DialogKind),
     CloseDialog,
@@ -136,6 +137,10 @@ pub enum DialogKind {
     ConfirmDeleteRemote { name: String },
     ChooseRemote { remotes: Vec<String>, branch: String },
     SetUpstream { remotes: Vec<String>, branch: String },
+    // Abort in-progress operation confirmation
+    ConfirmAbortOperation { op_name: String },
+    // Amend HEAD commit message
+    AmendMessage { current_message: String },
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +222,10 @@ pub enum GitAction {
     },
     CleanUntracked,
     Push,
+    // Abort in-progress operations
+    AbortRebase,
+    AbortMerge,
+    AbortCherryPick,
     // Remote actions
     AddRemote { url: String },  // remote name comes from `target` in execute_git_action
     RemoveRemote,               // remote name comes from `target`
@@ -468,6 +477,10 @@ pub enum UserEvent {
     CycleFilePrev,
     // Branch upstream
     SetUpstream,
+    // Abort in-progress rebase/merge/cherry-pick
+    AbortOperation,
+    // Amend HEAD commit message from detail view
+    AmendCommit,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -570,6 +583,8 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "cycle_file_next" => Ok(UserEvent::CycleFileNext),
                         "cycle_file_prev" => Ok(UserEvent::CycleFilePrev),
                         "set_upstream" => Ok(UserEvent::SetUpstream),
+                        "abort_operation" => Ok(UserEvent::AbortOperation),
+                        "amend_commit" => Ok(UserEvent::AmendCommit),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

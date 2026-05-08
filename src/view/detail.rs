@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
-    git::{Commit, CommitType, FileChange, Ref, Repository},
+    git::{Commit, CommitHash, CommitType, FileChange, Ref, Repository},
     view::{ListRefreshViewContext, RefreshViewContext},
     widget::{
         commit_detail::{CommitDetail, CommitDetailState},
@@ -26,6 +26,7 @@ pub struct DetailView<'a> {
     changes: Vec<FileChange>,
     refs: Vec<Ref>,
     head_branch_name: Option<String>,
+    head_commit_hash: Option<CommitHash>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -40,6 +41,7 @@ impl<'a> DetailView<'a> {
         changes: Vec<FileChange>,
         refs: Vec<Ref>,
         head_branch_name: Option<String>,
+        head_commit_hash: Option<CommitHash>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> DetailView<'a> {
@@ -50,6 +52,7 @@ impl<'a> DetailView<'a> {
             changes,
             refs,
             head_branch_name,
+            head_commit_hash,
             ctx,
             tx,
             list_height: 0,
@@ -230,6 +233,20 @@ impl<'a> DetailView<'a> {
             }
             UserEvent::CopyStashHash => {
                 self.copy_commit_hash();
+            }
+            UserEvent::AbortOperation => {
+                self.tx.send(AppEvent::CheckAbortOperation);
+            }
+            UserEvent::AmendCommit => {
+                if self.is_head_commit() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::AmendMessage {
+                        current_message: self.commit.commit_message.clone(),
+                    }));
+                } else {
+                    self.tx.send(AppEvent::NotifyWarn(
+                        "Amend is only available for the HEAD commit".into(),
+                    ));
+                }
             }
             _ => {}
         }
@@ -531,9 +548,37 @@ impl<'a> DetailView<'a> {
                 8 => self
                     .tx
                     .send(AppEvent::OpenDialog(DialogKind::Reset { target: hash })),
+                9 => {
+                    if self.is_head_commit() {
+                        self.tx.send(AppEvent::OpenDialog(DialogKind::AmendMessage {
+                            current_message: self.commit.commit_message.clone(),
+                        }));
+                    } else {
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Amend is only available for the HEAD commit".into(),
+                        ));
+                    }
+                }
                 _ => {}
             }
         }
+    }
+
+    fn is_head_commit(&self) -> bool {
+        if let Some(ref head_hash) = self.head_commit_hash {
+            return *head_hash == self.commit.commit_hash;
+        }
+        // Fallback: check if any branch ref on this commit matches head_branch_name
+        if let Some(ref head_name) = self.head_branch_name {
+            return self.refs.iter().any(|r| {
+                if let Ref::Branch { name, .. } = r {
+                    name == head_name
+                } else {
+                    false
+                }
+            });
+        }
+        false
     }
 
     fn is_stash(&self) -> bool {

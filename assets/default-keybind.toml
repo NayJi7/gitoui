@@ -91,3 +91,9 @@ copy_stash_hash = ["ctrl-o"]
 # Diff view file cycling (replaces left/right arrows which are used for button navigation)
 cycle_file_next = ["+"]
 cycle_file_prev = ["-"]
+
+# Abort in-progress rebase/merge/cherry-pick
+abort_operation = ["ctrl-a"]
+
+# Amend HEAD commit message (from detail view, HEAD only)
+amend_commit = ["ctrl-m"]

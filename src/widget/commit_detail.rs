@@ -143,6 +143,7 @@ pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
     ("Merge into current", "m"),
     ("Rebase current on", "e"),
     ("Reset current to", "S"),
+    ("Amend (HEAD only)", "Ctrl+M"),
 ];
 
 pub const STASH_ACTIONS: &[(&str, &str)] = &[
