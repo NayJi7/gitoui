@@ -694,7 +694,7 @@ impl App<'_> {
 
     fn prepare_render(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
         let area: Rect = terminal.size()?.into();
-        let [view_area, _, _] = split_app_areas(area);
+        let [_, view_area, _, _] = split_app_areas_with_header(area);
         self.update_state(view_area);
         self.view.update_layout(view_area);
         self.view.prepare_graph_uploads();
@@ -757,16 +757,115 @@ impl App<'_> {
         let base = Block::default().fg(self.ctx.color_theme.fg).bg(self.ctx.color_theme.bg);
         f.render_widget(base, f.area());
 
-        let [view_area, _gap, status_line_area] = split_app_areas(f.area());
+        let [header_area, view_area, _gap, status_line_area] =
+            split_app_areas_with_header(f.area());
 
         self.update_state(view_area);
 
+        self.render_header(f, header_area);
         self.view.render(f, view_area);
         self.render_status_line(f, status_line_area);
     }
 }
 
 impl App<'_> {
+    fn render_header(&self, f: &mut Frame, area: Rect) {
+        use ratatui::{
+            text::{Line, Span},
+            widgets::Paragraph,
+        };
+
+        // Derive a tilde-relative path from the current working directory.
+        let cwd = std::env::current_dir()
+            .unwrap_or_else(|_| self.repository.path().to_path_buf());
+        let home = std::env::var("HOME").unwrap_or_default();
+        let display_path = if !home.is_empty() && cwd.starts_with(&home) {
+            format!("~{}", &cwd.to_string_lossy()[home.len()..])
+        } else {
+            cwd.to_string_lossy().to_string()
+        };
+
+        // Repo name (last component) in bold, rest dimmer.
+        let repo_name = cwd
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let path_prefix = if display_path.ends_with(&repo_name) && repo_name.len() < display_path.len() {
+            display_path[..display_path.len() - repo_name.len()].to_string()
+        } else {
+            String::new()
+        };
+
+        // App icon placeholder — right-aligned.
+        // Replace this span with a Kitty image upload when you have the real icon.
+        let icon_text = " ◈ gitui ";
+        let icon_width = icon_text.len() as u16;
+        let path_width = area.width.saturating_sub(icon_width + 2);
+
+        let [content_row, separator_row] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(1),
+        ])
+        .areas(area);
+
+        // Content row: path left, icon right.
+        let [left_area, right_area] = ratatui::layout::Layout::horizontal([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(icon_width + 2),
+        ])
+        .areas(content_row);
+
+        let white = ratatui::style::Color::White;
+        let dim_white = ratatui::style::Color::Rgb(160, 160, 160);
+
+        // Path: dim prefix + bold repo name.
+        let mut path_spans = vec![];
+        if !path_prefix.is_empty() {
+            let prefix_truncated = if path_prefix.chars().count() > path_width as usize {
+                let skip = path_prefix.chars().count().saturating_sub(path_width as usize - 1);
+                format!("…{}", path_prefix.chars().skip(skip).collect::<String>())
+            } else {
+                path_prefix.clone()
+            };
+            path_spans.push(Span::styled(
+                format!(" {}", prefix_truncated),
+                ratatui::style::Style::default().fg(dim_white),
+            ));
+        } else {
+            path_spans.push(Span::raw(" "));
+        }
+        path_spans.push(Span::styled(
+            repo_name,
+            ratatui::style::Style::default()
+                .fg(white)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        ));
+
+        // Icon: right side.
+        let icon_line = Line::from(vec![Span::styled(
+            icon_text,
+            ratatui::style::Style::default()
+                .fg(white)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )]);
+
+        f.render_widget(
+            Paragraph::new(Line::from(path_spans)),
+            left_area,
+        );
+        f.render_widget(
+            Paragraph::new(icon_line).alignment(ratatui::layout::Alignment::Right),
+            right_area,
+        );
+
+        // Separator row: full-width line.
+        let sep = Line::from(
+            "─".repeat(area.width as usize)
+                .fg(self.ctx.color_theme.divider_fg),
+        );
+        f.render_widget(Paragraph::new(sep), separator_row);
+    }
+
     fn render_status_line(&self, f: &mut Frame, area: Rect) {
         let mut spans = match &self.app_status.status_line {
             StatusLine::None if self.app_status.numeric_prefix.is_empty() => vec![],
@@ -1042,13 +1141,19 @@ impl App<'_> {
     }
 }
 
-fn split_app_areas(area: Rect) -> [Rect; 3] {
-    Layout::vertical([
+fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
+    let [header, rest] = Layout::vertical([
+        Constraint::Length(2),
         Constraint::Min(0),
-        Constraint::Length(1), // gap between commit list and status bar
-        Constraint::Length(1), // status bar
     ])
-    .areas(area)
+    .areas(area);
+    let [view, gap, status] = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(rest);
+    [header, view, gap, status]
 }
 
 impl App<'_> {
