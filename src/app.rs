@@ -2058,6 +2058,10 @@ impl App<'_> {
         if let View::Dialog(mut dialog) = std::mem::take(&mut self.view) {
             self.view = dialog.take_before_view();
             self.view.clear_graph_images();
+            // Also clear avatar prepared images so ratatui re-emits those cells
+            // and clears any dialog text residue (image cells have skip=true which
+            // would otherwise leave dialog content visible over the avatar area).
+            self.ctx.avatar_manager.lock().unwrap().clear_prepared_images();
         }
     }
 
