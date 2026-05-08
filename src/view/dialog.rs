@@ -108,7 +108,7 @@ impl<'a> DialogView<'a> {
     }
 
     pub fn is_input_focused(&self) -> bool {
-        matches!(self.focused, DialogElement::Input)
+        matches!(self.focused, DialogElement::Input | DialogElement::SecondInput)
     }
 
     fn has_input_for(kind: &DialogKind) -> bool {
@@ -274,7 +274,7 @@ impl<'a> DialogView<'a> {
                     self.focus_next();
                 }
                 DialogElement::SecondInput => {
-                    self.focused = DialogElement::Validate;
+                    self.focus_next();
                 }
             },
             UserEvent::Cancel => self.tx.send(AppEvent::DialogCancel),
