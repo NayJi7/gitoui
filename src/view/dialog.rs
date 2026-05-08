@@ -850,11 +850,11 @@ impl<'a> DialogView<'a> {
                 lines.push(self.input_line(fg));
             }
             DialogKind::AddWorktree => {
-                lines.push(label_line("Branch:", dim_fg));
+                lines.push(label_line("Name:", dim_fg));
                 self.input_row = Some(lines.len());
                 lines.push(self.input_line(fg));
                 lines.push(Line::from(Span::styled(
-                    "  Existing branch to check out, or new name (auto-created).",
+                    "  Used as branch name and to derive the worktree path.",
                     Style::default().fg(dim_fg),
                 )));
                 lines.push(Line::from(""));
@@ -1285,16 +1285,16 @@ impl<'a> DialogView<'a> {
                 )
             }
             DialogKind::AddWorktree => {
-                let branch = self.input_value.trim().to_string();
-                if branch.is_empty() {
+                let name = self.input_value.trim().to_string();
+                if name.is_empty() {
                     self.tx
-                        .send(AppEvent::NotifyError("Branch cannot be empty".into()));
+                        .send(AppEvent::NotifyError("Name cannot be empty".into()));
                     return;
                 }
                 let checkout = self.checkboxes.get(0).copied().unwrap_or(false);
                 (
                     String::new(),
-                    GitAction::AddWorktree { branch, checkout },
+                    GitAction::AddWorktree { name, checkout },
                 )
             }
             // Handled by early-return above; this arm is unreachable at runtime.

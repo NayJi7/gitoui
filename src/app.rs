@@ -2030,8 +2030,8 @@ impl App<'_> {
         let should_checkout_worktree =
             matches!(&action, GitAction::AddWorktree { checkout: true, .. });
         // Pre-compute the auto-generated worktree path before `action` is consumed.
-        let worktree_raw_path = if let GitAction::AddWorktree { branch, .. } = &action {
-            worktree_path_for_branch(repo_path, branch)
+        let worktree_raw_path = if let GitAction::AddWorktree { name, .. } = &action {
+            worktree_path_for_branch(repo_path, name)
         } else {
             String::new()
         };
@@ -2194,10 +2194,10 @@ impl App<'_> {
                 actions::set_upstream(repo_path, &target, &branch),
                 Some(format!("Upstream set to '{}/{}'.", target, branch)),
             ),
-            GitAction::AddWorktree { branch, .. } => {
-                let wt_path = worktree_path_for_branch(repo_path, &branch);
+            GitAction::AddWorktree { name, .. } => {
+                let wt_path = worktree_path_for_branch(repo_path, &name);
                 (
-                    actions::add_worktree(repo_path, &wt_path, &branch),
+                    actions::add_worktree(repo_path, &wt_path, &name),
                     Some(format!("Worktree '{}' created", wt_path)),
                 )
             }

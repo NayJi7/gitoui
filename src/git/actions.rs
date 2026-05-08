@@ -425,39 +425,19 @@ pub struct WorktreeInfo {
 }
 
 pub fn add_worktree(path: &Path, worktree_path: &str, branch: &str) -> GitResult {
-    // Try checking out an existing branch first.
     let output = Command::new("git")
-        .args(["worktree", "add", worktree_path, branch])
+        .args(["worktree", "add", "-b", branch, worktree_path])
         .current_dir(path)
         .output()
         .map_err(|e| format!("Failed to run git worktree add: {}", e))?;
 
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-    }
-
-    // If the branch doesn't exist yet, create it with -b.
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let branch_missing = stderr.contains("invalid reference")
-        || stderr.contains("not a valid")
-        || stderr.contains("unknown revision");
-
-    if branch_missing {
-        let output2 = Command::new("git")
-            .args(["worktree", "add", "-b", branch, worktree_path])
-            .current_dir(path)
-            .output()
-            .map_err(|e| format!("Failed to run git worktree add: {}", e))?;
-        if output2.status.success() {
-            return Ok(String::from_utf8_lossy(&output2.stdout).to_string());
-        }
+    if !output.status.success() {
         return Err(format!(
             "git worktree add failed: {}",
-            String::from_utf8_lossy(&output2.stderr).trim()
+            String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-
-    Err(format!("git worktree add failed: {}", stderr.trim()))
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {

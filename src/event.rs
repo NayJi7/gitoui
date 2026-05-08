@@ -247,7 +247,7 @@ pub enum GitAction {
     PushSetUpstream { branch: String }, // target = remote name
     SetUpstream { branch: String }, // target = remote name
     AddWorktree {
-        branch: String,
+        name: String,
         checkout: bool,
     },
 }
