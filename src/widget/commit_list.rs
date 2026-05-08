@@ -1208,10 +1208,32 @@ impl CommitList<'_> {
         if state.graph_render_state == Some(key) {
             // Visible commits and graph area unchanged: write skip cells so ratatui never
             // emits escape sequences for graph positions. Terminal retains the previous render.
+            let max_graph_width = area.width.saturating_sub(1) as usize;
+            let pad_x = area.left() + max_graph_width as u16;
             for i in 0..state.height.min(area.height as usize) {
                 let y = area.top() + i as u16;
-                for x in area.left()..area.right() {
-                    buf[(x, y)].set_skip(true);
+                let is_selected = i == state.selected
+                    && state.hovered_branch.is_none()
+                    && state.hovered_tag.is_none();
+                // Write pad cell explicitly so it gets the correct selection bg
+                if pad_x < area.right() {
+                    let pad_bg = if is_selected {
+                        self.ctx.color_theme.list_selected_bg
+                    } else {
+                        self.ctx.color_theme.bg
+                    };
+                    let pad_cell = &mut buf[(pad_x, y)];
+                    pad_cell.set_symbol(" ");
+                    pad_cell.set_style(ratatui::style::Style::default().bg(pad_bg));
+                    pad_cell.set_skip(false);
+                    // Skip the image cells
+                    for x in area.left()..pad_x {
+                        buf[(x, y)].set_skip(true);
+                    }
+                } else {
+                    for x in area.left()..area.right() {
+                        buf[(x, y)].set_skip(true);
+                    }
                 }
             }
             return;
@@ -1225,6 +1247,9 @@ impl CommitList<'_> {
                 .for_each(|(i, commit_info)| {
                     let prepared_image = state_ref.prepared_image(commit_info, i);
                     let y = area.top() + i as u16;
+                    let is_selected = i == state_ref.selected
+                        && state_ref.hovered_branch.is_none()
+                        && state_ref.hovered_tag.is_none();
                     for (x, image_cell) in prepared_image
                         .cells()
                         .iter()
@@ -1235,6 +1260,19 @@ impl CommitList<'_> {
                         cell.set_symbol(image_cell.symbol());
                         cell.set_style(image_cell.style().bg(self.ctx.color_theme.bg));
                         cell.set_skip(image_cell.skip());
+                    }
+                    // Write the pad cell with the correct background
+                    let pad_x = area.left() + max_graph_width as u16;
+                    if pad_x < area.right() {
+                        let pad_bg = if is_selected {
+                            self.ctx.color_theme.list_selected_bg
+                        } else {
+                            self.ctx.color_theme.bg
+                        };
+                        let cell = &mut buf[(pad_x, y)];
+                        cell.set_symbol(" ");
+                        cell.set_style(ratatui::style::Style::default().bg(pad_bg));
+                        cell.set_skip(false);
                     }
                 });
         }
