@@ -428,7 +428,7 @@ impl<'a> DiffView<'a> {
                 title_spans.push(Span::styled(
                     format!("+{add_count} "),
                     Style::default()
-                        .fg(Color::Rgb(0, 255, 135))
+                        .fg(self.ctx.color_theme.detail_file_change_add_fg)
                         .add_modifier(Modifier::BOLD),
                 ));
             }
@@ -436,7 +436,7 @@ impl<'a> DiffView<'a> {
                 title_spans.push(Span::styled(
                     format!("-{del_count} "),
                     Style::default()
-                        .fg(Color::Rgb(255, 80, 80))
+                        .fg(self.ctx.color_theme.detail_file_change_delete_fg)
                         .add_modifier(Modifier::BOLD),
                 ));
             }
@@ -725,17 +725,32 @@ impl<'a> DiffView<'a> {
         let mut highlighter =
             SyntaxHighlighter::new_with_theme(file_path, &self.ctx.core_config.option.syntax_theme);
 
-        // VS Code-style diff colors
-        let add_bg = Color::Rgb(32, 68, 45);
-        let del_bg = Color::Rgb(68, 35, 40);
-        let ctx_fg = Color::Rgb(192, 202, 245);
+        // Detect if the theme is light (luminance > 128 means light background)
+        let bg_is_light = match self.ctx.color_theme.bg {
+            ratatui::style::Color::Rgb(r, g, b) => {
+                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) > 128.0
+            }
+            _ => false,
+        };
+
+        let add_bg = if bg_is_light {
+            Color::Rgb(172, 242, 189) // GitHub light: soft green
+        } else {
+            Color::Rgb(32, 68, 45) // VS Code dark: dark green
+        };
+        let del_bg = if bg_is_light {
+            Color::Rgb(255, 186, 181) // GitHub light: soft red
+        } else {
+            Color::Rgb(68, 35, 40) // VS Code dark: dark red
+        };
+        let ctx_fg = self.ctx.color_theme.fg;
 
         let add_style = Style::default().bg(add_bg);
         let del_style = Style::default().bg(del_bg);
         let ctx_style = Style::default().fg(ctx_fg);
 
-        let bar_add = Span::styled("▍", Style::default().fg(Color::Rgb(63, 185, 80)).bg(add_bg));
-        let bar_del = Span::styled("▍", Style::default().fg(Color::Rgb(248, 81, 73)).bg(del_bg));
+        let bar_add = Span::styled("▍", Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg).bg(add_bg));
+        let bar_del = Span::styled("▍", Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg).bg(del_bg));
 
         self.expand_buttons.clear();
         let mut gap_idx = 0usize;
@@ -811,7 +826,7 @@ impl<'a> DiffView<'a> {
                             Span::styled(
                                 label.to_string(),
                                 Style::default()
-                                    .fg(Color::Rgb(122, 162, 247))
+                                    .fg(self.ctx.color_theme.status_info_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ]));
@@ -837,10 +852,10 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h,
+                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
                             }
                         }
                     }
@@ -854,10 +869,10 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h,
+                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
                             }
                         }
                     }
@@ -883,7 +898,7 @@ impl<'a> DiffView<'a> {
                             Span::styled(
                                 label.to_string(),
                                 Style::default()
-                                    .fg(Color::Rgb(122, 162, 247))
+                                    .fg(self.ctx.color_theme.status_info_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ]));
@@ -906,10 +921,10 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h,
+                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
                             }
                         }
                     }
@@ -931,7 +946,7 @@ impl<'a> DiffView<'a> {
                             Span::styled(
                                 up_label.to_string(),
                                 Style::default()
-                                    .fg(Color::Rgb(122, 162, 247))
+                                    .fg(self.ctx.color_theme.status_info_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ]));
@@ -961,7 +976,7 @@ impl<'a> DiffView<'a> {
                             Span::styled(
                                 down_label.to_string(),
                                 Style::default()
-                                    .fg(Color::Rgb(122, 162, 247))
+                                    .fg(self.ctx.color_theme.status_info_fg)
                                     .add_modifier(Modifier::BOLD),
                             ),
                         ]));
@@ -982,10 +997,10 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h,
+                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width));
+                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
                             }
                         }
                     }
@@ -1038,6 +1053,7 @@ impl<'a> DiffView<'a> {
                                 width,
                                 h,
                                 Some(bar_add.clone()),
+                                self.ctx.color_theme.divider_fg,
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
@@ -1046,6 +1062,7 @@ impl<'a> DiffView<'a> {
                                 add_style,
                                 width,
                                 Some(bar_add.clone()),
+                                self.ctx.color_theme.divider_fg,
                             ));
                         }
                     }
@@ -1059,6 +1076,7 @@ impl<'a> DiffView<'a> {
                                 width,
                                 h,
                                 Some(bar_del.clone()),
+                                self.ctx.color_theme.divider_fg,
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
@@ -1067,6 +1085,7 @@ impl<'a> DiffView<'a> {
                                 del_style,
                                 width,
                                 Some(bar_del.clone()),
+                                self.ctx.color_theme.divider_fg,
                             ));
                         }
                     }
@@ -1079,6 +1098,7 @@ impl<'a> DiffView<'a> {
                                 ctx_style,
                                 width,
                                 h,
+                                self.ctx.color_theme.divider_fg,
                             ));
                         } else {
                             lines.extend(wrap_diff_line(
@@ -1086,6 +1106,7 @@ impl<'a> DiffView<'a> {
                                 &line_num,
                                 ctx_style,
                                 width,
+                                self.ctx.color_theme.divider_fg,
                             ));
                         }
                     }
@@ -1094,7 +1115,7 @@ impl<'a> DiffView<'a> {
                             lines.push(Line::from(vec![Span::styled(
                                 chunk.to_string(),
                                 Style::default()
-                                    .fg(Color::Rgb(192, 202, 245))
+                                    .fg(self.ctx.color_theme.fg)
                                     .add_modifier(Modifier::DIM),
                             )]));
                         }
@@ -1354,12 +1375,12 @@ impl<'a> DiffView<'a> {
     fn build_button_line(&self, btn: &ButtonInfo, is_hovered: bool, _width: u16) -> Line<'static> {
         let style = if is_hovered {
             Style::default()
-                .fg(Color::Rgb(192, 202, 245))
-                .bg(Color::Rgb(41, 46, 66))
+                .fg(self.ctx.color_theme.fg)
+                .bg(self.ctx.color_theme.bg)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
-                .fg(Color::Rgb(122, 162, 247))
+                .fg(self.ctx.color_theme.status_info_fg)
                 .add_modifier(Modifier::BOLD)
         };
         let label = if btn.is_edge {
@@ -1596,6 +1617,7 @@ fn wrap_diff_line_with_syntax(
     base_style: Style,
     available_width: u16,
     highlighter: &mut SyntaxHighlighter,
+    divider_fg: Color,
 ) -> Vec<Line<'static>> {
     let line_num_width = 7; // "1234 │ " = 7 chars
     let content_width = available_width.saturating_sub(line_num_width) as usize;
@@ -1605,7 +1627,7 @@ fn wrap_diff_line_with_syntax(
         let spans = highlighter.highlight_line(content, base_style, None);
         let mut all_spans = vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )];
         all_spans.extend(spans);
         lines.push(Line::from(all_spans));
@@ -1618,7 +1640,7 @@ fn wrap_diff_line_with_syntax(
     if remaining.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )]));
         return lines;
     }
@@ -1633,12 +1655,12 @@ fn wrap_diff_line_with_syntax(
         let num_span = if first {
             Span::styled(
                 line_num_str.to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         } else {
             Span::styled(
                 "     │ ".to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         };
 
@@ -1658,6 +1680,7 @@ fn wrap_diff_line(
     line_num_str: &str,
     content_style: Style,
     available_width: u16,
+    divider_fg: Color,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let line_num_width = 7; // "1234 │ " = 7 chars
@@ -1667,7 +1690,7 @@ fn wrap_diff_line(
         lines.push(Line::from(vec![
             Span::styled(
                 line_num_str.to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             ),
             Span::styled(content.to_string(), content_style),
         ]));
@@ -1681,7 +1704,7 @@ fn wrap_diff_line(
     if remaining.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )]));
         return lines;
     }
@@ -1696,12 +1719,12 @@ fn wrap_diff_line(
         let num_span = if first {
             Span::styled(
                 line_num_str.to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         } else {
             Span::styled(
                 "     │ ".to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         };
 
@@ -1723,6 +1746,7 @@ fn wrap_diff_line_with_bar(
     content_style: Style,
     available_width: u16,
     bar_span: Option<Span<'static>>,
+    divider_fg: Color,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let line_num_width = 7; // "1234 │ " = 7 chars
@@ -1732,7 +1756,7 @@ fn wrap_diff_line_with_bar(
     if content_width == 0 {
         let mut spans = vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
             spans.push(bar);
@@ -1749,7 +1773,7 @@ fn wrap_diff_line_with_bar(
     if remaining.is_empty() {
         let mut spans = vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
             spans.push(bar);
@@ -1769,12 +1793,12 @@ fn wrap_diff_line_with_bar(
         let num_span = if first {
             Span::styled(
                 line_num_str.to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         } else {
             Span::styled(
                 "     │ ".to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         };
 
@@ -1800,6 +1824,7 @@ fn wrap_diff_line_with_syntax_and_bar(
     available_width: u16,
     highlighter: &mut SyntaxHighlighter,
     bar_span: Option<Span<'static>>,
+    divider_fg: Color,
 ) -> Vec<Line<'static>> {
     let line_num_width = 7; // "1234 │ " = 7 chars
     let bar_width = if bar_span.is_some() { 1 } else { 0 };
@@ -1809,7 +1834,7 @@ fn wrap_diff_line_with_syntax_and_bar(
     if content_width == 0 {
         let mut spans = vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
             spans.push(bar);
@@ -1826,7 +1851,7 @@ fn wrap_diff_line_with_syntax_and_bar(
     if remaining.is_empty() {
         let mut spans = vec![Span::styled(
             line_num_str.to_string(),
-            Style::default().fg(Color::Rgb(59, 66, 97)),
+            Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
             spans.push(bar);
@@ -1846,12 +1871,12 @@ fn wrap_diff_line_with_syntax_and_bar(
         let num_span = if first {
             Span::styled(
                 line_num_str.to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         } else {
             Span::styled(
                 "     │ ".to_string(),
-                Style::default().fg(Color::Rgb(59, 66, 97)),
+                Style::default().fg(divider_fg),
             )
         };
 

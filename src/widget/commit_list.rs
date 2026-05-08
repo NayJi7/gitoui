@@ -1170,7 +1170,7 @@ impl CommitList<'_> {
 
             if !text.is_empty() {
                 let style = Style::default()
-                    .fg(Color::Rgb(86, 95, 137))
+                    .fg(self.ctx.color_theme.list_ref_paren_fg)
                     .add_modifier(Modifier::BOLD);
                 let line = Line::from(Span::styled(text.to_string(), style));
                 let para = Paragraph::new(line);
@@ -1180,7 +1180,7 @@ impl CommitList<'_> {
         }
 
         // Draw separator line below header
-        let sep_style = Style::default().fg(Color::Rgb(59, 66, 97));
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
         for col in area.left()..area.right() {
             buf[(col, area.top() + 1)].set_symbol("─");
             buf[(col, area.top() + 1)].set_style(sep_style);
@@ -1221,7 +1221,7 @@ impl CommitList<'_> {
                     {
                         let cell = &mut buf[(area.left() + x as u16, y)];
                         cell.set_symbol(image_cell.symbol());
-                        cell.set_style(image_cell.style());
+                        cell.set_style(image_cell.style().bg(self.ctx.color_theme.bg));
                         cell.set_skip(image_cell.skip());
                     }
                 });
@@ -1443,14 +1443,14 @@ impl CommitList<'_> {
                         for (x, image_cell) in prepared.cells().iter().enumerate() {
                             let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                             cell.set_symbol(image_cell.symbol());
-                            cell.set_style(image_cell.style());
+                            cell.set_style(image_cell.style().bg(self.ctx.color_theme.bg));
                             cell.set_skip(image_cell.skip());
                         }
                     } else {
                         for x in 0..2 {
                             let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                             cell.set_symbol(clear_cell.symbol());
-                            cell.set_style(clear_cell.style());
+                            cell.set_style(clear_cell.style().bg(self.ctx.color_theme.bg));
                             cell.set_skip(clear_cell.skip());
                         }
                     }
@@ -1484,14 +1484,14 @@ impl CommitList<'_> {
                 for (x, image_cell) in prepared.cells().iter().enumerate() {
                     let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                     cell.set_symbol(image_cell.symbol());
-                    cell.set_style(image_cell.style());
+                    cell.set_style(image_cell.style().bg(self.ctx.color_theme.bg));
                     cell.set_skip(image_cell.skip());
                 }
             } else {
                 for x in 0..2 {
                     let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                     cell.set_symbol(clear_cell.symbol());
-                    cell.set_style(clear_cell.style());
+                    cell.set_style(clear_cell.style().bg(self.ctx.color_theme.bg));
                     cell.set_skip(clear_cell.skip());
                 }
             }
@@ -1599,10 +1599,10 @@ impl CommitList<'_> {
             + commit_info.uncommitted_untracked;
         let spans: Vec<Span> = vec![
             Span::raw("Uncommitted Changes")
-                .fg(Color::Rgb(0xff, 0xff, 0xff))
+                .fg(self.ctx.color_theme.fg)
                 .add_modifier(Modifier::BOLD),
             Span::raw(format!(" ({})", total))
-                .fg(Color::Rgb(0xff, 0xff, 0xff))
+                .fg(self.ctx.color_theme.fg)
                 .add_modifier(Modifier::BOLD),
         ];
         self.to_commit_list_item(i, spans, state)

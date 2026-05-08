@@ -743,7 +743,7 @@ impl<'a> DialogView<'a> {
 
         let validate_style = if self.is_highlighted(DialogElement::Validate) {
             Style::default()
-                .fg(Color::White)
+                .fg(theme.bg)
                 .bg(theme.status_success_fg)
                 .add_modifier(Modifier::BOLD)
         } else {
@@ -752,7 +752,7 @@ impl<'a> DialogView<'a> {
 
         let cancel_style = if self.is_highlighted(DialogElement::Cancel) {
             Style::default()
-                .fg(Color::White)
+                .fg(theme.bg)
                 .bg(theme.status_error_fg)
                 .add_modifier(Modifier::BOLD)
         } else {

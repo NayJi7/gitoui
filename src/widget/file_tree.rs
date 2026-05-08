@@ -6,10 +6,11 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget, Wrap},
 };
 
-use crate::git::FileChange;
+use crate::{color::ColorTheme, git::FileChange};
 
 pub struct FileTree<'a> {
     changes: &'a [FileChange],
+    color_theme: &'a ColorTheme,
 }
 
 pub struct FileTreeState {
@@ -53,8 +54,8 @@ impl FileTreeState {
 }
 
 impl<'a> FileTree<'a> {
-    pub fn new(changes: &'a [FileChange]) -> Self {
-        Self { changes }
+    pub fn new(changes: &'a [FileChange], color_theme: &'a ColorTheme) -> Self {
+        Self { changes, color_theme }
     }
 }
 
@@ -72,18 +73,30 @@ impl StatefulWidget for FileTree<'_> {
             .map(|(i, change)| {
                 let is_selected = state.offset + i == state.selected;
                 let (status_char, status_color, path) = match change {
-                    FileChange::Add { path, .. } => ("A", Color::Rgb(158, 206, 106), path.as_str()),
-                    FileChange::Modify { path, .. } => {
-                        ("M", Color::Rgb(224, 175, 104), path.as_str())
-                    }
-                    FileChange::Delete { path, .. } => {
-                        ("D", Color::Rgb(247, 118, 142), path.as_str())
-                    }
-                    FileChange::Move { to, .. } => ("R", Color::Rgb(125, 207, 255), to.as_str()),
+                    FileChange::Add { path, .. } => (
+                        "A",
+                        self.color_theme.detail_file_change_add_fg,
+                        path.as_str(),
+                    ),
+                    FileChange::Modify { path, .. } => (
+                        "M",
+                        self.color_theme.detail_file_change_modify_fg,
+                        path.as_str(),
+                    ),
+                    FileChange::Delete { path, .. } => (
+                        "D",
+                        self.color_theme.detail_file_change_delete_fg,
+                        path.as_str(),
+                    ),
+                    FileChange::Move { to, .. } => (
+                        "R",
+                        self.color_theme.detail_file_change_move_fg,
+                        to.as_str(),
+                    ),
                 };
 
                 let bg = if is_selected {
-                    Color::Rgb(59, 66, 97)
+                    self.color_theme.list_selected_bg
                 } else {
                     Color::Reset
                 };
@@ -100,7 +113,7 @@ impl StatefulWidget for FileTree<'_> {
                     Span::styled(" ", Style::default().bg(bg)),
                     Span::styled(
                         path.to_string(),
-                        Style::default().fg(Color::Rgb(192, 202, 245)).bg(bg),
+                        Style::default().fg(self.color_theme.fg).bg(bg),
                     ),
                 ])
             })

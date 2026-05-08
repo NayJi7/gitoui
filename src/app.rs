@@ -740,8 +740,8 @@ impl App<'_> {
             }
         };
 
-        let dim_separator = Style::default().fg(Color::Rgb(59, 66, 97));
-        let dim_text = Style::default().fg(Color::Rgb(86, 95, 137));
+        let dim_separator = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let dim_text = Style::default().fg(self.ctx.color_theme.list_ref_paren_fg);
         let is_search_active = self.view.is_search_active();
         let is_search_querying = self.view.is_search_querying();
         let is_config_active = self.view.is_config_active();
@@ -856,11 +856,11 @@ impl App<'_> {
                         .branch_color_map
                         .get(name)
                         .copied()
-                        .unwrap_or(Color::Rgb(122, 162, 247));
+                        .unwrap_or(self.ctx.color_theme.status_info_fg);
                     spans.push(Span::styled(
                         "HEAD → ",
                         Style::default()
-                            .fg(Color::Rgb(125, 207, 255))
+                            .fg(self.ctx.color_theme.list_ref_remote_branch_fg)
                             .add_modifier(Modifier::BOLD),
                     ));
                     spans.push(Span::styled("⎇ ", Style::default().fg(branch_color)));
@@ -875,13 +875,13 @@ impl App<'_> {
                     spans.push(Span::styled(
                         "HEAD → ",
                         Style::default()
-                            .fg(Color::Rgb(125, 207, 255))
+                            .fg(self.ctx.color_theme.list_ref_remote_branch_fg)
                             .add_modifier(Modifier::BOLD),
                     ));
                     spans.push(Span::styled(
                         "● detached",
                         Style::default()
-                            .fg(Color::Rgb(255, 158, 100))
+                            .fg(self.ctx.color_theme.status_warn_fg)
                             .add_modifier(Modifier::BOLD),
                     ));
                 }
@@ -898,19 +898,19 @@ impl App<'_> {
                     if staged > 0 {
                         spans.push(Span::styled(
                             format!(" ✓{}", staged),
-                            Style::default().fg(Color::Rgb(158, 206, 106)),
+                            Style::default().fg(self.ctx.color_theme.status_success_fg),
                         ));
                     }
                     if unstaged > 0 {
                         spans.push(Span::styled(
                             format!(" ⚡{}", unstaged),
-                            Style::default().fg(Color::Rgb(224, 175, 104)),
+                            Style::default().fg(self.ctx.color_theme.status_warn_fg),
                         ));
                     }
                     if untracked > 0 {
                         spans.push(Span::styled(
                             format!(" ?{}", untracked),
-                            Style::default().fg(Color::Rgb(187, 154, 247)),
+                            Style::default().fg(self.ctx.color_theme.list_ref_stash_fg),
                         ));
                     }
                 }
