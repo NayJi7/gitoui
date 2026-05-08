@@ -50,6 +50,13 @@ pub struct DiffView<'a> {
 
     // Last known list_area.height; used to detect when commit-list shrinks
     cached_list_height: u16,
+
+    // Search state
+    search_active: bool,
+    search_query: String,
+    search_cursor: usize,
+    search_matches: Vec<usize>,
+    search_current: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +156,11 @@ impl<'a> DiffView<'a> {
             new_file_lines: new_lines,
             gap_states,
             cached_list_height: 0,
+            search_active: false,
+            search_query: String::new(),
+            search_cursor: 0,
+            search_matches: Vec::new(),
+            search_current: 0,
         }
     }
 
@@ -295,7 +307,56 @@ impl<'a> DiffView<'a> {
         states
     }
 
-    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+        if self.search_active {
+            match key.code {
+                KeyCode::Esc => {
+                    self.search_active = false;
+                    self.search_query.clear();
+                    self.search_cursor = 0;
+                    self.search_matches.clear();
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.search_active = false;
+                    return;
+                }
+                KeyCode::Char(c)
+                    if key.modifiers.is_empty()
+                        || key.modifiers == KeyModifiers::SHIFT =>
+                {
+                    self.search_query.insert(self.search_cursor, c);
+                    self.search_cursor += c.len_utf8();
+                    self.update_search_matches();
+                    if !self.search_matches.is_empty() {
+                        self.search_current = 0;
+                        self.scroll_to_match(self.search_current);
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    if self.search_cursor > 0 {
+                        let before = &self.search_query[..self.search_cursor];
+                        let char_len =
+                            before.chars().last().map(|c| c.len_utf8()).unwrap_or(0);
+                        self.search_cursor -= char_len;
+                        self.search_query.remove(self.search_cursor);
+                        self.update_search_matches();
+                        if !self.search_matches.is_empty() {
+                            self.search_current = 0;
+                            self.scroll_to_match(self.search_current);
+                        }
+                    }
+                    return;
+                }
+                _ => {
+                    return;
+                }
+            }
+        }
+
         let event = event_with_count.event;
         let count = event_with_count.count;
 
@@ -393,6 +454,31 @@ impl<'a> DiffView<'a> {
             UserEvent::Refresh => {
                 self.refresh();
             }
+            UserEvent::Search => {
+                self.search_active = !self.search_active;
+                if !self.search_active {
+                    self.search_query.clear();
+                    self.search_cursor = 0;
+                    self.search_matches.clear();
+                }
+            }
+            UserEvent::GoToNext => {
+                if !self.search_matches.is_empty() {
+                    self.search_current =
+                        (self.search_current + 1) % self.search_matches.len();
+                    self.scroll_to_match(self.search_current);
+                }
+            }
+            UserEvent::GoToPrevious => {
+                if !self.search_matches.is_empty() {
+                    self.search_current = if self.search_current == 0 {
+                        self.search_matches.len() - 1
+                    } else {
+                        self.search_current - 1
+                    };
+                    self.scroll_to_match(self.search_current);
+                }
+            }
             _ => {}
         }
     }
@@ -479,6 +565,18 @@ impl<'a> DiffView<'a> {
             diff_area
         };
 
+        let (content_area, search_bar_area) =
+            if self.search_active || !self.search_query.is_empty() {
+                let [c, s] = Layout::vertical([
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .areas(content_area);
+                (c, Some(s))
+            } else {
+                (content_area, None)
+            };
+
         self.diff_content_area = Some(content_area);
 
         // Rebuild base lines if needed (content changed, not just hover)
@@ -490,6 +588,9 @@ impl<'a> DiffView<'a> {
             } else {
                 Some(0)
             };
+            if !self.search_query.is_empty() {
+                self.update_search_matches();
+            }
         }
         self.content_height = self.base_lines.len();
 
@@ -515,8 +616,52 @@ impl<'a> DiffView<'a> {
             }
         }
 
+        // Apply search highlighting to matched lines in the visible range
+        if !self.search_query.is_empty() && !self.search_matches.is_empty() {
+            let query_lower = self.search_query.to_lowercase();
+            let current_match_line = self.search_matches.get(self.search_current).copied();
+            let match_bg = self.ctx.color_theme.list_match_bg;
+            let match_fg = self.ctx.color_theme.list_match_fg;
+
+            for vis_idx in 0..visible_lines.len() {
+                let abs_idx = self.scroll_offset + vis_idx;
+                if self.search_matches.contains(&abs_idx) {
+                    let is_current = current_match_line == Some(abs_idx);
+                    visible_lines[vis_idx] = highlight_search_matches(
+                        &visible_lines[vis_idx],
+                        &query_lower,
+                        is_current,
+                        match_bg,
+                        match_fg,
+                    );
+                }
+            }
+        }
+
         let paragraph = Paragraph::new(visible_lines);
         f.render_widget(paragraph, content_area);
+
+        // Render search bar at bottom of content area when active or query present
+        if let Some(bar_area) = search_bar_area {
+            let match_info = if self.search_query.is_empty() {
+                String::new()
+            } else if self.search_matches.is_empty() {
+                " [no matches]".to_string()
+            } else {
+                format!(
+                    " [{}/{}]",
+                    self.search_current + 1,
+                    self.search_matches.len()
+                )
+            };
+            let bar_line = Line::from(vec![Span::styled(
+                format!("/ {}{}", self.search_query, match_info),
+                Style::default()
+                    .fg(self.ctx.color_theme.fg)
+                    .bg(self.ctx.color_theme.list_selected_bg),
+            )]);
+            f.render_widget(Paragraph::new(bar_line), bar_area);
+        }
     }
 
     pub fn update_layout(&mut self, area: Rect) {
@@ -1500,6 +1645,34 @@ impl<'a> DiffView<'a> {
         }
     }
 
+    fn update_search_matches(&mut self) {
+        let query = self.search_query.to_lowercase();
+        self.search_matches.clear();
+        if query.is_empty() {
+            return;
+        }
+        if self.base_lines.is_empty() {
+            return;
+        }
+        for (i, line) in self.base_lines.iter().enumerate() {
+            let text: String = line
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>();
+            if text.to_lowercase().contains(&query) {
+                self.search_matches.push(i);
+            }
+        }
+    }
+
+    fn scroll_to_match(&mut self, match_idx: usize) {
+        if let Some(&line_idx) = self.search_matches.get(match_idx) {
+            let half_height = (self.content_height.min(20)) / 2;
+            self.scroll_offset = line_idx.saturating_sub(half_height);
+        }
+    }
+
     pub fn handle_click(&mut self, col: u16, row: u16) {
         if let Some(area) = self.diff_content_area {
             let in_area = col >= area.x
@@ -1840,6 +2013,54 @@ fn wrap_diff_line_with_bar(
     }
 
     lines
+}
+
+fn highlight_search_matches(
+    line: &Line<'static>,
+    query: &str,
+    is_current: bool,
+    match_bg: Color,
+    match_fg: Color,
+) -> Line<'static> {
+    let highlight_bg = if is_current { match_bg } else { Color::Reset };
+
+    let mut new_spans: Vec<Span<'static>> = Vec::new();
+    for span in &line.spans {
+        let text = span.content.as_ref();
+        let lower_text = text.to_lowercase();
+
+        if lower_text.contains(query) {
+            let mut pos = 0;
+            while let Some(start) = lower_text[pos..].find(query) {
+                let abs_start = pos + start;
+                let abs_end = abs_start + query.len();
+
+                if abs_start > pos {
+                    new_spans.push(Span::styled(
+                        text[pos..abs_start].to_string(),
+                        span.style,
+                    ));
+                }
+
+                new_spans.push(Span::styled(
+                    text[abs_start..abs_end].to_string(),
+                    span.style
+                        .fg(match_fg)
+                        .bg(highlight_bg)
+                        .add_modifier(Modifier::BOLD),
+                ));
+
+                pos = abs_end;
+            }
+            if pos < text.len() {
+                new_spans.push(Span::styled(text[pos..].to_string(), span.style));
+            }
+        } else {
+            new_spans.push(span.clone());
+        }
+    }
+
+    Line::from(new_spans)
 }
 
 fn wrap_diff_line_with_syntax_and_bar(
