@@ -77,8 +77,8 @@ impl<'a> GraphImageManager<'a> {
         }
     }
 
-    pub fn prepared_image(&self, commit_hash: &CommitHash) -> &PreparedImage {
-        self.prepared_image_map.get(commit_hash).unwrap()
+    pub fn prepared_image(&self, commit_hash: &CommitHash) -> Option<&PreparedImage> {
+        self.prepared_image_map.get(commit_hash)
     }
 
     pub fn image_ids(&self) -> &FxHashSet<u32> {

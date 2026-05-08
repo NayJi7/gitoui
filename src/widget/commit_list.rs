@@ -1036,7 +1036,7 @@ impl<'a> CommitListState<'a> {
         &self,
         commit_info: &'a CommitInfo,
         _visible_row_index: usize,
-    ) -> &PreparedImage {
+    ) -> Option<&PreparedImage> {
         self.graph_image_manager
             .prepared_image(&commit_info.commit.commit_hash)
     }
@@ -1240,7 +1240,7 @@ impl CommitList<'_> {
             let max_graph_width = area.width.saturating_sub(1) as usize;
             self.rendering_commit_info_iter(state_ref)
                 .for_each(|(i, commit_info)| {
-                    let prepared_image = state_ref.prepared_image(commit_info, i);
+                    let Some(prepared_image) = state_ref.prepared_image(commit_info, i) else { return; };
                     let y = area.top() + i as u16;
                     let is_selected = i == state_ref.selected
                         && state_ref.hovered_branch.is_none()
