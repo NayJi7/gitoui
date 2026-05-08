@@ -80,6 +80,31 @@ impl<'a> DiffView<'a> {
         &self.all_file_paths
     }
 
+    /// Append addition lines to the first hunk of the first diff entry (for progressive loading
+    /// of untracked/new files). Marks base_lines for rebuild.
+    pub fn append_addition_lines(&mut self, lines: Vec<crate::git::diff::DiffLine>) {
+        if let Some(entry) = self.diff_entries.first_mut() {
+            if let Some(hunk) = entry.hunks.first_mut() {
+                let next_line_no = hunk.new_count + 1;
+                let new_lines: Vec<crate::git::diff::DiffLine> = lines
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, mut l)| {
+                        l.new_line_no = Some(next_line_no + i as u32);
+                        l
+                    })
+                    .collect();
+                hunk.new_count += new_lines.len() as u32;
+                hunk.lines.extend(new_lines);
+            }
+        }
+        self.needs_rebuild = true;
+    }
+
+    pub fn has_content(&self) -> bool {
+        self.diff_entries.iter().any(|e| !e.hunks.is_empty())
+    }
+
     pub fn new(
         commit_list_state: Option<CommitListState<'a>>,
         diff_entries: Vec<DiffEntry>,
@@ -696,8 +721,8 @@ impl<'a> DiffView<'a> {
                                 lines.push(Line::from(Span::styled(
                                     chunk.to_string(),
                                     Style::default()
-                                        .fg(self.ctx.color_theme.fg)
-                                        .add_modifier(Modifier::DIM),
+                                        .fg(self.ctx.color_theme.status_warn_fg)
+                                        .add_modifier(Modifier::BOLD),
                                 )));
                             }
                         }

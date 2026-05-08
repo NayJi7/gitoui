@@ -227,6 +227,7 @@ pub fn run() -> Result<()> {
         );
         let mut avatar_manager = avatar_manager;
         avatar_manager.set_github_avatars(core_config.github_avatars());
+        let default_branch = core_config.option.default_branch.clone();
         let ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
@@ -240,7 +241,53 @@ pub fn run() -> Result<()> {
             branch_color_map: rustc_hash::FxHashMap::default(),
         });
 
-        let repository = git::Repository::load(Path::new("."), order, max_count)?;
+        let repository = match git::Repository::load(Path::new("."), order, max_count) {
+            Ok(repo) => repo,
+            Err(e) if terminal.is_none() => {
+                let err_str = e.to_string().to_lowercase();
+                let is_no_repo = err_str.contains("not a git repository")
+                    || err_str.contains("repository not found")
+                    || err_str.contains("could not find")
+                    || err_str.contains("not found");
+                if is_no_repo {
+                    let cwd = std::env::current_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| ".".to_string());
+                    print!(
+                        "No git repository found in '{}'.\nInitialize a new repository here? (y/n) ",
+                        cwd
+                    );
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_ok()
+                        && input.trim().eq_ignore_ascii_case("y")
+                    {
+                        let status = std::process::Command::new("git")
+                            .args(["init", "-b", &default_branch])
+                            .status();
+                        match status {
+                            Ok(s) if s.success() => {
+                                println!("Initialized repository with branch '{}'.", default_branch);
+                            }
+                            _ => {
+                                let _ = std::process::Command::new("git").arg("init").status();
+                                println!("Initialized repository.");
+                            }
+                        }
+                        continue;
+                    } else {
+                        break Err(e);
+                    }
+                } else {
+                    break Err(e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to load repository: {e}");
+                continue;
+            }
+        };
 
         let graph = graph::calc_graph(&repository);
 

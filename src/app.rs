@@ -152,6 +152,7 @@ pub struct App<'a> {
     app_status: AppStatus,
     ctx: Rc<AppContext>,
     ec: &'a EventController,
+    file_stream: Vec<crate::git::diff::DiffLine>,
 }
 
 impl<'a> App<'a> {
@@ -273,6 +274,7 @@ impl<'a> App<'a> {
             app_status: AppStatus::default(),
             ctx,
             ec,
+            file_stream: Vec::new(),
         };
 
         if let Some(context) = refresh_view_context {
@@ -596,13 +598,23 @@ impl App<'_> {
                     self.refresh_uncommitted();
                 }
                 AppEvent::Tick => {
-                    // Only redraw when a notification is about to expire.
-                    // Ticking without a notification produces no visual change, so skip the draw.
-                    needs_draw = self
+                    let notif_expiring = self
                         .app_status
                         .notification_timestamp
                         .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
                         .unwrap_or(false);
+                    // Progressive file loading: stream next chunk into the diff view
+                    let streaming = if !self.file_stream.is_empty() {
+                        let chunk_size = 100.min(self.file_stream.len());
+                        let chunk: Vec<_> = self.file_stream.drain(..chunk_size).collect();
+                        if let View::Diff(ref mut view) = self.view {
+                            view.append_addition_lines(chunk);
+                        }
+                        true
+                    } else {
+                        false
+                    };
+                    needs_draw = notif_expiring || streaming;
                 }
                 AppEvent::OpenUncommittedDiff {
                     file_path,
@@ -1097,6 +1109,7 @@ impl App<'_> {
     }
 
     fn close_diff(&mut self) {
+        self.file_stream.clear();
         if let View::Diff(ref mut view) = self.view {
             let commit_list_state = view.take_list_state().unwrap();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
@@ -1125,34 +1138,98 @@ impl App<'_> {
     }
 
     fn open_uncommitted_diff(&mut self, file_path: String, is_staged: bool) {
-        let (commit_list_state, all_files) = match self.view {
+        self.file_stream.clear();
+
+        let (commit_list_state, all_files, is_untracked) = match self.view {
             View::Uncommitted(ref mut view) => {
                 let list_state = view.take_list_state();
+                let is_untracked = view
+                    .untracked
+                    .iter()
+                    .any(|f| f.path == file_path);
                 let all_files: Vec<(String, bool)> = view
                     .staged
                     .iter()
-                    .filter(|f| {
-                        f.status != StatusType::Deleted && f.status != StatusType::Untracked
-                    })
+                    .filter(|f| f.status != StatusType::Deleted)
                     .map(|f| (f.path.clone(), true))
                     .chain(
                         view.unstaged
                             .iter()
-                            .filter(|f| {
-                                f.status != StatusType::Deleted && f.status != StatusType::Untracked
-                            })
+                            .filter(|f| f.status != StatusType::Deleted)
                             .map(|f| (f.path.clone(), false)),
                     )
+                    .chain(view.untracked.iter().map(|f| (f.path.clone(), false)))
                     .collect();
-                (list_state, all_files)
+                (list_state, all_files, is_untracked)
             }
             View::Diff(ref mut view) => {
                 let list_state = view.take_list_state();
                 let all_files = view.all_file_paths().clone();
-                (list_state, all_files)
+                (list_state, all_files, false)
             }
             _ => return,
         };
+
+        // For untracked files, show content as additions (not a real diff)
+        if is_untracked {
+            match DiffEntry::load_untracked_file(self.repository.path(), &file_path) {
+                Err(e) if e == "binary" => {
+                    // Show a placeholder entry with the "cannot open" message
+                    let entry = DiffEntry::binary_placeholder(&file_path);
+                    let title = format!("File: {}", file_path);
+                    self.view = View::of_uncommitted_diff(
+                        commit_list_state,
+                        vec![entry],
+                        self.ctx.clone(),
+                        self.ec.sender(),
+                        title,
+                        all_files,
+                        self.repository.path().to_path_buf(),
+                    );
+                }
+                Err(e) => {
+                    self.ec.send(AppEvent::NotifyError(e));
+                }
+                Ok(full_entry) => {
+                    // Stream the first 200 lines immediately, then the rest via Tick
+                    let total_lines: Vec<_> = full_entry
+                        .hunks
+                        .into_iter()
+                        .flat_map(|h| h.lines)
+                        .collect();
+                    let chunk_size = 200.min(total_lines.len());
+                    let (initial, rest): (Vec<_>, Vec<_>) =
+                        total_lines.into_iter().enumerate().partition(|(i, _)| *i < chunk_size);
+                    let initial: Vec<_> = initial.into_iter().map(|(_, l)| l).collect();
+                    let rest: Vec<_> = rest.into_iter().map(|(_, l)| l).collect();
+
+                    let initial_hunk = crate::git::diff::Hunk {
+                        old_start: 0,
+                        old_count: 0,
+                        new_start: 1,
+                        new_count: initial.len() as u32,
+                        lines: initial,
+                    };
+                    let initial_entry = DiffEntry {
+                        old_path: Some("/dev/null".to_string()),
+                        new_path: Some(file_path.clone()),
+                        hunks: vec![initial_hunk],
+                    };
+                    let title = format!("File: {}", file_path);
+                    self.view = View::of_uncommitted_diff(
+                        commit_list_state,
+                        vec![initial_entry],
+                        self.ctx.clone(),
+                        self.ec.sender(),
+                        title,
+                        all_files,
+                        self.repository.path().to_path_buf(),
+                    );
+                    self.file_stream = rest;
+                }
+            }
+            return;
+        }
 
         let diff_result = if is_staged {
             DiffEntry::load_staged_for_file(self.repository.path(), &file_path)

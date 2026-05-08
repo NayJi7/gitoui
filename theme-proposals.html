@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gitui — Propositions de thèmes</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #111;
+    color: #ccc;
+    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 20px;
+  }
+  h1 { font-size: 20px; color: #eee; margin-bottom: 6px; font-weight: 500; }
+  .subtitle { color: #888; margin-bottom: 24px; font-size: 12px; }
+
+  /* Theme selector */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .label { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .theme-btn {
+    padding: 5px 14px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #1a1a1a;
+    color: #aaa;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    transition: all .15s;
+  }
+  .theme-btn:hover { border-color: #555; color: #eee; }
+  .theme-btn.active { border-color: var(--accent); color: var(--accent); background: #1a1a1a; }
+  .sep { color: #333; }
+
+  /* Approach tabs */
+  .approach-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #333;
+  }
+  .approach-tab {
+    padding: 8px 18px;
+    border: none;
+    background: transparent;
+    color: #666;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all .15s;
+  }
+  .approach-tab:hover { color: #aaa; }
+  .approach-tab.active { color: #eee; border-bottom-color: var(--accent); }
+
+  .approach-desc {
+    background: #161616;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: #999;
+    line-height: 1.7;
+  }
+  .approach-desc strong { color: #ddd; }
+  .approach-desc .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    margin-right: 6px;
+    font-weight: 600;
+  }
+  .badge.rec { background: #1a3a1a; color: #4ec94e; border: 1px solid #2a4a2a; }
+  .badge.alt { background: #1a1a3a; color: #6a8fff; border: 1px solid #2a2a5a; }
+
+  /* Terminal window */
+  .terminal-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 12px;
+  }
+  .terminal-window {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6);
+  }
+  .terminal-titlebar {
+    display: flex;
+    align-items: center;
+    padding: 8px 14px;
+    background: #2a2a2a;
+    gap: 8px;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; }
+  .dot.y { background: #ffbd2e; }
+  .dot.g { background: #28c840; }
+  .terminal-title { margin-left: 8px; color: #888; font-size: 11px; }
+
+  /* gitui layout */
+  .gitui {
+    display: flex;
+    flex-direction: column;
+    height: 380px;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 12.5px;
+    overflow: hidden;
+  }
+  .gitui-header {
+    display: grid;
+    grid-template-columns: 52px 1fr 130px 62px 130px;
+    padding: 3px 0 2px 0;
+    border-bottom: 1px solid var(--divider);
+    color: var(--header-fg);
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .gitui-header span { padding: 0 6px; }
+  .commit-list { flex: 1; overflow: hidden; }
+  .commit-row {
+    display: grid;
+    grid-template-columns: 52px 1fr 130px 62px 130px;
+    align-items: center;
+    min-height: 19px;
+  }
+  .commit-row.selected {
+    background: var(--selected-bg);
+    color: var(--selected-fg);
+  }
+  .commit-row.selected .msg-col,
+  .commit-row.selected .author-col,
+  .commit-row.selected .hash-col,
+  .commit-row.selected .date-col { color: var(--selected-fg); }
+
+  .graph-col { padding: 0 4px; font-size: 11px; white-space: nowrap; }
+  .msg-col { padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--msg-fg); }
+  .author-col { padding: 0 6px; color: var(--author-fg); white-space: nowrap; overflow: hidden; }
+  .hash-col { padding: 0 6px; color: var(--hash-fg); font-size: 11.5px; }
+  .date-col { padding: 0 6px; color: var(--date-fg); font-size: 11px; }
+
+  .ref { display: inline-block; border-radius: 2px; padding: 0 4px; margin-right: 4px; font-size: 11px; }
+  .ref.branch { color: var(--branch-fg); font-weight: 700; }
+  .ref.remote { color: var(--remote-fg); font-weight: 700; }
+  .ref.tag { color: var(--tag-fg); font-weight: 700; }
+  .ref.head { color: var(--head-fg); font-weight: 700; }
+  .ref-paren { color: var(--paren-fg); font-weight: 700; }
+
+  .gitui-footer {
+    border-top: 1px solid var(--divider);
+    padding: 3px 8px;
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--footer-fg);
+  }
+  .footer-head { color: var(--head-fg); }
+  .footer-branch { color: var(--branch-fg); }
+  .key { color: var(--key-fg); }
+  .ksep { color: var(--divider); }
+
+  /* Config panel view */
+  .config-view {
+    display: flex;
+    flex-direction: column;
+    height: 380px;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 12.5px;
+    overflow: hidden;
+  }
+  .config-header {
+    text-align: center;
+    padding: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--divider);
+  }
+  .config-sep { text-align: center; font-size: 10px; color: var(--divider); padding: 2px; }
+  .config-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--fg);
+    align-items: center;
+    gap: 12px;
+  }
+  .config-item.selected {
+    background: var(--selected-bg);
+    color: var(--selected-fg);
+  }
+  .config-item .item-label { color: inherit; }
+  .config-item .item-value { color: var(--hash-fg); }
+  .config-item.selected .item-value { color: var(--selected-fg); opacity: .85; }
+  .config-desc {
+    padding: 8px 16px;
+    font-size: 11px;
+    color: var(--date-fg);
+    border-top: 1px solid var(--divider);
+    margin-top: 4px;
+  }
+  .theme-preview-box {
+    margin: 6px 16px;
+    padding: 8px 10px;
+    border: 1px solid var(--divider);
+    border-radius: 3px;
+    font-size: 11px;
+    line-height: 1.6;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Diff syntax preview */
+  .diff-view {
+    display: flex;
+    flex-direction: column;
+    height: 380px;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 12px;
+    overflow: hidden;
+  }
+  .diff-header {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--divider);
+    color: var(--header-fg);
+    display: flex;
+    gap: 24px;
+  }
+  .diff-line {
+    padding: 0 8px;
+    display: flex;
+    align-items: baseline;
+    min-height: 18px;
+    white-space: pre;
+  }
+  .diff-line.add { background: var(--diff-add-bg); }
+  .diff-line.del { background: var(--diff-del-bg); }
+  .diff-line .ln { color: var(--date-fg); min-width: 28px; text-align: right; margin-right: 12px; font-size: 10px; opacity: .6; }
+  .diff-line .marker { margin-right: 8px; width: 12px; }
+  .diff-line.add .marker { color: var(--file-add); }
+  .diff-line.del .marker { color: var(--file-del); }
+  .diff-line .code { color: var(--fg); }
+  /* Syntax colors in diff */
+  .kw { color: var(--syn-kw); }
+  .fn-name { color: var(--syn-fn); }
+  .str-lit { color: var(--syn-str); }
+  .num { color: var(--syn-num); }
+  .cmt { color: var(--syn-cmt); font-style: italic; }
+  .ty { color: var(--syn-ty); }
+  .punct { color: var(--syn-punct); }
+
+  /* caption */
+  .caption {
+    text-align: center;
+    font-size: 11px;
+    color: #555;
+    margin-top: 6px;
+  }
+  .caption strong { color: #888; }
+
+  /* section divider */
+  .section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: #555;
+    margin: 28px 0 10px;
+    border-bottom: 1px solid #222;
+    padding-bottom: 6px;
+  }
+
+  /* panels label row */
+  .panels-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 6px;
+  }
+  .panel-label {
+    font-size: 11px;
+    color: #555;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .two-panels-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 6px;
+  }
+
+  /* hidden approach panels */
+  .approach-panel { display: none; }
+  .approach-panel.visible { display: block; }
+</style>
+</head>
+<body>
+
+<h1>gitui — Propositions de thèmes</h1>
+<p class="subtitle">Renommer « Syntax Theme » → « Thème » + appliquer à toute l'interface</p>
+
+<!-- Approach tabs -->
+<div class="approach-tabs">
+  <button class="approach-tab active" onclick="setApproach('B')" id="tab-B">
+    ★ Approche B — Thèmes UI complets
+  </button>
+  <button class="approach-tab" onclick="setApproach('A')" id="tab-A">
+    Approche A — Dériver depuis la syntaxe
+  </button>
+  <button class="approach-tab" onclick="setApproach('C')" id="tab-C">
+    Approche C — Hybride
+  </button>
+</div>
+
+<!-- Approach B (default visible) -->
+<div class="approach-panel visible" id="panel-B">
+  <div class="approach-desc">
+    <span class="badge rec">Recommandé</span>
+    <strong>Thèmes UI complets</strong> — Créer 5-6 thèmes entièrement définis, chacun avec sa palette complète
+    (fond, texte, sélection, refs, diff, header) <em>et</em> un thème syntaxe correspondant embarqué.
+    L'utilisateur choisit un seul <strong>Thème</strong> et tout l'interface change.
+    La config <code>syntax_theme</code> existante peut rester pour un override manuel.
+    <br><br>
+    <strong>Avantages :</strong> Cohérence parfaite, contrôle total, visuels de qualité.
+    &nbsp;·&nbsp; <strong>Inconvénients :</strong> Nécessite de définir chaque palette à la main (~6 thèmes).
+  </div>
+
+  <!-- Theme selector for B -->
+  <div class="controls">
+    <span class="label">Thème</span>
+    <button class="theme-btn active" onclick="setTheme('tokyo-night')" id="btn-tokyo-night">Tokyo Night</button>
+    <button class="theme-btn" onclick="setTheme('dracula')" id="btn-dracula">Dracula</button>
+    <button class="theme-btn" onclick="setTheme('catppuccin')" id="btn-catppuccin">Catppuccin</button>
+    <button class="theme-btn" onclick="setTheme('gruvbox')" id="btn-gruvbox">Gruvbox</button>
+    <button class="theme-btn" onclick="setTheme('nord')" id="btn-nord">Nord</button>
+    <button class="theme-btn" onclick="setTheme('solarized')" id="btn-solarized">Solarized</button>
+  </div>
+
+  <!-- Panel labels -->
+  <div class="panels-row">
+    <div class="panel-label">Liste des commits</div>
+    <div class="panel-label">Config — Thème</div>
+    <div class="panel-label">Diff + syntaxe</div>
+  </div>
+
+  <!-- Three panels side by side -->
+  <div id="terminals-B" class="panels-row">
+    <!-- Commit list -->
+    <div class="terminal-window">
+      <div class="terminal-titlebar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span class="terminal-title">gitui</span>
+      </div>
+      <div class="gitui" id="commit-list-preview">
+        <div class="gitui-header">
+          <span>Graph</span><span>Commit message</span><span>Author</span><span>SHA</span><span>Date</span>
+        </div>
+        <div class="commit-list" id="commit-rows"></div>
+        <div class="gitui-footer" id="footer-main"></div>
+      </div>
+    </div>
+
+    <!-- Config panel -->
+    <div class="terminal-window">
+      <div class="terminal-titlebar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span class="terminal-title">gitui — Config</span>
+      </div>
+      <div class="config-view" id="config-preview">
+        <div class="config-header">Configuration</div>
+        <div class="config-sep">────────────────────────────</div>
+        <div id="config-items"></div>
+        <div class="theme-preview-box" id="theme-preview-box"></div>
+        <div class="config-desc" id="config-desc"></div>
+        <div class="gitui-footer" id="footer-config"></div>
+      </div>
+    </div>
+
+    <!-- Diff -->
+    <div class="terminal-window">
+      <div class="terminal-titlebar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <span class="terminal-title">gitui — Diff</span>
+      </div>
+      <div class="diff-view" id="diff-preview">
+        <div class="diff-header" id="diff-header"></div>
+        <div id="diff-lines"></div>
+        <div class="gitui-footer" id="footer-diff"></div>
+      </div>
+    </div>
+  </div>
+  <div class="caption" id="caption-B"></div>
+</div>
+
+<!-- Approach A -->
+<div class="approach-panel" id="panel-A">
+  <div class="approach-desc">
+    <span class="badge alt">Alternative</span>
+    <strong>Dériver l'UI depuis le thème syntaxe</strong> — Extraire bg/fg/accent du thème .tmTheme
+    sélectionné et en déduire les couleurs de toute l'interface (sélection = bg+20% luminosité,
+    texte secondaire = fg@70%, etc.).
+    <br><br>
+    <strong>Avantages :</strong> Cohérent par construction, un seul concept "thème".
+    &nbsp;·&nbsp;
+    <strong>Inconvénients :</strong> Les thèmes syntaxe ont une palette limitée — certains résultats
+    peuvent être visuellement pauvres. Le mapping bg→UI est fragile (ex: Solarized Light donnerait
+    un fond blanc pour toute l'interface).
+  </div>
+  <div class="controls">
+    <span class="label">Thème syntaxe</span>
+    <button class="theme-btn active" onclick="setTheme('tokyo-night')" id="btn-A-tokyo-night">base16-ocean.dark</button>
+    <button class="theme-btn" onclick="setTheme('dracula')" id="btn-A-dracula">Dracula</button>
+    <button class="theme-btn" onclick="setTheme('gruvbox')" id="btn-A-gruvbox">Monokai</button>
+    <button class="theme-btn" onclick="setTheme('solarized')" id="btn-A-solarized">Solarized (dark)</button>
+  </div>
+  <div class="approach-desc" style="margin-top:12px; background:#1a1210; border-color:#3a2a10;">
+    ⚠️ <strong>Limite principale :</strong> Les thèmes syntaxe (.tmTheme) définissent des couleurs pour
+    les tokens de code, pas pour les éléments d'interface. Le mapping bg→fond global et accent→refs
+    donne des résultats approximatifs. Exemple : <code>InspiredGitHub</code> a un fond blanc — toute
+    l'UI deviendrait blanche. L'approche B donne un bien meilleur résultat.
+  </div>
+</div>
+
+<!-- Approach C -->
+<div class="approach-panel" id="panel-C">
+  <div class="approach-desc">
+    <span class="badge alt">Alternative</span>
+    <strong>Hybride</strong> — Des thèmes UI complets (comme B), mais le thème syntaxe reste un
+    paramètre séparable. Le thème UI définit un thème syntaxe <em>par défaut</em> cohérent,
+    mais l'utilisateur peut l'overrider indépendamment.
+    <br><br>
+    <strong>Exemple :</strong> Thème UI = Dracula → syntaxe = Dracula par défaut, mais l'utilisateur
+    peut changer la syntaxe en Monokai sans changer l'UI.
+    <br><br>
+    <strong>Avantages :</strong> Flexibilité maximale. Bonne option si l'utilisateur a déjà configuré
+    son thème syntaxe favori et veut juste changer l'UI.
+    &nbsp;·&nbsp;
+    <strong>Inconvénients :</strong> Deux niveaux de config. Plus complexe à implémenter et à documenter.
+    Dans la pratique, les deux niveaux peuvent diverger et l'interface peut sembler incohérente.
+    L'approche B (un seul "Thème") est plus simple et couvre 95% des cas.
+  </div>
+
+  <div class="approach-desc" style="background:#0d1a1a; border-color:#1a3a3a; margin-top:0;">
+    <strong>Structure de config envisagée :</strong><br>
+    <code>[core.option]</code><br>
+    <code>theme = "Dracula"</code> &nbsp;← <em>nouveau, remplace syntax_theme</em><br>
+    <code>syntax_theme_override = "Monokai"</code> &nbsp;← <em>optionnel, override la syntaxe</em>
+  </div>
+</div>
+
+
+<script>
+// ─── Theme definitions ────────────────────────────────────────────────
+const THEMES = {
+  'tokyo-night': {
+    name: 'Tokyo Night',
+    syntax: 'base16-ocean.dark (personnalisé)',
+    '--bg': '#1a1b26',
+    '--fg': '#c0caf5',
+    '--selected-bg': '#364a82',
+    '--selected-fg': '#ffffff',
+    '--divider': '#3b4261',
+    '--header-fg': '#565f89',
+    '--footer-fg': '#9aa5ce',
+    '--msg-fg': '#b4bde5',
+    '--author-fg': '#2ac3de',
+    '--hash-fg': '#e0af68',
+    '--date-fg': '#bb9af7',
+    '--branch-fg': '#7aa2f7',
+    '--remote-fg': '#f7768e',
+    '--tag-fg': '#e0af68',
+    '--head-fg': '#2ac3de',
+    '--paren-fg': '#9aa5ce',
+    '--key-fg': '#7aa2f7',
+    '--file-add': '#9ece6a',
+    '--file-mod': '#e0af68',
+    '--file-del': '#f7768e',
+    '--diff-add-bg': '#20442d',
+    '--diff-del-bg': '#44232a',
+    '--syn-kw': '#bb9af7',
+    '--syn-fn': '#7aa2f7',
+    '--syn-str': '#9ece6a',
+    '--syn-num': '#ff9e64',
+    '--syn-cmt': '#565f89',
+    '--syn-ty': '#2ac3de',
+    '--syn-punct': '#89ddff',
+    '--accent': '#7aa2f7',
+    desc: 'Thème actuel (Tokyo Night) — palette Tokyo Night complète avec highlights bleutés.',
+  },
+  dracula: {
+    name: 'Dracula',
+    syntax: 'Dracula (intégré)',
+    '--bg': '#282a36',
+    '--fg': '#f8f8f2',
+    '--selected-bg': '#44475a',
+    '--selected-fg': '#f8f8f2',
+    '--divider': '#6272a4',
+    '--header-fg': '#6272a4',
+    '--footer-fg': '#6272a4',
+    '--msg-fg': '#f8f8f2',
+    '--author-fg': '#8be9fd',
+    '--hash-fg': '#ffb86c',
+    '--date-fg': '#bd93f9',
+    '--branch-fg': '#50fa7b',
+    '--remote-fg': '#ff5555',
+    '--tag-fg': '#f1fa8c',
+    '--head-fg': '#50fa7b',
+    '--paren-fg': '#6272a4',
+    '--key-fg': '#8be9fd',
+    '--file-add': '#50fa7b',
+    '--file-mod': '#ffb86c',
+    '--file-del': '#ff5555',
+    '--diff-add-bg': '#1a3320',
+    '--diff-del-bg': '#3a1e20',
+    '--syn-kw': '#ff79c6',
+    '--syn-fn': '#50fa7b',
+    '--syn-str': '#f1fa8c',
+    '--syn-num': '#bd93f9',
+    '--syn-cmt': '#6272a4',
+    '--syn-ty': '#8be9fd',
+    '--syn-punct': '#ff79c6',
+    '--accent': '#bd93f9',
+    desc: 'Dracula — fond charbon avec violets et verts néon. Thème syntaxe Dracula embarqué.',
+  },
+  catppuccin: {
+    name: 'Catppuccin Mocha',
+    syntax: 'Personnalisé (Catppuccin)',
+    '--bg': '#1e1e2e',
+    '--fg': '#cdd6f4',
+    '--selected-bg': '#45475a',
+    '--selected-fg': '#cdd6f4',
+    '--divider': '#313244',
+    '--header-fg': '#6c7086',
+    '--footer-fg': '#7f849c',
+    '--msg-fg': '#cdd6f4',
+    '--author-fg': '#89dceb',
+    '--hash-fg': '#fab387',
+    '--date-fg': '#cba6f7',
+    '--branch-fg': '#a6e3a1',
+    '--remote-fg': '#f38ba8',
+    '--tag-fg': '#f9e2af',
+    '--head-fg': '#89b4fa',
+    '--paren-fg': '#9399b2',
+    '--key-fg': '#89b4fa',
+    '--file-add': '#a6e3a1',
+    '--file-mod': '#fab387',
+    '--file-del': '#f38ba8',
+    '--diff-add-bg': '#1a2e1e',
+    '--diff-del-bg': '#2e1a1e',
+    '--syn-kw': '#cba6f7',
+    '--syn-fn': '#89b4fa',
+    '--syn-str': '#a6e3a1',
+    '--syn-num': '#fab387',
+    '--syn-cmt': '#585b70',
+    '--syn-ty': '#89dceb',
+    '--syn-punct': '#89b4fa',
+    '--accent': '#cba6f7',
+    desc: 'Catppuccin Mocha — couleurs douces et pastel, très lisible. Très populaire.',
+  },
+  gruvbox: {
+    name: 'Gruvbox Dark',
+    syntax: 'Personnalisé (Gruvbox)',
+    '--bg': '#282828',
+    '--fg': '#ebdbb2',
+    '--selected-bg': '#504945',
+    '--selected-fg': '#fbf1c7',
+    '--divider': '#3c3836',
+    '--header-fg': '#7c6f64',
+    '--footer-fg': '#7c6f64',
+    '--msg-fg': '#ebdbb2',
+    '--author-fg': '#83a598',
+    '--hash-fg': '#d79921',
+    '--date-fg': '#b16286',
+    '--branch-fg': '#98971a',
+    '--remote-fg': '#cc241d',
+    '--tag-fg': '#d79921',
+    '--head-fg': '#689d6a',
+    '--paren-fg': '#665c54',
+    '--key-fg': '#458588',
+    '--file-add': '#b8bb26',
+    '--file-mod': '#fabd2f',
+    '--file-del': '#fb4934',
+    '--diff-add-bg': '#1d2b1d',
+    '--diff-del-bg': '#2b1d1d',
+    '--syn-kw': '#fb4934',
+    '--syn-fn': '#b8bb26',
+    '--syn-str': '#b8bb26',
+    '--syn-num': '#d3869b',
+    '--syn-cmt': '#928374',
+    '--syn-ty': '#fabd2f',
+    '--syn-punct': '#ebdbb2',
+    '--accent': '#d79921',
+    desc: 'Gruvbox Dark — palette rétro chaude, teintes brunes et orangées. Très reposant pour les yeux.',
+  },
+  nord: {
+    name: 'Nord',
+    syntax: 'Personnalisé (Nord)',
+    '--bg': '#2e3440',
+    '--fg': '#d8dee9',
+    '--selected-bg': '#434c5e',
+    '--selected-fg': '#eceff4',
+    '--divider': '#3b4252',
+    '--header-fg': '#4c566a',
+    '--footer-fg': '#616e88',
+    '--msg-fg': '#e5e9f0',
+    '--author-fg': '#88c0d0',
+    '--hash-fg': '#ebcb8b',
+    '--date-fg': '#b48ead',
+    '--branch-fg': '#a3be8c',
+    '--remote-fg': '#bf616a',
+    '--tag-fg': '#ebcb8b',
+    '--head-fg': '#5e81ac',
+    '--paren-fg': '#616e88',
+    '--key-fg': '#81a1c1',
+    '--file-add': '#a3be8c',
+    '--file-mod': '#ebcb8b',
+    '--file-del': '#bf616a',
+    '--diff-add-bg': '#2a3b2a',
+    '--diff-del-bg': '#3b2a2a',
+    '--syn-kw': '#81a1c1',
+    '--syn-fn': '#88c0d0',
+    '--syn-str': '#a3be8c',
+    '--syn-num': '#b48ead',
+    '--syn-cmt': '#4c566a',
+    '--syn-ty': '#8fbcbb',
+    '--syn-punct': '#81a1c1',
+    '--accent': '#81a1c1',
+    desc: 'Nord — palette arctique froide et épurée. Bleus profonds, accents glacés. Très élégant.',
+  },
+  solarized: {
+    name: 'Solarized Dark',
+    syntax: 'Solarized (dark) (intégré)',
+    '--bg': '#002b36',
+    '--fg': '#839496',
+    '--selected-bg': '#073642',
+    '--selected-fg': '#93a1a1',
+    '--divider': '#073642',
+    '--header-fg': '#586e75',
+    '--footer-fg': '#586e75',
+    '--msg-fg': '#93a1a1',
+    '--author-fg': '#2aa198',
+    '--hash-fg': '#b58900',
+    '--date-fg': '#6c71c4',
+    '--branch-fg': '#859900',
+    '--remote-fg': '#dc322f',
+    '--tag-fg': '#b58900',
+    '--head-fg': '#268bd2',
+    '--paren-fg': '#586e75',
+    '--key-fg': '#268bd2',
+    '--file-add': '#859900',
+    '--file-mod': '#b58900',
+    '--file-del': '#dc322f',
+    '--diff-add-bg': '#002b1e',
+    '--diff-del-bg': '#2b0007',
+    '--syn-kw': '#859900',
+    '--syn-fn': '#268bd2',
+    '--syn-str': '#2aa198',
+    '--syn-num': '#d33682',
+    '--syn-cmt': '#586e75',
+    '--syn-ty': '#cb4b16',
+    '--syn-punct': '#657b83',
+    '--accent': '#268bd2',
+    desc: 'Solarized Dark — thème historique de Ethan Schoonover, contraste calibré scientifiquement.',
+  },
+};
+
+// ─── State ────────────────────────────────────────────────────────────
+let currentTheme = 'tokyo-night';
+let currentApproach = 'B';
+
+// ─── Sample data ──────────────────────────────────────────────────────
+const COMMITS = [
+  { graph: '│', msg: 'feat: GitHub avatar system — overhaul & bug fixes', hasRef: true, refs: [{type:'branch',label:'಄ HEAD → main'},{type:'remote',label:'origin/main'}], author: '🔵 NayJi7', hash: 'fda19b1', date: '08/05 · 14:22', selected: false },
+  { graph: '│', msg: 'feat: add push/pull shortcuts and redesign footer', hasRef: false, refs: [], author: '🔵 NayJi7', hash: '97852c3', date: '06/05 · 16:12', selected: false },
+  { graph: '│', msg: '(✦ origin/eleonore) MatchManager et ZoneManager avec all tests passed', hasRef: true, refs: [{type:'branch',label:'⎇ eleonore'}], author: 'eleonore', hash: '4665af9', date: '28/04 · 20:31', selected: false },
+  { graph: '●', msg: 'feat(fatima-abdel): complete petri model and persistence layer', hasRef: true, refs: [{type:'branch',label:'⎇ fatima-abdel'}], author: 'abdel95j', hash: 'c368792', date: '28/04 · 15:55', selected: true },
+  { graph: '│', msg: 'chore(docker): add Dockerfiles and update compose', hasRef: false, refs: [], author: 'Fatima AGUEL', hash: 'b91cd4d', date: '27/04 · 23:42', selected: false },
+  { graph: '│', msg: 'feat(reservation-payment): PaymentGateway, Petri analyzer', hasRef: false, refs: [], author: 'Fatima AGUEL', hash: 'b111ed1', date: '27/04 · 23:42', selected: false },
+  { graph: '│', msg: 'update(src): removed test vars and prepared for integration', hasRef: false, refs: [], author: '🔵 NayJi7', hash: '0c83f1d', date: '26/04 · 13:09', selected: false },
+  { graph: '│', msg: 'fix(login): fixed login func update(ui): updated ui for login', hasRef: false, refs: [], author: '🔵 NayJi7', hash: '34d1fb7', date: '26/04 · 12:17', selected: false },
+  { graph: '│', msg: 'fix(placeholder): @cystadium to @gmail', hasRef: false, refs: [], author: '🔵 NayJi7', hash: 'f452dc5', date: '25/04 · 19:23', selected: false },
+  { graph: '│', msg: 'feat(login): user + mdp not uuid', hasRef: false, refs: [], author: '🔵 NayJi7', hash: 'fb30d5f', date: '25/04 · 19:18', selected: false },
+  { graph: '│', msg: 'feat(front): clean ui', hasRef: false, refs: [], author: '🔵 NayJi7', hash: 'b7969d4', date: '25/04 · 18:41', selected: false },
+  { graph: '│', msg: 'seat actor + ajout zoneKeyEncoder dans codec.scala', hasRef: false, refs: [], author: 'inesribar', hash: '4207871', date: '25/04 · 12:35', selected: false },
+  { graph: '│', msg: 'feat(reservation): Ajout allocator handler et simulations', hasRef: false, refs: [], author: 'abdel95j', hash: 'b521e01', date: '23/04 · 13:09', selected: false },
+  { graph: '│', msg: 'feat(api): routes matches + reservations + tests avec stubs', hasRef: false, refs: [], author: '🔵 NayJi7', hash: '2527acc', date: '23/04 · 12:40', selected: false },
+  { graph: '│', msg: 'chore: init project structure with shared contracts', hasRef: false, refs: [], author: '🔵 NayJi7', hash: '8ea0072', date: '14/04 · 08:46', selected: false },
+];
+
+const CONFIG_ITEMS = [
+  { label: 'Style de graphe', value: 'Large' },
+  { label: 'Mode diff', value: 'Split' },
+  { label: 'Souris', value: 'Activée' },
+  { label: 'Protocole image', value: 'Kitty' },
+  { label: 'Thème', value: '—', isTheme: true },
+  { label: 'GitHub token', value: '••••••••••' },
+  { label: 'GitHub repos', value: 'NayJi7/gitui' },
+];
+
+const DIFF_LINES = [
+  { type: 'header', text: 'src/widget/commit_list.rs', extra: '+72 −41' },
+  { type: 'ctx', ln: 388, code: '    <span class="kw">pub fn</span> <span class="fn-name">ensure_visible_avatars_uploaded</span><span class="punct">(</span>' },
+  { type: 'ctx', ln: 389, code: '        <span class="punct">&amp;</span><span class="kw">mut</span> self<span class="punct">,</span>' },
+  { type: 'ctx', ln: 390, code: '        avatar_manager<span class="punct">:</span> <span class="punct">&amp;</span><span class="kw">mut</span> <span class="ty">AvatarManager</span><span class="punct">,</span>' },
+  { type: 'del', ln: 418, code: '                    <span class="kw">let</span> hash <span class="punct">=</span> commit_info<span class="punct">.</span><span class="fn-name">commit_hash</span><span class="punct">.</span><span class="fn-name">as_str</span><span class="punct">().</span><span class="fn-name">to_string</span><span class="punct">();</span>' },
+  { type: 'del', ln: 419, code: '                    avatar_manager<span class="punct">.</span><span class="fn-name">prefetch</span><span class="punct">(</span>vec<span class="punct">![</span>hash<span class="punct">],</span> email<span class="punct">);</span>' },
+  { type: 'add', ln: 418, code: '                    <span class="cmt">// Collect up to 8 hashes — better GitHub API hit rate</span>' },
+  { type: 'add', ln: 419, code: '                    <span class="kw">let</span> hashes<span class="punct">:</span> <span class="ty">Vec</span><span class="punct">&lt;</span><span class="ty">String</span><span class="punct">&gt;</span> <span class="punct">=</span> self' },
+  { type: 'add', ln: 420, code: '                        <span class="punct">.</span><span class="fn-name">commits</span><span class="punct">.</span><span class="fn-name">iter</span><span class="punct">()</span>' },
+  { type: 'add', ln: 421, code: '                        <span class="punct">.</span><span class="fn-name">filter</span><span class="punct">(|</span>ci<span class="punct">|</span> ci<span class="punct">.</span>author_email <span class="punct">==</span> <span class="punct">*</span>email<span class="punct">)</span>' },
+  { type: 'add', ln: 422, code: '                        <span class="punct">.</span><span class="fn-name">map</span><span class="punct">(|</span>ci<span class="punct">|</span> ci<span class="punct">.</span><span class="fn-name">commit_hash</span><span class="punct">().</span><span class="fn-name">to_string</span><span class="punct">())</span>' },
+  { type: 'add', ln: 423, code: '                        <span class="punct">.</span><span class="fn-name">take</span><span class="punct">(</span><span class="num">8</span><span class="punct">)</span>' },
+  { type: 'add', ln: 424, code: '                        <span class="punct">.</span><span class="fn-name">collect</span><span class="punct">();</span>' },
+  { type: 'add', ln: 425, code: '                    avatar_manager<span class="punct">.</span><span class="fn-name">prefetch</span><span class="punct">(</span>hashes<span class="punct">,</span> email<span class="punct">);</span>' },
+  { type: 'ctx', ln: 426, code: '                <span class="punct">}' },
+];
+
+// ─── Rendering ────────────────────────────────────────────────────────
+function applyTheme(themeKey) {
+  const t = THEMES[themeKey];
+  const root = document.documentElement;
+  for (const [k, v] of Object.entries(t)) {
+    if (k.startsWith('--')) root.style.setProperty(k, v);
+  }
+}
+
+function renderCommitList(themeKey) {
+  const t = THEMES[themeKey];
+  const container = document.getElementById('commit-rows');
+  container.innerHTML = COMMITS.map(c => {
+    const selClass = c.selected ? ' selected' : '';
+    let refHtml = '';
+    if (c.hasRef) {
+      refHtml = `<span class="ref-paren">(</span>`;
+      c.refs.forEach(r => {
+        refHtml += `<span class="ref ${r.type}">${r.label}</span> `;
+      });
+      refHtml += `<span class="ref-paren">)</span> `;
+    }
+    return `<div class="commit-row${selClass}">
+      <div class="graph-col" style="color:${t['--branch-fg']}">${c.graph}</div>
+      <div class="msg-col">${refHtml}${c.msg}</div>
+      <div class="author-col">${c.author}</div>
+      <div class="hash-col">${c.hash}</div>
+      <div class="date-col">${c.date}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('footer-main').innerHTML =
+    `<span><span class="footer-head">HEAD</span> → <span class="footer-branch">∱ main</span></span>
+     <span><span class="key">f</span><span class="ksep">▕▏</span><span class="key">r</span><span class="ksep">▕▏</span><span class="key">?</span><span class="ksep">▕▏</span><span class="key">q:quit</span></span>`;
+}
+
+function renderConfigPanel(themeKey) {
+  const t = THEMES[themeKey];
+  const container = document.getElementById('config-items');
+  container.innerHTML = CONFIG_ITEMS.map((item, i) => {
+    const val = item.isTheme ? `<em style="color:${t['--branch-fg']}">${t.name}</em>` : `<span class="item-value">${item.value}</span>`;
+    const selClass = item.isTheme ? ' selected' : '';
+    return `<div class="config-item${selClass}">
+      <span class="item-label">${item.label}</span>${val}
+    </div>`;
+  }).join('');
+
+  // Theme preview (syntax highlight sample)
+  document.getElementById('theme-preview-box').innerHTML =
+    `<span class="kw">pub fn</span> <span class="fn-name">clear_cell</span><span class="punct">(&amp;</span>self<span class="punct">)</span> <span class="punct">-&gt;</span> <span class="ty">PreparedImageCell</span> <span class="punct">{</span><br>`+
+    `&nbsp;&nbsp;<span class="kw">match</span> self <span class="punct">{</span><br>`+
+    `&nbsp;&nbsp;&nbsp;&nbsp;<span class="ty">ImageProtocol</span><span class="punct">::</span><span class="ty">Kitty</span> <span class="punct">=&gt;</span> <span class="ty">PreparedImageCell</span><span class="punct">::</span><span class="fn-name">new</span><span class="punct">(</span><br>`+
+    `&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="str-lit">"\\x1b_Ga=d,d=C;\\x1b\\\\ "</span><span class="punct">.</span><span class="fn-name">to_string</span><span class="punct">(),</span><br>`+
+    `&nbsp;&nbsp;&nbsp;&nbsp;<span class="punct">)</span><br>`+
+    `&nbsp;&nbsp;&nbsp;&nbsp;<span class="cmt">// Virtual placements: space suffices</span><br>`+
+    `&nbsp;&nbsp;&nbsp;&nbsp;<span class="punct">_ =&gt;</span> <span class="ty">PreparedImageCell</span><span class="punct">::</span><span class="fn-name">new</span><span class="punct">(</span><span class="str-lit">" "</span><span class="punct">.</span><span class="fn-name">to_string</span><span class="punct">())</span><br>`+
+    `<span class="punct">}</span>`;
+
+  document.getElementById('config-desc').textContent = `⬅ ➡ : changer de thème  ·  Syntaxe : ${t.syntax}`;
+  document.getElementById('footer-config').innerHTML =
+    `<span></span><span><span class="key">⬅➡</span><span class="ksep">▕▏</span><span class="key">Esc:fermer</span></span>`;
+}
+
+function renderDiff(themeKey) {
+  const t = THEMES[themeKey];
+  const header = document.getElementById('diff-header');
+  header.innerHTML = `<span style="color:${t['--file-mod']}">M</span> <span>src/widget/commit_list.rs</span><span style="color:${t['--file-add']}">+72</span><span style="color:${t['--file-del']}">−41</span>`;
+
+  const lines = document.getElementById('diff-lines');
+  lines.innerHTML = DIFF_LINES.map(l => {
+    if (l.type === 'header') return `<div class="diff-line" style="color:${t['--hash-fg']};padding:4px 8px;border-bottom:1px solid ${t['--divider']}"><strong>${l.text}</strong> <span style="color:${t['--file-add']}">${l.extra.split(' ')[0]}</span> <span style="color:${t['--file-del']}">${l.extra.split(' ')[1]}</span></div>`;
+    const cls = l.type === 'add' ? ' add' : l.type === 'del' ? ' del' : '';
+    const marker = l.type === 'add' ? '+' : l.type === 'del' ? '−' : ' ';
+    return `<div class="diff-line${cls}"><span class="ln">${l.ln}</span><span class="marker">${marker}</span><span class="code">${l.code}</span></div>`;
+  }).join('');
+
+  document.getElementById('footer-diff').innerHTML =
+    `<span></span><span><span class="key">j/k</span><span class="ksep">▕▏</span><span class="key">Esc:fermer</span></span>`;
+}
+
+function renderCaption(themeKey) {
+  const t = THEMES[themeKey];
+  const cap = document.getElementById('caption-B');
+  if (cap) cap.innerHTML = `<strong>${t.name}</strong> — ${t.desc}`;
+}
+
+function setTheme(themeKey) {
+  currentTheme = themeKey;
+  applyTheme(themeKey);
+  renderCommitList(themeKey);
+  renderConfigPanel(themeKey);
+  renderDiff(themeKey);
+  renderCaption(themeKey);
+
+  // Update buttons
+  document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`btn-${themeKey}`);
+  if (btn) btn.classList.add('active');
+}
+
+function setApproach(approach) {
+  currentApproach = approach;
+  document.querySelectorAll('.approach-panel').forEach(p => p.classList.remove('visible'));
+  document.querySelectorAll('.approach-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`panel-${approach}`).classList.add('visible');
+  document.getElementById(`tab-${approach}`).classList.add('active');
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────
+setTheme('tokyo-night');
+</script>
+
+</body>
+</html>

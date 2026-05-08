@@ -98,7 +98,7 @@ impl StatefulWidget for FileTree<'_> {
                 let bg = if is_selected {
                     self.color_theme.list_selected_bg
                 } else {
-                    Color::Reset
+                    self.color_theme.bg
                 };
 
                 Line::from(vec![

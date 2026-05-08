@@ -177,21 +177,17 @@ impl<'a> UncommittedView<'a> {
                     self.state
                         .selected_file(&self.unstaged, &self.staged, &self.untracked)
                 {
-                    if file.status != StatusType::Untracked && file.status != StatusType::Deleted {
+                    if file.status == StatusType::Deleted {
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Cannot view diff for a deleted file.".to_string(),
+                        ));
+                    } else {
                         let is_staged = self.state.section
                             == crate::widget::uncommitted::UncommittedSection::Staged;
                         self.tx.send(AppEvent::OpenUncommittedDiff {
                             file_path: file.path.clone(),
                             is_staged,
                         });
-                    } else if file.status == StatusType::Deleted {
-                        self.tx.send(AppEvent::NotifyWarn(
-                            "Cannot view diff for a deleted file.".to_string(),
-                        ));
-                    } else if file.status == StatusType::Untracked {
-                        self.tx.send(AppEvent::NotifyWarn(
-                            "Cannot view diff for an untracked file.".to_string(),
-                        ));
                     }
                 }
             }
@@ -333,21 +329,17 @@ impl<'a> UncommittedView<'a> {
                     self.state
                         .selected_file(&self.unstaged, &self.staged, &self.untracked)
                 {
-                    if file.status != StatusType::Untracked && file.status != StatusType::Deleted {
+                    if file.status == StatusType::Deleted {
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Cannot view diff for a deleted file.".to_string(),
+                        ));
+                    } else {
                         let is_staged = self.state.section
                             == crate::widget::uncommitted::UncommittedSection::Staged;
                         self.tx.send(AppEvent::OpenUncommittedDiff {
                             file_path: file.path.clone(),
                             is_staged,
                         });
-                    } else if file.status == StatusType::Deleted {
-                        self.tx.send(AppEvent::NotifyWarn(
-                            "Cannot view diff for a deleted file.".to_string(),
-                        ));
-                    } else if file.status == StatusType::Untracked {
-                        self.tx.send(AppEvent::NotifyWarn(
-                            "Cannot view diff for an untracked file.".to_string(),
-                        ));
                     }
                 }
             }

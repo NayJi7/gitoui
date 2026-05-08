@@ -155,6 +155,91 @@ impl DiffEntry {
             .next()
             .ok_or_else(|| "No diff output".to_string())
     }
+
+    /// Returns a placeholder DiffEntry with a "Cannot open" binary note.
+    pub fn binary_placeholder(file_path: &str) -> Self {
+        DiffEntry {
+            old_path: None,
+            new_path: Some(file_path.to_string()),
+            hunks: vec![Hunk {
+                old_start: 0,
+                old_count: 0,
+                new_start: 0,
+                new_count: 0,
+                lines: vec![DiffLine {
+                    line_type: DiffLineType::BinaryNote,
+                    old_line_no: None,
+                    new_line_no: None,
+                    content: "Cannot open this type of file".to_string(),
+                }],
+            }],
+        }
+    }
+
+    /// Load an untracked (new) file as a diff-like view with all lines as additions.
+    /// Returns Err("binary") for binary/non-text files, Err(msg) for other errors.
+    pub fn load_untracked_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
+        let full_path = repo_path.join(file_path);
+
+        // Binary detection: check file extension first (fast path)
+        let is_binary_ext = is_binary_extension(file_path);
+        if is_binary_ext {
+            return Err("binary".to_string());
+        }
+
+        // Read the file — detect binary by scanning for null bytes in the first 8KB
+        let content = std::fs::read(&full_path)
+            .map_err(|e| format!("Cannot read file: {}", e))?;
+
+        if content.contains(&0u8) {
+            return Err("binary".to_string());
+        }
+
+        let text = String::from_utf8_lossy(&content);
+        let lines: Vec<DiffLine> = text
+            .lines()
+            .enumerate()
+            .map(|(i, line)| DiffLine {
+                line_type: DiffLineType::Addition,
+                old_line_no: None,
+                new_line_no: Some(i as u32 + 1),
+                content: line.to_string(),
+            })
+            .collect();
+
+        let total = lines.len() as u32;
+        let hunk = Hunk {
+            old_start: 0,
+            old_count: 0,
+            new_start: 1,
+            new_count: total,
+            lines,
+        };
+
+        Ok(DiffEntry {
+            old_path: Some("/dev/null".to_string()),
+            new_path: Some(file_path.to_string()),
+            hunks: vec![hunk],
+        })
+    }
+}
+
+fn is_binary_extension(file_path: &str) -> bool {
+    let ext = std::path::Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" | "webp" | "tiff" | "svg"
+            | "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+            | "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar"
+            | "exe" | "dll" | "so" | "dylib" | "bin" | "obj" | "o" | "a"
+            | "mp3" | "mp4" | "wav" | "ogg" | "flac" | "avi" | "mkv" | "mov"
+            | "ttf" | "otf" | "woff" | "woff2"
+            | "db" | "sqlite" | "pyc" | "class"
+    )
 }
 
 fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
