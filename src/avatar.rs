@@ -191,11 +191,19 @@ impl AvatarManager {
             }
             out.into_inner()
         } else {
-            let Some(png) = rounded_avatar_png(&bytes) else {
+            let Ok(source) = image::load_from_memory(&bytes) else {
                 let _ = fs::remove_file(path);
                 return false;
             };
-            png
+            let Some(avatar) = rounded_avatar_on_background(&source, ratatui_color_to_rgba(bg))
+            else {
+                return false;
+            };
+            let mut out = Cursor::new(Vec::new());
+            if avatar.write_to(&mut out, ImageFormat::Png).is_err() {
+                return false;
+            }
+            out.into_inner()
         };
         let cell_width = height_cells as usize * 2;
         let image_id = self.next_image_id;

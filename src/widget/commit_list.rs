@@ -455,7 +455,13 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
-    pub fn invalidate_image_caches(&mut self) {
+    pub fn invalidate_image_caches(&mut self, bg: ratatui::style::Color) {
+        if let ratatui::style::Color::Rgb(r, g, b) = bg {
+            self.graph_image_manager.update_background_color(r, g, b);
+        } else {
+            // Non-RGB color: just clear, can't update bg
+            self.graph_image_manager.clear_prepared_images();
+        }
         self.graph_render_state = None;
         self.avatar_stable_key = None;
         self.avatars_fully_prepared = false;

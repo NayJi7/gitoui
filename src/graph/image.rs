@@ -95,6 +95,13 @@ impl<'a> GraphImageManager<'a> {
         self.pending_uploads.clear();
     }
 
+    /// Update the background color used when rendering new graph images.
+    /// Clears all cached images so they get re-generated with the new color.
+    pub fn update_background_color(&mut self, r: u8, g: u8, b: u8) {
+        self.image_params.background_color = image::Rgba([r, g, b, 0xff]);
+        self.clear_prepared_images();
+    }
+
     pub fn ensure_uploaded(&mut self, commit_hash: &CommitHash) {
         if self.prepared_image_map.contains_key(commit_hash) {
             return;

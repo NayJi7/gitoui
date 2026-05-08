@@ -303,8 +303,10 @@ impl<'a> ListView<'a> {
     }
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        let bg = theme.bg;
         std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
-        self.as_mut_list_state().invalidate_image_caches();
+        self.as_mut_list_state().invalidate_image_caches(bg);
+        self.ctx.avatar_manager.lock().unwrap().clear_prepared_images();
     }
 
     pub fn refresh(&self) {
