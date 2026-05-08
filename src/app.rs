@@ -305,8 +305,12 @@ impl App<'_> {
                 self.flush_pending_graph_uploads()?;
                 terminal.draw(|f| self.render(f))?;
                 self.flush_pending_avatar_deletes()?;
-                if matches!(self.view, View::Dialog(_)) {
-                    self.ctx.image_protocol.clear();
+                if let Some(dialog_area) = self.view.dialog_area() {
+                    if !dialog_area.is_empty() {
+                        for y in dialog_area.top()..dialog_area.bottom() {
+                            let _ = self.ctx.image_protocol.delete_row(y);
+                        }
+                    }
                 }
             }
             needs_draw = true;

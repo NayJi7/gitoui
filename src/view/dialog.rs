@@ -1087,6 +1087,10 @@ impl<'a> DialogView<'a> {
     pub fn take_before_view(&mut self) -> View<'a> {
         std::mem::take(&mut self.before)
     }
+
+    pub fn dialog_area(&self) -> Rect {
+        self.dialog_area
+    }
 }
 
 fn centered_rect_exact(width: u16, height: u16, area: Rect) -> Rect {

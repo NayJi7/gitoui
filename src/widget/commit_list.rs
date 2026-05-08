@@ -1494,10 +1494,15 @@ impl CommitList<'_> {
             if commit_info.is_uncommitted {
                 // Explicitly clear avatar cells: a committed row's avatar may have been
                 // at this y position before scrolling and must not bleed through.
+                let cell_bg = if i == state.selected {
+                    self.ctx.color_theme.list_selected_bg
+                } else {
+                    self.ctx.color_theme.bg
+                };
                 for x in 0..2 {
                     let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                     cell.set_symbol(clear_cell.symbol());
-                    cell.set_style(clear_cell.style().bg(self.ctx.color_theme.bg));
+                    cell.set_style(clear_cell.style().bg(cell_bg));
                     cell.set_skip(false);
                 }
                 continue;

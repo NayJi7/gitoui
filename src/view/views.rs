@@ -114,6 +114,14 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn dialog_area(&self) -> Option<ratatui::layout::Rect> {
+        if let View::Dialog(view) = self {
+            Some(view.dialog_area())
+        } else {
+            None
+        }
+    }
+
     pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
         match self {
             View::Detail(view) => view.drain_pending_avatar_deletes(),
