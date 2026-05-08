@@ -632,6 +632,9 @@ impl App<'_> {
                     self.clear_image(Some(terminal))?;
                     terminal.clear()?;
                 }
+                AppEvent::BackgroundFetch => {
+                    self.start_background_fetch();
+                }
             }
         }
     }
@@ -1575,6 +1578,23 @@ impl App<'_> {
         }
     }
 
+    fn start_background_fetch(&mut self) {
+        let repo_path = self.repository.path().to_path_buf();
+        let tx = self.ec.sender();
+        thread::spawn(move || {
+            let _ = actions::fetch(&repo_path);
+            let _ = tx.send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                list_context: crate::view::ListRefreshViewContext {
+                    commit_hash: String::new(),
+                    selected: 0,
+                    height: 20,
+                    scroll_to_top: false,
+                },
+                pending_notification: None,
+            }));
+        });
+    }
+
     fn select_older_commit(&mut self) {
         if let View::Detail(ref mut view) = self.view {
             view.select_older_commit(self.repository);
@@ -1899,6 +1919,15 @@ impl App<'_> {
     fn execute_git_action(&mut self, target: String, action: GitAction) {
         let repo_path = self.repository.path();
         let is_refs_action = matches!(&action, GitAction::AddRemote { .. } | GitAction::RemoveRemote);
+        let should_auto_fetch = matches!(
+            action,
+            GitAction::Commit { .. }
+                | GitAction::Stash { .. }
+                | GitAction::Push
+                | GitAction::PushBranch { .. }
+                | GitAction::PushTag
+                | GitAction::AddTag { .. }
+        );
         let (result, success_label) = match action {
             GitAction::Checkout => {
                 let r = if target.starts_with("refs/stash") {
@@ -2081,6 +2110,9 @@ impl App<'_> {
                         },
                         pending_notification: Some("Operation completed successfully".into()),
                     }));
+                }
+                if should_auto_fetch {
+                    self.ec.send(AppEvent::BackgroundFetch);
                 }
             }
             Err(msg) => {

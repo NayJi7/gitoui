@@ -97,6 +97,7 @@ pub enum AppEvent {
     },
     CloseDiffToUncommitted,
     Tick,
+    BackgroundFetch,
 }
 
 #[derive(Debug, Clone)]
