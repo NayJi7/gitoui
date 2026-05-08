@@ -981,7 +981,7 @@ impl App<'_> {
                         .view
                         .diff_footer_hint()
                         .unwrap_or_else(|| "⌘ c:copy-path▕▏Esc:close".into()),
-                    View::Detail(_) => "⌘ ←:newer▕▏→:older▕▏c:copy msg▕▏C:copy hash▕▏r:fetch▕▏Esc:close".into(),
+                    View::Detail(_) => "⌘ ⇆:prev/next commit▕▏c:copy msg▕▏C:copy hash▕▏r:fetch▕▏Esc:close".into(),
                     View::Refs(_) => "⌘ r:fetch▕▏Esc:close".into(),
                     View::Help(_) => "⌘ Esc:close".into(),
                     View::UserCommand(_) => "⌘ Esc:close".into(),
