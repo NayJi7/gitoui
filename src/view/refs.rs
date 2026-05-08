@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
-    event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
     git::Ref,
     view::{ListRefreshViewContext, RefreshViewContext, RefsRefreshViewContext},
     widget::{
@@ -94,7 +94,9 @@ impl<'a> RefsView<'a> {
                 self.update_commit_list_selected();
             }
             UserEvent::Confirm => {
-                if self.ref_list_state.selected_is_node() {
+                if self.ref_list_state.selected_is_add_remote_item() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::AddRemote));
+                } else if self.ref_list_state.selected_is_node() {
                     self.ref_list_state.toggle_selected();
                     self.update_commit_list_selected();
                 } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
@@ -104,6 +106,13 @@ impl<'a> RefsView<'a> {
                 } else {
                     self.ref_list_state.toggle_selected();
                     self.update_commit_list_selected();
+                }
+            }
+            UserEvent::DeleteBranch => {
+                if let Some(remote_name) = self.ref_list_state.selected_remote_name() {
+                    self.tx.send(AppEvent::OpenDialog(
+                        DialogKind::ConfirmDeleteRemote { name: remote_name },
+                    ));
                 }
             }
             UserEvent::ShortCopy | UserEvent::FullCopy => {
