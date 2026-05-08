@@ -98,6 +98,13 @@ pub enum AppEvent {
     CloseDiffToUncommitted,
     Tick,
     BackgroundFetch,
+    OpenFileHistory {
+        file_path: String,
+    },
+    CloseFileHistory,
+    OpenDetailByHash {
+        hash: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -482,6 +489,8 @@ pub enum UserEvent {
     AbortOperation,
     // Amend HEAD commit message from detail view
     AmendCommit,
+    // Open file history (git log --follow)
+    FileHistory,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -586,6 +595,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "set_upstream" => Ok(UserEvent::SetUpstream),
                         "abort_operation" => Ok(UserEvent::AbortOperation),
                         "amend_commit" => Ok(UserEvent::AmendCommit),
+                        "file_history" => Ok(UserEvent::FileHistory),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

@@ -97,3 +97,6 @@ abort_operation = ["ctrl-a"]
 
 # Amend HEAD commit message (from detail view, HEAD only)
 amend_commit = ["ctrl-m"]
+
+# Show file history (git log --follow) from diff view
+file_history = ["ctrl-h"]

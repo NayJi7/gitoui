@@ -360,6 +360,62 @@ pub fn tag_target_info(path: &Path, tag: &str) -> GitResult {
     run_git(path, &["log", "-1", "--format=%H %s", tag])
 }
 
+// --- File History ---
+
+#[derive(Debug, Clone)]
+pub struct FileHistoryEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    pub date: String,
+}
+
+/// Run `git log --follow` for a single file and return a list of commits.
+pub fn file_history(path: &Path, file_path: &str) -> Result<Vec<FileHistoryEntry>, String> {
+    let output = Command::new("git")
+        .args([
+            "log",
+            "--follow",
+            "--format=%H|%s|%an|%ar",
+            "--",
+            file_path,
+        ])
+        .current_dir(path)
+        .output()
+        .map_err(|e| format!("Failed to run git log: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "git log failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let entries = stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(4, '|').collect();
+            if parts.len() < 4 {
+                return None;
+            }
+            let hash = parts[0].to_string();
+            let short_hash = hash[..7.min(hash.len())].to_string();
+            Some(FileHistoryEntry {
+                hash,
+                short_hash,
+                subject: parts[1].to_string(),
+                author: parts[2].to_string(),
+                date: parts[3].to_string(),
+            })
+        })
+        .collect();
+
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod remote_tests {
     use super::*;

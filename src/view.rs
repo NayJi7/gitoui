@@ -5,6 +5,7 @@ mod config;
 mod detail;
 pub mod dialog;
 mod diff;
+pub mod file_history;
 mod help;
 mod list;
 mod refs;

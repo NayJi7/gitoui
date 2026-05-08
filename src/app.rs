@@ -635,6 +635,21 @@ impl App<'_> {
                 AppEvent::BackgroundFetch => {
                     self.start_background_fetch();
                 }
+                AppEvent::OpenFileHistory { file_path } => {
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
+                    self.open_file_history(file_path);
+                }
+                AppEvent::CloseFileHistory => {
+                    self.close_file_history();
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
+                }
+                AppEvent::OpenDetailByHash { hash } => {
+                    self.clear_image(Some(terminal))?;
+                    terminal.clear()?;
+                    self.open_detail_by_hash(hash);
+                }
             }
         }
     }
@@ -1144,6 +1159,75 @@ impl App<'_> {
                 self.ctx.clone(),
                 self.ec.sender(),
             );
+        }
+    }
+
+    fn open_file_history(&mut self, file_path: String) {
+        let commit_list_state = match self.view {
+            View::Diff(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
+        let repo_path = self.repository.path().to_path_buf();
+        match actions::file_history(&repo_path, &file_path) {
+            Ok(entries) => {
+                self.view = View::of_file_history(
+                    commit_list_state,
+                    file_path,
+                    entries,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Err(msg) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("File history failed: {}", msg)));
+            }
+        }
+    }
+
+    fn close_file_history(&mut self) {
+        if let View::FileHistory(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_detail_by_hash(&mut self, hash: String) {
+        let commit_list_state = match self.view {
+            View::FileHistory(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let commit_hash = CommitHash::from(hash.as_str());
+        let (commit, changes) = self.repository.commit_detail(&commit_hash);
+        let refs: Vec<Ref> = self
+            .repository
+            .refs(&commit_hash)
+            .into_iter()
+            .cloned()
+            .collect();
+        let head_branch_name = match self.repository.head() {
+            Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let head_commit_hash = head_commit_hash_from_repository(self.repository);
+        if let Some(list_state) = commit_list_state {
+            self.view = View::of_detail(
+                list_state,
+                commit,
+                changes,
+                refs,
+                head_branch_name,
+                head_commit_hash,
+                self.ctx.clone(),
+                self.ec.sender(),
+            );
+        } else {
+            self.ec.send(AppEvent::NotifyError(
+                "Cannot open commit detail: no list state available.".into(),
+            ));
         }
     }
 

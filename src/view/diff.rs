@@ -479,6 +479,18 @@ impl<'a> DiffView<'a> {
                     self.scroll_to_match(self.search_current);
                 }
             }
+            UserEvent::FileHistory => {
+                let file_path = self
+                    .title
+                    .strip_prefix("Diff (staged): ")
+                    .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
+                    .or_else(|| self.title.strip_prefix("Diff: "))
+                    .unwrap_or(&self.title)
+                    .to_string();
+                if !file_path.is_empty() {
+                    self.tx.send(AppEvent::OpenFileHistory { file_path });
+                }
+            }
             _ => {}
         }
     }

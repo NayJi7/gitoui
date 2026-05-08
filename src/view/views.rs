@@ -8,8 +8,9 @@ use crate::{
     git::{Commit, CommitHash, FileChange, Ref},
     view::{
         branch_detail::BranchDetailView, config::ConfigView, detail::DetailView,
-        dialog::DialogView, diff::DiffView, help::HelpView, list::ListView, refs::RefsView,
-        tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
+        dialog::DialogView, diff::DiffView, file_history::FileHistoryView, help::HelpView,
+        list::ListView, refs::RefsView, tag_detail::TagDetailView, uncommitted::UncommittedView,
+        user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -29,6 +30,7 @@ pub enum View<'a> {
     BranchDetail(Box<BranchDetailView<'a>>),
     TagDetail(Box<TagDetailView<'a>>),
     Uncommitted(Box<UncommittedView<'a>>),
+    FileHistory(Box<FileHistoryView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -46,6 +48,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.handle_event(event_with_count, key_event),
             View::TagDetail(view) => view.handle_event(event_with_count, key_event),
             View::Uncommitted(view) => view.handle_event(event_with_count, key_event),
+            View::FileHistory(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -63,6 +66,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.render(f, area),
             View::TagDetail(view) => view.render(f, area),
             View::Uncommitted(view) => view.render(f, area),
+            View::FileHistory(view) => view.render(f, area),
         }
     }
 
@@ -80,6 +84,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.update_layout(area),
             View::TagDetail(view) => view.update_layout(area),
             View::Uncommitted(view) => view.update_layout(area),
+            View::FileHistory(view) => view.update_layout(area),
         }
     }
 
@@ -97,6 +102,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.prepare_graph_uploads(),
             View::TagDetail(view) => view.prepare_graph_uploads(),
             View::Uncommitted(view) => view.prepare_graph_uploads(),
+            View::FileHistory(view) => view.prepare_graph_uploads(),
         }
     }
 
@@ -110,6 +116,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.clear_graph_images(),
             View::TagDetail(view) => view.clear_graph_images(),
             View::Uncommitted(view) => view.clear_graph_images(),
+            View::FileHistory(view) => view.clear_graph_images(),
             _ => {}
         }
     }
@@ -143,6 +150,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.drain_pending_graph_uploads(),
             View::TagDetail(view) => view.drain_pending_graph_uploads(),
             View::Uncommitted(view) => view.drain_pending_graph_uploads(),
+            View::FileHistory(view) => view.drain_pending_graph_uploads(),
         }
     }
 
@@ -160,6 +168,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.graph_image_ids_sorted(),
             View::TagDetail(view) => view.graph_image_ids_sorted(),
             View::Uncommitted(view) => view.graph_image_ids_sorted(),
+            View::FileHistory(view) => view.graph_image_ids_sorted(),
         }
     }
 
@@ -179,6 +188,7 @@ impl<'a> View<'a> {
             View::BranchDetail(_) => false,
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
+            View::FileHistory(_) => false,
         }
     }
 
@@ -198,6 +208,7 @@ impl<'a> View<'a> {
             View::BranchDetail(_) => false,
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
+            View::FileHistory(_) => false,
         }
     }
 
@@ -215,6 +226,7 @@ impl<'a> View<'a> {
             View::BranchDetail(_) => None,
             View::TagDetail(_) => None,
             View::Uncommitted(_) => None,
+            View::FileHistory(_) => None,
         }
     }
 
@@ -361,6 +373,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.handle_click(col, row),
             View::TagDetail(view) => view.handle_click(col, row),
             View::Uncommitted(view) => view.handle_click(col, row),
+            View::FileHistory(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -418,6 +431,7 @@ impl<'a> View<'a> {
             View::BranchDetail(view) => view.refresh(),
             View::TagDetail(view) => view.refresh(),
             View::Uncommitted(view) => view.refresh(),
+            View::FileHistory(view) => view.refresh(),
         }
     }
 
@@ -443,7 +457,24 @@ impl<'a> View<'a> {
             View::BranchDetail(v) => v.update_color_theme(theme),
             View::TagDetail(v) => v.update_color_theme(theme),
             View::Uncommitted(v) => v.update_color_theme(theme),
+            View::FileHistory(v) => v.update_color_theme(theme),
         }
+    }
+
+    pub fn of_file_history(
+        commit_list_state: Option<CommitListState<'a>>,
+        file_path: String,
+        entries: Vec<crate::git::actions::FileHistoryEntry>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::FileHistory(Box::new(FileHistoryView::new(
+            commit_list_state,
+            file_path,
+            entries,
+            ctx,
+            tx,
+        )))
     }
 }
 
