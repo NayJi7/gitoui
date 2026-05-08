@@ -1141,9 +1141,11 @@ impl App<'_> {
     }
 }
 
+const HEADER_HEIGHT: u16 = 2;
+
 fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
     let [header, rest] = Layout::vertical([
-        Constraint::Length(2),
+        Constraint::Length(HEADER_HEIGHT),
         Constraint::Min(0),
     ])
     .areas(area);
@@ -1971,10 +1973,14 @@ impl App<'_> {
                 true
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                self.view.handle_click(mouse.column, mouse.row);
+                let row = mouse.row.saturating_sub(HEADER_HEIGHT);
+                self.view.handle_click(mouse.column, row);
                 true
             }
-            MouseEventKind::Moved => self.view.handle_mouse_move(mouse.column, mouse.row),
+            MouseEventKind::Moved => {
+                let row = mouse.row.saturating_sub(HEADER_HEIGHT);
+                self.view.handle_mouse_move(mouse.column, row)
+            }
             _ => false,
         };
         Ok(needs_draw)
