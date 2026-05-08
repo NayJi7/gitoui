@@ -387,7 +387,7 @@ impl<'a> ListView<'a> {
         let prev_branch = list_state.hovered_branch.clone();
         let prev_tag = list_state.hovered_tag.clone();
 
-        let header_height = 2u16;
+        let header_height = 4u16; // app header (3) + column header (1)
         if row < header_height {
             list_state.set_hovered_branch(None);
             list_state.set_hovered_tag(None);
