@@ -1217,16 +1217,11 @@ impl CommitList<'_> {
                 let is_selected = i == state.selected
                     && state.hovered_branch.is_none()
                     && state.hovered_tag.is_none();
-                // Write pad cell explicitly so it gets the correct selection bg
+                // Pad cell keeps the app background — selection starts at the │ marker
                 if pad_x < area.right() {
-                    let pad_bg = if is_selected {
-                        self.ctx.color_theme.list_selected_bg
-                    } else {
-                        self.ctx.color_theme.bg
-                    };
                     let pad_cell = &mut buf[(pad_x, y)];
                     pad_cell.set_symbol(" ");
-                    pad_cell.set_style(ratatui::style::Style::default().bg(pad_bg));
+                    pad_cell.set_style(ratatui::style::Style::default().bg(self.ctx.color_theme.bg));
                     pad_cell.set_skip(false);
                     // Skip the image cells
                     for x in area.left()..pad_x {
@@ -1263,17 +1258,12 @@ impl CommitList<'_> {
                         cell.set_style(image_cell.style().bg(self.ctx.color_theme.bg));
                         cell.set_skip(image_cell.skip());
                     }
-                    // Write the pad cell with the correct background
+                    // Pad cell keeps the app background — selection starts at the │ marker
                     let pad_x = area.left() + max_graph_width as u16;
                     if pad_x < area.right() {
-                        let pad_bg = if is_selected {
-                            self.ctx.color_theme.list_selected_bg
-                        } else {
-                            self.ctx.color_theme.bg
-                        };
                         let cell = &mut buf[(pad_x, y)];
                         cell.set_symbol(" ");
-                        cell.set_style(ratatui::style::Style::default().bg(pad_bg));
+                        cell.set_style(ratatui::style::Style::default().bg(self.ctx.color_theme.bg));
                         cell.set_skip(false);
                     }
                 });
@@ -1517,11 +1507,14 @@ impl CommitList<'_> {
                             cell.set_skip(image_cell.skip());
                         }
                     } else {
+                        // No avatar and stable key unchanged (no old image to delete).
+                        // Write plain spaces so the List widget's selection background shows
+                        // correctly — using the Kitty delete APC here corrupts the bg.
                         for x in 0..2 {
                             let cell = &mut buf[(area.left() + x as u16 + 1, y)];
-                            cell.set_symbol(clear_cell.symbol());
-                            cell.set_style(clear_cell.style().bg(cell_bg));
-                            cell.set_skip(clear_cell.skip());
+                            cell.set_symbol(" ");
+                            cell.set_style(Style::default().bg(cell_bg));
+                            cell.set_skip(false);
                         }
                     }
                 } else {

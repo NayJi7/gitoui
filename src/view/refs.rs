@@ -203,9 +203,9 @@ impl<'a> RefsView<'a> {
             ratatui::layout::Rect::new(area.x, area.y, area.width, 1),
         );
 
-        // Draw separator line below header
+        // Draw dotted separator line below header
         let sep_span = Span::styled(
-            "─".repeat(area.width as usize),
+            "╌".repeat(area.width as usize),
             Style::default().fg(self.ctx.color_theme.divider_fg),
         );
         let sep_line = Line::from(sep_span);
