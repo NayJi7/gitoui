@@ -593,7 +593,7 @@ impl<'a> ConfigView<'a> {
             height: 1,
         };
         let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
-        let sep_line = Line::from("─".repeat(inner.width as usize)).style(sep_style);
+        let sep_line = Line::from("╌".repeat(inner.width as usize)).style(sep_style);
         f.render_widget(Paragraph::new(sep_line), sep_area);
 
         // Split remaining area into two columns
