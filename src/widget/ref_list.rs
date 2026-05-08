@@ -90,8 +90,11 @@ impl RefListState {
 
     pub fn selected_branch(&self) -> Option<String> {
         let selected = self.tree_state.selected();
-        if selected.len() > 1
-            && (selected[0] == TREE_BRANCH_ROOT_IDENT || selected[0] == TREE_REMOTE_ROOT_IDENT)
+        if selected.len() > 1 && selected[0] == TREE_BRANCH_ROOT_IDENT {
+            selected.last().cloned()
+        } else if selected.len() > 1
+            && selected[0] == TREE_REMOTE_ROOT_IDENT
+            && selected.last().map(String::as_str) != Some(ADD_REMOTE_IDENT)
         {
             selected.last().cloned()
         } else {
@@ -116,7 +119,6 @@ impl RefListState {
         if selected.len() == 2
             && selected[0] == TREE_REMOTE_ROOT_IDENT
             && selected.last().map(String::as_str) != Some(ADD_REMOTE_IDENT)
-            && self.nodes_with_children.contains(selected)
         {
             selected.last().cloned()
         } else {

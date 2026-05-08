@@ -1741,6 +1741,7 @@ impl App<'_> {
     // Phase 2 - Git Actions execution
     fn execute_git_action(&mut self, target: String, action: GitAction) {
         let repo_path = self.repository.path();
+        let is_refs_action = matches!(&action, GitAction::AddRemote { .. } | GitAction::RemoveRemote);
         let (result, success_label) = match action {
             GitAction::Checkout => {
                 let r = if target.starts_with("refs/stash") {
@@ -1885,6 +1886,20 @@ impl App<'_> {
                 if let Some(label) = success_label {
                     self.ec.send(AppEvent::NotifySuccess(label));
                     self.ec.send(AppEvent::RefreshUncommitted);
+                } else if is_refs_action {
+                    if let View::Refs(ref view) = self.view {
+                        view.refresh();
+                    } else {
+                        self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                            list_context: crate::view::ListRefreshViewContext {
+                                commit_hash: String::new(),
+                                selected: 0,
+                                height: 20,
+                                scroll_to_top: false,
+                            },
+                            pending_notification: Some("Operation completed successfully".into()),
+                        }));
+                    }
                 } else {
                     self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
