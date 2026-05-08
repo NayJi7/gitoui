@@ -1498,6 +1498,11 @@ impl CommitList<'_> {
                 if is_newly_selected || is_previously_selected {
                     // Re-render this row with the correct variant
                     let is_selected = is_newly_selected;
+                    let cell_bg = if is_selected {
+                        self.ctx.color_theme.list_selected_bg
+                    } else {
+                        self.ctx.color_theme.bg
+                    };
                     let prepared = avatar_manager
                         .prepared_image(email.as_str(), 1, is_selected)
                         .or_else(|| avatar_manager.prepared_image(email.as_str(), 1, false));
@@ -1513,7 +1518,7 @@ impl CommitList<'_> {
                         for x in 0..2 {
                             let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                             cell.set_symbol(clear_cell.symbol());
-                            cell.set_style(clear_cell.style().bg(self.ctx.color_theme.bg));
+                            cell.set_style(clear_cell.style().bg(cell_bg));
                             cell.set_skip(clear_cell.skip());
                         }
                     }
@@ -1553,6 +1558,11 @@ impl CommitList<'_> {
             }
             let email = &commit_info.commit.author_email;
             let is_selected = i == state.selected;
+            let cell_bg = if is_selected {
+                self.ctx.color_theme.list_selected_bg
+            } else {
+                self.ctx.color_theme.bg
+            };
             let prepared = avatar_manager
                 .prepared_image(email.as_str(), 1, is_selected)
                 .or_else(|| avatar_manager.prepared_image(email.as_str(), 1, false));
@@ -1567,7 +1577,7 @@ impl CommitList<'_> {
                 for x in 0..2 {
                     let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                     cell.set_symbol(clear_cell.symbol());
-                    cell.set_style(clear_cell.style().bg(self.ctx.color_theme.bg));
+                    cell.set_style(clear_cell.style().bg(cell_bg));
                     cell.set_skip(clear_cell.skip());
                 }
             }
