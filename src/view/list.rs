@@ -344,7 +344,7 @@ impl<'a> ListView<'a> {
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         if let Some(list_state) = self.commit_list_state.as_mut() {
-            let header_height = 2u16;
+            let header_height = 5u16; // app header (3) + column header (2)
             if row < header_height {
                 return;
             }

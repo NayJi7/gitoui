@@ -802,7 +802,8 @@ impl App<'_> {
         let icon_width = icon_text.len() as u16;
         let path_width = area.width.saturating_sub(icon_width + 2);
 
-        let [content_row, separator_row] = ratatui::layout::Layout::vertical([
+        let [content_row, separator_row, _blank_row] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Length(1),
             ratatui::layout::Constraint::Length(1),
             ratatui::layout::Constraint::Length(1),
         ])
@@ -1141,7 +1142,7 @@ impl App<'_> {
     }
 }
 
-const HEADER_HEIGHT: u16 = 2;
+const HEADER_HEIGHT: u16 = 3;
 
 fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
     let [header, rest] = Layout::vertical([
@@ -1973,13 +1974,11 @@ impl App<'_> {
                 true
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                let row = mouse.row.saturating_sub(HEADER_HEIGHT);
-                self.view.handle_click(mouse.column, row);
+                self.view.handle_click(mouse.column, mouse.row);
                 true
             }
             MouseEventKind::Moved => {
-                let row = mouse.row.saturating_sub(HEADER_HEIGHT);
-                self.view.handle_mouse_move(mouse.column, row)
+                self.view.handle_mouse_move(mouse.column, mouse.row)
             }
             _ => false,
         };
