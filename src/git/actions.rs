@@ -146,7 +146,7 @@ pub fn reset(path: &Path, target: &str, mode: &str) -> GitResult {
     run_git(path, &["reset", mode, target])
 }
 
-// --- Branch Actions ---
+// --- Remote Actions ---
 
 pub fn add_remote(path: &Path, name: &str, url: &str) -> GitResult {
     run_git(path, &["remote", "add", name, url])
@@ -155,6 +155,8 @@ pub fn add_remote(path: &Path, name: &str, url: &str) -> GitResult {
 pub fn remove_remote(path: &Path, name: &str) -> GitResult {
     run_git(path, &["remote", "remove", name])
 }
+
+// --- Branch Actions ---
 
 pub fn delete_remote_branch(path: &Path, remote: &str, branch: &str) -> GitResult {
     run_git(path, &["push", remote, "--delete", branch])
