@@ -1071,8 +1071,8 @@ impl<'a> StatefulWidget for CommitList<'a> {
 
         let (header_area, rows_area) = if area.height >= 2 {
             (
-                Some(Rect::new(area.x, area.y, area.width, 2)),
-                Rect::new(area.x, area.y + 2, area.width, area.height - 2),
+                Some(Rect::new(area.x, area.y, area.width, 1)),
+                Rect::new(area.x, area.y + 1, area.width, area.height - 1),
             )
         } else {
             (None, area)
