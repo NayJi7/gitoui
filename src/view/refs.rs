@@ -99,6 +99,8 @@ impl<'a> RefsView<'a> {
             UserEvent::Confirm => {
                 if self.ref_list_state.selected_is_add_remote_item() {
                     self.tx.send(AppEvent::OpenDialog(DialogKind::AddRemote));
+                } else if self.ref_list_state.selected_is_add_worktree_item() {
+                    self.tx.send(AppEvent::OpenDialog(DialogKind::AddWorktree));
                 } else if self.ref_list_state.selected_is_node() {
                     self.ref_list_state.toggle_selected();
                     self.update_commit_list_selected();
@@ -289,6 +291,8 @@ impl<'a> RefsView<'a> {
         self.ref_list_state.handle_click(col, row);
         if self.ref_list_state.selected_is_add_remote_item() {
             self.tx.send(AppEvent::OpenDialog(DialogKind::AddRemote));
+        } else if self.ref_list_state.selected_is_add_worktree_item() {
+            self.tx.send(AppEvent::OpenDialog(DialogKind::AddWorktree));
         } else if self.ref_list_state.selected_is_node() {
             self.update_commit_list_selected();
         } else if let Some(wt_path) = self.ref_list_state.selected_worktree_path() {

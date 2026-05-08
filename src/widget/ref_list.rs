@@ -17,6 +17,7 @@ const TREE_REMOTE_ROOT_IDENT: &str = "__remotes__";
 const TREE_TAG_ROOT_IDENT: &str = "__tags__";
 const TREE_STASH_ROOT_IDENT: &str = "__stashes__";
 const ADD_REMOTE_IDENT: &str = "__add_remote__";
+const ADD_WORKTREE_IDENT: &str = "__add_worktree__";
 
 const TREE_BRANCH_ROOT_TEXT: &str = "◈ Local";
 const TREE_REMOTE_ROOT_TEXT: &str = "⇄ Remotes";
@@ -128,17 +129,26 @@ impl RefListState {
         }
     }
 
-    /// Returns the worktree path if a worktree leaf is selected.
+    /// Returns the worktree path if a worktree leaf is selected (but not the add-worktree sentinel).
     pub fn selected_worktree_path(&self) -> Option<String> {
         let selected = self.tree_state.selected();
         if selected.len() == 2
             && selected[0] == TREE_WORKTREE_ROOT_IDENT
             && selected[1] != TREE_WORKTREE_ROOT_IDENT
+            && selected[1] != ADD_WORKTREE_IDENT
         {
             Some(selected[1].clone())
         } else {
             None
         }
+    }
+
+    /// Returns `true` when the selected item is the `[+ Add worktree]` leaf.
+    pub fn selected_is_add_worktree_item(&self) -> bool {
+        let selected = self.tree_state.selected();
+        selected.len() == 2
+            && selected[0] == TREE_WORKTREE_ROOT_IDENT
+            && selected[1] == ADD_WORKTREE_IDENT
     }
 
     /// Returns `true` when the selected item is the `[+ Add remote]` leaf.
@@ -287,7 +297,7 @@ fn build_ref_tree_items(
     let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
     // Build worktree items
-    let worktree_items: Vec<TreeItem<'static, String>> = worktrees
+    let mut worktree_items: Vec<TreeItem<'static, String>> = worktrees
         .iter()
         .map(|wt| {
             let branch_short = wt
@@ -340,6 +350,18 @@ fn build_ref_tree_items(
         })
         .collect();
 
+    worktree_items.push(
+        TreeItem::new_leaf(
+            ADD_WORKTREE_IDENT.to_string(),
+            ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+                "+ Add worktree",
+                ratatui::style::Style::default()
+                    .fg(color_theme.status_info_fg)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )]),
+        ),
+    );
+
     let mut result = vec![
         tree_item(
             TREE_BRANCH_ROOT_IDENT.into(),
@@ -367,14 +389,12 @@ fn build_ref_tree_items(
         ),
     ];
 
-    if !worktree_items.is_empty() {
-        result.push(tree_item(
-            TREE_WORKTREE_ROOT_IDENT.into(),
-            TREE_WORKTREE_ROOT_TEXT.into(),
-            worktree_items,
-            color_theme,
-        ));
-    }
+    result.push(tree_item(
+        TREE_WORKTREE_ROOT_IDENT.into(),
+        TREE_WORKTREE_ROOT_TEXT.into(),
+        worktree_items,
+        color_theme,
+    ));
 
     result
 }

@@ -69,6 +69,7 @@ impl<'a> DialogView<'a> {
             DialogKind::CleanUntracked => (vec![], 0),
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
+            DialogKind::AddWorktree => (vec![false, false], 0),
             _ => (vec![], 0),
         };
 
@@ -130,6 +131,7 @@ impl<'a> DialogView<'a> {
                 | DialogKind::CommitWithMessage
                 | DialogKind::AddRemote
                 | DialogKind::AmendMessage { .. }
+                | DialogKind::AddWorktree
         )
     }
 
@@ -138,7 +140,7 @@ impl<'a> DialogView<'a> {
     }
 
     fn has_second_input_field(&self) -> bool {
-        matches!(self.kind, DialogKind::AddRemote)
+        matches!(self.kind, DialogKind::AddRemote | DialogKind::AddWorktree)
     }
 
     fn radio_count(&self) -> usize {
@@ -847,6 +849,20 @@ impl<'a> DialogView<'a> {
                 self.input_row = Some(lines.len());
                 lines.push(self.input_line(fg));
             }
+            DialogKind::AddWorktree => {
+                lines.push(label_line("Path:", dim_fg));
+                self.input_row = Some(lines.len());
+                lines.push(self.input_line(fg));
+                lines.push(Line::from(""));
+                lines.push(label_line("Branch:", dim_fg));
+                self.second_input_row = Some(lines.len());
+                lines.push(self.second_input_line(fg));
+                lines.push(Line::from(""));
+                self.checkbox_rows.push(lines.len());
+                lines.push(self.checkbox_line(0, "Create new branch (-b)"));
+                self.checkbox_rows.push(lines.len());
+                lines.push(self.checkbox_line(1, "Switch to new worktree"));
+            }
             DialogKind::ConfirmSwitchWorktree {
                 path,
                 display_name,
@@ -914,6 +930,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmAbortOperation { .. } => " Abort Operation ",
             DialogKind::AmendMessage { .. } => " Amend Commit ",
             DialogKind::ConfirmSwitchWorktree { .. } => " Switch Worktree ",
+            DialogKind::AddWorktree => " Add Worktree ",
         }
         .to_string()
     }
@@ -1266,6 +1283,31 @@ impl<'a> DialogView<'a> {
                     GitAction::Commit {
                         message: self.input_value.trim().to_string(),
                         amend: true,
+                    },
+                )
+            }
+            DialogKind::AddWorktree => {
+                let worktree_path = self.input_value.trim().to_string();
+                let branch = self.second_input_value.trim().to_string();
+                if worktree_path.is_empty() {
+                    self.tx
+                        .send(AppEvent::NotifyError("Path cannot be empty".into()));
+                    return;
+                }
+                if branch.is_empty() {
+                    self.tx
+                        .send(AppEvent::NotifyError("Branch cannot be empty".into()));
+                    return;
+                }
+                let new_branch = self.checkboxes.get(0).copied().unwrap_or(false);
+                let checkout = self.checkboxes.get(1).copied().unwrap_or(false);
+                (
+                    String::new(),
+                    GitAction::AddWorktree {
+                        worktree_path,
+                        branch,
+                        new_branch,
+                        checkout,
                     },
                 )
             }

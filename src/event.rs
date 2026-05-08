@@ -154,6 +154,8 @@ pub enum DialogKind {
     AmendMessage { current_message: String },
     // Worktree switch confirmation
     ConfirmSwitchWorktree { path: String, display_name: String },
+    // Add new worktree
+    AddWorktree,
 }
 
 #[derive(Debug, Clone)]
@@ -244,6 +246,12 @@ pub enum GitAction {
     RemoveRemote,               // remote name comes from `target`
     PushSetUpstream { branch: String }, // target = remote name
     SetUpstream { branch: String }, // target = remote name
+    AddWorktree {
+        worktree_path: String,
+        branch: String,
+        new_branch: bool,
+        checkout: bool,
+    },
 }
 
 #[derive(Clone)]

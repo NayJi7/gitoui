@@ -424,6 +424,35 @@ pub struct WorktreeInfo {
     pub is_current: bool,
 }
 
+pub fn add_worktree(
+    path: &Path,
+    worktree_path: &str,
+    branch: &str,
+    new_branch: bool,
+) -> GitResult {
+    let output = if new_branch {
+        Command::new("git")
+            .args(["worktree", "add", "-b", branch, worktree_path])
+            .current_dir(path)
+            .output()
+            .map_err(|e| format!("Failed to run git worktree add: {}", e))?
+    } else {
+        Command::new("git")
+            .args(["worktree", "add", worktree_path, branch])
+            .current_dir(path)
+            .output()
+            .map_err(|e| format!("Failed to run git worktree add: {}", e))?
+    };
+
+    if !output.status.success() {
+        return Err(format!(
+            "git worktree add failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
     let output = match Command::new("git")
         .args(["worktree", "list", "--porcelain"])

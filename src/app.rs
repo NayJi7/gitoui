@@ -2023,7 +2023,22 @@ impl App<'_> {
     // Phase 2 - Git Actions execution
     fn execute_git_action(&mut self, target: String, action: GitAction) {
         let repo_path = self.repository.path();
-        let is_refs_action = matches!(&action, GitAction::AddRemote { .. } | GitAction::RemoveRemote);
+        let is_refs_action = matches!(
+            &action,
+            GitAction::AddRemote { .. } | GitAction::RemoveRemote | GitAction::AddWorktree { .. }
+        );
+        let should_checkout_worktree =
+            matches!(&action, GitAction::AddWorktree { checkout: true, .. });
+        let worktree_abs_path = if let GitAction::AddWorktree { worktree_path, .. } = &action {
+            std::path::Path::new(repo_path)
+                .join(worktree_path)
+                .canonicalize()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| worktree_path.clone())
+        } else {
+            String::new()
+        };
         let should_auto_fetch = matches!(
             action,
             GitAction::Commit { .. }
@@ -2183,15 +2198,24 @@ impl App<'_> {
                 actions::set_upstream(repo_path, &target, &branch),
                 Some(format!("Upstream set to '{}/{}'.", target, branch)),
             ),
+            GitAction::AddWorktree {
+                worktree_path,
+                branch,
+                new_branch,
+                ..
+            } => (
+                actions::add_worktree(repo_path, &worktree_path, &branch, new_branch),
+                Some(format!("Worktree '{}' created", worktree_path)),
+            ),
         };
 
         match result {
             Ok(_) => {
                 self.close_dialog();
-                if let Some(label) = success_label {
-                    self.ec.send(AppEvent::NotifySuccess(label));
-                    self.ec.send(AppEvent::RefreshUncommitted);
-                } else if is_refs_action {
+                if is_refs_action {
+                    if let Some(label) = success_label {
+                        self.ec.send(AppEvent::NotifySuccess(label));
+                    }
                     if let View::Refs(ref mut view) = self.view {
                         view.refresh();
                     } else {
@@ -2202,9 +2226,16 @@ impl App<'_> {
                                 height: 20,
                                 scroll_to_top: false,
                             },
-                            pending_notification: Some("Operation completed successfully".into()),
+                            pending_notification: None,
                         }));
                     }
+                    if should_checkout_worktree && !worktree_abs_path.is_empty() {
+                        self.ec
+                            .send(AppEvent::SwitchWorktree { path: worktree_abs_path });
+                    }
+                } else if let Some(label) = success_label {
+                    self.ec.send(AppEvent::NotifySuccess(label));
+                    self.ec.send(AppEvent::RefreshUncommitted);
                 } else {
                     self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
