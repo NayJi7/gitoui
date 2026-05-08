@@ -416,6 +416,64 @@ pub fn file_history(path: &Path, file_path: &str) -> Result<Vec<FileHistoryEntry
     Ok(entries)
 }
 
+#[derive(Debug, Clone)]
+pub struct WorktreeInfo {
+    pub path: String,
+    pub head: String,
+    pub branch: Option<String>,
+    pub is_current: bool,
+}
+
+pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
+    let output = match Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_path)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut worktrees = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_head = String::new();
+    let mut current_branch: Option<String> = None;
+    let mut is_first = true;
+
+    for line in stdout.lines() {
+        if line.starts_with("worktree ") {
+            if let Some(path) = current_path.take() {
+                let is_current = is_first;
+                is_first = false;
+                worktrees.push(WorktreeInfo {
+                    path,
+                    head: current_head.clone(),
+                    branch: current_branch.take(),
+                    is_current,
+                });
+                current_head.clear();
+            }
+            current_path = Some(line["worktree ".len()..].to_string());
+        } else if line.starts_with("HEAD ") {
+            current_head = line["HEAD ".len()..].to_string();
+        } else if line.starts_with("branch ") {
+            current_branch = Some(line["branch ".len()..].to_string());
+        }
+    }
+    if let Some(path) = current_path {
+        let is_current = is_first;
+        worktrees.push(WorktreeInfo {
+            path,
+            head: current_head,
+            branch: current_branch,
+            is_current,
+        });
+    }
+
+    worktrees
+}
+
 #[cfg(test)]
 mod remote_tests {
     use super::*;

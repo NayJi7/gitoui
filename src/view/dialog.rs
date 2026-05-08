@@ -847,6 +847,25 @@ impl<'a> DialogView<'a> {
                 self.input_row = Some(lines.len());
                 lines.push(self.input_line(fg));
             }
+            DialogKind::ConfirmSwitchWorktree {
+                path,
+                display_name,
+            } => {
+                lines.push(Line::from(Span::styled(
+                    format!("Switch to worktree '{}'?", display_name),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("Path: {}", path),
+                    Style::default().fg(dim_fg),
+                )));
+                lines.push(Line::from(""));
+                lines.push(warning_line(
+                    "The entire app context will reload from the new path.",
+                    warn_fg,
+                ));
+            }
         }
 
         lines.push(Line::from(""));
@@ -894,6 +913,7 @@ impl<'a> DialogView<'a> {
             DialogKind::SetUpstream { .. } => " Set Upstream ",
             DialogKind::ConfirmAbortOperation { .. } => " Abort Operation ",
             DialogKind::AmendMessage { .. } => " Amend Commit ",
+            DialogKind::ConfirmSwitchWorktree { .. } => " Switch Worktree ",
         }
         .to_string()
     }
@@ -1019,6 +1039,12 @@ impl<'a> DialogView<'a> {
     }
 
     fn confirm(&mut self) {
+        if let DialogKind::ConfirmSwitchWorktree { path, .. } = &self.kind {
+            let path = path.clone();
+            self.tx.send(AppEvent::CloseDialog);
+            self.tx.send(AppEvent::SwitchWorktree { path });
+            return;
+        }
         let (target, action) = match &self.kind {
             DialogKind::AddTag { target } => {
                 if self.input_value.trim().is_empty() {
@@ -1243,6 +1269,8 @@ impl<'a> DialogView<'a> {
                     },
                 )
             }
+            // Handled by early-return above; this arm is unreachable at runtime.
+            DialogKind::ConfirmSwitchWorktree { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

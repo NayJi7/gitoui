@@ -650,6 +650,27 @@ impl App<'_> {
                     terminal.clear()?;
                     self.open_detail_by_hash(hash);
                 }
+                AppEvent::SwitchWorktree { path } => {
+                    if let Err(e) = std::env::set_current_dir(&path) {
+                        self.ec.send(AppEvent::NotifyError(format!(
+                            "Cannot switch to worktree: {}",
+                            e
+                        )));
+                    } else {
+                        self.cleanup_graph_images()?;
+                        return Ok(Ret::Refresh(RefreshRequest {
+                            context: crate::view::RefreshViewContext::List {
+                                list_context: crate::view::ListRefreshViewContext {
+                                    commit_hash: String::new(),
+                                    selected: 0,
+                                    height: 20,
+                                    scroll_to_top: true,
+                                },
+                                pending_notification: Some(format!("Switched to {}", path)),
+                            },
+                        }));
+                    }
+                }
             }
         }
     }
@@ -2171,7 +2192,7 @@ impl App<'_> {
                     self.ec.send(AppEvent::NotifySuccess(label));
                     self.ec.send(AppEvent::RefreshUncommitted);
                 } else if is_refs_action {
-                    if let View::Refs(ref view) = self.view {
+                    if let View::Refs(ref mut view) = self.view {
                         view.refresh();
                     } else {
                         self.ec.send(AppEvent::Refresh(RefreshViewContext::List {

@@ -22,6 +22,8 @@ const TREE_BRANCH_ROOT_TEXT: &str = "◈ Local";
 const TREE_REMOTE_ROOT_TEXT: &str = "⇄ Remotes";
 const TREE_TAG_ROOT_TEXT: &str = "# Tags";
 const TREE_STASH_ROOT_TEXT: &str = "≡ Stashes";
+const TREE_WORKTREE_ROOT_IDENT: &str = "__worktrees__";
+const TREE_WORKTREE_ROOT_TEXT: &str = "⑃ Worktrees";
 
 #[derive(Debug, Default)]
 pub struct RefListState {
@@ -126,6 +128,19 @@ impl RefListState {
         }
     }
 
+    /// Returns the worktree path if a worktree leaf is selected.
+    pub fn selected_worktree_path(&self) -> Option<String> {
+        let selected = self.tree_state.selected();
+        if selected.len() == 2
+            && selected[0] == TREE_WORKTREE_ROOT_IDENT
+            && selected[1] != TREE_WORKTREE_ROOT_IDENT
+        {
+            Some(selected[1].clone())
+        } else {
+            None
+        }
+    }
+
     /// Returns `true` when the selected item is the `[+ Add remote]` leaf.
     pub fn selected_is_add_remote_item(&self) -> bool {
         let selected = self.tree_state.selected();
@@ -170,8 +185,12 @@ pub struct RefList {
 }
 
 impl RefList {
-    pub fn new(refs: &[Ref], ctx: Rc<AppContext>) -> RefList {
-        let items = build_ref_tree_items(refs, &ctx);
+    pub fn new(
+        refs: &[Ref],
+        worktrees: &[crate::git::actions::WorktreeInfo],
+        ctx: Rc<AppContext>,
+    ) -> RefList {
+        let items = build_ref_tree_items(refs, worktrees, &ctx);
         RefList { items, ctx }
     }
 }
@@ -218,7 +237,11 @@ impl StatefulWidget for RefList {
     }
 }
 
-fn build_ref_tree_items(refs: &[Ref], ctx: &AppContext) -> Vec<TreeItem<'static, String>> {
+fn build_ref_tree_items(
+    refs: &[Ref],
+    worktrees: &[crate::git::actions::WorktreeInfo],
+    ctx: &AppContext,
+) -> Vec<TreeItem<'static, String>> {
     let color_theme = &ctx.color_theme;
     let branch_color_map = &ctx.branch_color_map;
 
@@ -263,7 +286,61 @@ fn build_ref_tree_items(refs: &[Ref], ctx: &AppContext) -> Vec<TreeItem<'static,
     let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme);
     let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
-    vec![
+    // Build worktree items
+    let worktree_items: Vec<TreeItem<'static, String>> = worktrees
+        .iter()
+        .map(|wt| {
+            let branch_short = wt
+                .branch
+                .as_deref()
+                .and_then(|b| b.strip_prefix("refs/heads/"))
+                .unwrap_or_else(|| {
+                    if wt.branch.is_none() {
+                        "(detached HEAD)"
+                    } else {
+                        wt.branch.as_deref().unwrap_or("?")
+                    }
+                });
+
+            let prefix = if wt.is_current { "● " } else { "  " };
+            let color = if wt.is_current {
+                color_theme.list_head_fg
+            } else {
+                color_theme.list_ref_branch_fg
+            };
+
+            let short_path = {
+                let p = std::path::Path::new(&wt.path);
+                let components: Vec<_> = p.components().rev().take(2).collect();
+                components
+                    .iter()
+                    .rev()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            };
+            let label = format!("{}{}", prefix, branch_short);
+            let hint = format!(" ({})", short_path);
+
+            TreeItem::new_leaf(
+                wt.path.clone(),
+                ratatui::text::Line::from(vec![
+                    ratatui::text::Span::styled(
+                        label,
+                        ratatui::style::Style::default()
+                            .fg(color)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                    ratatui::text::Span::styled(
+                        hint,
+                        ratatui::style::Style::default().fg(color_theme.detail_label_fg),
+                    ),
+                ]),
+            )
+        })
+        .collect();
+
+    let mut result = vec![
         tree_item(
             TREE_BRANCH_ROOT_IDENT.into(),
             TREE_BRANCH_ROOT_TEXT.into(),
@@ -288,7 +365,18 @@ fn build_ref_tree_items(refs: &[Ref], ctx: &AppContext) -> Vec<TreeItem<'static,
             stash_items,
             color_theme,
         ),
-    ]
+    ];
+
+    if !worktree_items.is_empty() {
+        result.push(tree_item(
+            TREE_WORKTREE_ROOT_IDENT.into(),
+            TREE_WORKTREE_ROOT_TEXT.into(),
+            worktree_items,
+            color_theme,
+        ));
+    }
+
+    result
 }
 
 struct RefTreeNode {

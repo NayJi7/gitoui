@@ -105,6 +105,9 @@ pub enum AppEvent {
     OpenDetailByHash {
         hash: String,
     },
+    SwitchWorktree {
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +152,8 @@ pub enum DialogKind {
     ConfirmAbortOperation { op_name: String },
     // Amend HEAD commit message
     AmendMessage { current_message: String },
+    // Worktree switch confirmation
+    ConfirmSwitchWorktree { path: String, display_name: String },
 }
 
 #[derive(Debug, Clone)]

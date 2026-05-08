@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     app::AppContext,
     event::{AppEvent, DialogKind, Sender, UserEvent, UserEventWithCount},
-    git::Ref,
+    git::{actions, Ref},
     view::{ListRefreshViewContext, RefreshViewContext, RefsRefreshViewContext},
     widget::{
         commit_list::{CommitList, CommitListState},
@@ -23,6 +23,7 @@ pub struct RefsView<'a> {
     ref_list_state: RefListState,
 
     refs: Vec<Ref>,
+    worktrees: Vec<actions::WorktreeInfo>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -35,10 +36,12 @@ impl<'a> RefsView<'a> {
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> RefsView<'a> {
+        let worktrees = actions::list_worktrees(std::path::Path::new("."));
         RefsView {
             commit_list_state: Some(commit_list_state),
             ref_list_state: RefListState::new(),
             refs,
+            worktrees,
             ctx,
             tx,
         }
@@ -99,6 +102,21 @@ impl<'a> RefsView<'a> {
                 } else if self.ref_list_state.selected_is_node() {
                     self.ref_list_state.toggle_selected();
                     self.update_commit_list_selected();
+                } else if let Some(wt_path) = self.ref_list_state.selected_worktree_path() {
+                    let display_name = self
+                        .worktrees
+                        .iter()
+                        .find(|wt| wt.path == wt_path)
+                        .and_then(|wt| wt.branch.as_deref())
+                        .and_then(|b| b.strip_prefix("refs/heads/"))
+                        .unwrap_or(&wt_path)
+                        .to_string();
+                    self.tx.send(AppEvent::OpenDialog(
+                        DialogKind::ConfirmSwitchWorktree {
+                            path: wt_path,
+                            display_name,
+                        },
+                    ));
                 } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
                     self.tx.send(AppEvent::OpenBranchDetail { branch_name });
                 } else if let Some(tag_name) = self.ref_list_state.selected_tag() {
@@ -136,7 +154,7 @@ impl<'a> RefsView<'a> {
 
         self.render_refs_header(f, header_area);
 
-        let ref_list = RefList::new(&self.refs, self.ctx.clone());
+        let ref_list = RefList::new(&self.refs, &self.worktrees, self.ctx.clone());
         f.render_stateful_widget(ref_list, refs_list_area, &mut self.ref_list_state);
     }
 
@@ -246,7 +264,8 @@ impl<'a> RefsView<'a> {
         std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
     }
 
-    pub fn refresh(&self) {
+    pub fn refresh(&mut self) {
+        self.worktrees = actions::list_worktrees(std::path::Path::new("."));
         let list_state = self.as_list_state();
         let list_context = ListRefreshViewContext::from(list_state);
         let (tree_selected, tree_opened) = self.ref_list_state.current_tree_status();
@@ -272,6 +291,21 @@ impl<'a> RefsView<'a> {
             self.tx.send(AppEvent::OpenDialog(DialogKind::AddRemote));
         } else if self.ref_list_state.selected_is_node() {
             self.update_commit_list_selected();
+        } else if let Some(wt_path) = self.ref_list_state.selected_worktree_path() {
+            let display_name = self
+                .worktrees
+                .iter()
+                .find(|wt| wt.path == wt_path)
+                .and_then(|wt| wt.branch.as_deref())
+                .and_then(|b| b.strip_prefix("refs/heads/"))
+                .unwrap_or(&wt_path)
+                .to_string();
+            self.tx.send(AppEvent::OpenDialog(
+                DialogKind::ConfirmSwitchWorktree {
+                    path: wt_path,
+                    display_name,
+                },
+            ));
         } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
             self.tx.send(AppEvent::OpenBranchDetail { branch_name });
         } else if let Some(tag_name) = self.ref_list_state.selected_tag() {
