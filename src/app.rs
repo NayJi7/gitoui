@@ -159,6 +159,15 @@ pub struct App<'a> {
     ctx: Rc<AppContext>,
     ec: &'a EventController,
     file_stream: Vec<crate::git::diff::DiffLine>,
+    brand_logo: Option<crate::protocol::PreparedImage>,
+    brand_wordmark: Option<crate::protocol::PreparedImage>,
+    brand_pending_uploads: Vec<String>,
+    spinner_frames: Vec<crate::protocol::PreparedImage>,
+    spinner_pending_uploads: Vec<String>,
+    // Header image skip-optimisation: None = unrendered/dirty; Some(id) = last uploaded.
+    // id = None means static G logo; Some(fidx) means animation frame fidx.
+    header_logo_last: Option<Option<usize>>,
+    header_wordmark_rendered: bool,
 }
 
 impl<'a> App<'a> {
@@ -274,6 +283,45 @@ impl<'a> App<'a> {
         }
         let view = View::of_list(commit_list_state, ctx.clone(), ec.sender());
 
+        let mut brand_pending_uploads = Vec::new();
+        let mut prepare_brand = |png: Option<Vec<u8>>, cell_width: usize, image_id: u32| {
+            png.map(|bytes| {
+                let mut prepared = ctx.image_protocol.prepare_image(&bytes, cell_width, image_id);
+                if let Some(upload) = prepared.take_upload_data() {
+                    brand_pending_uploads.push(upload);
+                }
+                prepared
+            })
+        };
+        let brand_logo = prepare_brand(
+            crate::brand::render_logo_png(),
+            crate::brand::LOGO_CELL_WIDTH,
+            0x0B_2A_1D,
+        );
+        let brand_wordmark = prepare_brand(
+            crate::brand::render_wordmark_png(),
+            crate::brand::WORDMARK_CELL_WIDTH,
+            0x0B_2A_1E,
+        );
+
+        // Pre-render the 28-frame G spinner animation.
+        let (spinner_frames, spinner_pending_uploads) = {
+            let pngs = crate::brand::render_spinner_frames();
+            let mut frames = Vec::with_capacity(pngs.len());
+            let mut uploads = Vec::new();
+            for (i, png) in pngs.iter().enumerate() {
+                let id = 0x0B_2B_00 + i as u32;
+                let mut prepared = ctx
+                    .image_protocol
+                    .prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
+                if let Some(upload) = prepared.take_upload_data() {
+                    uploads.push(upload);
+                }
+                frames.push(prepared);
+            }
+            (frames, uploads)
+        };
+
         let mut app = Self {
             repository,
             view,
@@ -281,6 +329,13 @@ impl<'a> App<'a> {
             ctx,
             ec,
             file_stream: Vec::new(),
+            brand_logo,
+            brand_wordmark,
+            brand_pending_uploads,
+            spinner_frames,
+            spinner_pending_uploads,
+            header_logo_last: None,
+            header_wordmark_rendered: false,
         };
 
         if let Some(context) = refresh_view_context {
@@ -294,8 +349,8 @@ impl<'a> App<'a> {
 impl App<'_> {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<Ret, std::io::Error> {
         // Clearing the screen here, as it should be cleared upon refresh
-        self.clear_image(None)?;
-        terminal.clear()?;
+        self.clear_image(Some(terminal))?;
+        self.clear_terminal(terminal)?;
 
         let mut needs_draw = true;
         loop {
@@ -422,6 +477,7 @@ impl App<'_> {
                 }
                 AppEvent::Resize(w, h) => {
                     let _ = (w, h);
+                    self.invalidate_header();
                 }
                 AppEvent::Mouse(mouse) => {
                     needs_draw = self.handle_mouse_event(mouse, terminal)?;
@@ -432,7 +488,7 @@ impl App<'_> {
                 }
                 AppEvent::OpenDetail => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_detail();
                 }
                 AppEvent::CloseDetail => {
@@ -453,61 +509,61 @@ impl App<'_> {
                         }));
                     }
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::OpenUserCommand(n) => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_user_command(n, Some(terminal));
                 }
                 AppEvent::CloseUserCommand => {
                     self.close_user_command();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::OpenRefs => {
-                    self.clear_image(None)?;
+                    self.clear_image(Some(terminal))?;
                     self.open_refs();
                 }
                 AppEvent::CloseRefs => {
-                    self.clear_image(None)?;
+                    self.clear_image(Some(terminal))?;
                     self.close_refs();
                 }
                 AppEvent::OpenHelp => {
-                    self.clear_image(None)?;
+                    self.clear_image(Some(terminal))?;
                     self.open_help();
                 }
                 AppEvent::CloseHelp => {
                     self.close_help();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::OpenConfig => {
-                    self.clear_image(None)?;
+                    self.clear_image(Some(terminal))?;
                     self.open_config();
                 }
                 AppEvent::CloseConfig => {
                     self.close_config();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::GithubAuthFinished(state) => {
                     self.finish_github_auth(state);
                 }
                 AppEvent::OpenFileDiff { hash, file_path } => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_file_diff(hash, file_path);
                 }
                 AppEvent::CloseDiff => {
                     self.close_diff();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::CloseDiffToDetail => {
                     self.close_diff_to_detail();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::SelectOlderCommit => {
                     self.select_older_commit();
@@ -581,7 +637,7 @@ impl App<'_> {
                 }
                 AppEvent::OpenBranchDetail { branch_name } => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_branch_detail(branch_name);
                 }
                 AppEvent::OpenSetUpstreamDialog { branch } => {
@@ -599,12 +655,12 @@ impl App<'_> {
                 }
                 AppEvent::OpenTagDetail { tag_name } => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_tag_detail(tag_name);
                 }
                 AppEvent::OpenUncommitted => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_uncommitted();
                 }
                 AppEvent::StageFile { file } => self.stage_file(file),
@@ -631,8 +687,13 @@ impl App<'_> {
                         false
                     };
                     if self.app_status.spinner_active {
+                        let total = if self.spinner_frames.is_empty() {
+                            10
+                        } else {
+                            crate::brand::SPINNER_FRAME_COUNT
+                        };
                         self.app_status.spinner_frame =
-                            (self.app_status.spinner_frame + 1) % 10;
+                            (self.app_status.spinner_frame + 1) % total;
                         needs_draw = true;
                     } else {
                         needs_draw = notif_expiring || streaming;
@@ -643,13 +704,13 @@ impl App<'_> {
                     is_staged,
                 } => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_uncommitted_diff(file_path, is_staged);
                 }
                 AppEvent::CloseDiffToUncommitted => {
                     self.close_diff_to_uncommitted();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::BackgroundFetch => {
                     self.start_spinner("Fetching\u{2026}");
@@ -657,17 +718,17 @@ impl App<'_> {
                 }
                 AppEvent::OpenFileHistory { file_path } => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_file_history(file_path);
                 }
                 AppEvent::CloseFileHistory => {
                     self.close_file_history();
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                 }
                 AppEvent::OpenDetailByHash { hash } => {
                     self.clear_image(Some(terminal))?;
-                    terminal.clear()?;
+                    self.clear_terminal(terminal)?;
                     self.open_detail_by_hash(hash);
                 }
                 AppEvent::SwitchWorktree { path } => {
@@ -731,6 +792,8 @@ impl App<'_> {
                 .unwrap()
                 .drain_pending_uploads(),
         );
+        uploads.append(&mut self.brand_pending_uploads);
+        uploads.append(&mut self.spinner_pending_uploads);
         if uploads.is_empty() {
             return Ok(());
         }
@@ -778,7 +841,7 @@ impl App<'_> {
 }
 
 impl App<'_> {
-    fn render_header(&self, f: &mut Frame, area: Rect) {
+    fn render_header(&mut self, f: &mut Frame, area: Rect) {
         use ratatui::{
             text::{Line, Span},
             widgets::Paragraph,
@@ -805,11 +868,16 @@ impl App<'_> {
             String::new()
         };
 
-        // App icon placeholder — right-aligned.
-        // Replace this span with a Kitty image upload when you have the real icon.
-        let icon_text = " ◈ gitui ";
-        let icon_width = icon_text.len() as u16;
-        let path_width = area.width.saturating_sub(icon_width + 2);
+        // Right icon area: [logo] [gap] [wordmark]  — or text fallback (9 cols).
+        let has_brand = self.brand_logo.is_some() && self.brand_wordmark.is_some();
+        let icon_cell_width = if has_brand {
+            crate::brand::LOGO_CELL_WIDTH as u16
+                + crate::brand::GAP_COLS
+                + crate::brand::WORDMARK_CELL_WIDTH as u16
+        } else {
+            9u16
+        };
+        let path_width = area.width.saturating_sub(icon_cell_width + 2);
 
         let [content_row, separator_row] = ratatui::layout::Layout::vertical([
             ratatui::layout::Constraint::Length(1),
@@ -820,7 +888,7 @@ impl App<'_> {
         // Content row: path left, icon right.
         let [left_area, right_area] = ratatui::layout::Layout::horizontal([
             ratatui::layout::Constraint::Min(0),
-            ratatui::layout::Constraint::Length(icon_width + 2),
+            ratatui::layout::Constraint::Length(icon_cell_width + 2),
         ])
         .areas(content_row);
 
@@ -850,22 +918,88 @@ impl App<'_> {
                 .add_modifier(ratatui::style::Modifier::BOLD),
         ));
 
-        // Icon: right side.
-        let icon_line = Line::from(vec![Span::styled(
-            icon_text,
-            ratatui::style::Style::default()
-                .fg(white)
-                .add_modifier(ratatui::style::Modifier::BOLD),
-        )]);
-
         f.render_widget(
             Paragraph::new(Line::from(path_spans)),
             left_area,
         );
-        f.render_widget(
-            Paragraph::new(icon_line).alignment(ratatui::layout::Alignment::Right),
-            right_area,
-        );
+
+        // Icon: [G logo OR spinner frame] + gap + wordmark, or text fallback.
+        // The spinner animation lives here in the header (safe zone — not the last row).
+        if has_brand {
+            // Determine current logo "identity": None = static G, Some(idx) = animation frame.
+            let logo_id: Option<usize> =
+                if self.app_status.spinner_active && !self.spinner_frames.is_empty() {
+                    Some(self.app_status.spinner_frame % self.spinner_frames.len())
+                } else {
+                    None
+                };
+
+            // skip=true → ratatui never writes the cell, terminal keeps the existing image.
+            // skip=false → cell is written (uploaded/placed) when content differs from prev buffer.
+            let logo_skip = Some(logo_id) == self.header_logo_last;
+            let wordmark_skip = self.header_wordmark_rendered;
+
+            let y = content_row.top();
+
+            // Compute layout positions (must be done before taking image refs due to borrow rules).
+            let logo_cell_w = crate::brand::LOGO_CELL_WIDTH as u16;
+            let wordmark_cell_w = crate::brand::WORDMARK_CELL_WIDTH as u16;
+            let total = logo_cell_w + crate::brand::GAP_COLS + wordmark_cell_w;
+            let x_logo = right_area.right().saturating_sub(total + 1);
+            let x_wordmark = x_logo + logo_cell_w + crate::brand::GAP_COLS;
+
+            // Write logo cells (or just set skip=true to preserve the existing Kitty image).
+            {
+                let logo_img: &crate::protocol::PreparedImage =
+                    if let Some(fidx) = logo_id {
+                        &self.spinner_frames[fidx]
+                    } else {
+                        self.brand_logo.as_ref().unwrap()
+                    };
+                let buf = f.buffer_mut();
+                for (dx, ic) in logo_img.cells().iter().enumerate() {
+                    let x = x_logo + dx as u16;
+                    if x >= right_area.left() && x < right_area.right() {
+                        let cell = &mut buf[(x, y)];
+                        if !logo_skip {
+                            cell.set_symbol(ic.symbol());
+                            cell.set_style(ic.style());
+                        }
+                        cell.set_skip(logo_skip);
+                    }
+                }
+            }
+            // Write wordmark cells.
+            {
+                let wordmark_img = self.brand_wordmark.as_ref().unwrap();
+                let buf = f.buffer_mut();
+                for (dx, ic) in wordmark_img.cells().iter().enumerate() {
+                    let x = x_wordmark + dx as u16;
+                    if x >= right_area.left() && x < right_area.right() {
+                        let cell = &mut buf[(x, y)];
+                        if !wordmark_skip {
+                            cell.set_symbol(ic.symbol());
+                            cell.set_style(ic.style());
+                        }
+                        cell.set_skip(wordmark_skip);
+                    }
+                }
+            }
+            // Persist the rendered state so the next render can skip re-uploading.
+            if !logo_skip { self.header_logo_last = Some(logo_id); }
+            if !wordmark_skip { self.header_wordmark_rendered = true; }
+        } else {
+            let icon_line = Line::from(vec![Span::styled(
+                " ◈ gitui ",
+                ratatui::style::Style::default()
+                    .fg(white)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )]);
+            f.render_widget(
+                Paragraph::new(icon_line).alignment(ratatui::layout::Alignment::Right),
+                right_area,
+            );
+        }
 
         // Separator row: full-width line.
         let sep = Line::from(
@@ -938,8 +1072,11 @@ impl App<'_> {
                 )]
             }
             StatusLine::Spinner(msg) => {
-                const FRAMES: [&str; 10] =
-                    ["\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}"];
+                // The G animation plays in the header logo — status bar is text-only.
+                const FRAMES: [&str; 10] = [
+                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}",
+                    "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+                ];
                 let frame = FRAMES[self.app_status.spinner_frame % 10];
                 vec![Span::styled(
                     format!("{frame} {msg}"),
@@ -1170,6 +1307,19 @@ fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
 impl App<'_> {
     fn update_state(&mut self, view_area: Rect) {
         self.app_status.view_area = view_area;
+    }
+
+    /// Mark header images as needing re-upload on next render.
+    fn invalidate_header(&mut self) {
+        self.header_logo_last = None;
+        self.header_wordmark_rendered = false;
+    }
+
+    /// Clear the terminal display and mark header images dirty for re-upload.
+    fn clear_terminal(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
+        terminal.clear()?;
+        self.invalidate_header();
+        Ok(())
     }
 
     fn clear_image(
@@ -2006,10 +2156,12 @@ impl App<'_> {
         self.app_status.spinner_active = true;
         self.app_status.spinner_frame = 0;
         self.app_status.status_line = StatusLine::Spinner(msg.to_string());
+        self.header_logo_last = None; // logo switches from static to animated
     }
 
     fn stop_spinner(&mut self) {
         self.app_status.spinner_active = false;
+        self.header_logo_last = None; // logo switches from animated back to static
         // status_line will be overwritten by the next NotifySuccess/NotifyError/Refresh
     }
 

@@ -1045,6 +1045,7 @@ dependencies = [
  "ratatui",
  "regex",
  "reqwest",
+ "resvg",
  "rstest",
  "rustc-hash",
  "semver",

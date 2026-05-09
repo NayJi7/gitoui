@@ -352,7 +352,7 @@ impl EventController {
                     }
                     Ok(false) => {
                         tick_counter += 1;
-                        if tick_counter >= 5 {
+                        if tick_counter >= 1 {
                             tick_counter = 0;
                             tx.send(AppEvent::Tick);
                         }

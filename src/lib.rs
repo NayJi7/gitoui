@@ -9,6 +9,7 @@ pub mod protocol;
 pub mod themes;
 
 mod app;
+mod brand;
 mod check;
 mod event;
 mod external;
