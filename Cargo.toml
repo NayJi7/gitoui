@@ -1,10 +1,10 @@
 [package]
-name = "gitui"
+name = "gitoui"
 version = "0.8.0"
 description = "Interactive Git client for the terminal"
 authors = ["Kyosuke Fujimoto <kyoro.f@gmail.com>"]
-homepage = "https://github.com/aterrak/gitui"
-repository = "https://github.com/aterrak/gitui"
+homepage = "https://github.com/aterrak/gitoui"
+repository = "https://github.com/aterrak/gitoui"
 readme = "README.md"
 license = "MIT"
 keywords = ["git", "cli", "tui", "terminal"]
@@ -42,6 +42,7 @@ toml = "1.1.2"
 tui-input = "0.15.3"
 tui-tree-widget = "0.24.0"
 umbra = "0.4.0"
+two-face = { version = "0.5.1", default-features = false, features = ["syntect-fancy"] }
 
 [dev-dependencies]
 dircpy = "0.3.20"

@@ -4,7 +4,7 @@ You can set your own custom key bindings.
 
 Custom key bindings can be applied by writing them in the `[keybind]` section of [the config file](../configurations/config-file-format.md).
 
-The default key binding settings are described in [`./assets/default-keybind.toml`](https://github.com/lusingander/serie/blob/master/assets/default-keybind.toml).
+The default key binding settings are described in [`./assets/default-keybind.toml`](https://github.com/lusingander/gitoui/blob/master/assets/default-keybind.toml).
 You can set key bindings for each action in the same format.
 
 - It is possible to set multiple key bindings for one action.

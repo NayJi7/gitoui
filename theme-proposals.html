@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>gitui — Propositions de thèmes</title>
+<title>gitoui — Propositions de thèmes</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -110,8 +110,8 @@
   .dot.g { background: #28c840; }
   .terminal-title { margin-left: 8px; color: #888; font-size: 11px; }
 
-  /* gitui layout */
-  .gitui {
+  /* gitoui layout */
+  .gitoui {
     display: flex;
     flex-direction: column;
     height: 380px;
@@ -120,7 +120,7 @@
     font-size: 12.5px;
     overflow: hidden;
   }
-  .gitui-header {
+  .gitoui-header {
     display: grid;
     grid-template-columns: 52px 1fr 130px 62px 130px;
     padding: 3px 0 2px 0;
@@ -129,7 +129,7 @@
     font-weight: 700;
     font-size: 11px;
   }
-  .gitui-header span { padding: 0 6px; }
+  .gitoui-header span { padding: 0 6px; }
   .commit-list { flex: 1; overflow: hidden; }
   .commit-row {
     display: grid;
@@ -159,7 +159,7 @@
   .ref.head { color: var(--head-fg); font-weight: 700; }
   .ref-paren { color: var(--paren-fg); font-weight: 700; }
 
-  .gitui-footer {
+  .gitoui-footer {
     border-top: 1px solid var(--divider);
     padding: 3px 8px;
     font-size: 11px;
@@ -314,7 +314,7 @@
 </head>
 <body>
 
-<h1>gitui — Propositions de thèmes</h1>
+<h1>gitoui — Propositions de thèmes</h1>
 <p class="subtitle">Renommer « Syntax Theme » → « Thème » + appliquer à toute l'interface</p>
 
 <!-- Approach tabs -->
@@ -367,14 +367,14 @@
     <div class="terminal-window">
       <div class="terminal-titlebar">
         <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-        <span class="terminal-title">gitui</span>
+        <span class="terminal-title">gitoui</span>
       </div>
-      <div class="gitui" id="commit-list-preview">
-        <div class="gitui-header">
+      <div class="gitoui" id="commit-list-preview">
+        <div class="gitoui-header">
           <span>Graph</span><span>Commit message</span><span>Author</span><span>SHA</span><span>Date</span>
         </div>
         <div class="commit-list" id="commit-rows"></div>
-        <div class="gitui-footer" id="footer-main"></div>
+        <div class="gitoui-footer" id="footer-main"></div>
       </div>
     </div>
 
@@ -382,7 +382,7 @@
     <div class="terminal-window">
       <div class="terminal-titlebar">
         <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-        <span class="terminal-title">gitui — Config</span>
+        <span class="terminal-title">gitoui — Config</span>
       </div>
       <div class="config-view" id="config-preview">
         <div class="config-header">Configuration</div>
@@ -390,7 +390,7 @@
         <div id="config-items"></div>
         <div class="theme-preview-box" id="theme-preview-box"></div>
         <div class="config-desc" id="config-desc"></div>
-        <div class="gitui-footer" id="footer-config"></div>
+        <div class="gitoui-footer" id="footer-config"></div>
       </div>
     </div>
 
@@ -398,12 +398,12 @@
     <div class="terminal-window">
       <div class="terminal-titlebar">
         <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
-        <span class="terminal-title">gitui — Diff</span>
+        <span class="terminal-title">gitoui — Diff</span>
       </div>
       <div class="diff-view" id="diff-preview">
         <div class="diff-header" id="diff-header"></div>
         <div id="diff-lines"></div>
-        <div class="gitui-footer" id="footer-diff"></div>
+        <div class="gitoui-footer" id="footer-diff"></div>
       </div>
     </div>
   </div>
@@ -712,7 +712,7 @@ const CONFIG_ITEMS = [
   { label: 'Protocole image', value: 'Kitty' },
   { label: 'Thème', value: '—', isTheme: true },
   { label: 'GitHub token', value: '••••••••••' },
-  { label: 'GitHub repos', value: 'NayJi7/gitui' },
+  { label: 'GitHub repos', value: 'NayJi7/gitoui' },
 ];
 
 const DIFF_LINES = [

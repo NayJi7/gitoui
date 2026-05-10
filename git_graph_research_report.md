@@ -232,7 +232,7 @@
 
 ## 4. FEATURES POTENTIALLY MISSING FROM TUI APPS
 
-Based on typical TUI git clients (like lazygit, tig, gitui), Git Graph provides these advantages:
+Based on typical TUI git clients (like lazygit, tig, gitoui), Git Graph provides these advantages:
 
 ### Visual/UX Advantages
 1. **True Graph Visualization** - SVG/canvas-rendered branch/merge topology with colors

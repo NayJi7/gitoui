@@ -990,7 +990,7 @@ impl App<'_> {
             if !wordmark_skip { self.header_wordmark_rendered = true; }
         } else {
             let icon_line = Line::from(vec![Span::styled(
-                " ◈ gitui ",
+                " ◈ gitoui ",
                 ratatui::style::Style::default()
                     .fg(white)
                     .add_modifier(ratatui::style::Modifier::BOLD),

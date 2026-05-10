@@ -2,10 +2,10 @@
 authors = ["Kyosuke Fujimoto"]
 language = "en"
 src = "src"
-title = "Serie"
-description = "Serie Documentation"
+title = "Gitoui"
+description = "Gitoui Documentation"
 
 [output.html]
-git-repository-url = "https://github.com/lusingander/serie"
-site-url = "/serie/"
+git-repository-url = "https://github.com/lusingander/gitoui"
+site-url = "/gitoui/"
 default-theme = "rust"

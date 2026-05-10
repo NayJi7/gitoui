@@ -1,15 +1,15 @@
-# gitui — Design Document
+# gitoui — Design Document
 
 **Date:** 2026-05-02  
 **Status:** Draft  
-**Base:** Fork of [serie](https://github.com/lusingander/serie) v0.8.0  
+**Base:** Fork of [gitoui](https://github.com/lusingander/gitoui) v0.8.0  
 **Goal:** Terminal-based Git client with full Git Graph parity, pixel-perfect rendering
 
 ---
 
 ## 1. Vision
 
-**gitui** is a fully interactive Git client for the terminal. It provides the same level of functionality as the Git Graph VS Code extension — visual commit graph, diffs, staging, branch/tag/stash operations, push/pull — rendered with pixel-perfect PNG graphics (Bezier curves, anti-aliased nodes, specular highlights) via Kitty/iTerm2/Sixel image protocols.
+**gitoui** is a fully interactive Git client for the terminal. It provides the same level of functionality as the Git Graph VS Code extension — visual commit graph, diffs, staging, branch/tag/stash operations, push/pull — rendered with pixel-perfect PNG graphics (Bezier curves, anti-aliased nodes, specular highlights) via Kitty/iTerm2/Sixel image protocols.
 
 **Core principle:** Every phase ships a complete, usable tool. No half-features.
 
@@ -30,21 +30,21 @@ src/
 │   ├── diff.rs              # Diff parsing & structured representation
 │   └── status.rs            # git status, staging area state
 ├── graph/
-│   ├── calc.rs              # Commit graph layout algorithm (from serie)
-│   ├── image.rs             # PNG generation per-row (from serie)
+│   ├── calc.rs              # Commit graph layout algorithm (from gitoui)
+│   ├── image.rs             # PNG generation per-row (from gitoui)
 │   ├── protocol.rs          # Kitty / iTerm2 / Sixel encoding
 │   └── fallback.rs          # Unicode fallback for unsupported terminals
 ├── view/
 │   ├── mod.rs               # View enum, state machine, transitions
-│   ├── graph.rs             # Main commit graph list (serie's list.rs)
+│   ├── graph.rs             # Main commit graph list (gitoui's list.rs)
 │   ├── detail.rs            # Commit detail split pane (enhanced)
 │   ├── diff.rs              # Diff viewer (unified + side-by-side)
 │   ├── staging.rs           # Staging area view
-│   ├── refs.rs              # Branches/tags/remotes browser (from serie)
-│   ├── help.rs              # Keybinding reference overlay (from serie)
+│   ├── refs.rs              # Branches/tags/remotes browser (from gitoui)
+│   ├── help.rs              # Keybinding reference overlay (from gitoui)
 │   └── dialog.rs            # Confirmation & input dialogs
 ├── widget/
-│   ├── commit_list.rs       # Graph image + commit list (from serie)
+│   ├── commit_list.rs       # Graph image + commit list (from gitoui)
 │   ├── commit_detail.rs     # Commit info panel (enhanced)
 │   ├── diff_view.rs         # Unified/side-by-side diff rendering
 │   ├── file_tree.rs         # File tree with +/- stats per file
@@ -53,18 +53,18 @@ src/
 │   ├── find.rs              # Search/filter widget
 │   └── status_bar.rs        # Bottom status bar
 ├── config.rs                # TOML config with defaults + validation
-├── keybind.rs               # TOML keybinding system (from serie)
-├── color.rs                 # Theme + color palette (from serie)
+├── keybind.rs               # TOML keybinding system (from gitoui)
+├── color.rs                 # Theme + color palette (from gitoui)
 └── external.rs              # Clipboard, editor launch, shell commands
 ```
 
 ### Key architectural decisions
 
-1. **Git via CLI subprocess** — Same approach as serie. No libgit2 binding. Simpler, no C dependency, works everywhere git is installed. Performance is adequate for repos up to ~50k commits.
+1. **Git via CLI subprocess** — Same approach as gitoui. No libgit2 binding. Simpler, no C dependency, works everywhere git is installed. Performance is adequate for repos up to ~50k commits.
 
 2. **Image rendering for graph** — PNG per commit row, displayed via terminal image protocols. Gives pixel-perfect Bezier curves, anti-aliased circles, gradient highlights. Cannot be achieved with Unicode box-drawing characters.
 
-3. **View state machine** — Same pattern as serie: `View` enum with variants for each screen. Transitions are explicit. `CommitListState` shared between views.
+3. **View state machine** — Same pattern as gitoui: `View` enum with variants for each screen. Transitions are explicit. `CommitListState` shared between views.
 
 4. **Mouse via crossterm** — Crossterm natively captures `Event::Mouse` (scroll, click, drag). Add mouse event handling in `event.rs` alongside existing keyboard events.
 
@@ -83,7 +83,7 @@ src/
 
 ### Phase 1 — Enhanced Viewer
 
-*Ship a better serie with mouse support, diffs, and uncommitted changes visibility.*
+*Ship a better gitoui with mouse support, diffs, and uncommitted changes visibility.*
 
 | Feature | Detail |
 |---------|--------|
@@ -139,7 +139,7 @@ src/
 | Code review tracking | Mark files as reviewed per commit range, persisted to disk |
 | Issue linking | Configurable regex to turn issue references into highlighted text |
 | Multi-repo | Detect repos in workspace, dropdown to switch |
-| Config export | Share config in repo (.gitui/config.toml) |
+| Config export | Share config in repo (.gitoui/config.toml) |
 | Performance | Lazy-load commits (initial batch + load-more on scroll) for large repos |
 
 ---
@@ -159,7 +159,7 @@ src/
 
 ### Keyboard
 
-All of serie's existing bindings preserved, plus:
+All of gitoui's existing bindings preserved, plus:
 
 | Key | Action |
 |-----|--------|
@@ -175,9 +175,9 @@ All of serie's existing bindings preserved, plus:
 | `Escape` | Close current pane / menu / dialog |
 | `f` | Open find/filter widget |
 | `b` | Open branch filter dropdown |
-| `1-9` | Numeric prefix (vim-style, from serie) |
+| `1-9` | Numeric prefix (vim-style, from gitoui) |
 
-All bindings fully customizable via TOML config (from serie's keybind system).
+All bindings fully customizable via TOML config (from gitoui's keybind system).
 
 ---
 
@@ -185,7 +185,7 @@ All bindings fully customizable via TOML config (from serie's keybind system).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ gitui — my-project (main)                                       ? help  q quit │
+│ gitoui — my-project (main)                                       ? help  q quit │
 ├──────────────────────────────┬───────────────────────────────────────────────┤
 │                              │ ● a1b2c3d (HEAD -> main, origin/main)        │
 │   [PNG pixel-perfect         │ Alice • 2026-05-01                            │
@@ -323,9 +323,9 @@ Activated by pressing `Tab` to switch focus from graph to staging pane.
 
 ## 8. Configuration
 
-TOML config at `$XDG_CONFIG_HOME/gitui/config.toml` or `$GITUI_CONFIG_FILE`.
+TOML config at `$XDG_CONFIG_HOME/gitoui/config.toml` or `$GITOUI_CONFIG_FILE`.
 
-All of serie's existing config options are preserved. New options:
+All of gitoui's existing config options are preserved. New options:
 
 ```toml
 [general]
@@ -384,7 +384,7 @@ theme = "obsidian"
 # text_secondary = "#565f89"
 
 [keybind]
-# All keybindings customizable (inherits serie's system)
+# All keybindings customizable (inherits gitoui's system)
 # New defaults:
 toggle_staging = "tab"
 stage_file = "s"
@@ -461,7 +461,7 @@ The graph is the centerpiece. Every pixel matters.
 
 **Edge case handling:**
 - Lane crossings: One lane passes "behind" the other (interrupted line with 2px gap)
-- Overlapping merges: Detour routing (like serie already does)
+- Overlapping merges: Detour routing (like gitoui already does)
 
 ### 9.3 Ref Labels — Pill Badges
 
@@ -757,7 +757,7 @@ Git command failures are captured (stderr) and displayed in a dialog overlay. Th
 
 ### Performance considerations
 
-- Graph images are generated lazily (only for visible rows), same as serie
+- Graph images are generated lazily (only for visible rows), same as gitoui
 - For repos >10k commits, load first `initial_load_count` commits, load more on scroll to bottom
 - Diff rendering uses a streaming parser — doesn't load the full diff into memory
 - File tree is computed once per commit selection, cached until selection changes
@@ -771,9 +771,9 @@ Git command failures are captured (stderr) and displayed in a dialog overlay. Th
 
 ---
 
-## 12. Comparison: gitui vs Git Graph vs serie
+## 12. Comparison: gitoui vs Git Graph vs gitoui
 
-| Feature | serie | gitui (target) | Git Graph |
+| Feature | gitoui | gitoui (target) | Git Graph |
 |---------|-------|---------------|-----------|
 | Pixel-perfect graph | PNG (Kitty/iTerm2) | PNG (Kitty/iTerm2/Sixel) + Unicode fallback | SVG/Canvas (webview) |
 | Mouse support | No | Yes (scroll, click, drag) | Yes |

@@ -8,27 +8,27 @@ To ensure that your contributions are considered, please follow this guidelines.
 
 Before reporting, please check if an issue with the same content already exists.
 
-Also, please refer to [FAQ](https://lusingander.github.io/serie/faq/index.html).
+Also, please refer to [FAQ](https://lusingander.github.io/gitoui/faq/index.html).
 
 ### Reporting Bugs
 
 When reporting a bug, please include the following information:
 
 - Application version
-  - `serie --version`
+  - `gitoui --version`
 - Version of the terminal emulator and the OS it's running on
 - Information about the git repository to reproduce the issue
   - If possible, provide the smallest possible repository (debugging a repository with 100,000 commits is difficult)
 
 ### Suggesting Features
 
-Before proposing a new feature, please review the [Goals](https://lusingander.github.io/serie/introduction/index.html#goals) and [Non-Goals](https://lusingander.github.io/serie/introduction/index.html#non-goals).
+Before proposing a new feature, please review the [Goals](https://lusingander.github.io/gitoui/introduction/index.html#goals) and [Non-Goals](https://lusingander.github.io/gitoui/introduction/index.html#non-goals).
 
 ### Terminal Emulator Compatibility
 
 If the application does not work with your terminal emulator, please first check whether the terminal emulator supports the target image display protocol.
 
-For information on tested terminal emulators, refer to [Compatibility](https://lusingander.github.io/serie/getting-started/compatibility.html).
+For information on tested terminal emulators, refer to [Compatibility](https://lusingander.github.io/gitoui/getting-started/compatibility.html).
 
 ## Pull Requests
 
@@ -43,7 +43,7 @@ We welcome pull requests, but please note that they are not guaranteed to be acc
 
 ### Continuous Integration
 
-We use [GitHub Actions](https://github.com/lusingander/serie/blob/master/.github/workflows/build.yml) to perform basic checks:
+We use [GitHub Actions](https://github.com/lusingander/gitoui/blob/master/.github/workflows/build.yml) to perform basic checks:
 
 - Run both stable and MSRV versions of Rust.
 - Run build, test, format, and lint.

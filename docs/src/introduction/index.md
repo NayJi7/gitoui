@@ -1,8 +1,8 @@
 # Introduction
 
-**Serie** ([`/zéːriə/`](https://lusingander.github.io/serie/faq/index.html#how-do-i-pronounce-serie)) is a TUI application that uses the terminal emulators' image display protocol to render commit graphs like `git log --graph --all`.
+**Gitoui** ([`/zéːriə/`](https://lusingander.github.io/gitoui/faq/index.html#how-do-i-pronounce-gitoui)) is a TUI application that uses the terminal emulators' image display protocol to render commit graphs like `git log --graph --all`.
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/demo.gif">
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/demo.gif">
 
 (This demo shows [Ratatui](https://github.com/ratatui/ratatui) repository!)
 
@@ -26,4 +26,4 @@ Personally, I found the output from `git log --graph` difficult to read, even wi
 ---
 
 _Built with Rust and [ratatui](https://github.com/ratatui/ratatui)._  
-_Serie is available on [GitHub](https://github.com/lusingander/serie) under the MIT license._
+_Serie is available on [GitHub](https://github.com/lusingander/gitoui) under the MIT license._

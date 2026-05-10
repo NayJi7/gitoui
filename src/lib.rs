@@ -24,7 +24,7 @@ use clap::{Parser, ValueEnum};
 use graph::GraphImageManager;
 use serde::Deserialize;
 
-/// GitUi - Interactive Git client for the terminal
+/// Gitoui - Interactive Git client for the terminal
 #[derive(Parser)]
 #[command(version)]
 struct Args {
@@ -257,6 +257,7 @@ pub fn run() -> Result<()> {
             git_default_branch: git_default_branch.clone(),
             github_auth_state,
             branch_color_map: rustc_hash::FxHashMap::default(),
+            graph_color_set: graph_color_set.clone(),
         });
 
         let repository = match git::Repository::load(Path::new("."), order, max_count) {

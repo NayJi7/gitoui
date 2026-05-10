@@ -61,12 +61,14 @@ fn visible_for_frame(f: usize) -> Box<dyn Iterator<Item = usize>> {
 /// Pre-render all SPINNER_FRAME_COUNT animation frames as PNG bytes.
 /// PNG is square (px × px) to match the 2-col × 1-row cell aspect ratio,
 /// preventing vertical overflow that would scroll the terminal from the last row.
+/// Right-aligned to match `render_logo_png` so the spinner sits in the same
+/// pixel position as the static G logo it replaces.
 pub fn render_spinner_frames() -> Vec<Vec<u8>> {
     let px = (SPINNER_CELL_WIDTH * 16) as u32; // 32×32 square
     (0..SPINNER_FRAME_COUNT)
         .filter_map(|f| {
             let svg = build_frame_svg(visible_for_frame(f));
-            render_svg_to_png(svg.as_bytes(), px, px)
+            render_svg_to_png_aligned(svg.as_bytes(), px, px, HAlign::Right)
         })
         .collect()
 }
@@ -75,21 +77,42 @@ pub fn render_spinner_frames() -> Vec<Vec<u8>> {
 /// 2 cols × 1 row = 16×16px → 1:1 display ratio, close to the natural 0.8:1.
 pub const LOGO_CELL_WIDTH: usize = 2;
 
-/// "gitui" wordmark: 805×502 (≈1.6:1 landscape). At 4 cols × 1 row (2:1 display ratio),
-/// the scale is height-limited, so the text fills the full row height — matching the G logo.
+/// "gitoui" wordmark: 1044×500 (≈2.09:1 landscape). At 4 cols × 1 row (2:1 display ratio),
+/// the scale is width-limited (SVG slightly wider than canvas), so the text fills the full
+/// row width and is ~96% of row height — about 0.7 display-px shorter than the G logo.
 pub const WORDMARK_CELL_WIDTH: usize = 4;
 
 /// Gap between the two images, in terminal columns.
 pub const GAP_COLS: u16 = 1;
 
 fn render_svg_to_png(svg_data: &[u8], px_w: u32, px_h: u32) -> Option<Vec<u8>> {
+    render_svg_to_png_aligned(svg_data, px_w, px_h, HAlign::Center)
+}
+
+#[derive(Clone, Copy)]
+enum HAlign {
+    Center,
+    Right,
+}
+
+fn render_svg_to_png_aligned(
+    svg_data: &[u8],
+    px_w: u32,
+    px_h: u32,
+    halign: HAlign,
+) -> Option<Vec<u8>> {
     let opts = usvg::Options::default();
     let tree = usvg::Tree::from_data(svg_data, &opts).ok()?;
     let sx = px_w as f32 / tree.size().width();
     let sy = px_h as f32 / tree.size().height();
     // Use uniform scale so we never distort the SVG within the pixmap.
     let scale = sx.min(sy);
-    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    let rendered_w = tree.size().width() * scale;
+    let tx = match halign {
+        HAlign::Center => (px_w as f32 - rendered_w) / 2.0,
+        HAlign::Right => px_w as f32 - rendered_w,
+    };
+    let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, 0.0);
     let mut pixmap = tiny_skia::Pixmap::new(px_w, px_h)?;
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     pixmap.encode_png().ok()
@@ -97,13 +120,15 @@ fn render_svg_to_png(svg_data: &[u8], px_w: u32, px_h: u32) -> Option<Vec<u8>> {
 
 /// Render the G logomark.
 /// PNG is square (px × px) to match the 2-col × 1-row cell aspect ratio.
-/// Terminal cells are typically 1:2 (width:height), so 2 cols × 1 row → 1:1 square.
+/// The SVG is portrait (0.8:1), so it's height-limited in the square canvas — that
+/// leaves ~1.58 display-px of horizontal slack. We right-align the rendered G so the
+/// slack sits on the LEFT of the image, putting the G flush against the wordmark.
 pub fn render_logo_png() -> Option<Vec<u8>> {
     let px = (LOGO_CELL_WIDTH * 32) as u32; // 64×64 square
-    render_svg_to_png(LOGO_SVG, px, px)
+    render_svg_to_png_aligned(LOGO_SVG, px, px, HAlign::Right)
 }
 
-/// Render the "gitui" wordmark.
+/// Render the "gitoui" wordmark.
 /// PNG aspect is 2:1 to match the 4-col × 1-row cell aspect ratio
 /// (4 cols × cell_w : 1 row × cell_h = 4×8 : 1×16 = 32:16 = 2:1).
 /// The SVG (1.6:1) is narrower than the canvas (2:1) → scale is height-limited

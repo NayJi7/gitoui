@@ -119,9 +119,9 @@ impl<'de> Deserialize<'de> for DateTimeFormat {
 
 const XDG_CONFIG_HOME_ENV_NAME: &str = "XDG_CONFIG_HOME";
 const DEFAULT_CONFIG_DIR: &str = ".config";
-const APP_DIR_NAME: &str = "gitui";
+const APP_DIR_NAME: &str = "gitoui";
 const CONFIG_FILE_NAME: &str = "config.toml";
-const CONFIG_FILE_ENV_NAME: &str = "GITUI_CONFIG_FILE";
+const CONFIG_FILE_ENV_NAME: &str = "GITOUI_CONFIG_FILE";
 
 pub fn load() -> Result<(
     CoreConfig,
@@ -1214,7 +1214,7 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().unwrap();
         std::env::set_var("XDG_CONFIG_HOME", temp_dir.path());
-        let app_dir = temp_dir.path().join("gitui");
+        let app_dir = temp_dir.path().join("gitoui");
         std::fs::create_dir_all(&app_dir).unwrap();
 
         // Save config

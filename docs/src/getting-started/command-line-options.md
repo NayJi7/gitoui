@@ -23,11 +23,11 @@ _Possible values:_ `chrono`, `topo`
 
 `chrono` will order commits by commit date if possible.
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/order-chrono.png" width=300>
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/order-chrono.png" width=300>
 
 `topo` will order commits on the same branch consecutively if possible.
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/order-topo.png" width=300>
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/order-topo.png" width=300>
 
 ## -g, --graph-width \<TYPE\>
 
@@ -37,9 +37,9 @@ _Possible values:_ `auto`, `double`, `single`
 
 If not specified or `auto` is specified, `double` will be used automatically if there is enough width to display it, `single` otherwise.
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/graph-width-double.png" width=300>
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/graph-width-double.png" width=300>
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/graph-width-single.png" width=300>
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/graph-width-single.png" width=300>
 
 </details>
 
@@ -51,11 +51,11 @@ _Possible values:_ `rounded`, `angular`
 
 `rounded` will use rounded edges for the graph lines.
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/graph-width-double.png" width=300>
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/graph-width-double.png" width=300>
 
 `angular` will use angular edges for the graph lines.
 
-<img src="https://raw.githubusercontent.com/lusingander/serie/master/img/style-angular.png" width=300>
+<img src="https://raw.githubusercontent.com/lusingander/gitoui/master/img/style-angular.png" width=300>
 
 ## -i, --initial-selection \<TYPE\>
 

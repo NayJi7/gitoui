@@ -1,3 +1,3 @@
-fn main() -> gitui::Result<()> {
-    gitui::run()
+fn main() -> gitoui::Result<()> {
+    gitoui::run()
 }

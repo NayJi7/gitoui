@@ -54,7 +54,7 @@ struct StoredToken {
 pub fn token_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("gitui")
+        .join("gitoui")
         .join("github_token.toml")
 }
 
@@ -117,7 +117,7 @@ pub fn request_device_code() -> Result<DeviceCodeResponse, String> {
     let response = client
         .post("https://github.com/login/device/code")
         .header("Accept", "application/json")
-        .header("User-Agent", "gitui")
+        .header("User-Agent", "gitoui")
         .form(&[("client_id", GITHUB_CLIENT_ID), ("scope", "read:user repo")])
         .send()
         .map_err(|e| format!("Failed to request GitHub device code: {e}"))?;
@@ -146,7 +146,7 @@ pub fn poll_for_token(device: &DeviceCodeResponse) -> Result<GithubAuthState, St
         let response = client
             .post("https://github.com/login/oauth/access_token")
             .header("Accept", "application/json")
-            .header("User-Agent", "gitui")
+            .header("User-Agent", "gitoui")
             .form(&[
                 ("client_id", GITHUB_CLIENT_ID),
                 ("device_code", device.device_code.as_str()),
@@ -197,7 +197,7 @@ pub fn fetch_login(token: &str) -> Result<String, String> {
     let response = client
         .get("https://api.github.com/user")
         .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "gitui")
+        .header("User-Agent", "gitoui")
         .bearer_auth(token)
         .send()
         .map_err(|e| format!("Failed to fetch GitHub user: {e}"))?;

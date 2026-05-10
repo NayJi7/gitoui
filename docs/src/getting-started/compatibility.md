@@ -39,4 +39,4 @@ Rendering using Unicode Placeholder is available by explicitly specifying `kitty
 
 - Sixel graphics is not supported.
 - Other terminal multiplexers (screen, Zellij, etc.) other than those listed in [Partially supported environments](#partially-supported-environments) are not supported.
-- Windows is not officially supported. Please refer to [the related issue](https://github.com/lusingander/serie/issues/147#issuecomment-4192875627).
+- Windows is not officially supported. Please refer to [the related issue](https://github.com/lusingander/gitoui/issues/147#issuecomment-4192875627).

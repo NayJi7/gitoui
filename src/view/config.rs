@@ -793,7 +793,7 @@ impl<'a> ConfigView<'a> {
                 git_email
             ),
             format!(
-                "Override the branch name used by gitui when initializing a new git repository.\n\nCurrent git config: '{}'",
+                "Override the branch name used by gitoui when initializing a new git repository.\n\nCurrent git config: '{}'",
                 self.ctx.git_default_branch
             ),
             github_auth_description(&self.github_auth_state, self.github_auth_pending),

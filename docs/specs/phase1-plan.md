@@ -1,10 +1,10 @@
-# gitui Phase 1 — Enhanced Viewer Implementation Plan
+# gitoui Phase 1 — Enhanced Viewer Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Transform serie into gitui — a terminal Git viewer with mouse support, uncommitted changes visibility, inline diffs, file tree, enhanced status bar, and broader terminal compatibility.
+**Goal:** Transform gitoui into gitoui — a terminal Git viewer with mouse support, uncommitted changes visibility, inline diffs, file tree, enhanced status bar, and broader terminal compatibility.
 
-**Architecture:** Fork serie's existing ratatui + PNG image rendering architecture. Extend the event system for mouse, add git status parsing, create new views (diff, staging) and widgets (file tree, context menu, enhanced status bar), add Sixel protocol and Unicode fallback.
+**Architecture:** Fork gitoui's existing ratatui + PNG image rendering architecture. Extend the event system for mouse, add git status parsing, create new views (diff, staging) and widgets (file tree, context menu, enhanced status bar), add Sixel protocol and Unicode fallback.
 
 **Tech Stack:** Rust, Ratatui 0.30, Crossterm (via ratatui), image 0.25, base64 0.22
 
@@ -49,13 +49,13 @@ Change the package name, description, and binary name:
 
 ```toml
 [package]
-name = "gitui"
+name = "gitoui"
 version = "0.1.0"
 description = "Interactive Git client for the terminal"
 edition = "2021"
 
 [[bin]]
-name = "gitui"
+name = "gitoui"
 path = "src/main.rs"
 ```
 
@@ -63,19 +63,19 @@ path = "src/main.rs"
 
 ```rust
 fn main() {
-    gitui::run()
+    gitoui::run()
 }
 ```
 
 - [ ] **Step 3: Update config path in src/lib.rs**
 
-Find all references to `$XDG_CONFIG_HOME/serie/config.toml` and `$SERIE_CONFIG_FILE` and replace with:
-- `$XDG_CONFIG_HOME/gitui/config.toml`
-- `$GITUI_CONFIG_FILE`
+Find all references to `$XDG_CONFIG_HOME/gitoui/config.toml` and `$GITOUI_CONFIG_FILE` and replace with:
+- `$XDG_CONFIG_HOME/gitoui/config.toml`
+- `$GITOUI_CONFIG_FILE`
 
 In `src/config.rs`, find the config path resolution (around line 25-50) and change:
-- `SERIE_CONFIG_FILE` → `GITUI_CONFIG_FILE`
-- `serie/config.toml` → `gitui/config.toml`
+- `GITOUI_CONFIG_FILE` → `GITOUI_CONFIG_FILE`
+- `gitoui/config.toml` → `gitoui/config.toml`
 
 - [ ] **Step 4: Verify it compiles**
 
@@ -85,7 +85,7 @@ Expected: Compiles with warnings (unused imports from rename) but no errors
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat: rename project from serie to gitui"
+git add -A && git commit -m "feat: rename project from gitoui to gitoui"
 ```
 
 ---
@@ -1481,12 +1481,12 @@ mod tests {
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, "hello").unwrap();
         
-        let changes = gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
+        let changes = gitoui::git::status::UncommittedChanges::load(dir.path()).unwrap();
         assert!(changes.is_dirty());
         assert_eq!(changes.untracked.len(), 1);
         
         Command::new("git").args(["add", "."]).current_dir(dir.path()).output().unwrap();
-        let changes = gitui::git::status::UncommittedChanges::load(dir.path()).unwrap();
+        let changes = gitoui::git::status::UncommittedChanges::load(dir.path()).unwrap();
         assert_eq!(changes.staged.len(), 1);
     }
 
@@ -1505,7 +1505,7 @@ mod tests {
             Command::new("git").args(["rev-parse", "HEAD"]).current_dir(dir.path()).output().unwrap().stdout
         ).unwrap().trim().to_string();
         
-        let entries = gitui::git::diff::DiffEntry::load_for_commit(dir.path(), &hash).unwrap();
+        let entries = gitoui::git::diff::DiffEntry::load_for_commit(dir.path(), &hash).unwrap();
         assert!(!entries.is_empty());
         assert!(entries[0].hunks.iter().any(|h| h.lines.iter().any(|l| l.content.contains("modified"))));
     }

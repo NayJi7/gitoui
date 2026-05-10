@@ -1,7 +1,7 @@
 use std::{path::Path, process::Command};
 
 use chrono::{DateTime, Days, NaiveDate, TimeZone, Utc};
-use gitui::{color, config, git, graph};
+use gitoui::{color, config, git, graph};
 use image::{GenericImage, GenericImageView};
 use rustc_hash::FxHashSet;
 

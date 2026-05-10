@@ -80,7 +80,7 @@ impl AvatarManager {
     ) -> Self {
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("gitui")
+            .join("gitoui")
             .join("avatars-v5");
         let _ = fs::create_dir_all(&cache_dir);
 
@@ -357,7 +357,7 @@ fn resolve_github_commit_avatar_url(
             let Ok(response) = client
                 .get(&url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "gitui")
+                .header("User-Agent", "gitoui")
                 .bearer_auth(token)
                 .send()
             else {

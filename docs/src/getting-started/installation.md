@@ -1,46 +1,46 @@
 # Installation
 
-### [Cargo](https://crates.io/crates/serie)
+### [Cargo](https://crates.io/crates/gitoui)
 
 ```
-$ cargo install --locked serie
+$ cargo install --locked gitoui
 ```
 
-### [Arch Linux](https://archlinux.org/packages/extra/x86_64/serie/)
+### [Arch Linux](https://archlinux.org/packages/extra/x86_64/gitoui/)
 
 ```
-$ pacman -S serie
+$ pacman -S gitoui
 ```
 
-### [Homebrew](https://formulae.brew.sh/formula/serie)
+### [Homebrew](https://formulae.brew.sh/formula/gitoui)
 
 ```
-$ brew install serie
+$ brew install gitoui
 ```
 
-or from [tap](https://github.com/lusingander/homebrew-tap/blob/master/serie.rb):
+or from [tap](https://github.com/lusingander/homebrew-tap/blob/master/gitoui.rb):
 
 ```
-$ brew install lusingander/tap/serie
+$ brew install lusingander/tap/gitoui
 ```
 
-### [NetBSD](https://pkgsrc.se/devel/serie)
+### [NetBSD](https://pkgsrc.se/devel/gitoui)
 
 ```
-$ pkgin install serie
+$ pkgin install gitoui
 ```
 
 ### Downloading binary
 
-You can download pre-compiled binaries from [releases](https://github.com/lusingander/serie/releases).
+You can download pre-compiled binaries from [releases](https://github.com/lusingander/gitoui/releases).
 
 ### Build from source
 
 If you want to check the latest development version, build from source:
 
 ```
-$ git clone https://github.com/lusingander/serie.git
-$ cd serie
+$ git clone https://github.com/lusingander/gitoui.git
+$ cd gitoui
 $ cargo build --release # Unless it's a release build, it's very slow.
-$ ./target/release/serie
+$ ./target/release/gitoui
 ```
