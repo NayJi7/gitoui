@@ -16,6 +16,25 @@ pub struct Hunk {
     pub new_start: u32,
     pub new_count: u32,
     pub lines: Vec<DiffLine>,
+    /// Where this hunk comes from. Used by the uncommitted combined diff view
+    /// to know whether the hunk is staged or not, so it can show the right
+    /// indicator and apply the right toggle action.
+    pub origin: HunkOrigin,
+}
+
+/// Origin of a hunk — used to drive the staged/unstaged indicator and
+/// stage/unstage toggle in the Uncommitted view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HunkOrigin {
+    /// `git diff --cached` — already in the index.
+    Staged,
+    /// `git diff` — modified but not yet in the index.
+    Unstaged,
+    /// Untracked file rendered as a synthetic diff (all additions).
+    Untracked,
+    /// Hunk from a committed diff or any context where stage/unstage doesn't apply.
+    #[default]
+    Other,
 }
 
 #[derive(Debug, Clone)]
@@ -156,10 +175,14 @@ impl DiffEntry {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries = parse_diff(&stdout)?;
-        entries
+        let mut entry = entries
             .into_iter()
             .next()
-            .ok_or_else(|| "No diff output".to_string())
+            .ok_or_else(|| "No diff output".to_string())?;
+        for h in &mut entry.hunks {
+            h.origin = HunkOrigin::Unstaged;
+        }
+        Ok(entry)
     }
 
     pub fn load_staged_for_file(repo_path: &Path, file_path: &str) -> Result<Self, String> {
@@ -185,10 +208,46 @@ impl DiffEntry {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries = parse_diff(&stdout)?;
-        entries
+        let mut entry = entries
             .into_iter()
             .next()
-            .ok_or_else(|| "No diff output".to_string())
+            .ok_or_else(|| "No diff output".to_string())?;
+        for h in &mut entry.hunks {
+            h.origin = HunkOrigin::Staged;
+        }
+        Ok(entry)
+    }
+
+    /// Combined uncommitted diff: loads both staged (`git diff --cached`) and
+    /// unstaged (`git diff`) hunks for a single file and merges them into one
+    /// `DiffEntry`, with each hunk tagged via its `origin` field. Hunks are
+    /// emitted in linear order by `new_start` so the Uncommitted view can show
+    /// them as one stream with per-hunk staged/unstaged indicators.
+    ///
+    /// Returns `Ok(None)` if neither side has any changes for this file.
+    pub fn load_combined_uncommitted_for_file(
+        repo_path: &Path,
+        file_path: &str,
+        context_lines: u32,
+    ) -> Result<Option<Self>, String> {
+        let staged = Self::load_staged_for_file_with_context(repo_path, file_path, context_lines)
+            .ok()
+            .filter(|e| !e.hunks.is_empty());
+        let unstaged =
+            Self::load_unstaged_for_file_with_context(repo_path, file_path, context_lines)
+                .ok()
+                .filter(|e| !e.hunks.is_empty());
+
+        match (staged, unstaged) {
+            (None, None) => Ok(None),
+            (Some(s), None) => Ok(Some(s)),
+            (None, Some(u)) => Ok(Some(u)),
+            (Some(mut s), Some(u)) => {
+                s.hunks.extend(u.hunks);
+                s.hunks.sort_by_key(|h| h.new_start);
+                Ok(Some(s))
+            }
+        }
     }
 
     pub fn load_for_stash(repo_path: &Path, stash_ref: &str) -> Result<Vec<Self>, String> {
@@ -224,6 +283,7 @@ impl DiffEntry {
                     content: "Cannot open this type of file".to_string(),
                     highlight_ranges: Vec::new(),
                 }],
+                origin: HunkOrigin::Other,
             }],
         }
     }
@@ -267,6 +327,7 @@ impl DiffEntry {
             new_start: 1,
             new_count: total,
             lines,
+            origin: HunkOrigin::Untracked,
         };
 
         Ok(DiffEntry {
@@ -362,6 +423,7 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
                         content: line.to_string(),
                         highlight_ranges: Vec::new(),
                     }],
+                    origin: HunkOrigin::Other,
                 });
             }
         } else if let Some(hunk) = current_hunk.as_mut() {

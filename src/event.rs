@@ -105,6 +105,14 @@ pub enum AppEvent {
         file_path: String,
         is_staged: bool,
     },
+    /// Toggle a single hunk between staged and unstaged. `currently_staged`
+    /// drives which direction the patch is applied — staged hunks reverse the
+    /// patch (unstage), unstaged hunks forward-apply it (stage).
+    ToggleHunkStage {
+        file_path: String,
+        hunk_idx: usize,
+        currently_staged: bool,
+    },
     CloseDiffToUncommitted,
     Tick,
     BackgroundFetch,

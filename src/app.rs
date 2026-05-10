@@ -782,6 +782,13 @@ impl App<'_> {
                     self.clear_terminal(terminal)?;
                     self.open_uncommitted_diff(file_path, is_staged);
                 }
+                AppEvent::ToggleHunkStage {
+                    file_path,
+                    hunk_idx,
+                    currently_staged,
+                } => {
+                    self.toggle_hunk_stage(file_path, hunk_idx, currently_staged);
+                }
                 AppEvent::CloseDiffToUncommitted => {
                     self.close_diff_to_uncommitted();
                     self.clear_image(Some(terminal))?;
@@ -1930,6 +1937,7 @@ impl App<'_> {
                         new_start: 1,
                         new_count: initial.len() as u32,
                         lines: initial,
+                        origin: crate::git::diff::HunkOrigin::Untracked,
                     };
                     let initial_entry = DiffEntry {
                         old_path: Some("/dev/null".to_string()),
@@ -1952,19 +1960,17 @@ impl App<'_> {
             return;
         }
 
-        let diff_result = if is_staged {
-            DiffEntry::load_staged_for_file(self.repository.path(), &file_path)
-        } else {
-            DiffEntry::load_unstaged_for_file(self.repository.path(), &file_path)
-        };
-
-        match diff_result {
-            Ok(diff_entry) => {
-                let title = if is_staged {
-                    format!("Diff (staged): {}", file_path)
-                } else {
-                    format!("Diff (unstaged): {}", file_path)
-                };
+        // Hunk-level staging — we always load the combined staged+unstaged
+        // diff so the view shows every hunk linearly with its own indicator.
+        // `is_staged` only drives the initial scroll position so the user
+        // lands on the first hunk of the side they clicked from.
+        match DiffEntry::load_combined_uncommitted_for_file(
+            self.repository.path(),
+            &file_path,
+            3,
+        ) {
+            Ok(Some(diff_entry)) => {
+                let title = format!("Diff: {}", file_path);
                 self.view = View::of_uncommitted_diff(
                     commit_list_state,
                     vec![diff_entry],
@@ -1974,9 +1980,83 @@ impl App<'_> {
                     all_files,
                     self.repository.path().to_path_buf(),
                 );
+                if let View::Diff(ref mut view) = self.view {
+                    let origin = if is_staged {
+                        crate::git::diff::HunkOrigin::Staged
+                    } else {
+                        crate::git::diff::HunkOrigin::Unstaged
+                    };
+                    view.set_initial_scroll_origin(origin);
+                }
+            }
+            Ok(None) => {
+                self.ec
+                    .send(AppEvent::NotifyWarn(format!("No changes for {}", file_path)));
             }
             Err(err) => {
                 self.ec.send(AppEvent::NotifyError(err));
+            }
+        }
+    }
+
+    /// Stage or unstage a single hunk by reloading the combined diff, picking
+    /// the hunk at `hunk_idx`, piping the patch through `git apply --cached`
+    /// (with `--reverse` for unstage), then re-opening the diff so the view
+    /// reflects the new state. Preserves the user's scroll position and
+    /// re-focuses the same hunk so toggling doesn't snap them back to row 0.
+    /// If the user has edited the file between the view render and the click,
+    /// hunk_idx may no longer line up — in which case `git apply` itself
+    /// surfaces an error verbatim.
+    fn toggle_hunk_stage(
+        &mut self,
+        file_path: String,
+        hunk_idx: usize,
+        currently_staged: bool,
+    ) {
+        let repo_path = self.repository.path().to_path_buf();
+        let combined = match DiffEntry::load_combined_uncommitted_for_file(&repo_path, &file_path, 3) {
+            Ok(Some(d)) => d,
+            Ok(None) => {
+                self.ec
+                    .send(AppEvent::NotifyWarn("No changes to toggle".to_string()));
+                return;
+            }
+            Err(e) => {
+                self.ec.send(AppEvent::NotifyError(e));
+                return;
+            }
+        };
+        let hunk = match combined.hunks.get(hunk_idx) {
+            Some(h) => h,
+            None => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Hunk {} not found", hunk_idx)));
+                return;
+            }
+        };
+        let result = if currently_staged {
+            crate::git::actions::unstage_hunk(&repo_path, &file_path, hunk)
+        } else {
+            crate::git::actions::stage_hunk(&repo_path, &file_path, hunk)
+        };
+        match result {
+            Ok(_) => {
+                // Capture the user's current scroll position from the diff view
+                // before we tear it down, so we can restore it on the new view.
+                let prev_scroll = match self.view {
+                    View::Diff(ref v) => v.scroll_offset(),
+                    _ => 0,
+                };
+                // Reload the combined diff so the moved hunk shows its new state.
+                self.open_uncommitted_diff(file_path, false);
+                // After reload, ask the new view to anchor on the toggled hunk.
+                if let View::Diff(ref mut v) = self.view {
+                    v.set_restore_focus(hunk_idx, prev_scroll);
+                }
+            }
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("git apply failed: {}", e)));
             }
         }
     }

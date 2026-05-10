@@ -1,5 +1,8 @@
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+
+use crate::git::diff::{DiffLineType, Hunk};
 
 pub type GitResult = Result<String, String>;
 
@@ -310,6 +313,96 @@ pub fn fetch(path: &Path) -> GitResult {
 
 pub fn clean_untracked(path: &Path) -> GitResult {
     run_git(path, &["clean", "-fd"])
+}
+
+// --- Hunk-Level Staging ---
+
+/// Serialise a single `Hunk` into a unified-diff patch that `git apply` can
+/// consume on stdin. The patch references the file via both `a/<path>` and
+/// `b/<path>` (the standard git diff convention).
+fn hunk_to_patch(file_path: &str, hunk: &Hunk) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("diff --git a/{0} b/{0}\n", file_path));
+    s.push_str(&format!("--- a/{}\n", file_path));
+    s.push_str(&format!("+++ b/{}\n", file_path));
+    for line in &hunk.lines {
+        match line.line_type {
+            DiffLineType::HunkHeader => {
+                s.push_str(&line.content);
+                s.push('\n');
+            }
+            DiffLineType::Context => {
+                s.push(' ');
+                s.push_str(&line.content);
+                s.push('\n');
+            }
+            DiffLineType::Addition => {
+                s.push('+');
+                s.push_str(&line.content);
+                s.push('\n');
+            }
+            DiffLineType::Deletion => {
+                s.push('-');
+                s.push_str(&line.content);
+                s.push('\n');
+            }
+            _ => {}
+        }
+    }
+    s
+}
+
+/// Pipe a patch to `git apply` (optionally in reverse). Captures stderr so the
+/// caller can surface the underlying git error verbatim — `git apply` is
+/// notoriously strict about whitespace and line endings.
+fn run_git_apply(repo_path: &Path, patch: &str, reverse: bool) -> GitResult {
+    let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
+    if reverse {
+        args.push("--reverse");
+    }
+    args.push("-");
+    let mut child = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn git apply: {}", e))?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "Failed to open git apply stdin".to_string())?;
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|e| format!("Failed to write patch: {}", e))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait on git apply: {}", e))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+/// Stage a single hunk by piping it as a patch into `git apply --cached`.
+/// The hunk must come from the unstaged side (`git diff`).
+pub fn stage_hunk(repo_path: &Path, file_path: &str, hunk: &Hunk) -> GitResult {
+    let patch = hunk_to_patch(file_path, hunk);
+    run_git_apply(repo_path, &patch, false)
+}
+
+/// Unstage a single hunk by reverse-applying it against the index.
+/// The hunk must come from the staged side (`git diff --cached`).
+pub fn unstage_hunk(repo_path: &Path, file_path: &str, hunk: &Hunk) -> GitResult {
+    let patch = hunk_to_patch(file_path, hunk);
+    run_git_apply(repo_path, &patch, true)
 }
 
 // --- Branch Metadata ---
