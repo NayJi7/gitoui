@@ -373,8 +373,37 @@ impl<'a> UncommittedWidget<'a> {
         ]);
         Paragraph::new(underline_line).render(files_underline_area, buf);
 
+        // Conflict banner: rendered above the scrollable content when there are unmerged files
+        let conflict_count = self
+            .unstaged
+            .iter()
+            .filter(|f| f.status == StatusType::Unmerged)
+            .count();
+
+        let (banner_area, content_area) = if conflict_count > 0 {
+            let [b, c] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
+                .areas(scroll_area);
+            (Some(b), c)
+        } else {
+            (None, scroll_area)
+        };
+
+        if let Some(banner_area) = banner_area {
+            let banner_text = format!(
+                " ⚠  {} conflict(s) — edit then mark resolved with [a]",
+                conflict_count
+            );
+            let banner_line = Line::from(Span::styled(
+                banner_text,
+                Style::default()
+                    .fg(self.ctx.color_theme.status_error_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            Paragraph::new(banner_line).render(banner_area, buf);
+        }
+
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(scroll_area);
+            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)]).areas(content_area);
 
         let (label_lines, value_lines) = self.build_content_lines(state, value_area.width as usize);
 
@@ -486,6 +515,7 @@ impl<'a> UncommittedWidget<'a> {
     }
 
     fn file_line(&self, file: &UncommittedFile, style: Style) -> Line<'static> {
+        let is_unmerged = file.status == StatusType::Unmerged;
         let status_color = match file.status {
             StatusType::Added => self.ctx.color_theme.detail_file_change_add_fg,
             StatusType::Modified => self.ctx.color_theme.detail_file_change_modify_fg,
@@ -494,7 +524,7 @@ impl<'a> UncommittedWidget<'a> {
             }
             _ => self.ctx.color_theme.detail_file_change_move_fg,
         };
-        let path_style = if matches!(file.status, StatusType::Deleted | StatusType::Unmerged) {
+        let path_style = if matches!(file.status, StatusType::Deleted) {
             Style::default().add_modifier(Modifier::CROSSED_OUT)
         } else {
             Style::default()
@@ -509,23 +539,28 @@ impl<'a> UncommittedWidget<'a> {
         } else {
             "".to_string()
         };
-        Line::from(vec![
-            Span::styled(
-                format!("{:2}", file.status_char()),
-                Style::default().fg(status_color),
-            ),
-            Span::raw(" "),
-            Span::styled(file.path.clone(), path_style),
-            Span::styled(
-                add_str,
-                Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
-            ),
-            Span::styled(
-                del_str,
-                Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
-            ),
-        ])
-        .style(style)
+        let mut spans: Vec<Span> = Vec::new();
+        if is_unmerged {
+            spans.push(Span::styled(
+                "⚠ ",
+                Style::default().fg(self.ctx.color_theme.status_error_fg),
+            ));
+        }
+        spans.push(Span::styled(
+            format!("{:2}", file.status_char()),
+            Style::default().fg(status_color),
+        ));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(file.path.clone(), path_style));
+        spans.push(Span::styled(
+            add_str,
+            Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
+        ));
+        spans.push(Span::styled(
+            del_str,
+            Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
+        ));
+        Line::from(spans).style(style)
     }
 
     fn full_divider(&self, width: usize) -> Line<'static> {

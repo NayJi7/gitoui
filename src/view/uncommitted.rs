@@ -177,7 +177,11 @@ impl<'a> UncommittedView<'a> {
                     self.state
                         .selected_file(&self.unstaged, &self.staged, &self.untracked)
                 {
-                    if file.status == StatusType::Deleted {
+                    if file.status == StatusType::Unmerged {
+                        self.tx.send(AppEvent::NotifyWarn(
+                            "Conflicted file — edit to resolve, then press [a] to mark as resolved".to_string(),
+                        ));
+                    } else if file.status == StatusType::Deleted {
                         self.tx.send(AppEvent::NotifyWarn(
                             "Cannot view diff for a deleted file.".to_string(),
                         ));
@@ -511,17 +515,20 @@ impl<'a> UncommittedView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
+        let has_conflicts = self
+            .unstaged
+            .iter()
+            .any(|f| f.status == StatusType::Unmerged);
         let has_unstaged = !self.unstaged.is_empty() || !self.untracked.is_empty();
         let has_staged = !self.staged.is_empty();
-        let can_stage = has_unstaged;
         let can_unstage = has_staged;
         let can_discard = has_unstaged || has_staged;
         let mut parts = Vec::new();
-        if can_stage {
+        if has_conflicts {
+            parts.push("a:resolve".to_string());
+        } else if has_unstaged {
             parts.push("a:stage".to_string());
-            if has_unstaged || !self.untracked.is_empty() {
-                parts.push("A:stage-all".to_string());
-            }
+            parts.push("A:stage-all".to_string());
         }
         if can_unstage {
             parts.push("u:unstage".to_string());
