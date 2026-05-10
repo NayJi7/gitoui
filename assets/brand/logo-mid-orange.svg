@@ -1,12 +1,10 @@
 <svg width="1408" height="1408" viewBox="0 0 1408 1408" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g id="logo-mid-orange" filter="url(#filter0_d_5_10)">
-<rect x="4" width="1400" height="1400" fill="#F05133"/>
-<rect x="4.5" y="0.5" width="1399" height="1399" stroke="black"/>
-<rect x="4.5" y="0.5" width="1399" height="1399" stroke="black" stroke-opacity="0.3"/>
+<rect width="1400" height="1400" transform="translate(4)" fill="#F05133"/>
 <rect id="Rectangle 1" x="304" y="200" width="199" height="999" fill="#111111"/>
 <rect id="Rectangle 2" x="903" y="601" width="201" height="597" fill="#111111"/>
 <rect id="Rectangle 3" x="304" y="999" width="798" height="199" fill="#111111"/>
-<rect id="Rectangle 6" x="503" y="799" width="400" height="200" fill="#8B2A12"/>
+<rect id="Rectangle 6" x="503" y="799" width="400" height="200" fill="#8A2E15"/>
 <rect id="Rectangle 5" x="705" y="600" width="398" height="199" fill="#111111"/>
 <rect id="Rectangle 4" x="305" y="200" width="798" height="199" fill="#111111"/>
 </g>

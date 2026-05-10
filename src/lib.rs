@@ -413,37 +413,91 @@ pub fn run() -> Result<()> {
 }
 
 /// Print the gitoui logo + wordmark inline (opencode-style) before the no-repo
-/// prompt. Reserves `cell_h` rows by emitting newlines first (so the terminal
-/// scrolls if needed), moves the cursor back up, then emits the image escape.
-/// Both Kitty (default `C=0`) and iTerm2 auto-advance the cursor below the
-/// image after rendering, so we only need a single trailing newline for the
-/// blank separator before the prompt.
-/// Falls back to a plain text banner when the protocol can't render inline.
+/// prompt. The G logomark is rendered SMALLER than the wordmark and vertically
+/// centered next to it, so the wordmark text dominates the splash. Layout in
+/// terminal cells:
+///
+/// ```text
+///   .. [G..] .[wordmark...........]   ← rows R0..R0+4 (5-row band)
+///   ↑   ↑    ↑     ↑
+///   2   logo gap   wordmark
+/// ```
+///
+/// Both Kitty (default `C=0`) and iTerm2 advance the cursor by `(cell_w, cell_h-1)`
+/// after rendering — i.e. the cursor lands on the LAST row of the image. Two
+/// trailing newlines therefore produce exactly one blank separator row before
+/// the prompt. Falls back to a plain text banner when the protocol can't
+/// render inline (e.g. KittyUnicode placeholder mode).
 fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     use std::io::Write;
-    let cell_w: usize = 28;
-    let cell_h: usize = 5;
+
+    let left_margin: u16 = 2;
+    let logo_w: usize = 8;
+    let logo_h: usize = 5;
+    let gap: u16 = 2;
+    let wm_w: usize = 21;
+    let wm_h: usize = 5;
+    let total_h: u16 = wm_h as u16;
+    // Logo and wordmark are now both 5 rows tall — same baseline, no slack.
+    let logo_y_offset: u16 = 0;
 
     println!();
-    let Some(png) = brand::render_mixed_png(cell_w as u32, cell_h as u32) else {
-        println!("        gitoui\n");
+
+    let render_fallback = || println!("        gitoui\n");
+    let Some(logo_png) = brand::render_logo_sized(logo_w as u32, logo_h as u32) else {
+        render_fallback();
         return;
     };
-    let Some(escape) = image_protocol.encode_inline(&png, cell_w, cell_h, 1) else {
-        println!("        gitoui\n");
+    let Some(wm_png) = brand::render_wordmark_sized(wm_w as u32, wm_h as u32) else {
+        render_fallback();
+        return;
+    };
+    // Logo first: emit with the d=C clear prefix (no prior placements to worry
+    // about). Wordmark second: skip the clear prefix so we don't accidentally
+    // erase the logo on terminals that interpret d=C row-wide rather than
+    // cell-wide (e.g. Ghostty when both images share rows).
+    let Some(logo_esc) = image_protocol.encode_inline(&logo_png, logo_w, logo_h, 1, true) else {
+        render_fallback();
+        return;
+    };
+    let Some(wm_esc) = image_protocol.encode_inline(&wm_png, wm_w, wm_h, 2, false) else {
+        render_fallback();
         return;
     };
 
     let mut stdout = std::io::stdout().lock();
-    // Reserve cell_h rows so the terminal scrolls if the cursor is near the bottom.
-    for _ in 0..cell_h {
+    // Reserve total_h rows so the terminal scrolls if the cursor is near the bottom.
+    for _ in 0..total_h {
         let _ = writeln!(stdout);
     }
-    // Move cursor back up to the start of the reserved area.
-    let _ = write!(stdout, "\x1b[{}A", cell_h);
-    // Render the image; cursor auto-advances to the row just below the image.
-    let _ = write!(stdout, "{}", escape);
-    // One blank row separator before the prompt.
+    // Move cursor back up to the top-left of the reserved band.
+    let _ = write!(stdout, "\x1b[{}A", total_h);
+    // Save cursor at (top, 0) so we can come back here for the wordmark
+    // without depending on how each protocol advances the cursor after an image.
+    let _ = write!(stdout, "\x1b7");
+
+    // --- Emit the small G logomark ---
+    if logo_y_offset > 0 {
+        let _ = write!(stdout, "\x1b[{}B", logo_y_offset);
+    }
+    let _ = write!(stdout, "\x1b[{}C", left_margin);
+    let _ = write!(stdout, "{}", logo_esc);
+    // Flush so the terminal commits the logo placement before any subsequent
+    // cursor manipulation can be (mis)interpreted as overlapping with it.
+    let _ = stdout.flush();
+
+    // --- Emit the wordmark ---
+    // Restore to (top, 0), then walk right to the wordmark's start column.
+    let _ = write!(stdout, "\x1b8");
+    let _ = write!(
+        stdout,
+        "\x1b[{}C",
+        left_margin + logo_w as u16 + gap
+    );
+    let _ = write!(stdout, "{}", wm_esc);
+
+    // Two newlines = one blank separator row before the prompt.
+    let _ = writeln!(stdout);
     let _ = writeln!(stdout);
     let _ = stdout.flush();
 }

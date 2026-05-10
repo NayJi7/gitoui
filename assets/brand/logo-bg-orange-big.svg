@@ -1,8 +1,6 @@
 <svg width="2508" height="2508" viewBox="0 0 2508 2508" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g id="logo-bg-orange-big" filter="url(#filter0_d_5_50)">
-<rect x="4" width="2500" height="2500" fill="#F05133"/>
-<rect x="4.5" y="0.5" width="2499" height="2499" stroke="black"/>
-<rect x="4.5" y="0.5" width="2499" height="2499" stroke="black" stroke-opacity="0.3"/>
+<rect width="2500" height="2500" transform="translate(4)" fill="#F05133"/>
 <rect id="Rectangle 1" x="854" y="751" width="199" height="999" fill="#111111"/>
 <rect id="Rectangle 2" x="1453" y="1152" width="201" height="597" fill="#111111"/>
 <rect id="Rectangle 3" x="854" y="1550" width="798" height="199" fill="#111111"/>

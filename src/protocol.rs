@@ -151,6 +151,12 @@ impl ImageProtocol {
     /// Encode the image as a stdout-printable escape sequence sized to occupy
     /// `cell_width × cell_height` terminal cells. Used for inline rendering
     /// outside the Ratatui buffer (e.g. splash screens before TUI init).
+    ///
+    /// Set `clear_at_cursor = false` when emitting subsequent images that share
+    /// rows with a prior placement — Kitty's `d=C` delete prefix is interpreted
+    /// liberally by Ghostty (deletes the whole row, not just the cursor cell)
+    /// and would erase the prior image.
+    ///
     /// Returns `None` for protocols that need terminal cells with diacritics
     /// (KittyUnicode), which can't be emitted via raw stdout reliably.
     pub fn encode_inline(
@@ -159,12 +165,17 @@ impl ImageProtocol {
         cell_width: usize,
         cell_height: usize,
         image_id: u32,
+        clear_at_cursor: bool,
     ) -> Option<String> {
         match self {
             ImageProtocol::Iterm2 | ImageProtocol::Sixel => {
                 Some(iterm2_encode(bytes, cell_width, cell_height))
             }
-            ImageProtocol::Kitty => Some(kitty_encode(bytes, cell_width, cell_height, image_id)),
+            ImageProtocol::Kitty => Some(if clear_at_cursor {
+                kitty_encode(bytes, cell_width, cell_height, image_id)
+            } else {
+                kitty_encode_no_clear(bytes, cell_width, cell_height, image_id)
+            }),
             ImageProtocol::KittyUnicode { .. } => None,
         }
     }
@@ -538,18 +549,43 @@ fn iterm2_encode(bytes: &[u8], cell_width: usize, cell_height: usize) -> String 
 
 // https://sw.kovidgoyal.net/kitty/graphics-protocol/
 fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize, image_id: u32) -> String {
+    kitty_encode_inner(bytes, cell_width, cell_height, image_id, true)
+}
+
+/// Same as `kitty_encode` but skips the `d=C` delete-at-cursor prefix. Use this
+/// when emitting multiple images on overlapping rows in a single splash —
+/// some terminals (Ghostty in particular) widen the "intersect cursor position"
+/// rule to "intersect cursor row", which would erase prior placements.
+fn kitty_encode_no_clear(
+    bytes: &[u8],
+    cell_width: usize,
+    cell_height: usize,
+    image_id: u32,
+) -> String {
+    kitty_encode_inner(bytes, cell_width, cell_height, image_id, false)
+}
+
+fn kitty_encode_inner(
+    bytes: &[u8],
+    cell_width: usize,
+    cell_height: usize,
+    image_id: u32,
+    with_delete_prefix: bool,
+) -> String {
     let base64_str = to_base64_str(bytes);
     let chunk_size = 4096;
 
     let total_chunks = base64_str.len().div_ceil(chunk_size).max(1);
-    // Pre-allocate: delete prefix (14) + per-chunk overhead (~55) + base64 data
+    // Pre-allocate: optional delete prefix (14) + per-chunk overhead (~55) + base64 data
     let capacity = 14 + total_chunks * 55 + base64_str.len();
     let mut s = String::with_capacity(capacity);
 
     let chunks = base64_str.as_bytes().chunks(chunk_size);
     let total_chunks = chunks.len();
 
-    s.push_str("\x1b_Ga=d,d=C;\x1b\\");
+    if with_delete_prefix {
+        s.push_str("\x1b_Ga=d,d=C;\x1b\\");
+    }
     for (i, chunk) in chunks.enumerate() {
         s.push_str("\x1b_G");
         if i == 0 {

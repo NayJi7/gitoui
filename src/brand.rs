@@ -2,7 +2,6 @@ use resvg::{tiny_skia, usvg};
 
 static LOGO_SVG: &[u8] = include_bytes!("../assets/brand/logo-nobg.svg");
 static WORDMARK_SVG: &[u8] = include_bytes!("../assets/brand/wordmark-nobg.svg");
-static MIXED_SVG: &[u8] = include_bytes!("../assets/brand/mixed-nobg.svg");
 
 // 16 cells of the G logo in spiral build order (path data, fill color).
 // SVG viewBox: 0 0 809 1008.  The y=601 on cells 12/15/16 is the 1-px fix that
@@ -140,11 +139,16 @@ pub fn render_wordmark_png() -> Option<Vec<u8>> {
     render_svg_to_png(WORDMARK_SVG, px_w, px_h)
 }
 
-/// Render the combined logo + wordmark for splash screens at the given cell size.
-/// Cell aspect is 8w × 16h; oversampled 4× → 32 px/col × 64 px/row in the canvas.
-/// SVG is 1645×600 (≈2.74:1); the image is centered inside the canvas with uniform scale.
-pub fn render_mixed_png(cell_w: u32, cell_h: u32) -> Option<Vec<u8>> {
+/// Render the standalone G logomark at the given cell size (centered in canvas).
+pub fn render_logo_sized(cell_w: u32, cell_h: u32) -> Option<Vec<u8>> {
     let px_w = cell_w * 32;
     let px_h = cell_h * 64;
-    render_svg_to_png(MIXED_SVG, px_w, px_h)
+    render_svg_to_png(LOGO_SVG, px_w, px_h)
+}
+
+/// Render the standalone "gitoui" wordmark at the given cell size (centered in canvas).
+pub fn render_wordmark_sized(cell_w: u32, cell_h: u32) -> Option<Vec<u8>> {
+    let px_w = cell_w * 32;
+    let px_h = cell_h * 64;
+    render_svg_to_png(WORDMARK_SVG, px_w, px_h)
 }
