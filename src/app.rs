@@ -226,9 +226,12 @@ impl<'a> App<'a> {
                 if commit.commit_type == crate::git::CommitType::Uncommitted {
                     let changes = repository.uncommitted_changes().unwrap();
                     let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
+                    // Match the #808080 used by graph::image for the uncommitted
+                    // line — keeps the marker `│` and the message text visually
+                    // consistent with the graph rendering.
                     CommitInfo::new_uncommitted(
                         commit,
-                        ctx.color_theme.list_ref_paren_fg,
+                        ratatui::style::Color::Rgb(0x80, 0x80, 0x80),
                         changes.staged.len(),
                         changes.unstaged.len(),
                         changes.untracked.len(),
@@ -1217,7 +1220,7 @@ impl App<'_> {
 
         let status_area = if show_shortcuts {
             let shortcut_text: String = if is_search_querying {
-                "⌘ Esc:cancel".into()
+                String::new()
             } else if is_search_active {
                 let (ignore_case, fuzzy, regex) = self
                     .view
@@ -1233,29 +1236,29 @@ impl App<'_> {
             } else if is_config_active {
                 self.view
                     .config_footer_hint()
-                    .unwrap_or_else(|| "⌘ Enter/⇆:cycle▕▏Esc:close".into())
+                    .unwrap_or_else(|| "⌘ Enter/⇆:cycle".into())
             } else {
                 match &self.view {
                     View::List(_) => {
-                        "⌘ Enter:detail▕▏f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏c:copy msg▕▏C:copy hash▕▏p:config▕▏?:help▕▏q:quit"
+                        "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏c:copy msg▕▏C:copy hash▕▏p:config▕▏?:help▕▏q:quit"
                             .into()
                     }
                     View::Diff(_) => self
                         .view
                         .diff_footer_hint()
-                        .unwrap_or_else(|| "⌘ c:copy-path▕▏Esc:close".into()),
-                    View::Detail(_) => "⌘ Enter:open file▕▏⇆:prev/next▕▏t:tag▕▏b:branch▕▏o:checkout▕▏m:merge▕▏e:rebase▕▏see action bar →▕▏c:msg▕▏C:hash▕▏r:fetch▕▏Esc:close".into(),
-                    View::Refs(_) => "⌘ Enter:open▕▏D:delete▕▏c:copy-name▕▏r:fetch▕▏?:help▕▏Esc:close".into(),
-                    View::Help(_) => "⌘ ?/Esc:close".into(),
-                    View::UserCommand(_) => "⌘ Enter:detail▕▏?:help▕▏r:fetch▕▏Esc:close".into(),
-                    View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm▕▏Esc:cancel".into(),
-                    View::BranchDetail(_) => "⌘ o:checkout▕▏m:merge▕▏e:rebase▕▏Q:push▕▏Z:pull▕▏I:upstream▕▏D:delete▕▏see action bar →▕▏V:copy-name▕▏r:fetch▕▏Esc:close".into(),
-                    View::TagDetail(_) => "⌘ W:push▕▏F:delete▕▏Y:copy-name▕▏r:fetch▕▏Esc:close".into(),
+                        .unwrap_or_else(|| "⌘ c:copy-path".into()),
+                    View::Detail(_) => "⌘ ⇆:prev/next▕▏t:tag▕▏b:branch▕▏o:checkout▕▏m:merge▕▏e:rebase▕▏see action bar →▕▏c:msg▕▏C:hash▕▏r:fetch".into(),
+                    View::Refs(_) => "⌘ D:delete▕▏c:copy-name▕▏r:fetch▕▏?:help".into(),
+                    View::Help(_) => "⌘ ?:close".into(),
+                    View::UserCommand(_) => "⌘ ?:help▕▏r:fetch".into(),
+                    View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm".into(),
+                    View::BranchDetail(_) => "⌘ o:checkout▕▏m:merge▕▏e:rebase▕▏Q:push▕▏Z:pull▕▏I:upstream▕▏D:delete▕▏see action bar →▕▏V:copy-name▕▏r:fetch".into(),
+                    View::TagDetail(_) => "⌘ W:push▕▏F:delete▕▏Y:copy-name▕▏r:fetch".into(),
                     View::Uncommitted(_) => self
                         .view
                         .uncommitted_footer_hint()
-                        .unwrap_or_else(|| "Esc:close".into()),
-                    View::FileHistory(_) => "⌘ Enter:open commit▕▏?:help▕▏Esc:close".into(),
+                        .unwrap_or_else(String::new),
+                    View::FileHistory(_) => "⌘ ?:help".into(),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -1387,7 +1390,10 @@ impl App<'_> {
                 let untracked = changes.untracked.len();
 
                 if changes.is_dirty() {
-                    spans.push(Span::styled(" │ ", dim_separator));
+                    // No trailing space after the bar — each indicator below
+                    // already starts with a leading space, which doubles as
+                    // the separator from one indicator to the next.
+                    spans.push(Span::styled(" │", dim_separator));
                     if staged > 0 {
                         spans.push(Span::styled(
                             format!(" ✓{}", staged),

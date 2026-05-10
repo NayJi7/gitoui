@@ -1241,22 +1241,22 @@ fn github_avatars_description(state: &GithubAuthState, _enabled: bool) -> String
 fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -> String {
     if selected == GITHUB_AUTH_INDEX {
         if pending {
-            "Enter:re-copy Esc:close".into()
+            "Enter:re-copy".into()
         } else if state.is_authenticated() {
-            "Enter:logout Esc:close".into()
+            "Enter:logout".into()
         } else {
-            "Enter:auth Esc:close".into()
+            "Enter:auth".into()
         }
     } else if selected == GITHUB_AVATARS_INDEX {
         if state.is_authenticated() {
-            "Enter/⇆:toggle Esc:close".into()
+            "Enter/⇆:toggle".into()
         } else {
-            "Esc:close".into()
+            String::new()
         }
     } else if selected >= TEXT_EDIT_START_INDEX {
-        "Enter:edit Esc:close".into()
+        "Enter:edit".into()
     } else {
-        "Enter/⇆:cycle Esc:close".into()
+        "Enter/⇆:cycle".into()
     }
 }
 
@@ -1395,7 +1395,7 @@ mod tests {
     fn config_footer_prompts_auth_for_github_auth_row_when_logged_out() {
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), false),
-            "Enter:auth Esc:close"
+            "Enter:auth"
         );
     }
 
@@ -1409,7 +1409,7 @@ mod tests {
 
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &state, false),
-            "Enter:logout Esc:close"
+            "Enter:logout"
         );
     }
 
@@ -1417,7 +1417,7 @@ mod tests {
     fn config_footer_prompts_recopy_during_pending_auth() {
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), true),
-            "Enter:re-copy Esc:close"
+            "Enter:re-copy"
         );
     }
 

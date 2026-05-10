@@ -551,9 +551,7 @@ impl<'a> UncommittedView<'a> {
         if !self.untracked.is_empty() {
             parts.push("v:clean".to_string());
         }
-        parts.push("Enter:diff".to_string());
         parts.push("r:fetch".to_string());
-        parts.push("Esc:close".to_string());
         format!("⌘ {}", parts.join("▕▏"))
     }
 }

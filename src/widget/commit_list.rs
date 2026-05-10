@@ -1778,12 +1778,16 @@ impl CommitList<'_> {
         let total = commit_info.uncommitted_staged
             + commit_info.uncommitted_unstaged
             + commit_info.uncommitted_untracked;
+        // Same #808080 grey as graph::image's UNCOMMITTED_COLOR and as the
+        // marker `│` for this row — keeps the whole uncommitted line tonally
+        // unified instead of mixing graph grey with default white text.
+        let uncommitted_grey = Color::Rgb(0x80, 0x80, 0x80);
         let spans: Vec<Span> = vec![
             Span::raw("Uncommitted Changes")
-                .fg(self.ctx.color_theme.fg)
+                .fg(uncommitted_grey)
                 .add_modifier(Modifier::BOLD),
             Span::raw(format!(" ({})", total))
-                .fg(self.ctx.color_theme.fg)
+                .fg(uncommitted_grey)
                 .add_modifier(Modifier::BOLD),
         ];
         self.to_commit_list_item(i, spans, state)

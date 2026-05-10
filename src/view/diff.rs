@@ -1593,7 +1593,6 @@ impl<'a> DiffView<'a> {
         parts.push("H:history");
         parts.push("c:copy-path");
         parts.push("r:fetch");
-        parts.push("Esc:close");
         format!("⌘ {}", parts.join("▕▏"))
     }
 
