@@ -252,7 +252,7 @@ pub fn run() -> Result<()> {
             .default_branch
             .clone()
             .unwrap_or_else(|| git_default_branch.clone());
-        let ctx = Rc::new(app::AppContext {
+        let mut ctx = Rc::new(app::AppContext {
             keybind,
             core_config,
             ui_config,
@@ -265,6 +265,8 @@ pub fn run() -> Result<()> {
             github_auth_state,
             branch_color_map: rustc_hash::FxHashMap::default(),
             graph_color_set: graph_color_set.clone(),
+            // Filled after the repository is loaded — see below.
+            current_branch_remote_state: None,
         });
 
         let repository = match git::Repository::load(Path::new("."), order, max_count) {
@@ -319,6 +321,34 @@ pub fn run() -> Result<()> {
         // stable across config-reload iterations.
         if _git_watcher.is_none() {
             _git_watcher = watcher::start(repository.path(), ec.sender());
+        }
+
+        // Compute (ahead, behind) of the current branch vs its upstream so
+        // the status bar can show whether the user needs to push or pull.
+        // Done here (not in AppContext::new) because we need the loaded
+        // repository to know the current branch. The Rc is unique at this
+        // point (no clones yet), so get_mut succeeds.
+        let remote_state = match repository.head() {
+            git::Head::Branch { name } => {
+                let upstream = git::actions::branch_upstream(repository.path(), name);
+                if upstream.as_ref().map_or(true, |u| u.is_empty()) {
+                    None
+                } else {
+                    let ahead = git::actions::branch_ahead_count(repository.path(), name)
+                        .ok()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    let behind = git::actions::branch_behind_count(repository.path(), name)
+                        .ok()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    Some((ahead, behind))
+                }
+            }
+            _ => None,
+        };
+        if let Some(ctx_mut) = Rc::get_mut(&mut ctx) {
+            ctx_mut.current_branch_remote_state = remote_state;
         }
 
         let graph = graph::calc_graph(&repository);

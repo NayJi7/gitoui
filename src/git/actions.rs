@@ -339,6 +339,14 @@ pub fn branch_behind_count(path: &Path, branch: &str) -> GitResult {
     )
 }
 
+pub fn branch_ahead_behind_vs(path: &Path, branch: &str, vs: &str) -> Result<(String, String), String> {
+    let ahead = run_git(path, &["rev-list", "--count", &format!("{}..{}", vs, branch)])
+        .unwrap_or_else(|_| "0".to_string());
+    let behind = run_git(path, &["rev-list", "--count", &format!("{}..{}", branch, vs)])
+        .unwrap_or_else(|_| "0".to_string());
+    Ok((ahead.trim().to_string(), behind.trim().to_string()))
+}
+
 pub fn branch_tip_info(path: &Path, branch: &str) -> GitResult {
     run_git(path, &["log", "-1", "--format=%H %s", branch])
 }

@@ -49,6 +49,7 @@ pub struct BranchMetadata {
     pub upstream: Option<String>,
     pub ahead: String,
     pub behind: String,
+    pub comparison_label: String,
 }
 
 pub struct BranchDetail<'a> {
@@ -260,14 +261,36 @@ impl BranchDetail<'_> {
             value_lines.push(Line::from(upstream.as_str()));
         }
 
-        if !self.metadata.ahead.is_empty() && self.metadata.ahead != "0" {
-            label_lines.push(Line::from("    Ahead: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(format!("{} commits", self.metadata.ahead)));
-        }
+        let ahead_zero = self.metadata.ahead.is_empty() || self.metadata.ahead == "0";
+        let behind_zero = self.metadata.behind.is_empty() || self.metadata.behind == "0";
 
-        if !self.metadata.behind.is_empty() && self.metadata.behind != "0" {
-            label_lines.push(Line::from("   Behind: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(format!("{} commits", self.metadata.behind)));
+        if !self.metadata.comparison_label.is_empty() || self.metadata.upstream.is_some() {
+            label_lines.push(Line::from("   Status: ").fg(self.ctx.color_theme.detail_label_fg));
+            if ahead_zero && behind_zero {
+                value_lines.push(Line::from(Span::styled(
+                    "\u{2713} up to date",
+                    Style::default().fg(self.ctx.color_theme.status_success_fg),
+                )));
+            } else {
+                let ahead_num = if ahead_zero { "0" } else { self.metadata.ahead.as_str() };
+                let behind_num = if behind_zero { "0" } else { self.metadata.behind.as_str() };
+                value_lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("\u{2191} {}", ahead_num),
+                        Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
+                    ),
+                    Span::raw(" \u{00b7} "),
+                    Span::styled(
+                        format!("\u{2193} {}", behind_num),
+                        Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                    ),
+                ]));
+            }
+
+            if !self.metadata.comparison_label.is_empty() {
+                label_lines.push(Line::from("       vs: ").fg(self.ctx.color_theme.detail_label_fg));
+                value_lines.push(Line::from(self.metadata.comparison_label.as_str()));
+            }
         }
 
         (label_lines, value_lines)

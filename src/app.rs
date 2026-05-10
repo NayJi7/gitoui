@@ -84,6 +84,7 @@ impl Clone for AppContext {
             github_auth_state: self.github_auth_state.clone(),
             branch_color_map: self.branch_color_map.clone(),
             graph_color_set: self.graph_color_set.clone(),
+            current_branch_remote_state: self.current_branch_remote_state,
         }
     }
 }
@@ -118,6 +119,11 @@ pub struct AppContext {
     pub github_auth_state: GithubAuthState,
     pub branch_color_map: FxHashMap<String, Color>,
     pub graph_color_set: GraphColorSet,
+    /// (ahead, behind) commit counts of the current branch vs its upstream.
+    /// `None` if HEAD is detached or has no upstream configured. Computed
+    /// once per `lib.rs::run` iteration; auto-refresh recreates the context
+    /// so this stays current as remote refs change.
+    pub current_branch_remote_state: Option<(usize, usize)>,
 }
 
 impl Default for AppContext {
@@ -140,6 +146,7 @@ impl Default for AppContext {
             github_auth_state: GithubAuthState::default(),
             branch_color_map: FxHashMap::default(),
             graph_color_set: GraphColorSet::new(&crate::config::GraphColorConfig::default()),
+            current_branch_remote_state: None,
         }
     }
 }
@@ -1280,6 +1287,32 @@ impl App<'_> {
                     ));
                 }
                 Head::None => {}
+            }
+
+            // Push/pull readiness indicator: ↑N (commits to push) / ↓N
+            // (commits to pull) appended right after the branch name.
+            // Shown only if the branch has an upstream; ✓ if in sync.
+            if let Some((ahead, behind)) = self.ctx.current_branch_remote_state {
+                if ahead == 0 && behind == 0 {
+                    spans.push(Span::styled(
+                        " ✓",
+                        Style::default().fg(self.ctx.color_theme.status_success_fg),
+                    ));
+                } else {
+                    if ahead > 0 {
+                        spans.push(Span::styled(
+                            format!(" ↑{}", ahead),
+                            Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
+                        ));
+                    }
+                    if behind > 0 {
+                        spans.push(Span::styled(
+                            format!(" ↓{}", behind),
+                            Style::default()
+                                .fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                        ));
+                    }
+                }
             }
 
             if let Some(changes) = self.repository.uncommitted_changes() {
@@ -2673,8 +2706,19 @@ impl App<'_> {
         let repo_path = self.repository.path();
         let is_remote = branch_name.contains('/');
         let upstream = actions::branch_upstream(repo_path, &branch_name).ok();
-        let ahead = actions::branch_ahead_count(repo_path, &branch_name).unwrap_or_default();
-        let behind = actions::branch_behind_count(repo_path, &branch_name).unwrap_or_default();
+        let (ahead, behind, comparison_label) = if upstream.is_some() {
+            let a = actions::branch_ahead_count(repo_path, &branch_name).unwrap_or_default();
+            let b = actions::branch_behind_count(repo_path, &branch_name).unwrap_or_default();
+            let label = upstream.clone().unwrap_or_default();
+            (a, b, label)
+        } else if branch_name != self.ctx.git_default_branch {
+            let default = self.ctx.git_default_branch.clone();
+            let (a, b) = actions::branch_ahead_behind_vs(repo_path, &branch_name, &default)
+                .unwrap_or_default();
+            (a, b, default)
+        } else {
+            (String::new(), String::new(), String::new())
+        };
         let (tip_hash, tip_commit_message) = actions::branch_tip_info(repo_path, &branch_name)
             .map(|s| {
                 let mut parts = s.splitn(2, ' ');
@@ -2694,6 +2738,7 @@ impl App<'_> {
             upstream,
             ahead,
             behind,
+            comparison_label,
         };
         self.view =
             View::BranchDetail(Box::new(crate::view::branch_detail::BranchDetailView::new(
