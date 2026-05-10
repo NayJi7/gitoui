@@ -281,11 +281,12 @@ pub fn run() -> Result<()> {
                     let cwd = std::env::current_dir()
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| ".".to_string());
+                    use std::io::Write;
+                    print_no_repo_splash(image_protocol);
                     print!(
                         "No git repository found in '{}'.\nInitialize a new repository here? (y/n) ",
                         cwd
                     );
-                    use std::io::Write;
                     let _ = std::io::stdout().flush();
                     let mut input = String::new();
                     if std::io::stdin().read_line(&mut input).is_ok()
@@ -409,6 +410,40 @@ pub fn run() -> Result<()> {
     .unwrap();
     ratatui::restore();
     ret.map_err(Into::into)
+}
+
+/// Print the gitoui logo + wordmark inline (opencode-style) before the no-repo
+/// prompt. Reserves `cell_h` rows by emitting newlines first, moves the cursor
+/// back up, prints the image escape, then moves the cursor below — works for
+/// both Kitty (which doesn't auto-advance the cursor) and iTerm2/Sixel.
+/// Falls back to a plain text banner when the protocol can't render inline.
+fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
+    use std::io::Write;
+    let cell_w: usize = 28;
+    let cell_h: usize = 5;
+
+    println!();
+    let Some(png) = brand::render_mixed_png(cell_w as u32, cell_h as u32) else {
+        println!("        gitoui\n");
+        return;
+    };
+    let Some(escape) = image_protocol.encode_inline(&png, cell_w, cell_h, 1) else {
+        println!("        gitoui\n");
+        return;
+    };
+
+    let mut stdout = std::io::stdout().lock();
+    // Reserve cell_h rows.
+    for _ in 0..cell_h {
+        let _ = writeln!(stdout);
+    }
+    // Move cursor back up over the reserved rows.
+    let _ = write!(stdout, "\x1b[{}A", cell_h);
+    // Render the image at the (now-reserved) cursor position.
+    let _ = write!(stdout, "{}", escape);
+    // Move cursor back down past the image, then add a blank line.
+    let _ = write!(stdout, "\x1b[{}B\n", cell_h);
+    let _ = stdout.flush();
 }
 
 fn github_repos_from_remotes() -> Vec<String> {

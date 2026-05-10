@@ -148,6 +148,27 @@ impl ImageProtocol {
         }
     }
 
+    /// Encode the image as a stdout-printable escape sequence sized to occupy
+    /// `cell_width × cell_height` terminal cells. Used for inline rendering
+    /// outside the Ratatui buffer (e.g. splash screens before TUI init).
+    /// Returns `None` for protocols that need terminal cells with diacritics
+    /// (KittyUnicode), which can't be emitted via raw stdout reliably.
+    pub fn encode_inline(
+        &self,
+        bytes: &[u8],
+        cell_width: usize,
+        cell_height: usize,
+        image_id: u32,
+    ) -> Option<String> {
+        match self {
+            ImageProtocol::Iterm2 | ImageProtocol::Sixel => {
+                Some(iterm2_encode(bytes, cell_width, cell_height))
+            }
+            ImageProtocol::Kitty => Some(kitty_encode(bytes, cell_width, cell_height, image_id)),
+            ImageProtocol::KittyUnicode { .. } => None,
+        }
+    }
+
     pub fn clear_line(&self, y: u16) {
         match self {
             ImageProtocol::Iterm2 | ImageProtocol::Sixel => {}
