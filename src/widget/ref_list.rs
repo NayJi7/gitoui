@@ -114,6 +114,16 @@ impl RefListState {
         }
     }
 
+    /// Returns the stash ref (e.g. `stash@{0}`) when a stash leaf is selected.
+    pub fn selected_stash_ref(&self) -> Option<String> {
+        let selected = self.tree_state.selected();
+        if selected.len() == 2 && selected[0] == TREE_STASH_ROOT_IDENT {
+            selected.last().cloned()
+        } else {
+            None
+        }
+    }
+
     /// Returns the remote name when the selected item is a top-level remote
     /// node (e.g. `origin`) directly under the remotes root, but not the
     /// special `[+ Add remote]` entry.

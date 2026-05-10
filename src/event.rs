@@ -101,6 +101,9 @@ pub enum AppEvent {
     OpenFileHistory {
         file_path: String,
     },
+    OpenStashDiff {
+        stash_ref: String,
+    },
     CloseFileHistory,
     OpenDetailByHash {
         hash: String,

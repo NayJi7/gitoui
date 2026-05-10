@@ -571,6 +571,11 @@ impl App<'_> {
                     self.clear_terminal(terminal)?;
                     self.open_file_diff(hash, file_path);
                 }
+                AppEvent::OpenStashDiff { stash_ref } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_stash_diff(stash_ref);
+                }
                 AppEvent::CloseDiff => {
                     self.close_diff();
                     self.clear_image(Some(terminal))?;
@@ -1517,6 +1522,39 @@ impl App<'_> {
                     hash,
                     all_files,
                     self.repository.path().to_path_buf(),
+                );
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_stash_diff(&mut self, stash_ref: String) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.take_list_state(),
+            View::Refs(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        let repo_path = self.repository.path().to_path_buf();
+        match DiffEntry::load_for_stash(&repo_path, &stash_ref) {
+            Ok(diff_entries) => {
+                let all_file_paths = diff_entries
+                    .iter()
+                    .filter_map(|e| e.new_path.clone().or_else(|| e.old_path.clone()))
+                    .map(|p| (p, false))
+                    .collect::<Vec<(String, bool)>>();
+                let title = format!("Stash: {}", stash_ref);
+                self.view = View::of_diff_with_entries(
+                    commit_list_state,
+                    diff_entries,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                    title,
+                    stash_ref,
+                    all_file_paths,
+                    repo_path,
                 );
             }
             Err(err) => {

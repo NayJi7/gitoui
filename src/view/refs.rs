@@ -123,6 +123,8 @@ impl<'a> RefsView<'a> {
                     self.tx.send(AppEvent::OpenBranchDetail { branch_name });
                 } else if let Some(tag_name) = self.ref_list_state.selected_tag() {
                     self.tx.send(AppEvent::OpenTagDetail { tag_name });
+                } else if let Some(stash_ref) = self.ref_list_state.selected_stash_ref() {
+                    self.tx.send(AppEvent::OpenStashDiff { stash_ref });
                 } else {
                     self.ref_list_state.toggle_selected();
                     self.update_commit_list_selected();

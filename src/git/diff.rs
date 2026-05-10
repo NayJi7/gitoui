@@ -159,6 +159,22 @@ impl DiffEntry {
             .ok_or_else(|| "No diff output".to_string())
     }
 
+    pub fn load_for_stash(repo_path: &Path, stash_ref: &str) -> Result<Vec<Self>, String> {
+        let parent = format!("{}^1", stash_ref);
+        let output = Command::new("git")
+            .args(["diff", &parent, stash_ref])
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("Failed to run git diff for stash: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "git diff failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        parse_diff(&String::from_utf8_lossy(&output.stdout))
+    }
+
     /// Returns a placeholder DiffEntry with a "Cannot open" binary note.
     pub fn binary_placeholder(file_path: &str) -> Self {
         DiffEntry {
