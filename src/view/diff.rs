@@ -56,8 +56,17 @@ pub struct DiffView<'a> {
     search_active: bool,
     search_query: String,
     search_cursor: usize,
-    search_matches: Vec<usize>,
+    search_matches: Vec<SearchMatch>,
     search_current: usize,
+}
+
+/// One concrete occurrence of the search query inside a base line.
+/// `start`/`end` are byte offsets in the line's flattened text (concat of all spans).
+#[derive(Debug, Clone, Copy)]
+struct SearchMatch {
+    line_idx: usize,
+    start: usize,
+    end: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +108,7 @@ impl<'a> DiffView<'a> {
                     .enumerate()
                     .map(|(i, mut l)| {
                         l.new_line_no = Some(next_line_no + i as u32);
+                        l.highlight_ranges = Vec::new();
                         l
                     })
                     .collect();
@@ -319,10 +329,30 @@ impl<'a> DiffView<'a> {
                     self.search_query.clear();
                     self.search_cursor = 0;
                     self.search_matches.clear();
+                    self.clear_search_status_bar();
                     return;
                 }
-                KeyCode::Enter => {
-                    self.search_active = false;
+                // Up / Enter / Down navigate matches without leaving the input,
+                // mirroring n / N behavior so search-bar editing stays available.
+                KeyCode::Up => {
+                    if !self.search_matches.is_empty() {
+                        self.search_current = if self.search_current == 0 {
+                            self.search_matches.len() - 1
+                        } else {
+                            self.search_current - 1
+                        };
+                        self.scroll_to_match(self.search_current);
+                    }
+                    self.update_search_status_bar();
+                    return;
+                }
+                KeyCode::Down | KeyCode::Enter => {
+                    if !self.search_matches.is_empty() {
+                        self.search_current =
+                            (self.search_current + 1) % self.search_matches.len();
+                        self.scroll_to_match(self.search_current);
+                    }
+                    self.update_search_status_bar();
                     return;
                 }
                 KeyCode::Char(c)
@@ -336,6 +366,7 @@ impl<'a> DiffView<'a> {
                         self.search_current = 0;
                         self.scroll_to_match(self.search_current);
                     }
+                    self.update_search_status_bar();
                     return;
                 }
                 KeyCode::Backspace => {
@@ -351,6 +382,7 @@ impl<'a> DiffView<'a> {
                             self.scroll_to_match(self.search_current);
                         }
                     }
+                    self.update_search_status_bar();
                     return;
                 }
                 _ => {
@@ -462,6 +494,9 @@ impl<'a> DiffView<'a> {
                     self.search_query.clear();
                     self.search_cursor = 0;
                     self.search_matches.clear();
+                    self.clear_search_status_bar();
+                } else {
+                    self.update_search_status_bar();
                 }
             }
             UserEvent::GoToNext => {
@@ -469,6 +504,7 @@ impl<'a> DiffView<'a> {
                     self.search_current =
                         (self.search_current + 1) % self.search_matches.len();
                     self.scroll_to_match(self.search_current);
+                    self.update_search_status_bar();
                 }
             }
             UserEvent::GoToPrevious => {
@@ -479,6 +515,7 @@ impl<'a> DiffView<'a> {
                         self.search_current - 1
                     };
                     self.scroll_to_match(self.search_current);
+                    self.update_search_status_bar();
                 }
             }
             UserEvent::FileHistory => {
@@ -579,26 +616,21 @@ impl<'a> DiffView<'a> {
             diff_area
         };
 
-        let (content_area, search_bar_area) =
-            if self.search_active || !self.search_query.is_empty() {
-                let [c, s] = Layout::vertical([
-                    Constraint::Min(1),
-                    Constraint::Length(1),
-                ])
-                .areas(content_area);
-                (c, Some(s))
-            } else {
-                (content_area, None)
-            };
-
+        // The search bar is now rendered globally via StatusLine::Input — no
+        // need to carve a row out of the content area for an inline bar.
         self.diff_content_area = Some(content_area);
 
         // Rebuild base lines if needed (content changed, not just hover)
         if self.needs_rebuild || self.base_lines.is_empty() {
+            let saved_focus = self.focused_button;
             self.base_lines = self.build_diff_lines(&content_area);
             self.needs_rebuild = false;
+            // Restore the focused button if still valid; otherwise clamp to the last one.
+            // Only fall back to Some(0) on the very first build (saved_focus == None).
             self.focused_button = if self.expand_buttons.is_empty() {
                 None
+            } else if let Some(idx) = saved_focus {
+                Some(idx.min(self.expand_buttons.len() - 1))
             } else {
                 Some(0)
             };
@@ -630,21 +662,30 @@ impl<'a> DiffView<'a> {
             }
         }
 
-        // Apply search highlighting to matched lines in the visible range
+        // Apply search highlighting to every occurrence in the visible range.
+        // Each occurrence is its own SearchMatch; the current one is identified
+        // by its (line_idx, start) pair and gets an UNDERLINED modifier on top.
         if !self.search_query.is_empty() && !self.search_matches.is_empty() {
-            let query_lower = self.search_query.to_lowercase();
-            let current_match_line = self.search_matches.get(self.search_current).copied();
+            let current = self.search_matches.get(self.search_current).copied();
             let match_bg = self.ctx.color_theme.list_match_bg;
             let match_fg = self.ctx.color_theme.list_match_fg;
 
             for vis_idx in 0..visible_lines.len() {
                 let abs_idx = self.scroll_offset + vis_idx;
-                if self.search_matches.contains(&abs_idx) {
-                    let is_current = current_match_line == Some(abs_idx);
+                let line_matches: Vec<SearchMatch> = self
+                    .search_matches
+                    .iter()
+                    .filter(|m| m.line_idx == abs_idx)
+                    .copied()
+                    .collect();
+                if !line_matches.is_empty() {
+                    let current_start_in_line = current
+                        .filter(|c| c.line_idx == abs_idx)
+                        .map(|c| c.start);
                     visible_lines[vis_idx] = highlight_search_matches(
                         &visible_lines[vis_idx],
-                        &query_lower,
-                        is_current,
+                        &line_matches,
+                        current_start_in_line,
                         match_bg,
                         match_fg,
                     );
@@ -654,28 +695,6 @@ impl<'a> DiffView<'a> {
 
         let paragraph = Paragraph::new(visible_lines);
         f.render_widget(paragraph, content_area);
-
-        // Render search bar at bottom of content area when active or query present
-        if let Some(bar_area) = search_bar_area {
-            let match_info = if self.search_query.is_empty() {
-                String::new()
-            } else if self.search_matches.is_empty() {
-                " [no matches]".to_string()
-            } else {
-                format!(
-                    " [{}/{}]",
-                    self.search_current + 1,
-                    self.search_matches.len()
-                )
-            };
-            let bar_line = Line::from(vec![Span::styled(
-                format!("/ {}{}", self.search_query, match_info),
-                Style::default()
-                    .fg(self.ctx.color_theme.fg)
-                    .bg(self.ctx.color_theme.list_selected_bg),
-            )]);
-            f.render_widget(Paragraph::new(bar_line), bar_area);
-        }
     }
 
     pub fn update_layout(&mut self, area: Rect) {
@@ -927,6 +946,17 @@ impl<'a> DiffView<'a> {
             Color::Rgb(255, 186, 181) // GitHub light: soft red
         } else {
             Color::Rgb(68, 35, 40) // VS Code dark: dark red
+        };
+        // Word-diff strong highlight: significantly more vivid than the line bg.
+        let add_strong_bg = if bg_is_light {
+            Color::Rgb(75, 195, 105)  // richer green on light
+        } else {
+            Color::Rgb(60, 145, 80)   // brighter green on dark
+        };
+        let del_strong_bg = if bg_is_light {
+            Color::Rgb(215, 75, 80)   // richer red on light
+        } else {
+            Color::Rgb(155, 55, 65)   // brighter red on dark
         };
         let ctx_fg = self.ctx.color_theme.fg;
 
@@ -1239,6 +1269,8 @@ impl<'a> DiffView<'a> {
                                 h,
                                 Some(bar_add.clone()),
                                 self.ctx.color_theme.divider_fg,
+                                &diff_line.highlight_ranges,
+                                add_strong_bg,
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
@@ -1248,6 +1280,8 @@ impl<'a> DiffView<'a> {
                                 width,
                                 Some(bar_add.clone()),
                                 self.ctx.color_theme.divider_fg,
+                                &diff_line.highlight_ranges,
+                                add_strong_bg,
                             ));
                         }
                     }
@@ -1262,6 +1296,8 @@ impl<'a> DiffView<'a> {
                                 h,
                                 Some(bar_del.clone()),
                                 self.ctx.color_theme.divider_fg,
+                                &diff_line.highlight_ranges,
+                                del_strong_bg,
                             ));
                         } else {
                             lines.extend(wrap_diff_line_with_bar(
@@ -1271,6 +1307,8 @@ impl<'a> DiffView<'a> {
                                 width,
                                 Some(bar_del.clone()),
                                 self.ctx.color_theme.divider_fg,
+                                &diff_line.highlight_ranges,
+                                del_strong_bg,
                             ));
                         }
                     }
@@ -1551,6 +1589,8 @@ impl<'a> DiffView<'a> {
                 }
             }
         }
+        parts.push("f:search");
+        parts.push("H:history");
         parts.push("c:copy-path");
         parts.push("r:fetch");
         parts.push("Esc:close");
@@ -1560,8 +1600,8 @@ impl<'a> DiffView<'a> {
     fn build_button_line(&self, btn: &ButtonInfo, is_hovered: bool, _width: u16) -> Line<'static> {
         let style = if is_hovered {
             Style::default()
-                .fg(self.ctx.color_theme.fg)
-                .bg(self.ctx.color_theme.bg)
+                .fg(self.ctx.color_theme.status_info_fg)
+                .bg(self.ctx.color_theme.list_selected_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
@@ -1663,29 +1703,78 @@ impl<'a> DiffView<'a> {
     fn update_search_matches(&mut self) {
         let query = self.search_query.to_lowercase();
         self.search_matches.clear();
-        if query.is_empty() {
+        if query.is_empty() || self.base_lines.is_empty() {
             return;
         }
-        if self.base_lines.is_empty() {
-            return;
-        }
+        let qlen = query.len();
         for (i, line) in self.base_lines.iter().enumerate() {
             let text: String = line
                 .spans
                 .iter()
                 .map(|s| s.content.as_ref())
                 .collect::<String>();
-            if text.to_lowercase().contains(&query) {
-                self.search_matches.push(i);
+            let lower = text.to_lowercase();
+            let mut pos = 0;
+            while pos <= lower.len() {
+                match lower[pos..].find(&query) {
+                    Some(rel) => {
+                        let start = pos + rel;
+                        let end = start + qlen;
+                        self.search_matches
+                            .push(SearchMatch { line_idx: i, start, end });
+                        if end == start {
+                            // Empty query guard (shouldn't happen due to qlen check)
+                            break;
+                        }
+                        pos = end;
+                    }
+                    None => break,
+                }
             }
         }
     }
 
     fn scroll_to_match(&mut self, match_idx: usize) {
-        if let Some(&line_idx) = self.search_matches.get(match_idx) {
+        if let Some(m) = self.search_matches.get(match_idx) {
             let half_height = (self.content_height.min(20)) / 2;
-            self.scroll_offset = line_idx.saturating_sub(half_height);
+            self.scroll_offset = m.line_idx.saturating_sub(half_height);
         }
+    }
+
+    /// Exposed to `View::is_input_active()` so the app routes Backspace/Delete
+    /// (which have no UserEvent mapping) into our handle_event.
+    pub fn is_search_input_active(&self) -> bool {
+        self.search_active
+    }
+
+    /// Push the current search state into the global StatusLine::Input bar at
+    /// the bottom of the app, mirroring the commit list's "Search: <query>"
+    /// pattern. The match counter is shown as a right-aligned transient.
+    fn update_search_status_bar(&self) {
+        const PREFIX: &str = "Search: ";
+        let prefix_chars = PREFIX.chars().count();
+        let cursor_chars = self.search_query[..self.search_cursor].chars().count();
+        let msg = format!("{}{}", PREFIX, self.search_query);
+        let transient = if self.search_query.is_empty() {
+            None
+        } else if self.search_matches.is_empty() {
+            Some("[no matches]".to_string())
+        } else {
+            Some(format!(
+                "[{}/{}]",
+                self.search_current + 1,
+                self.search_matches.len()
+            ))
+        };
+        self.tx.send(AppEvent::UpdateStatusInput(
+            msg,
+            Some((prefix_chars + cursor_chars) as u16),
+            transient,
+        ));
+    }
+
+    fn clear_search_status_bar(&self) {
+        self.tx.send(AppEvent::ClearStatusLine);
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
@@ -1779,16 +1868,10 @@ mod tests {
     }
 
     #[test]
-    fn arrow_navigation_keeps_existing_bounds() {
+    fn arrow_navigation_clamps_at_boundaries() {
         assert_eq!(next_button_focus(Some(0), 3, ExpandDirection::Up), Some(0));
-        assert_eq!(
-            next_button_focus(Some(2), 3, ExpandDirection::Down),
-            Some(2)
-        );
-        assert_eq!(
-            next_button_focus(Some(1), 3, ExpandDirection::Down),
-            Some(2)
-        );
+        assert_eq!(next_button_focus(Some(2), 3, ExpandDirection::Down), Some(2));
+        assert_eq!(next_button_focus(Some(1), 3, ExpandDirection::Down), Some(2));
         assert_eq!(next_button_focus(Some(1), 3, ExpandDirection::Up), Some(0));
     }
 
@@ -1960,6 +2043,8 @@ fn wrap_diff_line_with_bar(
     available_width: u16,
     bar_span: Option<Span<'static>>,
     divider_fg: Color,
+    highlight_ranges: &[std::ops::Range<usize>],
+    strong_bg: Color,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let line_num_width = 7; // "1234 │ " = 7 chars
@@ -1974,7 +2059,7 @@ fn wrap_diff_line_with_bar(
         if let Some(bar) = bar_span {
             spans.push(bar);
         }
-        spans.push(Span::styled(content.to_string(), content_style));
+        spans.extend(apply_word_diff_to_plain(content, 0, highlight_ranges, content_style, strong_bg));
         spans.push(Span::styled(" ".repeat(200), content_style));
         lines.push(Line::from(spans));
         return lines;
@@ -2003,6 +2088,8 @@ fn wrap_diff_line_with_bar(
             (remaining, "")
         };
 
+        let chunk_start = chunk.as_ptr() as usize - content.as_ptr() as usize;
+
         let num_span = if first {
             Span::styled(
                 line_num_str.to_string(),
@@ -2019,7 +2106,7 @@ fn wrap_diff_line_with_bar(
         if let Some(ref bar) = bar_span {
             spans.push(bar.clone());
         }
-        spans.push(Span::styled(chunk.to_string(), content_style));
+        spans.extend(apply_word_diff_to_plain(chunk, chunk_start, highlight_ranges, content_style, strong_bg));
         spans.push(Span::styled(" ".repeat(200), content_style));
         lines.push(Line::from(spans));
 
@@ -2030,48 +2117,171 @@ fn wrap_diff_line_with_bar(
     lines
 }
 
+/// Post-process syntax-highlighted spans to overlay strong_bg on word-diff ranges.
+/// `chunk_start` is the byte offset of the chunk's first character within the original content.
+/// Each syntect span covers a contiguous substring; we track position by accumulating lengths.
+fn apply_word_diff_to_spans(
+    spans: Vec<Span<'static>>,
+    chunk_start: usize,
+    highlight_ranges: &[std::ops::Range<usize>],
+    strong_bg: Color,
+) -> Vec<Span<'static>> {
+    if highlight_ranges.is_empty() {
+        return spans;
+    }
+
+    let mut result = Vec::new();
+    let mut abs_pos = chunk_start; // byte position within original content
+
+    for span in spans {
+        let text = span.content.as_ref();
+        let span_abs_start = abs_pos;
+        let span_abs_end = abs_pos + text.len();
+        abs_pos = span_abs_end;
+
+        let mut inner = 0usize; // relative to span text
+        let mut had_overlap = false;
+
+        for range in highlight_ranges {
+            let overlap_start = range.start.max(span_abs_start);
+            let overlap_end = range.end.min(span_abs_end);
+            if overlap_start >= overlap_end {
+                continue;
+            }
+            had_overlap = true;
+            let rel_start = overlap_start - span_abs_start;
+            let rel_end = overlap_end - span_abs_start;
+
+            if inner < rel_start {
+                result.push(Span::styled(text[inner..rel_start].to_string(), span.style));
+            }
+            result.push(Span::styled(
+                text[rel_start..rel_end].to_string(),
+                span.style.bg(strong_bg),
+            ));
+            inner = rel_end;
+        }
+
+        if !had_overlap {
+            result.push(span);
+        } else if inner < text.len() {
+            result.push(Span::styled(text[inner..].to_string(), span.style));
+        }
+    }
+
+    result
+}
+
+/// Build word-diff spans for plain (non-syntax) content lines.
+/// Segments within `highlight_ranges` get `strong_bg`; the rest keeps `base_style`.
+fn apply_word_diff_to_plain(
+    chunk: &str,
+    chunk_start: usize,
+    highlight_ranges: &[std::ops::Range<usize>],
+    base_style: Style,
+    strong_bg: Color,
+) -> Vec<Span<'static>> {
+    if highlight_ranges.is_empty() {
+        return vec![Span::styled(chunk.to_string(), base_style)];
+    }
+
+    let mut spans = Vec::new();
+    let mut pos = 0usize; // relative to chunk
+
+    for range in highlight_ranges {
+        let abs_start = range.start;
+        let abs_end = range.end;
+
+        let rel_start = abs_start.saturating_sub(chunk_start);
+        let rel_end = abs_end.saturating_sub(chunk_start).min(chunk.len());
+
+        if rel_start >= chunk.len() || rel_start >= rel_end {
+            continue;
+        }
+
+        if pos < rel_start {
+            spans.push(Span::styled(chunk[pos..rel_start].to_string(), base_style));
+        }
+        let strong_style = Style::default().bg(strong_bg);
+        spans.push(Span::styled(chunk[rel_start..rel_end].to_string(), strong_style));
+        pos = rel_end;
+    }
+
+    if pos < chunk.len() {
+        spans.push(Span::styled(chunk[pos..].to_string(), base_style));
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::styled(chunk.to_string(), base_style));
+    }
+
+    spans
+}
+
+/// Apply per-occurrence search highlighting. `matches_on_line` lists every
+/// occurrence in the line (byte offsets in the flattened text, same flattening
+/// as `update_search_matches`). `current_start_in_line` identifies the active
+/// occurrence by its start offset; if it matches, that occurrence gets an extra
+/// UNDERLINED modifier so the user can tell which is the active jump target.
 fn highlight_search_matches(
     line: &Line<'static>,
-    query: &str,
-    is_current: bool,
+    matches_on_line: &[SearchMatch],
+    current_start_in_line: Option<usize>,
     match_bg: Color,
     match_fg: Color,
 ) -> Line<'static> {
-    let highlight_bg = if is_current { match_bg } else { Color::Reset };
-
     let mut new_spans: Vec<Span<'static>> = Vec::new();
+    let mut abs_pos: usize = 0;
+
     for span in &line.spans {
         let text = span.content.as_ref();
-        let lower_text = text.to_lowercase();
+        let span_start = abs_pos;
+        let span_end = abs_pos + text.len();
+        abs_pos = span_end;
 
-        if lower_text.contains(query) {
-            let mut pos = 0;
-            while let Some(start) = lower_text[pos..].find(query) {
-                let abs_start = pos + start;
-                let abs_end = abs_start + query.len();
+        let mut inner = 0usize;
+        let mut had_overlap = false;
 
-                if abs_start > pos {
-                    new_spans.push(Span::styled(
-                        text[pos..abs_start].to_string(),
-                        span.style,
-                    ));
-                }
+        for m in matches_on_line {
+            // Compute overlap of this match with this span (in absolute coords).
+            let ov_start = m.start.max(span_start);
+            let ov_end = m.end.min(span_end);
+            if ov_start >= ov_end {
+                continue;
+            }
+            had_overlap = true;
+            // Convert to span-relative byte offsets.
+            let rel_start = ov_start - span_start;
+            let rel_end = ov_end - span_start;
 
+            if inner < rel_start && rel_start <= text.len() {
                 new_spans.push(Span::styled(
-                    text[abs_start..abs_end].to_string(),
+                    text[inner..rel_start].to_string(),
+                    span.style,
+                ));
+            }
+
+            let mut modifier = Modifier::BOLD;
+            if current_start_in_line == Some(m.start) {
+                modifier |= Modifier::UNDERLINED;
+            }
+
+            if rel_end <= text.len() {
+                new_spans.push(Span::styled(
+                    text[rel_start..rel_end].to_string(),
                     span.style
                         .fg(match_fg)
-                        .bg(highlight_bg)
-                        .add_modifier(Modifier::BOLD),
+                        .bg(match_bg)
+                        .add_modifier(modifier),
                 ));
+            }
+            inner = rel_end;
+        }
 
-                pos = abs_end;
-            }
-            if pos < text.len() {
-                new_spans.push(Span::styled(text[pos..].to_string(), span.style));
-            }
-        } else {
+        if !had_overlap {
             new_spans.push(span.clone());
+        } else if inner < text.len() {
+            new_spans.push(Span::styled(text[inner..].to_string(), span.style));
         }
     }
 
@@ -2086,6 +2296,8 @@ fn wrap_diff_line_with_syntax_and_bar(
     highlighter: &mut SyntaxHighlighter,
     bar_span: Option<Span<'static>>,
     divider_fg: Color,
+    highlight_ranges: &[std::ops::Range<usize>],
+    strong_bg: Color,
 ) -> Vec<Line<'static>> {
     let line_num_width = 7; // "1234 │ " = 7 chars
     let bar_width = if bar_span.is_some() { 1 } else { 0 };
@@ -2100,7 +2312,8 @@ fn wrap_diff_line_with_syntax_and_bar(
         if let Some(bar) = bar_span {
             spans.push(bar);
         }
-        spans.extend(highlighter.highlight_line(content, base_style, None));
+        let syntax_spans = highlighter.highlight_line(content, base_style, None);
+        spans.extend(apply_word_diff_to_spans(syntax_spans, 0, highlight_ranges, strong_bg));
         spans.push(Span::styled(" ".repeat(200), base_style));
         lines.push(Line::from(spans));
         return lines;
@@ -2129,6 +2342,8 @@ fn wrap_diff_line_with_syntax_and_bar(
             (remaining, "")
         };
 
+        let chunk_start = chunk.as_ptr() as usize - content.as_ptr() as usize;
+
         let num_span = if first {
             Span::styled(
                 line_num_str.to_string(),
@@ -2145,7 +2360,8 @@ fn wrap_diff_line_with_syntax_and_bar(
         if let Some(ref bar) = bar_span {
             spans.push(bar.clone());
         }
-        spans.extend(highlighter.highlight_line(chunk, base_style, None));
+        let syntax_spans = highlighter.highlight_line(chunk, base_style, None);
+        spans.extend(apply_word_diff_to_spans(syntax_spans, chunk_start, highlight_ranges, strong_bg));
         spans.push(Span::styled(" ".repeat(200), base_style));
         lines.push(Line::from(spans));
 

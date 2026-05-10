@@ -24,6 +24,9 @@ pub struct DiffLine {
     pub old_line_no: Option<u32>,
     pub new_line_no: Option<u32>,
     pub content: String,
+    /// Byte ranges within `content` that changed (intra-line / word diff).
+    /// Empty means no word-diff available (line is not part of a matched pair).
+    pub highlight_ranges: Vec<std::ops::Range<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -171,6 +174,7 @@ impl DiffEntry {
                     old_line_no: None,
                     new_line_no: None,
                     content: "Cannot open this type of file".to_string(),
+                    highlight_ranges: Vec::new(),
                 }],
             }],
         }
@@ -204,6 +208,7 @@ impl DiffEntry {
                 old_line_no: None,
                 new_line_no: Some(i as u32 + 1),
                 content: line.to_string(),
+                highlight_ranges: Vec::new(),
             })
             .collect();
 
@@ -307,6 +312,7 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
                         old_line_no: None,
                         new_line_no: None,
                         content: line.to_string(),
+                        highlight_ranges: Vec::new(),
                     }],
                 });
             }
@@ -317,6 +323,7 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
                     old_line_no: None,
                     new_line_no: Some(new_line),
                     content: content.to_string(),
+                    highlight_ranges: Vec::new(),
                 });
                 new_line += 1;
             } else if let Some(content) = line.strip_prefix('-') {
@@ -325,6 +332,7 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
                     old_line_no: Some(old_line),
                     new_line_no: None,
                     content: content.to_string(),
+                    highlight_ranges: Vec::new(),
                 });
                 old_line += 1;
             } else if let Some(content) = line.strip_prefix(' ') {
@@ -333,6 +341,7 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
                     old_line_no: Some(old_line),
                     new_line_no: Some(new_line),
                     content: content.to_string(),
+                    highlight_ranges: Vec::new(),
                 });
                 old_line += 1;
                 new_line += 1;
@@ -342,6 +351,7 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
                     old_line_no: None,
                     new_line_no: None,
                     content: line.to_string(),
+                    highlight_ranges: Vec::new(),
                 });
             }
         }
@@ -356,7 +366,134 @@ fn parse_diff(input: &str) -> Result<Vec<DiffEntry>, String> {
         entries.push(entry);
     }
 
+    // Annotate matched deletion/addition pairs with intra-line changed ranges.
+    for entry in &mut entries {
+        for hunk in &mut entry.hunks {
+            annotate_intra_line_diff(hunk);
+        }
+    }
+
     Ok(entries)
+}
+
+/// For each group of consecutive deletions followed by consecutive additions in a hunk,
+/// pair them up and compute which byte ranges changed within each matched line.
+fn annotate_intra_line_diff(hunk: &mut Hunk) {
+    let n = hunk.lines.len();
+    let mut i = 0;
+    while i < n {
+        if hunk.lines[i].line_type != DiffLineType::Deletion {
+            i += 1;
+            continue;
+        }
+        let del_start = i;
+        while i < n && hunk.lines[i].line_type == DiffLineType::Deletion {
+            i += 1;
+        }
+        let del_end = i;
+        let add_start = i;
+        while i < n && hunk.lines[i].line_type == DiffLineType::Addition {
+            i += 1;
+        }
+        let add_end = i;
+
+        let n_pairs = (del_end - del_start).min(add_end - add_start);
+        for k in 0..n_pairs {
+            let del_content = hunk.lines[del_start + k].content.clone();
+            let add_content = hunk.lines[add_start + k].content.clone();
+            let (del_ranges, add_ranges) = diff_intra_line(&del_content, &add_content);
+            hunk.lines[del_start + k].highlight_ranges = del_ranges;
+            hunk.lines[add_start + k].highlight_ranges = add_ranges;
+        }
+    }
+}
+
+/// Compute the changed byte ranges within a matched old/new line pair using
+/// common-prefix + common-suffix analysis. Returns `(old_ranges, new_ranges)`.
+fn diff_intra_line(
+    old: &str,
+    new: &str,
+) -> (Vec<std::ops::Range<usize>>, Vec<std::ops::Range<usize>>) {
+    if old.is_empty() || new.is_empty() || old == new {
+        return (Vec::new(), Vec::new());
+    }
+
+    // Count matching chars from the start.
+    let prefix_chars = old.chars().zip(new.chars()).take_while(|(a, b)| a == b).count();
+    let prefix_old_bytes: usize = old.chars().take(prefix_chars).map(|c| c.len_utf8()).sum();
+    let prefix_new_bytes: usize = new.chars().take(prefix_chars).map(|c| c.len_utf8()).sum();
+
+    // Count matching chars from the end (in the remainder after prefix).
+    let old_rest: Vec<char> = old[prefix_old_bytes..].chars().collect();
+    let new_rest: Vec<char> = new[prefix_new_bytes..].chars().collect();
+
+    let suffix_chars = old_rest
+        .iter()
+        .rev()
+        .zip(new_rest.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let suffix_old_bytes: usize = old_rest.iter().rev().take(suffix_chars).map(|c| c.len_utf8()).sum();
+    let suffix_new_bytes: usize = new_rest.iter().rev().take(suffix_chars).map(|c| c.len_utf8()).sum();
+
+    let old_end = old.len() - suffix_old_bytes;
+    let new_end = new.len() - suffix_new_bytes;
+
+    let old_range = prefix_old_bytes..old_end;
+    let new_range = prefix_new_bytes..new_end;
+
+    let old_ranges = if !old_range.is_empty() { vec![old_range] } else { vec![] };
+    let new_ranges = if !new_range.is_empty() { vec![new_range] } else { vec![] };
+
+    (old_ranges, new_ranges)
+}
+
+#[cfg(test)]
+mod intra_line_tests {
+    use super::*;
+
+    #[test]
+    fn identical_lines_produce_no_ranges() {
+        let (old, new) = diff_intra_line("foo bar", "foo bar");
+        assert!(old.is_empty());
+        assert!(new.is_empty());
+    }
+
+    #[test]
+    fn single_word_change() {
+        let (old, new) = diff_intra_line("foo bar baz", "foo qux baz");
+        assert_eq!(old, vec![4..7]);
+        assert_eq!(new, vec![4..7]);
+    }
+
+    #[test]
+    fn suffix_only_change() {
+        let (old, new) = diff_intra_line("hello world", "hello rust");
+        assert_eq!(old, vec![6..11]);
+        assert_eq!(new, vec![6..10]);
+    }
+
+    #[test]
+    fn prefix_only_change() {
+        let (old, new) = diff_intra_line("old thing", "new thing");
+        assert_eq!(old, vec![0..3]);
+        assert_eq!(new, vec![0..3]);
+    }
+
+    #[test]
+    fn entirely_different_lines() {
+        let (old, new) = diff_intra_line("abc", "xyz");
+        assert_eq!(old, vec![0..3]);
+        assert_eq!(new, vec![0..3]);
+    }
+
+    #[test]
+    fn empty_old_produces_no_ranges() {
+        let (old, new) = diff_intra_line("", "new");
+        assert!(old.is_empty());
+        assert!(new.is_empty());
+    }
 }
 
 impl DiffEntry {
