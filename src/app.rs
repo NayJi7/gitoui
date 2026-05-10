@@ -149,6 +149,12 @@ struct AppStatus {
     notification_timestamp: Option<std::time::Instant>,
     spinner_active: bool,
     spinner_frame: usize,
+    /// Wall-clock of the last auto-refresh (FilesystemChanged → view.refresh()).
+    /// Used to throttle bursts of refreshes — the watcher already debounces and
+    /// fingerprint-compares, but two distinct legitimate changes within a
+    /// couple seconds (e.g. checkout immediately followed by a fetch in
+    /// another shell) still shouldn't double-flicker the screen.
+    last_auto_refresh: Option<std::time::Instant>,
 }
 
 #[derive(Debug)]
@@ -595,18 +601,38 @@ impl App<'_> {
                     return Ok(Ret::Refresh(request));
                 }
                 AppEvent::FilesystemChanged => {
-                    // Auto-refresh from external git activity. Skip when the
-                    // user is typing or interacting with a modal so we don't
-                    // wipe in-progress input. Dialogs, text-input fields
-                    // (commit message, rename, search…), and status-line
-                    // inputs all qualify.
+                    // Auto-refresh from external git activity. Three guards:
+                    // 1. Don't disrupt user input — skip while a dialog or any
+                    //    text-input (commit message, search bar, …) is active.
+                    // 2. Throttle to at most one refresh every 2 s. The watcher
+                    //    already debounces + fingerprint-compares, but a heavy
+                    //    burst of legitimate changes shouldn't trigger
+                    //    repeated terminal redraws within a few seconds.
+                    // 3. Don't refresh if a spinner is active — gitoui itself
+                    //    is currently running a git command, the post-action
+                    //    refresh path will handle the UI update.
+                    const THROTTLE: std::time::Duration =
+                        std::time::Duration::from_secs(2);
                     let is_dialog = matches!(self.view, View::Dialog(_));
                     let is_input = matches!(
                         self.app_status.status_line,
                         StatusLine::Input(_, _, _)
                     );
                     let is_view_input = self.view.is_input_active();
-                    if !is_dialog && !is_input && !is_view_input {
+                    let is_spinning = self.app_status.spinner_active;
+                    let throttled = self
+                        .app_status
+                        .last_auto_refresh
+                        .map(|t| t.elapsed() < THROTTLE)
+                        .unwrap_or(false);
+                    if !is_dialog
+                        && !is_input
+                        && !is_view_input
+                        && !is_spinning
+                        && !throttled
+                    {
+                        self.app_status.last_auto_refresh =
+                            Some(std::time::Instant::now());
                         self.view.refresh();
                     }
                 }
