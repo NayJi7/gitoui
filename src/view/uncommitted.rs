@@ -542,6 +542,16 @@ impl<'a> UncommittedView<'a> {
                 parts.push("X:discard-all".to_string());
             }
         }
+        if has_staged {
+            parts.push("w:commit".to_string());
+        }
+        if has_unstaged || has_staged {
+            parts.push("i:stash".to_string());
+        }
+        if !self.untracked.is_empty() {
+            parts.push("v:clean".to_string());
+        }
+        parts.push("Enter:diff".to_string());
         parts.push("r:fetch".to_string());
         parts.push("Esc:close".to_string());
         format!("⌘ {}", parts.join("▕▏"))

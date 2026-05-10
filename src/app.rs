@@ -1187,24 +1187,25 @@ impl App<'_> {
             } else {
                 match &self.view {
                     View::List(_) => {
-                        "⌘ f:search▕▏P:push▕▏U:pull▕▏r:fetch▕▏c:copy msg▕▏C:copy hash▕▏Tab:refs▕▏p:config▕▏?:help▕▏q:quit"
+                        "⌘ Enter:detail▕▏f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏c:copy msg▕▏C:copy hash▕▏p:config▕▏?:help▕▏q:quit"
                             .into()
                     }
                     View::Diff(_) => self
                         .view
                         .diff_footer_hint()
                         .unwrap_or_else(|| "⌘ c:copy-path▕▏Esc:close".into()),
-                    View::Detail(_) => "⌘ ⇆:prev/next commit▕▏c:copy msg▕▏C:copy hash▕▏r:fetch▕▏Esc:close".into(),
-                    View::Refs(_) => "⌘ r:fetch▕▏Esc:close".into(),
-                    View::Help(_) => "⌘ Esc:close".into(),
-                    View::UserCommand(_) => "⌘ Esc:close".into(),
-                    View::Dialog(_) => "⌘ Enter:confirm▕▏Esc:cancel".into(),
-                    View::BranchDetail(_) => "⌘ c:copy-name▕▏o:checkout▕▏r:fetch▕▏Esc:close".into(),
-                    View::TagDetail(_) => "⌘ c:copy-name▕▏W:push▕▏r:fetch▕▏Esc:close".into(),
+                    View::Detail(_) => "⌘ Enter:open file▕▏⇆:prev/next▕▏t:tag▕▏b:branch▕▏o:checkout▕▏m:merge▕▏e:rebase▕▏see action bar →▕▏c:msg▕▏C:hash▕▏r:fetch▕▏Esc:close".into(),
+                    View::Refs(_) => "⌘ Enter:open▕▏D:delete▕▏c:copy-name▕▏r:fetch▕▏?:help▕▏Esc:close".into(),
+                    View::Help(_) => "⌘ ?/Esc:close".into(),
+                    View::UserCommand(_) => "⌘ Enter:detail▕▏?:help▕▏r:fetch▕▏Esc:close".into(),
+                    View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm▕▏Esc:cancel".into(),
+                    View::BranchDetail(_) => "⌘ o:checkout▕▏m:merge▕▏e:rebase▕▏Q:push▕▏Z:pull▕▏I:upstream▕▏D:delete▕▏see action bar →▕▏V:copy-name▕▏r:fetch▕▏Esc:close".into(),
+                    View::TagDetail(_) => "⌘ W:push▕▏F:delete▕▏Y:copy-name▕▏r:fetch▕▏Esc:close".into(),
                     View::Uncommitted(_) => self
                         .view
                         .uncommitted_footer_hint()
                         .unwrap_or_else(|| "Esc:close".into()),
+                    View::FileHistory(_) => "⌘ Enter:open commit▕▏?:help▕▏Esc:close".into(),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -1356,6 +1357,18 @@ impl App<'_> {
                         ));
                     }
                 }
+            }
+
+            // Show the numeric prefix (vim-style count) after the HEAD info, clearly
+            // separated, so it never overlaps the branch name.
+            if !self.app_status.numeric_prefix.is_empty() {
+                spans.push(Span::styled(" │ ", dim_separator));
+                spans.push(Span::styled(
+                    self.app_status.numeric_prefix.as_str(),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_input_transient_fg)
+                        .add_modifier(Modifier::BOLD),
+                ));
             }
         }
 
