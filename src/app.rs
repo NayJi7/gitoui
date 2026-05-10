@@ -1067,13 +1067,31 @@ impl App<'_> {
     }
 
     fn render_status_line(&self, f: &mut Frame, area: Rect) {
+        // Compute view-state flags before building spans so StatusLine::None can
+        // decide whether the numeric prefix goes before or after the HEAD info.
+        let is_search_active = self.view.is_search_active();
+        let is_search_querying = self.view.is_search_querying();
+        let is_config_active = self.view.is_config_active();
+        let show_enhanced = matches!(
+            &self.app_status.status_line,
+            StatusLine::None | StatusLine::NotificationInfo(_)
+        ) && !is_search_active
+            && !is_config_active;
+
         let mut spans = match &self.app_status.status_line {
             StatusLine::None if self.app_status.numeric_prefix.is_empty() => vec![],
             StatusLine::None => {
-                vec![Span::styled(
-                    self.app_status.numeric_prefix.as_str(),
-                    Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
-                )]
+                // When show_enhanced the prefix is rendered after the HEAD indicator;
+                // when not enhanced (search / config active) the prefix never accumulates
+                // because key handling blocks it — so this branch only fires without enhanced.
+                if show_enhanced {
+                    vec![]
+                } else {
+                    vec![Span::styled(
+                        self.app_status.numeric_prefix.as_str(),
+                        Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                    )]
+                }
             }
             StatusLine::Input(msg, _, transient_msg) => {
                 let msg_w = console::measure_text_width(msg.as_str());
@@ -1146,14 +1164,6 @@ impl App<'_> {
 
         let dim_separator = Style::default().fg(self.ctx.color_theme.divider_fg);
         let dim_text = Style::default().fg(self.ctx.color_theme.list_ref_paren_fg);
-        let is_search_active = self.view.is_search_active();
-        let is_search_querying = self.view.is_search_querying();
-        let is_config_active = self.view.is_config_active();
-        let show_enhanced = matches!(
-            &self.app_status.status_line,
-            StatusLine::None | StatusLine::NotificationInfo(_)
-        ) && !is_search_active
-            && !is_config_active;
         let show_shortcuts = matches!(
             &self.app_status.status_line,
             StatusLine::None
