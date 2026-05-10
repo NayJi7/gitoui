@@ -413,9 +413,11 @@ pub fn run() -> Result<()> {
 }
 
 /// Print the gitoui logo + wordmark inline (opencode-style) before the no-repo
-/// prompt. Reserves `cell_h` rows by emitting newlines first, moves the cursor
-/// back up, prints the image escape, then moves the cursor below — works for
-/// both Kitty (which doesn't auto-advance the cursor) and iTerm2/Sixel.
+/// prompt. Reserves `cell_h` rows by emitting newlines first (so the terminal
+/// scrolls if needed), moves the cursor back up, then emits the image escape.
+/// Both Kitty (default `C=0`) and iTerm2 auto-advance the cursor below the
+/// image after rendering, so we only need a single trailing newline for the
+/// blank separator before the prompt.
 /// Falls back to a plain text banner when the protocol can't render inline.
 fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     use std::io::Write;
@@ -433,16 +435,16 @@ fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     };
 
     let mut stdout = std::io::stdout().lock();
-    // Reserve cell_h rows.
+    // Reserve cell_h rows so the terminal scrolls if the cursor is near the bottom.
     for _ in 0..cell_h {
         let _ = writeln!(stdout);
     }
-    // Move cursor back up over the reserved rows.
+    // Move cursor back up to the start of the reserved area.
     let _ = write!(stdout, "\x1b[{}A", cell_h);
-    // Render the image at the (now-reserved) cursor position.
+    // Render the image; cursor auto-advances to the row just below the image.
     let _ = write!(stdout, "{}", escape);
-    // Move cursor back down past the image, then add a blank line.
-    let _ = write!(stdout, "\x1b[{}B\n", cell_h);
+    // One blank row separator before the prompt.
+    let _ = writeln!(stdout);
     let _ = stdout.flush();
 }
 
