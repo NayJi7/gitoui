@@ -195,9 +195,79 @@ impl<'a> DialogView<'a> {
         self.focused == element || self.hovered == Some(element)
     }
 
+    /// Returns `(line_index, col_in_line)` for `byte_offset` within `s`.
+    fn cursor_line_col(s: &str, byte_offset: usize) -> (usize, usize) {
+        let clamped = byte_offset.min(s.len());
+        let before = &s[..clamped];
+        let line = before.chars().filter(|&c| c == '\n').count();
+        let col = before.rfind('\n').map_or(before.len(), |p| before.len() - p - 1);
+        (line, col)
+    }
+
+    /// Move the cursor to the same column on the previous line (for multi-line commit dialogs).
+    fn move_cursor_up(&mut self) {
+        let (line_idx, col) = Self::cursor_line_col(&self.input_value, self.input_cursor);
+        if line_idx == 0 {
+            // Already on first line; move to start.
+            self.input_cursor = 0;
+            return;
+        }
+        // Find the start of the previous line.
+        let lines: Vec<&str> = self.input_value.split('\n').collect();
+        let prev_line = lines[line_idx - 1];
+        let target_col = col.min(prev_line.len());
+        // Byte offset of the start of the previous line.
+        let prev_line_start: usize = lines[..line_idx - 1]
+            .iter()
+            .map(|l| l.len() + 1) // +1 for '\n'
+            .sum();
+        self.input_cursor = prev_line_start + target_col;
+    }
+
+    /// Move the cursor to the same column on the next line (for multi-line commit dialogs).
+    fn move_cursor_down(&mut self) {
+        let (line_idx, col) = Self::cursor_line_col(&self.input_value, self.input_cursor);
+        let lines: Vec<&str> = self.input_value.split('\n').collect();
+        if line_idx + 1 >= lines.len() {
+            // Already on last line; move to end.
+            self.input_cursor = self.input_value.len();
+            return;
+        }
+        let next_line = lines[line_idx + 1];
+        let target_col = col.min(next_line.len());
+        let next_line_start: usize = lines[..line_idx + 1]
+            .iter()
+            .map(|l| l.len() + 1)
+            .sum();
+        self.input_cursor = next_line_start + target_col;
+    }
+
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         if matches!(self.focused, DialogElement::Input) {
-            use ratatui::crossterm::event::KeyModifiers;
+            use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+            // Multi-line shortcuts for commit/amend dialogs only.
+            if matches!(
+                self.kind,
+                DialogKind::CommitWithMessage | DialogKind::AmendMessage { .. }
+            ) {
+                if key.code == KeyCode::Enter
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    self.input_value.insert(self.input_cursor, '\n');
+                    self.input_cursor += 1;
+                    return;
+                }
+                if key.code == KeyCode::Up {
+                    self.move_cursor_up();
+                    return;
+                }
+                if key.code == KeyCode::Down {
+                    self.move_cursor_down();
+                    return;
+                }
+            }
+
             match key.code {
                 ratatui::crossterm::event::KeyCode::Char(c) => {
                     self.input_value.insert(self.input_cursor, c);
@@ -466,7 +536,18 @@ impl<'a> DialogView<'a> {
         }
 
         if let Some(input_row) = self.input_row {
-            if row == input_row {
+            // For multi-line commit dialogs the input spans several rows.
+            let input_height = if matches!(
+                self.kind,
+                DialogKind::CommitWithMessage | DialogKind::AmendMessage { .. }
+            ) {
+                let line_count = self.input_value.lines().count().max(1);
+                // +2 for separator row and placeholder / extra blank row
+                (line_count + 2).min(8)
+            } else {
+                1
+            };
+            if row >= input_row && row < input_row + input_height {
                 return Some(DialogElement::Input);
             }
         }
@@ -533,8 +614,27 @@ impl<'a> DialogView<'a> {
 
         if self.is_highlighted(DialogElement::Input) {
             if let Some(input_row) = self.input_row {
-                let cursor_x = self.inner_area.x + 1 + self.input_cursor as u16;
-                let cursor_y = self.inner_area.y + input_row as u16;
+                let (cursor_x, cursor_y) = if matches!(
+                    self.kind,
+                    DialogKind::CommitWithMessage | DialogKind::AmendMessage { .. }
+                ) {
+                    let (line_idx, col) =
+                        Self::cursor_line_col(&self.input_value, self.input_cursor);
+                    // Row layout: subject=+0, separator=+1, body_line_k=+(2+k)
+                    let row_offset = if line_idx == 0 {
+                        0u16
+                    } else {
+                        // +1 for separator row, then body line index
+                        1 + line_idx as u16
+                    };
+                    let cx = self.inner_area.x + 1 + col as u16;
+                    let cy = self.inner_area.y + input_row as u16 + row_offset;
+                    (cx, cy)
+                } else {
+                    let cx = self.inner_area.x + 1 + self.input_cursor as u16;
+                    let cy = self.inner_area.y + input_row as u16;
+                    (cx, cy)
+                };
                 match &self.ctx.ui_config.common.cursor_type {
                     CursorType::Native => {
                         f.set_cursor_position((cursor_x, cursor_y));
@@ -725,7 +825,9 @@ impl<'a> DialogView<'a> {
             DialogKind::CommitWithMessage => {
                 lines.push(label_line("Message:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg, inner_width));
+                for ml in self.multiline_input_lines(fg, dim_fg, divider_fg, inner_width) {
+                    lines.push(ml);
+                }
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Amend previous commit"));
@@ -849,7 +951,9 @@ impl<'a> DialogView<'a> {
             DialogKind::AmendMessage { .. } => {
                 lines.push(label_line("New commit message:", dim_fg));
                 self.input_row = Some(lines.len());
-                lines.push(self.input_line(fg, inner_width));
+                for ml in self.multiline_input_lines(fg, dim_fg, divider_fg, inner_width) {
+                    lines.push(ml);
+                }
             }
             DialogKind::AddWorktree => {
                 lines.push(label_line("Name:", dim_fg));
@@ -989,6 +1093,102 @@ impl<'a> DialogView<'a> {
             Span::styled(padded, Style::default().fg(text_fg).bg(input_bg)),
             Span::raw(" "),
         ])
+    }
+
+    /// Render the multi-line input area for commit/amend dialogs.
+    ///
+    /// Layout per call:
+    ///  - Row 0:   subject line + char-count indicator `(N/72)` on right
+    ///  - Row 1:   visual separator `─────────`
+    ///  - Rows 2+: body lines (or placeholder when body is empty)
+    ///
+    /// The total number of rendered rows is capped at 8 (1 subject + 1 sep + 6 body).
+    fn multiline_input_lines(
+        &self,
+        fg: Color,
+        dim_fg: Color,
+        divider_fg: Color,
+        inner_width: u16,
+    ) -> Vec<Line<'static>> {
+        let focused = self.is_highlighted(DialogElement::Input);
+        let theme = &self.ctx.color_theme;
+        let input_bg = theme.list_selected_bg;
+        let text_fg = if focused { fg } else { theme.detail_label_fg };
+        let content_width = inner_width.saturating_sub(2) as usize; // minus 2 side spaces
+
+        // Split on '\n'; always have at least one element.
+        let value_lines: Vec<&str> = if self.input_value.is_empty() {
+            vec![""]
+        } else {
+            // split('\n') gives correct empty-string parts for trailing newlines.
+            self.input_value.split('\n').collect()
+        };
+
+        let mut result: Vec<Line<'static>> = Vec::new();
+
+        // --- Subject line (index 0) ---
+        let subject = value_lines[0];
+        let subject_len = subject.chars().count();
+        let counter_text = format!("({}/72)", subject_len);
+        let counter_color = if subject_len <= 50 {
+            theme.status_success_fg
+        } else if subject_len <= 72 {
+            theme.list_hash_fg // yellow
+        } else {
+            theme.status_error_fg
+        };
+
+        // Available width for the subject text itself (leave room for " " + counter + " ").
+        let counter_width = counter_text.chars().count();
+        // We need: 1 (left space) + subject_display + padding + counter + 1 (right space) == inner_width
+        // subject_display width = content_width - counter_width
+        let subject_display_width = content_width.saturating_sub(counter_width);
+        let subject_padded = format!("{:<width$}", subject, width = subject_display_width);
+
+        result.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(subject_padded, Style::default().fg(text_fg).bg(input_bg)),
+            Span::styled(counter_text, Style::default().fg(counter_color).bg(input_bg)),
+            Span::raw(" "),
+        ]));
+
+        // --- Visual separator after subject ---
+        let sep = "─".repeat(inner_width as usize);
+        result.push(Line::from(Span::styled(
+            sep,
+            Style::default().fg(divider_fg),
+        )));
+
+        // --- Body lines (indices 1+), capped so total rows ≤ 8 ---
+        // We already used 2 rows (subject + separator), so max 6 body rows.
+        let max_body_rows = 6usize;
+        if value_lines.len() > 1 {
+            for body_line in value_lines[1..].iter().take(max_body_rows) {
+                let padded = format!("{:<width$}", body_line, width = content_width);
+                result.push(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(padded, Style::default().fg(text_fg).bg(input_bg)),
+                    Span::raw(" "),
+                ]));
+            }
+        } else {
+            // Show placeholder hint when there is no body yet.
+            let placeholder = "(optional body — Ctrl+Enter for newline)";
+            let padded = format!("{:<width$}", placeholder, width = content_width);
+            result.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    padded,
+                    Style::default()
+                        .fg(dim_fg)
+                        .bg(input_bg)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::raw(" "),
+            ]));
+        }
+
+        result
     }
 
     fn checkbox_line(&self, index: usize, label: &str) -> Line<'static> {
