@@ -153,6 +153,9 @@ impl<'a> ListView<'a> {
                 UserEvent::Refresh => {
                     self.refresh();
                 }
+                UserEvent::LoadMore => {
+                    self.load_more();
+                }
                 UserEvent::Push => {
                     self.tx.send(AppEvent::PushCurrentBranch);
                 }
@@ -321,6 +324,20 @@ impl<'a> ListView<'a> {
             pending_notification: None,
         };
         self.tx.send(AppEvent::Refresh(context));
+    }
+
+    /// Request that the outer `run()` loop reload the repository with
+    /// `core.option.load_more_count` more commits than currently loaded. The
+    /// view state (selected commit, scroll position) is preserved through the
+    /// same `RefreshViewContext` mechanism as `refresh()`.
+    pub fn load_more(&self) {
+        let list_state = self.as_list_state();
+        let list_context = ListRefreshViewContext::from(list_state);
+        let context = RefreshViewContext::List {
+            list_context,
+            pending_notification: None,
+        };
+        self.tx.send(AppEvent::LoadMoreCommits(context));
     }
 
     pub fn reset_commit_list_with(&mut self, list_context: &ListRefreshViewContext) {

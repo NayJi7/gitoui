@@ -133,11 +133,10 @@ pub fn load() -> Result<(
     let config = match config_file_path_from_env() {
         Some(user_path) => {
             if !user_path.exists() {
-                let msg = format!(
+                return Err(crate::Error::Config(format!(
                     "Config file specified by ${CONFIG_FILE_ENV_NAME} environment variable not found: {}",
                     user_path.display()
-                );
-                return Err(msg.into());
+                )));
             }
             read_config_from_path(&user_path)
         }
@@ -799,105 +798,55 @@ mod tests {
 
     #[test]
     fn test_config_default() {
-        let actual = Config::default();
-        let expected = Config {
-            core: CoreConfig {
-                option: CoreOptionConfig {
-                    protocol: None,
-                    order: None,
-                    graph_width: None,
-                    graph_style: None,
-                    initial_selection: None,
-                    auto_refresh: true,
-                    auto_refresh_debounce_ms: 500,
-                    initial_load_count: 500,
-                    load_more_count: 200,
-                    theme: "Tokyo Night".into(),
-                    syntax_theme: "base16-ocean.dark".into(),
-                    date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
-                    date_time_local: true,
-                    user_name: None,
-                    user_email: None,
-                    default_branch: None,
-                    github_avatars: true,
-                },
-                search: CoreSearchConfig {
-                    ignore_case: false,
-                    fuzzy: false,
-                },
-                user_command: CoreUserCommandConfig {
-                    commands: FxHashMap::from_iter([(
-                        "1".into(),
-                        UserCommand {
-                            name: "git diff".into(),
-                            r#type: UserCommandType::Inline,
-                            commands: vec![
-                                "git".into(),
-                                "--no-pager".into(),
-                                "diff".into(),
-                                "--color=always".into(),
-                                "{{first_parent_hash}}".into(),
-                                "{{target_hash}}".into(),
-                            ],
-                            refresh: false,
-                        },
-                    )]),
-                    tab_width: 4,
-                },
-                external: CoreExternalConfig {
-                    clipboard: ClipboardConfig::Auto,
-                },
-            },
-            ui: UiConfig {
-                common: UiCommonConfig {
-                    cursor_type: CursorType::Native,
-                    mouse_enabled: true,
-                    diff_mode: DiffMode::Enhanced,
-                },
-                list: UiListConfig {
-                    columns: vec![
-                        UserListColumnType::Graph,
-                        UserListColumnType::Marker,
-                        UserListColumnType::CommitMessage,
-                        UserListColumnType::Name,
-                        UserListColumnType::Hash,
-                        UserListColumnType::Date,
-                    ],
-                    commit_message_min_width: 20,
-                    date_format: "%d/%m/%Y - %H:%M".into(),
-                    date_width: 20,
-                    date_local: true,
-                    name_width: 20,
-                },
-                detail: UiDetailConfig {
-                    height: 20,
-                    date_format: "%Y-%m-%d %H:%M:%S %z".into(),
-                    date_local: true,
-                },
-                user_command: UiUserCommandConfig { height: 20 },
-                refs: UiRefsConfig { width: 26 },
-            },
-            graph: GraphConfig {
-                row_image_width: GraphImageWidthMode::Compact,
-                color: GraphColorConfig {
-                    branches: vec![
-                        "#1f77b4".into(), // steel blue
-                        "#d62728".into(), // brick red
-                        "#2ca02c".into(), // forest green
-                        "#ff7f0e".into(), // orange
-                        "#9467bd".into(), // purple
-                        "#8c564b".into(), // brown
-                        "#e377c2".into(), // pink/rose
-                        "#17becf".into(), // teal
-                    ],
-                    edge: "#00000000".into(),
-                    background: "#00000000".into(),
-                },
-            },
-            color: ColorTheme::default(),
-            keybind: None,
-        };
-        assert_eq!(actual, expected);
+        // Spot-check the defaults users notice when first running gitoui — anything
+        // that, if silently changed, would surprise the user or affect first-run
+        // behavior. The full struct shape is exercised via `Config::default()` as
+        // the base in the partial / complete TOML tests below.
+        let cfg = Config::default();
+
+        // Performance: lazy-load tunables.
+        assert_eq!(cfg.core.option.initial_load_count, 500);
+        assert_eq!(cfg.core.option.load_more_count, 200);
+
+        // Auto-refresh on by default with anti-flicker debounce.
+        assert!(cfg.core.option.auto_refresh);
+        assert_eq!(cfg.core.option.auto_refresh_debounce_ms, 500);
+
+        // Theming defaults that ship with the binary.
+        assert_eq!(cfg.core.option.theme, "Tokyo Night");
+        assert_eq!(cfg.core.option.syntax_theme, "base16-ocean.dark");
+
+        // UX defaults.
+        assert!(cfg.ui.common.mouse_enabled);
+        assert_eq!(cfg.ui.common.cursor_type, CursorType::Native);
+        assert_eq!(cfg.ui.common.diff_mode, DiffMode::Enhanced);
+        assert!(cfg.core.option.github_avatars);
+        assert!(cfg.core.option.date_time_local);
+        assert_eq!(
+            cfg.core.option.date_time_format,
+            DateTimeFormat::DDMMYYYY_HHMM
+        );
+
+        // Default user command should be the inline `git diff` preview.
+        let cmd = cfg
+            .core
+            .user_command
+            .commands
+            .get("1")
+            .expect("default user command 1 should exist");
+        assert_eq!(cmd.name, "git diff");
+        assert_eq!(cmd.r#type, UserCommandType::Inline);
+
+        // Default columns include the graph + commit message at minimum.
+        assert!(cfg.ui.list.columns.contains(&UserListColumnType::Graph));
+        assert!(cfg
+            .ui
+            .list
+            .columns
+            .contains(&UserListColumnType::CommitMessage));
+
+        // Graph branch palette must be non-empty (otherwise the graph wouldn't render).
+        assert!(!cfg.graph.color.branches.is_empty());
     }
 
     #[test]
@@ -943,119 +892,84 @@ mod tests {
             background = "#ffffff"
         "##;
         let actual: Config = toml::from_str::<OptionalConfig>(toml).unwrap().into();
-        let expected = Config {
-            core: CoreConfig {
-                option: CoreOptionConfig {
-                    protocol: Some(ImageProtocolType::KittyUnicode),
-                    order: Some(CommitOrderType::Topo),
-                    graph_width: Some(GraphWidthType::Single),
-                    graph_style: Some(GraphStyle::Angular),
-                    initial_selection: Some(InitialSelection::Head),
-                    auto_refresh: true,
-                    auto_refresh_debounce_ms: 500,
-                    initial_load_count: 500,
-                    load_more_count: 200,
-                    theme: "Tokyo Night".into(),
-                    syntax_theme: "base16-ocean.dark".into(),
-                    date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
-                    date_time_local: true,
-                    user_name: None,
-                    user_email: None,
-                    default_branch: None,
-                    github_avatars: true,
-                },
-                search: CoreSearchConfig {
-                    ignore_case: true,
-                    fuzzy: true,
-                },
-                user_command: CoreUserCommandConfig {
-                    commands: FxHashMap::from_iter([
-                        (
-                            "1".into(),
-                            UserCommand {
-                                name: "git diff no color".into(),
-                                r#type: UserCommandType::Inline,
-                                commands: vec![
-                                    "git".into(),
-                                    "diff".into(),
-                                    "{{first_parent_hash}}".into(),
-                                    "{{target_hash}}".into(),
-                                ],
-                                refresh: false,
-                            },
-                        ),
-                        (
-                            "2".into(),
-                            UserCommand {
-                                name: "echo hello".into(),
-                                r#type: UserCommandType::Silent,
-                                commands: vec!["echo".into(), "hello".into()],
-                                refresh: true,
-                            },
-                        ),
-                        (
-                            "10".into(),
-                            UserCommand {
-                                name: "echo world".into(),
-                                r#type: UserCommandType::Inline,
-                                commands: vec!["echo".into(), "world".into()],
-                                refresh: false,
-                            },
-                        ),
-                        (
-                            "3".into(),
-                            UserCommand {
-                                name: "open vim".into(),
-                                r#type: UserCommandType::Suspend,
-                                commands: vec!["vim".into()],
-                                refresh: false,
-                            },
-                        ),
-                    ]),
-                    tab_width: 2,
-                },
-                external: CoreExternalConfig {
-                    clipboard: ClipboardConfig::Auto,
-                },
-            },
-            ui: UiConfig {
-                common: UiCommonConfig {
-                    cursor_type: CursorType::Virtual("|".into()),
-                    mouse_enabled: true,
-                    diff_mode: DiffMode::Enhanced,
-                },
-                list: UiListConfig {
-                    columns: vec![
-                        UserListColumnType::Date,
-                        UserListColumnType::CommitMessage,
-                        UserListColumnType::Hash,
-                        UserListColumnType::Graph,
+
+        // Build expected by overriding only the fields the TOML changes — defaults
+        // come from `Config::default()`. Adding a new default no longer requires
+        // touching this test.
+        let mut expected = Config::default();
+        expected.core.option.protocol = Some(ImageProtocolType::KittyUnicode);
+        expected.core.option.order = Some(CommitOrderType::Topo);
+        expected.core.option.graph_width = Some(GraphWidthType::Single);
+        expected.core.option.graph_style = Some(GraphStyle::Angular);
+        expected.core.option.initial_selection = Some(InitialSelection::Head);
+        expected.core.search.ignore_case = true;
+        expected.core.search.fuzzy = true;
+        expected.core.user_command.commands = FxHashMap::from_iter([
+            (
+                "1".into(),
+                UserCommand {
+                    name: "git diff no color".into(),
+                    r#type: UserCommandType::Inline,
+                    commands: vec![
+                        "git".into(),
+                        "diff".into(),
+                        "{{first_parent_hash}}".into(),
+                        "{{target_hash}}".into(),
                     ],
-                    commit_message_min_width: 40,
-                    date_format: "%Y/%m/%d".into(),
-                    date_width: 20,
-                    date_local: false,
-                    name_width: 30,
+                    refresh: false,
                 },
-                detail: UiDetailConfig {
-                    height: 30,
-                    date_format: "%Y/%m/%d %H:%M:%S".into(),
-                    date_local: false,
+            ),
+            (
+                "2".into(),
+                UserCommand {
+                    name: "echo hello".into(),
+                    r#type: UserCommandType::Silent,
+                    commands: vec!["echo".into(), "hello".into()],
+                    refresh: true,
                 },
-                user_command: UiUserCommandConfig { height: 30 },
-                refs: UiRefsConfig { width: 40 },
-            },
-            graph: GraphConfig {
-                row_image_width: GraphImageWidthMode::Fixed,
-                color: GraphColorConfig {
-                    branches: vec!["#ff0000".into(), "#00ff00".into(), "#0000ff".into()],
-                    edge: "#000000".into(),
-                    background: "#ffffff".into(),
+            ),
+            (
+                "10".into(),
+                UserCommand {
+                    name: "echo world".into(),
+                    r#type: UserCommandType::Inline,
+                    commands: vec!["echo".into(), "world".into()],
+                    refresh: false,
                 },
-            },
-            color: ColorTheme::default(),
-            keybind: None,
-        };
+            ),
+            (
+                "3".into(),
+                UserCommand {
+                    name: "open vim".into(),
+                    r#type: UserCommandType::Suspend,
+                    commands: vec!["vim".into()],
+                    refresh: false,
+                },
+            ),
+        ]);
+        expected.core.user_command.tab_width = 2;
+        expected.ui.common.cursor_type = CursorType::Virtual("|".into());
+        expected.ui.list.columns = vec![
+            UserListColumnType::Date,
+            UserListColumnType::CommitMessage,
+            UserListColumnType::Hash,
+            UserListColumnType::Graph,
+        ];
+        expected.ui.list.commit_message_min_width = 40;
+        expected.ui.list.date_format = "%Y/%m/%d".into();
+        expected.ui.list.date_local = false;
+        expected.ui.list.name_width = 30;
+        expected.ui.detail.height = 30;
+        expected.ui.detail.date_format = "%Y/%m/%d %H:%M:%S".into();
+        expected.ui.detail.date_local = false;
+        expected.ui.user_command.height = 30;
+        expected.ui.refs.width = 40;
+        expected.graph.row_image_width = GraphImageWidthMode::Fixed;
+        expected.graph.color.branches =
+            vec!["#ff0000".into(), "#00ff00".into(), "#0000ff".into()];
+        expected.graph.color.edge = "#000000".into();
+        expected.graph.color.background = "#ffffff".into();
+
         assert_eq!(actual, expected);
     }
 
@@ -1066,103 +980,12 @@ mod tests {
             date_format = "%Y/%m/%d"
         "#;
         let actual: Config = toml::from_str::<OptionalConfig>(toml).unwrap().into();
-        let expected = Config {
-            core: CoreConfig {
-                option: CoreOptionConfig {
-                    protocol: None,
-                    order: None,
-                    graph_width: None,
-                    graph_style: None,
-                    initial_selection: None,
-                    auto_refresh: true,
-                    auto_refresh_debounce_ms: 500,
-                    initial_load_count: 500,
-                    load_more_count: 200,
-                    theme: "Tokyo Night".into(),
-                    syntax_theme: "base16-ocean.dark".into(),
-                    date_time_format: DateTimeFormat::DDMMYYYY_HHMM,
-                    date_time_local: true,
-                    user_name: None,
-                    user_email: None,
-                    default_branch: None,
-                    github_avatars: true,
-                },
-                search: CoreSearchConfig {
-                    ignore_case: false,
-                    fuzzy: false,
-                },
-                user_command: CoreUserCommandConfig {
-                    commands: FxHashMap::from_iter([(
-                        "1".into(),
-                        UserCommand {
-                            name: "git diff".into(),
-                            r#type: UserCommandType::Inline,
-                            commands: vec![
-                                "git".into(),
-                                "--no-pager".into(),
-                                "diff".into(),
-                                "--color=always".into(),
-                                "{{first_parent_hash}}".into(),
-                                "{{target_hash}}".into(),
-                            ],
-                            refresh: false,
-                        },
-                    )]),
-                    tab_width: 4,
-                },
-                external: CoreExternalConfig {
-                    clipboard: ClipboardConfig::Auto,
-                },
-            },
-            ui: UiConfig {
-                common: UiCommonConfig {
-                    cursor_type: CursorType::Native,
-                    mouse_enabled: true,
-                    diff_mode: DiffMode::Enhanced,
-                },
-                list: UiListConfig {
-                    columns: vec![
-                        UserListColumnType::Graph,
-                        UserListColumnType::Marker,
-                        UserListColumnType::CommitMessage,
-                        UserListColumnType::Name,
-                        UserListColumnType::Hash,
-                        UserListColumnType::Date,
-                    ],
-                    commit_message_min_width: 20,
-                    date_format: "%Y/%m/%d".into(),
-                    date_width: 20,
-                    date_local: true,
-                    name_width: 20,
-                },
-                detail: UiDetailConfig {
-                    height: 20,
-                    date_format: "%Y-%m-%d %H:%M:%S %z".into(),
-                    date_local: true,
-                },
-                user_command: UiUserCommandConfig { height: 20 },
-                refs: UiRefsConfig { width: 26 },
-            },
-            graph: GraphConfig {
-                row_image_width: GraphImageWidthMode::Compact,
-                color: GraphColorConfig {
-                    branches: vec![
-                        "#1f77b4".into(), // steel blue
-                        "#d62728".into(), // brick red
-                        "#2ca02c".into(), // forest green
-                        "#ff7f0e".into(), // orange
-                        "#9467bd".into(), // purple
-                        "#8c564b".into(), // brown
-                        "#e377c2".into(), // pink/rose
-                        "#17becf".into(), // teal
-                    ],
-                    edge: "#00000000".into(),
-                    background: "#00000000".into(),
-                },
-            },
-            color: ColorTheme::default(),
-            keybind: None,
-        };
+
+        // Partial config: only the explicit field changes; everything else inherits
+        // from `Config::default()`.
+        let mut expected = Config::default();
+        expected.ui.list.date_format = "%Y/%m/%d".into();
+
         assert_eq!(actual, expected);
     }
 

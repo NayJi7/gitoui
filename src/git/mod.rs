@@ -12,7 +12,7 @@ use std::{
 use chrono::{DateTime, FixedOffset};
 use rustc_hash::FxHashMap;
 
-use crate::Result;
+use crate::{Error, Result};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommitHash(String);
@@ -139,7 +139,7 @@ impl Repository {
         let stashes = load_all_stashes(path);
         let commits = load_all_commits(path, sort, &head, &stashes, max_count);
         if commits.is_empty() {
-            return Err("no commits in the repository".into());
+            return Err(Error::Git("no commits in the repository".into()));
         }
 
         let mut commits = merge_stashes_to_commits(commits, stashes);
@@ -286,8 +286,9 @@ impl Repository {
 
 fn check_git_repository(path: &Path) -> Result<()> {
     if !is_inside_work_tree(path) && !is_bare_repository(path) {
-        let msg = "not a git repository (or any of the parent directories)";
-        return Err(msg.into());
+        return Err(Error::Git(
+            "not a git repository (or any of the parent directories)".into(),
+        ));
     }
     Ok(())
 }
@@ -362,7 +363,11 @@ fn load_all_commits(
 
         let parts: Vec<&str> = s.split('\x1f').collect();
         if parts.len() != 10 {
-            panic!("unexpected number of parts: {} [{}]", parts.len(), s);
+            eprintln!(
+                "gitoui: skipping malformed commit record (expected 10 fields, got {})",
+                parts.len()
+            );
+            continue;
         }
 
         let commit = Commit {
@@ -412,7 +417,11 @@ fn load_all_stashes(path: &Path) -> Vec<Commit> {
 
         let parts: Vec<&str> = s.split('\x1f').collect();
         if parts.len() != 10 {
-            panic!("unexpected number of parts: {} [{}]", parts.len(), s);
+            eprintln!(
+                "gitoui: skipping malformed commit record (expected 10 fields, got {})",
+                parts.len()
+            );
+            continue;
         }
 
         let commit = Commit {
@@ -529,7 +538,11 @@ fn load_refs(path: &Path) -> (RefMap, Head) {
 
         let parts: Vec<&str> = line.split(' ').collect();
         if parts.len() != 2 {
-            panic!("unexpected number of parts: {} [{}]", parts.len(), line);
+            eprintln!(
+                "gitoui: skipping malformed ref line (expected 2 fields, got {})",
+                parts.len()
+            );
+            continue;
         }
 
         let hash = parts[0];
@@ -586,7 +599,11 @@ fn load_stashes_as_refs(path: &Path) -> RefMap {
 
         let parts: Vec<&str> = line.split('\x1f').collect();
         if parts.len() != 3 {
-            panic!("unexpected number of parts: {} [{}]", parts.len(), line);
+            eprintln!(
+                "gitoui: skipping malformed stash ref line (expected 3 fields, got {})",
+                parts.len()
+            );
+            continue;
         }
 
         let name = parts[0];

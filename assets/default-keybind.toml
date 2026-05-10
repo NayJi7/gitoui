@@ -32,6 +32,7 @@ search = ["f"]
 ignore_case_toggle = ["s"]
 fuzzy_toggle = ["z"]
 refresh = ["r"]
+load_more = ["]"]
 
 push = ["shift-p"]
 pull = ["shift-u"]

@@ -140,7 +140,58 @@ impl From<Option<InitialSelection>> for app::InitialSelection {
     }
 }
 
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+/// Top-level error type returned by `gitoui::run()` and the entry points it
+/// composes. Variants are deliberately coarse — finer-grained domain errors
+/// (e.g. `git::actions` returning `Result<_, String>`) are surfaced as `String`
+/// inside their respective variants so the user sees the underlying message
+/// verbatim.
+///
+/// Conversions:
+/// - `std::io::Error` → `Error::Io` (auto via `?`)
+/// - `String` / `&str` → `Error::Other` (lets us keep `Err(msg.into())` shorthand
+///   in legacy call sites without forcing every parser to pick a variant)
+/// - `toml::de::Error`, `garde::Report` → `Error::Config` (for `?` chaining
+///   inside `config::load`)
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("git: {0}")]
+    Git(String),
+
+    #[error("config: {0}")]
+    Config(String),
+
+    #[error("i/o: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for Error {
+    fn from(s: String) -> Self {
+        Error::Other(s)
+    }
+}
+
+impl From<&str> for Error {
+    fn from(s: &str) -> Self {
+        Error::Other(s.to_string())
+    }
+}
+
+impl From<toml::de::Error> for Error {
+    fn from(e: toml::de::Error) -> Self {
+        Error::Config(e.to_string())
+    }
+}
+
+impl From<garde::Report> for Error {
+    fn from(e: garde::Report) -> Self {
+        Error::Config(e.to_string())
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn run() -> Result<()> {
     let args = Args::parse();
@@ -149,6 +200,10 @@ pub fn run() -> Result<()> {
     let ec = event::EventController::init();
     let mut refresh_view_context = None;
     let mut terminal = None;
+    // Counter incremented each time the user triggers `LoadMore` from the
+    // commit list. Multiplies `core.option.load_more_count` to compute the
+    // current commit cap when the CLI did not pass an explicit `-n`.
+    let mut load_more_count: usize = 0;
     // Filesystem watcher on .git/ — keeps the UI in sync with external git
     // operations (commits from another shell, push/pull/fetch, branch
     // switches, …). Held alive for the whole `run()` lifetime; dropping it
@@ -172,7 +227,16 @@ pub fn run() -> Result<()> {
         }
         let keybind = keybind::KeyBind::new(keybind_patch);
 
-        let max_count = args.max_count;
+        // Lazy-load policy: an explicit CLI `-n` always wins. Otherwise default
+        // to `initial_load_count` and grow by `load_more_count` each time the
+        // user requests "load more" from the commit list.
+        let max_count = match args.max_count {
+            Some(n) => Some(n),
+            None => Some(
+                core_config.option.initial_load_count
+                    + load_more_count * core_config.option.load_more_count,
+            ),
+        };
         let image_protocol = args.protocol.or(core_config.option.protocol).into();
         let order = args.order.or(core_config.option.order).into();
         let graph_width = args.graph_width.or(core_config.option.graph_width);
@@ -397,8 +461,17 @@ pub fn run() -> Result<()> {
                 refresh_view_context = Some(request.context);
                 continue;
             }
+            Ok(Ret::LoadMore(request)) => {
+                // CLI `-n` is hard cap; only grow when no explicit limit was given.
+                if args.max_count.is_none() {
+                    load_more_count = load_more_count.saturating_add(1);
+                }
+                refresh_view_context = Some(request.context);
+                continue;
+            }
             Err(e) => {
-                break Err(Box::new(e));
+                // app::run returns std::io::Error; the From impl on Error wraps it.
+                break Err(e.into());
             }
         }
     };

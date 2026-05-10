@@ -1091,6 +1091,7 @@ dependencies = [
  "syntect",
  "tempfile",
  "text-to-png",
+ "thiserror 2.0.17",
  "toml",
  "tui-input",
  "tui-tree-widget",

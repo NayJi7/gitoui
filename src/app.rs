@@ -63,6 +63,9 @@ pub enum InitialSelection {
 pub enum Ret {
     Quit,
     Refresh(RefreshRequest),
+    /// Like `Refresh`, but the outer `run()` loop should bump the loaded commit
+    /// count by `core.option.load_more_count` before reloading the repository.
+    LoadMore(RefreshRequest),
 }
 
 pub struct RefreshRequest {
@@ -614,6 +617,12 @@ impl App<'_> {
                     self.cleanup_graph_images()?;
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
+                }
+                AppEvent::LoadMoreCommits(context) => {
+                    self.stop_spinner();
+                    self.cleanup_graph_images()?;
+                    let request = RefreshRequest { context };
+                    return Ok(Ret::LoadMore(request));
                 }
                 AppEvent::FilesystemChanged => {
                     // Auto-refresh from external git activity. Three guards:

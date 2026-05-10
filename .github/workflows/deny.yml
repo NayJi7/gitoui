@@ -15,6 +15,10 @@ on:
       - '**/Cargo.lock'
       - '**/Cargo.toml'
       - '**/deny.toml'
+  # Run weekly so newly disclosed RustSec advisories are caught even
+  # when dependencies haven't changed.
+  schedule:
+    - cron: '0 6 * * 1'
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,4 +32,5 @@ jobs:
       # https://github.com/EmbarkStudios/cargo-deny-action/releases/tag/v2.0.14
       - uses: EmbarkStudios/cargo-deny-action@76cd80eb775d7bbbd2d80292136d74d39e1b4918
         with:
-          command: check licenses
+          # Run both license and advisory (RustSec / CVE) checks.
+          command: check licenses advisories

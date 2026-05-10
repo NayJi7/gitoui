@@ -52,6 +52,9 @@ pub enum AppEvent {
     },
     OpenUrl(String),
     Refresh(RefreshViewContext),
+    /// Same as `Refresh` but also bumps the loaded commit count by
+    /// `core.option.load_more_count` in the outer `run()` loop.
+    LoadMoreCommits(RefreshViewContext),
     AvatarsUpdated,
     ClearStatusLine,
     UpdateStatusInput(String, Option<u16>, Option<String>),
@@ -513,6 +516,8 @@ pub enum UserEvent {
     AmendCommit,
     // Open file history (git log --follow)
     FileHistory,
+    // Load more commits (extends the initial_load_count by load_more_count)
+    LoadMore,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -573,6 +578,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "ignore_case_toggle" => Ok(UserEvent::IgnoreCaseToggle),
                         "fuzzy_toggle" => Ok(UserEvent::FuzzyToggle),
                         "refresh" => Ok(UserEvent::Refresh),
+                        "load_more" => Ok(UserEvent::LoadMore),
                         "push" => Ok(UserEvent::Push),
                         "pull" => Ok(UserEvent::Pull),
                         "config" => Ok(UserEvent::Config),
