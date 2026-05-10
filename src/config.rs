@@ -403,11 +403,23 @@ pub struct UiConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum DiffMode {
     #[default]
     Enhanced,
     Raw,
+    /// Two columns: old version on the left, new on the right, separated by a
+    /// vertical bar. Removed lines render only on the left, added only on the
+    /// right; consecutive Del+Add pairs are zipped row-by-row so modifications
+    /// align side by side. Long lines are truncated with `…` rather than
+    /// wrapped (wrapping each half independently misaligns the pair).
+    SideBySide,
+    /// Side-by-side layout with the Enhanced styling: per-side line-number
+    /// gutter, full-row background color on additions / deletions, and syntax
+    /// highlighting on the content. Does not (yet) support the clickable
+    /// "show more" expand buttons of the single-column Enhanced view — for
+    /// gap navigation, fall back to the Enhanced mode.
+    SideBySideEnhanced,
 }
 
 #[optional(derives = [Deserialize])]
@@ -668,6 +680,8 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
         match ui.common.diff_mode {
             DiffMode::Enhanced => "enhanced",
             DiffMode::Raw => "raw",
+            DiffMode::SideBySide => "side-by-side",
+            DiffMode::SideBySideEnhanced => "side-by-side-enhanced",
         },
     );
 

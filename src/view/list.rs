@@ -133,8 +133,17 @@ impl<'a> ListView<'a> {
                     self.tx.send(AppEvent::OpenHelp);
                 }
                 UserEvent::Cancel => {
+                    // Esc clears the compare-pending mark first (highest
+                    // priority "exit this mode" action), then falls through
+                    // to clearing search if applicable.
+                    if self.as_list_state().marked_compare_commit().is_some() {
+                        self.as_mut_list_state().clear_compare_mark();
+                    }
                     self.as_mut_list_state().cancel_search();
                     self.clear_search_query();
+                }
+                UserEvent::MarkCompare => {
+                    self.handle_mark_compare();
                 }
                 UserEvent::Confirm => {
                     if let SearchState::Applied { .. } = self.as_list_state().search_state() {
@@ -358,6 +367,59 @@ impl<'a> ListView<'a> {
             pending_notification: None,
         };
         self.tx.send(AppEvent::LoadMoreCommits(context));
+    }
+
+    /// Handle a Ctrl+click in the commit list area: select the row at the
+    /// click position, then drive the same compare flow as Space.
+    /// Mirrors how the mouse already calls `handle_click` for plain Left
+    /// clicks but routes through `handle_mark_compare` afterwards.
+    pub fn handle_shift_click(&mut self, col: u16, row: u16) {
+        // Reuse the existing click-to-select logic so the cursor lands on
+        // the clicked row first.
+        self.handle_click(col, row);
+        self.handle_mark_compare();
+    }
+
+    /// Handle the Space / Ctrl+click action that drives the 2-commit
+    /// comparison flow.
+    ///
+    /// Three cases (decided by what's currently marked vs what's selected):
+    /// 1. No mark yet → mark the selected commit, enter compare-pending mode.
+    /// 2. Mark exists AND cursor is on the SAME commit → toggle off (cancel).
+    /// 3. Mark exists AND cursor is on a DIFFERENT commit → fire OpenCompareDiff.
+    ///
+    /// Uncommitted Changes / stash rows are silently rejected since they have
+    /// no real ancestry to diff against.
+    fn handle_mark_compare(&mut self) {
+        // Reject uncommitted up front — toggle_compare_mark already does this
+        // for case (1), but we also need to short-circuit case (3) where the
+        // cursor lands on uncommitted while a mark is active.
+        if self.as_list_state().is_uncommitted_selected() {
+            return;
+        }
+
+        let marked = self
+            .as_list_state()
+            .marked_compare_commit()
+            .cloned();
+        let selected = self.as_list_state().selected_commit_hash().clone();
+
+        match marked {
+            Some(mark) if mark != selected => {
+                // Case 3: second endpoint chosen → open the comparison.
+                // Order detection (older → newer) happens in app.rs where the
+                // commit metadata is accessible. Mark is cleared by the
+                // OpenCompareDiff handler so the user starts fresh next time.
+                self.tx.send(AppEvent::OpenCompareDiff {
+                    from_hash: mark.as_str().to_string(),
+                    to_hash: selected.as_str().to_string(),
+                });
+            }
+            _ => {
+                // Cases 1 & 2: toggle the mark on the selected commit.
+                self.as_mut_list_state().toggle_compare_mark();
+            }
+        }
     }
 
     pub fn reset_commit_list_with(&mut self, list_context: &ListRefreshViewContext) {

@@ -17,6 +17,14 @@ pub struct ColorTheme {
     pub list_selected_fg: RatatuiColor,
     #[default(RatatuiColor::DarkGray)]
     pub list_selected_bg: RatatuiColor,
+    /// Foreground/background for a commit row marked as the first endpoint of
+    /// the 2-commit comparison flow (Space / Ctrl+click). Each theme defines
+    /// a more saturated, accent-colored variant of its selection palette so
+    /// the marked row stands out clearly while still feeling theme-coherent.
+    #[default(RatatuiColor::White)]
+    pub list_compare_marked_fg: RatatuiColor,
+    #[default(RatatuiColor::Rgb(0x6e, 0x55, 0xab))]
+    pub list_compare_marked_bg: RatatuiColor,
     #[default(RatatuiColor::Yellow)]
     pub list_ref_paren_fg: RatatuiColor,
     #[default(RatatuiColor::Green)]

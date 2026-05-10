@@ -55,6 +55,13 @@ pub enum AppEvent {
     /// Same as `Refresh` but also bumps the loaded commit count by
     /// `core.option.load_more_count` in the outer `run()` loop.
     LoadMoreCommits(RefreshViewContext),
+    /// Open the cumulative diff between two commits (`git diff from..to`).
+    /// Triggered by the 2-commit comparison flow once both endpoints are
+    /// chosen via Space / Ctrl+click.
+    OpenCompareDiff {
+        from_hash: String,
+        to_hash: String,
+    },
     AvatarsUpdated,
     ClearStatusLine,
     UpdateStatusInput(String, Option<u16>, Option<String>),
@@ -524,6 +531,9 @@ pub enum UserEvent {
     FileHistory,
     // Load more commits (extends the initial_load_count by load_more_count)
     LoadMore,
+    // 2-commit comparison: Space / Ctrl+click toggles a "marked" commit
+    // and, on a second commit, opens the cumulative diff between them.
+    MarkCompare,
 }
 
 impl<'de> Deserialize<'de> for UserEvent {
@@ -585,6 +595,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "fuzzy_toggle" => Ok(UserEvent::FuzzyToggle),
                         "refresh" => Ok(UserEvent::Refresh),
                         "load_more" => Ok(UserEvent::LoadMore),
+                        "mark_compare" => Ok(UserEvent::MarkCompare),
                         "push" => Ok(UserEvent::Push),
                         "pull" => Ok(UserEvent::Pull),
                         "config" => Ok(UserEvent::Config),

@@ -583,6 +583,11 @@ impl App<'_> {
                     self.clear_terminal(terminal)?;
                     self.open_stash_diff(stash_ref);
                 }
+                AppEvent::OpenCompareDiff { from_hash, to_hash } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_compare_diff(from_hash, to_hash);
+                }
                 AppEvent::CloseDiff => {
                     self.close_diff();
                     self.clear_image(Some(terminal))?;
@@ -1130,11 +1135,18 @@ impl App<'_> {
         let is_search_active = self.view.is_search_active();
         let is_search_querying = self.view.is_search_querying();
         let is_config_active = self.view.is_config_active();
+        // 2-commit compare flow: when a mark is active in the list view, the
+        // entire footer swaps over to a dedicated mode — left side shows the
+        // "Comparison: <a> → <b>" indicator (with the cursor side updating
+        // live as the user navigates), right side replaces the usual shortcut
+        // bar with compare-specific actions.
+        let compare_pending = self.view.list_compare_pending();
         let show_enhanced = matches!(
             &self.app_status.status_line,
             StatusLine::None | StatusLine::NotificationInfo(_)
         ) && !is_search_active
-            && !is_config_active;
+            && !is_config_active
+            && compare_pending.is_none();
 
         let mut spans = match &self.app_status.status_line {
             // Numeric prefix is now rendered in the header (left of the logo),
@@ -1237,6 +1249,11 @@ impl App<'_> {
                 self.view
                     .config_footer_hint()
                     .unwrap_or_else(|| "⌘ Enter/⇆:cycle".into())
+            } else if compare_pending.is_some() {
+                // Dedicated compare-pending shortcut bar — completely
+                // replaces the usual list view shortcuts so the user knows
+                // unambiguously which actions are relevant in this mode.
+                "⌘ Space:compare▕▏↑↓:navigate▕▏Esc:cancel".into()
             } else {
                 match &self.view {
                     View::List(_) => {
@@ -1259,6 +1276,10 @@ impl App<'_> {
                         .uncommitted_footer_hint()
                         .unwrap_or_else(String::new),
                     View::FileHistory(_) => "⌘ ?:help".into(),
+                    View::Compare(_) => self
+                        .view
+                        .compare_footer_hint()
+                        .unwrap_or_else(|| "⌘ Tab:focus▕▏↑↓:navigate▕▏Esc:close".into()),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -1318,7 +1339,47 @@ impl App<'_> {
             area
         };
 
-        if show_enhanced {
+        // Compare-pending mode: replace the LEFT side (HEAD info + dirty
+        // counts) with the live "Comparison: marked → cursor" indicator. The
+        // selected hash slot updates on every render as the cursor moves;
+        // shows `...` when the cursor sits on the marked commit itself or on
+        // the Uncommitted row (where comparison is impossible).
+        if let Some((marked, cursor)) = compare_pending.as_ref() {
+            let short = |h: &str| h.chars().take(7).collect::<String>();
+            let marked_short = short(marked.as_str());
+            let target_short = match cursor {
+                Some(c) if c != marked => short(c.as_str()),
+                _ => "...".to_string(),
+            };
+            // The "Comparison: " label keeps the violet bg badge — it's the
+            // mode indicator. The two SHAs themselves render in the regular
+            // commit-list hash color (no bg) so they look exactly like the
+            // SHA column the user is reading from.
+            spans.push(Span::styled(
+                " Comparison: ",
+                Style::default()
+                    .fg(self.ctx.color_theme.list_compare_marked_fg)
+                    .bg(self.ctx.color_theme.list_compare_marked_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                marked_short,
+                Style::default()
+                    .fg(self.ctx.color_theme.list_hash_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                " → ",
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ));
+            spans.push(Span::styled(
+                target_short,
+                Style::default()
+                    .fg(self.ctx.color_theme.list_hash_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else if show_enhanced {
             match self.repository.head() {
                 Head::Branch { name } => {
                     let branch_color = self
@@ -1633,9 +1694,73 @@ impl App<'_> {
         }
     }
 
+    /// Handle the 2-commit comparison flow. Detects older/newer order from
+    /// commit dates, loads `git diff <older>..<newer>`, and opens the result
+    /// in DiffView. Clears the compare mark on the way out so subsequent
+    /// Space starts a fresh selection.
+    fn open_compare_diff(&mut self, from_hash: String, to_hash: String) {
+        let mut commit_list_state = match self.view {
+            View::List(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        // Mark is consumed on opening — UX described in the plan.
+        commit_list_state.clear_compare_mark();
+
+        let repo_path = self.repository.path().to_path_buf();
+
+        // Order detection: find both commits in the loaded list and pick the
+        // older one as the diff base. Falls back to (from, to) if either
+        // can't be located (rare — only if hashes drifted out of the loaded
+        // window between marking and confirming).
+        let (older, newer) = {
+            let from = self.repository.commit(&CommitHash::from(from_hash.as_str()));
+            let to = self.repository.commit(&CommitHash::from(to_hash.as_str()));
+            match (from, to) {
+                (Some(f), Some(t)) if t.committer_date >= f.committer_date => {
+                    (from_hash.clone(), to_hash.clone())
+                }
+                (Some(_), Some(_)) => (to_hash.clone(), from_hash.clone()),
+                _ => (from_hash.clone(), to_hash.clone()),
+            }
+        };
+
+        match DiffEntry::load_for_commit_range(&repo_path, &older, &newer, 3) {
+            Ok(diff_entries) if !diff_entries.is_empty() => {
+                // Open the dedicated 2-pane CompareView (file list on the
+                // left, full diff of the selected file on the right). The
+                // CompareView owns the commit_list_state and rebuilds an
+                // internal DiffView on every file selection change.
+                self.view = View::of_compare(
+                    commit_list_state,
+                    diff_entries,
+                    older,
+                    newer,
+                    repo_path,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Ok(_) => {
+                self.ec.send(AppEvent::NotifyInfo(
+                    "No differences between the two commits.".into(),
+                ));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
     fn close_diff(&mut self) {
         self.file_stream.clear();
         if let View::Diff(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state().unwrap();
+            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        } else if let View::Compare(ref mut view) = self.view {
+            // CompareView shares CloseDiff with the regular diff close path —
+            // it owns the commit list state directly and returns to List view.
             let commit_list_state = view.take_list_state().unwrap();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
         }
@@ -2317,7 +2442,12 @@ impl App<'_> {
                 true
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                self.view.handle_click(mouse.column, mouse.row);
+                use ratatui::crossterm::event::KeyModifiers;
+                if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.view.handle_shift_click(mouse.column, mouse.row);
+                } else {
+                    self.view.handle_click(mouse.column, mouse.row);
+                }
                 true
             }
             MouseEventKind::Moved => {

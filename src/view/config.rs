@@ -468,8 +468,10 @@ impl<'a> ConfigView<'a> {
             }
             2 => {
                 let prev = match self.ui_config.common.diff_mode {
-                    DiffMode::Enhanced => DiffMode::Raw,
+                    DiffMode::Enhanced => DiffMode::SideBySideEnhanced,
                     DiffMode::Raw => DiffMode::Enhanced,
+                    DiffMode::SideBySide => DiffMode::Raw,
+                    DiffMode::SideBySideEnhanced => DiffMode::SideBySide,
                 };
                 self.ui_config.common.set_diff_mode(prev);
             }
@@ -534,7 +536,9 @@ impl<'a> ConfigView<'a> {
             2 => {
                 let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
-                    DiffMode::Raw => DiffMode::Enhanced,
+                    DiffMode::Raw => DiffMode::SideBySide,
+                    DiffMode::SideBySide => DiffMode::SideBySideEnhanced,
+                    DiffMode::SideBySideEnhanced => DiffMode::Enhanced,
                 };
                 self.ui_config.common.set_diff_mode(next);
             }
@@ -1177,6 +1181,8 @@ fn diff_mode_display(mode: DiffMode) -> String {
     match mode {
         DiffMode::Enhanced => "Enhanced".to_string(),
         DiffMode::Raw => "Raw".to_string(),
+        DiffMode::SideBySide => "Side by side".to_string(),
+        DiffMode::SideBySideEnhanced => "Side by side (enhanced)".to_string(),
     }
 }
 

@@ -296,6 +296,13 @@ pub struct CommitListState<'a> {
     search_input: Input,
     search_matches: Vec<SearchMatch>,
 
+    /// First endpoint of a 2-commit comparison. `Some(hash)` puts the list
+    /// view in compare-pending mode: the marked row is highlighted, and the
+    /// next Space / Ctrl+click on a different commit opens the
+    /// cumulative diff between the two. Cleared on Esc, on toggle, or after
+    /// a successful comparison view is opened.
+    marked_compare_commit: Option<CommitHash>,
+
     selected: usize,
     offset: usize,
     total: usize,
@@ -362,6 +369,7 @@ impl<'a> CommitListState<'a> {
             search_state: SearchState::Inactive,
             search_input: Input::default(),
             search_matches: vec![SearchMatch::default(); total],
+            marked_compare_commit: None,
             selected: 0,
             offset: 0,
             total,
@@ -702,6 +710,38 @@ impl<'a> CommitListState<'a> {
     pub fn is_uncommitted_selected(&self) -> bool {
         let info = &self.commits[self.current_selected_index()];
         info.is_uncommitted
+    }
+
+    /// Hash of the commit currently marked as the first endpoint of a 2-commit
+    /// comparison, or `None` if no mark is active.
+    pub fn marked_compare_commit(&self) -> Option<&CommitHash> {
+        self.marked_compare_commit.as_ref()
+    }
+
+    /// Toggle the compare mark on the currently selected commit. Does nothing
+    /// (and returns `None`) when the cursor is on the Uncommitted Changes row,
+    /// since a synthetic uncommitted hash has no real ancestry to diff
+    /// against. Returns the new mark state for caller-side notifications.
+    pub fn toggle_compare_mark(&mut self) -> Option<CommitHash> {
+        if self.is_uncommitted_selected() {
+            return None;
+        }
+        let current = self.selected_commit_hash().clone();
+        match &self.marked_compare_commit {
+            Some(h) if *h == current => {
+                // Toggle off: space on the already-marked row clears it.
+                self.marked_compare_commit = None;
+                None
+            }
+            _ => {
+                self.marked_compare_commit = Some(current.clone());
+                Some(current)
+            }
+        }
+    }
+
+    pub fn clear_compare_mark(&mut self) {
+        self.marked_compare_commit = None;
     }
 
     fn current_selected_index(&self) -> usize {
@@ -1803,7 +1843,29 @@ impl CommitList<'_> {
         spans.insert(0, Span::raw(" "));
         spans.push(Span::raw(" "));
         let mut line = Line::from(spans);
-        if i == state.selected && state.hovered_branch.is_none() && state.hovered_tag.is_none() {
+
+        // Check whether this visible row is the compare-mark target. The mark
+        // wins over the selection highlight so the user always sees which
+        // commit was first picked, even when the cursor moves onto it.
+        let absolute_idx = state.offset + i;
+        let is_marked = state
+            .marked_compare_commit
+            .as_ref()
+            .zip(state.commits.get(absolute_idx))
+            .map(|(marked, info)| info.commit.commit_hash == *marked)
+            .unwrap_or(false);
+
+        if is_marked {
+            // Compare-mark uses its own theme tokens — each theme picks a
+            // saturated, accent-colored variant of its selection palette so
+            // the marked row stands out clearly without clashing.
+            line = line
+                .bg(self.ctx.color_theme.list_compare_marked_bg)
+                .fg(self.ctx.color_theme.list_compare_marked_fg);
+        } else if i == state.selected
+            && state.hovered_branch.is_none()
+            && state.hovered_tag.is_none()
+        {
             line = line
                 .bg(self.ctx.color_theme.list_selected_bg)
                 .fg(self.ctx.color_theme.list_selected_fg);

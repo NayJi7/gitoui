@@ -17,7 +17,7 @@ go_to_bottom = ["shift-g"]
 scroll_down = ["ctrl-e"]
 scroll_up = ["ctrl-y"]
 page_up = ["ctrl-b", "pageup"]
-page_down = ["ctrl-f", "pagedown", "space"]
+page_down = ["ctrl-f", "pagedown"]
 half_page_up = ["ctrl-u"]
 half_page_down = ["ctrl-d"]
 select_top = []
@@ -33,6 +33,11 @@ ignore_case_toggle = ["s"]
 fuzzy_toggle = ["z"]
 refresh = ["r"]
 load_more = ["]"]
+
+# 2-commit comparison: Space on a first commit marks it, then Space on a
+# second commit opens `git diff <a>..<b>`. The mouse equivalent is
+# Ctrl+click (Space has no mouse counterpart).
+mark_compare = ["space"]
 
 push = ["shift-p"]
 pull = ["shift-u"]

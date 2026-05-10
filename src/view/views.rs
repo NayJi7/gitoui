@@ -7,10 +7,10 @@ use crate::{
     event::{Sender, UserEventWithCount},
     git::{Commit, CommitHash, FileChange, Ref},
     view::{
-        branch_detail::BranchDetailView, config::ConfigView, detail::DetailView,
-        dialog::DialogView, diff::DiffView, file_history::FileHistoryView, help::HelpView,
-        list::ListView, refs::RefsView, tag_detail::TagDetailView, uncommitted::UncommittedView,
-        user_command::UserCommandView,
+        branch_detail::BranchDetailView, compare::CompareView, config::ConfigView,
+        detail::DetailView, dialog::DialogView, diff::DiffView,
+        file_history::FileHistoryView, help::HelpView, list::ListView, refs::RefsView,
+        tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -31,6 +31,7 @@ pub enum View<'a> {
     TagDetail(Box<TagDetailView<'a>>),
     Uncommitted(Box<UncommittedView<'a>>),
     FileHistory(Box<FileHistoryView<'a>>),
+    Compare(Box<CompareView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -49,6 +50,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.handle_event(event_with_count, key_event),
             View::Uncommitted(view) => view.handle_event(event_with_count, key_event),
             View::FileHistory(view) => view.handle_event(event_with_count, key_event),
+            View::Compare(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -67,6 +69,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.render(f, area),
             View::Uncommitted(view) => view.render(f, area),
             View::FileHistory(view) => view.render(f, area),
+            View::Compare(view) => view.render(f, area),
         }
     }
 
@@ -85,6 +88,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.update_layout(area),
             View::Uncommitted(view) => view.update_layout(area),
             View::FileHistory(view) => view.update_layout(area),
+            View::Compare(view) => view.update_layout(area),
         }
     }
 
@@ -103,6 +107,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.prepare_graph_uploads(),
             View::Uncommitted(view) => view.prepare_graph_uploads(),
             View::FileHistory(view) => view.prepare_graph_uploads(),
+            View::Compare(view) => view.prepare_graph_uploads(),
         }
     }
 
@@ -117,6 +122,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.clear_graph_images(),
             View::Uncommitted(view) => view.clear_graph_images(),
             View::FileHistory(view) => view.clear_graph_images(),
+            View::Compare(view) => view.clear_graph_images(),
             _ => {}
         }
     }
@@ -152,6 +158,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.drain_pending_graph_uploads(),
             View::Uncommitted(view) => view.drain_pending_graph_uploads(),
             View::FileHistory(view) => view.drain_pending_graph_uploads(),
+            View::Compare(view) => view.drain_pending_graph_uploads(),
         }
     }
 
@@ -170,6 +177,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.graph_image_ids_sorted(),
             View::Uncommitted(view) => view.graph_image_ids_sorted(),
             View::FileHistory(view) => view.graph_image_ids_sorted(),
+            View::Compare(view) => view.graph_image_ids_sorted(),
         }
     }
 
@@ -190,6 +198,7 @@ impl<'a> View<'a> {
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
             View::FileHistory(_) => false,
+            View::Compare(_) => false,
         }
     }
 
@@ -210,6 +219,7 @@ impl<'a> View<'a> {
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
             View::FileHistory(_) => false,
+            View::Compare(_) => false,
         }
     }
 
@@ -231,6 +241,7 @@ impl<'a> View<'a> {
             View::TagDetail(_) => None,
             View::Uncommitted(_) => None,
             View::FileHistory(_) => None,
+            View::Compare(_) => None,
         }
     }
 
@@ -255,6 +266,36 @@ impl<'a> View<'a> {
     pub fn config_footer_hint(&self) -> Option<String> {
         match self {
             View::Config(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn compare_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Compare(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    /// Returns the current 2-commit-compare state for the List view, used by
+    /// the status bar to swap into a dedicated "Comparison: <a> → <b>" mode.
+    /// `Some((marked, selected))` means a mark is active in the List view;
+    /// `selected` is the commit currently under the cursor (may equal `marked`
+    /// when the cursor is back on the marked row, and may be `None` when the
+    /// cursor sits on the Uncommitted Changes row).
+    pub fn list_compare_pending(&self) -> Option<(crate::git::CommitHash, Option<crate::git::CommitHash>)> {
+        match self {
+            View::List(view) => {
+                let state = view.as_list_state();
+                state.marked_compare_commit().map(|marked| {
+                    let cursor = if state.is_uncommitted_selected() {
+                        None
+                    } else {
+                        Some(state.selected_commit_hash().clone())
+                    };
+                    (marked.clone(), cursor)
+                })
+            }
             _ => None,
         }
     }
@@ -378,7 +419,18 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.handle_click(col, row),
             View::Uncommitted(view) => view.handle_click(col, row),
             View::FileHistory(view) => view.handle_click(col, row),
+            View::Compare(view) => view.handle_click(col, row),
             _ => {}
+        }
+    }
+
+    /// Ctrl+click variant: only meaningful for the List view (drives the
+    /// 2-commit compare flow). Other views fall back to a plain click so the
+    /// modifier is silently ignored where it has no semantic.
+    pub fn handle_shift_click(&mut self, col: u16, row: u16) {
+        match self {
+            View::List(view) => view.handle_shift_click(col, row),
+            _ => self.handle_click(col, row),
         }
     }
 
@@ -417,6 +469,7 @@ impl<'a> View<'a> {
                 view.handle_mouse_move(col, row);
                 true
             }
+            View::Compare(view) => view.handle_mouse_move(col, row),
             _ => false,
         }
     }
@@ -436,6 +489,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.refresh(),
             View::Uncommitted(view) => view.refresh(),
             View::FileHistory(view) => view.refresh(),
+            View::Compare(view) => view.refresh(),
         }
     }
 
@@ -466,7 +520,28 @@ impl<'a> View<'a> {
             View::TagDetail(v) => v.update_color_theme(theme),
             View::Uncommitted(v) => v.update_color_theme(theme),
             View::FileHistory(v) => v.update_color_theme(theme),
+            View::Compare(v) => v.update_color_theme(theme),
         }
+    }
+
+    pub fn of_compare(
+        commit_list_state: CommitListState<'a>,
+        diff_entries: Vec<crate::git::diff::DiffEntry>,
+        older_hash: String,
+        newer_hash: String,
+        repo_path: std::path::PathBuf,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Compare(Box::new(CompareView::new(
+            commit_list_state,
+            diff_entries,
+            older_hash,
+            newer_hash,
+            repo_path,
+            ctx,
+            tx,
+        )))
     }
 
     pub fn of_file_history(

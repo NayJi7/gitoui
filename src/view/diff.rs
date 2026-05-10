@@ -580,12 +580,57 @@ impl<'a> DiffView<'a> {
             } else {
                 (0, 0)
             };
-            let mut title_spans = vec![Span::styled(
-                format!("─── {} ", self.title),
-                Style::default()
-                    .fg(self.ctx.color_theme.fg)
-                    .add_modifier(Modifier::BOLD),
-            )];
+            // Compare mode: split "Compare <older>..<newer>" into separate
+            // colored spans so older renders in deletion-red (left, the
+            // "removed-from" endpoint) and newer in addition-green (right,
+            // the "added-to" endpoint). The double-dot is replaced by " → "
+            // for clarity. Falls back to the plain single-span title for any
+            // other diff (single-commit, file diff, stash, uncommitted).
+            let mut title_spans: Vec<Span<'static>> =
+                if let Some(rest) = self.title.strip_prefix("Compare ") {
+                    if let Some((older, newer)) = rest.split_once("..") {
+                        vec![
+                            Span::styled(
+                                "─── Compare ".to_string(),
+                                Style::default()
+                                    .fg(self.ctx.color_theme.fg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                older.to_string(),
+                                Style::default()
+                                    .fg(self.ctx.color_theme.detail_file_change_delete_fg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                " → ".to_string(),
+                                Style::default()
+                                    .fg(self.ctx.color_theme.fg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{} ", newer),
+                                Style::default()
+                                    .fg(self.ctx.color_theme.detail_file_change_add_fg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]
+                    } else {
+                        vec![Span::styled(
+                            format!("─── {} ", self.title),
+                            Style::default()
+                                .fg(self.ctx.color_theme.fg)
+                                .add_modifier(Modifier::BOLD),
+                        )]
+                    }
+                } else {
+                    vec![Span::styled(
+                        format!("─── {} ", self.title),
+                        Style::default()
+                            .fg(self.ctx.color_theme.fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                };
             if add_count > 0 {
                 title_spans.push(Span::styled(
                     format!("+{add_count} "),
@@ -807,7 +852,525 @@ impl<'a> DiffView<'a> {
         match self.ctx.ui_config.common.diff_mode {
             DiffMode::Raw => self.build_raw_diff_lines(diff_area),
             DiffMode::Enhanced => self.build_base_lines(diff_area.width),
+            DiffMode::SideBySide => self.build_sbs_diff_lines(diff_area),
+            DiffMode::SideBySideEnhanced => self.build_sbs_enhanced_diff_lines(diff_area),
         }
+    }
+
+    /// Side-by-side renderer: old version on the left, new on the right,
+    /// vertical bar between. Consecutive Deletion+Addition runs are zipped row
+    /// by row so a "modification" shows the old and new variants on the same
+    /// row. Pure deletions get an empty right cell, pure additions an empty
+    /// left cell. Headers (file / hunk) span the full width on their own line.
+    /// Long content is truncated with `…` rather than wrapped — wrapping each
+    /// half independently would misalign the pair.
+    fn build_sbs_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
+        use crate::git::diff::DiffLineType;
+
+        let total_width = diff_area.width as usize;
+        // Layout: [half] [│] [half] — 1 col reserved for the separator.
+        let half = total_width.saturating_sub(1) / 2;
+        if half == 0 {
+            return Vec::new();
+        }
+
+        let mut lines = Vec::new();
+        let dim_style = Style::default()
+            .fg(self.ctx.color_theme.detail_hash_fg)
+            .add_modifier(Modifier::DIM);
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let add_style = Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg);
+        let del_style = Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg);
+        let ctx_style = Style::default().fg(self.ctx.color_theme.fg);
+        let warn_style = Style::default()
+            .fg(self.ctx.color_theme.status_warn_fg)
+            .add_modifier(Modifier::BOLD);
+
+        // Push a single full-width line styled uniformly.
+        let push_full = |lines: &mut Vec<Line<'static>>, content: String, style: Style| {
+            for chunk in wrap_text(&content, total_width) {
+                lines.push(Line::from(Span::styled(chunk.to_string(), style)));
+            }
+        };
+
+        // Push a paired left/right row with the vertical separator. Each side
+        // is independently truncated to `half` cells; an empty side renders as
+        // pure padding so the separator stays at a fixed column.
+        let push_row =
+            |lines: &mut Vec<Line<'static>>,
+             left: Option<(String, Style)>,
+             right: Option<(String, Style)>| {
+                let left_text = left
+                    .as_ref()
+                    .map(|(t, _)| truncate_to_width(t, half))
+                    .unwrap_or_else(|| pad_to_width("", half));
+                let right_text = right
+                    .as_ref()
+                    .map(|(t, _)| truncate_to_width(t, half))
+                    .unwrap_or_else(|| pad_to_width("", half));
+                let left_style = left.map(|(_, s)| s).unwrap_or_default();
+                let right_style = right.map(|(_, s)| s).unwrap_or_default();
+                lines.push(Line::from(vec![
+                    Span::styled(left_text, left_style),
+                    Span::styled("│", sep_style),
+                    Span::styled(right_text, right_style),
+                ]));
+            };
+
+        for entry in &self.diff_entries {
+            // File path banner — full width.
+            if let Some(path) = entry.new_path.as_ref().or(entry.old_path.as_ref()) {
+                push_full(&mut lines, format!("── {} ──", path), dim_style);
+            }
+
+            for hunk in &entry.hunks {
+                // Walk hunk lines, batching consecutive del / add runs so we can
+                // pair them cell by cell.
+                let mut i = 0;
+                let h_lines = &hunk.lines;
+                while i < h_lines.len() {
+                    let l = &h_lines[i];
+                    match l.line_type {
+                        DiffLineType::HunkHeader | DiffLineType::FileHeader => {
+                            push_full(&mut lines, l.content.clone(), dim_style);
+                            i += 1;
+                        }
+                        DiffLineType::BinaryNote => {
+                            push_full(&mut lines, format!(" {}", l.content), warn_style);
+                            i += 1;
+                        }
+                        DiffLineType::Context => {
+                            // Context appears identically on both sides.
+                            let text = format!(" {}", l.content);
+                            push_row(
+                                &mut lines,
+                                Some((text.clone(), ctx_style)),
+                                Some((text, ctx_style)),
+                            );
+                            i += 1;
+                        }
+                        DiffLineType::Deletion => {
+                            // Collect run of consecutive deletions.
+                            let mut dels: Vec<String> = Vec::new();
+                            while i < h_lines.len()
+                                && matches!(h_lines[i].line_type, DiffLineType::Deletion)
+                            {
+                                dels.push(format!("-{}", h_lines[i].content));
+                                i += 1;
+                            }
+                            // Then collect the immediately-following run of additions
+                            // (treat them as paired modifications).
+                            let mut adds: Vec<String> = Vec::new();
+                            while i < h_lines.len()
+                                && matches!(h_lines[i].line_type, DiffLineType::Addition)
+                            {
+                                adds.push(format!("+{}", h_lines[i].content));
+                                i += 1;
+                            }
+                            // Zip them, padding the shorter side with a None cell.
+                            let max = dels.len().max(adds.len());
+                            for j in 0..max {
+                                let l_cell = dels.get(j).cloned().map(|t| (t, del_style));
+                                let r_cell = adds.get(j).cloned().map(|t| (t, add_style));
+                                push_row(&mut lines, l_cell, r_cell);
+                            }
+                        }
+                        DiffLineType::Addition => {
+                            // Pure additions (no preceding deletion run).
+                            let text = format!("+{}", l.content);
+                            push_row(&mut lines, None, Some((text, add_style)));
+                            i += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        lines
+    }
+
+    /// Side-by-side renderer with the Enhanced styling. Mirrors
+    /// `build_base_lines` exactly (skips hunk headers, computes `─── N lines
+    /// unchanged ───` gap markers between hunks, displays visible_up/down
+    /// context from `new_file_lines`) but emits paired left/right rows. The
+    /// `show more` buttons are not yet rendered in this mode — the click
+    /// area / gap-state plumbing is tightly bound to the single-column
+    /// rendering. Switch to Enhanced for gap navigation.
+    fn build_sbs_enhanced_diff_lines(&mut self, diff_area: &Rect) -> Vec<Line<'static>> {
+        use crate::git::diff::DiffLineType;
+
+        let total_width = diff_area.width as usize;
+        let half = total_width.saturating_sub(1) / 2;
+        // Each half: 7 chars for the "{:>4} │ " line-number gutter, the rest
+        // for content. Bail out if the area is too narrow to fit a gutter.
+        const GUTTER: usize = 7;
+        if half <= GUTTER + 1 {
+            return Vec::new();
+        }
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        let entry = match self.diff_entries.first() {
+            Some(e) => e,
+            None => return lines,
+        };
+
+        let file_path = entry
+            .new_path
+            .as_deref()
+            .or(entry.old_path.as_deref())
+            .unwrap_or("");
+        let mut highlighter = SyntaxHighlighter::new_with_theme(
+            file_path,
+            &self.ctx.core_config.option.syntax_theme,
+        );
+
+        // Theme-aware backgrounds — same logic as build_base_lines so the
+        // visual feel matches Enhanced exactly.
+        let bg_is_light = match self.ctx.color_theme.bg {
+            ratatui::style::Color::Rgb(r, g, b) => {
+                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) > 128.0
+            }
+            _ => false,
+        };
+        let add_bg = if bg_is_light {
+            Color::Rgb(172, 242, 189)
+        } else {
+            Color::Rgb(32, 68, 45)
+        };
+        let del_bg = if bg_is_light {
+            Color::Rgb(255, 186, 181)
+        } else {
+            Color::Rgb(68, 35, 40)
+        };
+
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let warn_style = Style::default()
+            .fg(self.ctx.color_theme.status_warn_fg)
+            .add_modifier(Modifier::BOLD);
+        let unchanged_label_style = Style::default()
+            .fg(self.ctx.color_theme.fg)
+            .add_modifier(Modifier::ITALIC);
+
+        // ── helpers ─────────────────────────────────────────────────────
+        // Render one half (gutter + syntax-highlighted content), padded to
+        // exactly `half` cells with the supplied row background.
+        let render_half = |line_no: Option<u32>,
+                           content: &str,
+                           row_bg: Option<Color>,
+                           hl: &mut Option<SyntaxHighlighter>|
+         -> Vec<Span<'static>> {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            let gutter = match line_no {
+                Some(n) => format!("{:>4} │ ", n),
+                None => "     │ ".to_string(),
+            };
+            let mut gutter_style = Style::default().fg(sep_style.fg.unwrap_or(Color::Reset));
+            if let Some(bg) = row_bg {
+                gutter_style = gutter_style.bg(bg);
+            }
+            spans.push(Span::styled(gutter, gutter_style));
+
+            let content_w = half - GUTTER;
+            let truncated = truncate_to_width(content, content_w);
+            let visible_text: String = truncated.trim_end().to_string();
+            let pad_w = content_w.saturating_sub(visible_text.chars().count());
+            let mut base_style = Style::default();
+            if let Some(bg) = row_bg {
+                base_style = base_style.bg(bg);
+            }
+            if let Some(h) = hl {
+                let highlighted = h.highlight_line(&visible_text, base_style, None);
+                for s in highlighted {
+                    spans.push(s);
+                }
+            } else {
+                spans.push(Span::styled(visible_text, base_style));
+            }
+            if pad_w > 0 {
+                spans.push(Span::styled(" ".repeat(pad_w), base_style));
+            }
+            spans
+        };
+
+        // Build a paired row from optional left + right cells.
+        let push_paired_row = |lines: &mut Vec<Line<'static>>,
+                               left: Option<(Option<u32>, &str, Color)>,
+                               right: Option<(Option<u32>, &str, Color)>,
+                               hl: &mut Option<SyntaxHighlighter>| {
+            let mut row: Vec<Span<'static>> = Vec::new();
+            match left {
+                Some((no, content, bg)) => {
+                    row.extend(render_half(no, content, Some(bg), hl));
+                }
+                None => {
+                    row.push(Span::raw(" ".repeat(half)));
+                }
+            }
+            row.push(Span::styled("│", sep_style));
+            match right {
+                Some((no, content, bg)) => {
+                    row.extend(render_half(no, content, Some(bg), hl));
+                }
+                None => {
+                    row.push(Span::raw(" ".repeat(half)));
+                }
+            }
+            lines.push(Line::from(row));
+        };
+
+        // Push a single full-width line styled uniformly (banners, gap markers).
+        let push_full = |lines: &mut Vec<Line<'static>>, content: String, style: Style| {
+            for chunk in wrap_text(&content, total_width) {
+                lines.push(Line::from(Span::styled(chunk.to_string(), style)));
+            }
+        };
+
+        // Render an unchanged context line from `new_file_lines` on both
+        // sides (same line number on left and right since the line is shared
+        // between old and new).
+        let push_unchanged_context = |lines: &mut Vec<Line<'static>>,
+                                       line_no: usize,
+                                       new_file_lines: &[String],
+                                       hl: &mut Option<SyntaxHighlighter>| {
+            if line_no == 0 || line_no > new_file_lines.len() {
+                return;
+            }
+            let content = new_file_lines[line_no - 1].as_str();
+            let mut row: Vec<Span<'static>> = Vec::new();
+            row.extend(render_half(Some(line_no as u32), content, None, hl));
+            row.push(Span::styled("│", sep_style));
+            row.extend(render_half(Some(line_no as u32), content, None, hl));
+            lines.push(Line::from(row));
+        };
+
+        // ── helpers for hunk gap detection (mirrors build_base_lines) ──
+        fn hunk_first_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
+            hunk.lines.iter().find_map(|l| {
+                if l.line_type == DiffLineType::Context {
+                    l.new_line_no
+                } else {
+                    None
+                }
+            })
+        }
+        fn hunk_last_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
+            hunk.lines.iter().rev().find_map(|l| {
+                if l.line_type == DiffLineType::Context {
+                    l.new_line_no
+                } else {
+                    None
+                }
+            })
+        }
+
+        let gap_states = self.gap_states.clone();
+        let new_file_lines = self.new_file_lines.clone();
+        let visible_default = 3usize;
+
+        // Render a gap. `edge`: None=middle, Some(true)=top, Some(false)=bottom.
+        // For SBS we don't yet emit clickable buttons — the `─── N lines
+        // unchanged ───` marker spans the full width, and visible_up/down
+        // context lines are emitted as paired rows.
+        let render_gap = |lines: &mut Vec<Line<'static>>,
+                          gap_start: u32,
+                          gap_end: u32,
+                          gidx: usize,
+                          hl: &mut Option<SyntaxHighlighter>,
+                          edge: Option<bool>| {
+            if gap_end <= gap_start {
+                return;
+            }
+            let total = (gap_end - gap_start) as usize;
+            let gap_state = gap_states.get(gidx).cloned().unwrap_or(GapState {
+                visible_up: if edge.is_some() { 0 } else { visible_default.min(total) },
+                visible_down: if edge.is_some() { 0 } else { visible_default.min(total) },
+                total,
+            });
+            let mut visible_up = gap_state.visible_up.min(total);
+            let mut visible_down = gap_state.visible_down.min(total);
+            if visible_up + visible_down > total {
+                visible_up = total.saturating_sub(visible_down);
+                visible_down = total.saturating_sub(visible_up);
+            }
+
+            match edge {
+                Some(true) => {
+                    // Top edge: marker first, then visible context up to the hunk.
+                    let hidden = total.saturating_sub(visible_up);
+                    if hidden > 0 {
+                        push_full(
+                            lines,
+                            format!("─── {} lines unchanged ───", hidden),
+                            unchanged_label_style,
+                        );
+                    }
+                    for i in 0..visible_up {
+                        let line_no = (gap_end - visible_up as u32 + i as u32) as usize;
+                        push_unchanged_context(lines, line_no, &new_file_lines, hl);
+                    }
+                }
+                Some(false) => {
+                    // Bottom edge: visible context first, then marker.
+                    for i in 0..visible_down {
+                        let line_no = (gap_start + i as u32) as usize;
+                        push_unchanged_context(lines, line_no, &new_file_lines, hl);
+                    }
+                    let hidden = total.saturating_sub(visible_down);
+                    if hidden > 0 {
+                        push_full(
+                            lines,
+                            format!("─── {} lines unchanged ───", hidden),
+                            unchanged_label_style,
+                        );
+                    }
+                }
+                None => {
+                    // Middle gap: visible_up trailing the previous hunk, then
+                    // marker, then visible_down leading the next hunk.
+                    for i in 0..visible_up {
+                        let line_no = (gap_start + i as u32) as usize;
+                        push_unchanged_context(lines, line_no, &new_file_lines, hl);
+                    }
+                    let hidden = total.saturating_sub(visible_up + visible_down);
+                    if hidden > 0 {
+                        push_full(
+                            lines,
+                            format!("─── {} lines unchanged ───", hidden),
+                            unchanged_label_style,
+                        );
+                    }
+                    for i in (0..visible_down).rev() {
+                        let line_no = (gap_end - i as u32 - 1) as usize;
+                        push_unchanged_context(lines, line_no, &new_file_lines, hl);
+                    }
+                }
+            }
+        };
+
+        // (No extra file banner — the diff view already renders
+        // "── Diff: <path> +N -M ──" above this content. Mirroring Enhanced.)
+
+        // ── top gap (before first hunk) ─────────────────────────────────
+        let mut gap_idx = 0usize;
+        if let Some(first_hunk) = entry.hunks.first() {
+            if let Some(first_new) = hunk_first_new_line(first_hunk) {
+                if first_new > 1 {
+                    render_gap(
+                        &mut lines,
+                        1,
+                        first_new,
+                        gap_idx,
+                        &mut highlighter,
+                        Some(true),
+                    );
+                    gap_idx += 1;
+                }
+            }
+        }
+
+        // ── walk hunks ──────────────────────────────────────────────────
+        for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
+            // Gap between hunks.
+            if hunk_idx > 0 {
+                if let Some(prev_hunk) = entry.hunks.get(hunk_idx - 1) {
+                    let prev_end = hunk_last_new_line(prev_hunk);
+                    let curr_start = hunk_first_new_line(hunk);
+                    if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
+                        if cs > pe + 1 {
+                            render_gap(
+                                &mut lines,
+                                pe + 1,
+                                cs,
+                                gap_idx,
+                                &mut highlighter,
+                                None,
+                            );
+                            gap_idx += 1;
+                        }
+                    }
+                }
+            }
+
+            // Hunk content — skip(1) to drop the @@ HunkHeader line.
+            let h_lines: Vec<&crate::git::diff::DiffLine> = hunk.lines.iter().skip(1).collect();
+            let mut i = 0;
+            while i < h_lines.len() {
+                let l = h_lines[i];
+                match l.line_type {
+                    DiffLineType::FileHeader | DiffLineType::HunkHeader => {
+                        // Defensive — should already be skipped by skip(1).
+                        i += 1;
+                    }
+                    DiffLineType::BinaryNote => {
+                        push_full(&mut lines, format!(" {}", l.content), warn_style);
+                        i += 1;
+                    }
+                    DiffLineType::Context => {
+                        let mut row: Vec<Span<'static>> = Vec::new();
+                        row.extend(render_half(l.old_line_no, &l.content, None, &mut highlighter));
+                        row.push(Span::styled("│", sep_style));
+                        row.extend(render_half(l.new_line_no, &l.content, None, &mut highlighter));
+                        lines.push(Line::from(row));
+                        i += 1;
+                    }
+                    DiffLineType::Deletion => {
+                        // Collect consecutive del + add runs, zip into pairs.
+                        let mut dels: Vec<&crate::git::diff::DiffLine> = Vec::new();
+                        while i < h_lines.len()
+                            && matches!(h_lines[i].line_type, DiffLineType::Deletion)
+                        {
+                            dels.push(h_lines[i]);
+                            i += 1;
+                        }
+                        let mut adds: Vec<&crate::git::diff::DiffLine> = Vec::new();
+                        while i < h_lines.len()
+                            && matches!(h_lines[i].line_type, DiffLineType::Addition)
+                        {
+                            adds.push(h_lines[i]);
+                            i += 1;
+                        }
+                        let max = dels.len().max(adds.len());
+                        for j in 0..max {
+                            let l_cell = dels.get(j).map(|d| {
+                                (d.old_line_no, d.content.as_str(), del_bg)
+                            });
+                            let r_cell = adds.get(j).map(|a| {
+                                (a.new_line_no, a.content.as_str(), add_bg)
+                            });
+                            push_paired_row(&mut lines, l_cell, r_cell, &mut highlighter);
+                        }
+                    }
+                    DiffLineType::Addition => {
+                        push_paired_row(
+                            &mut lines,
+                            None,
+                            Some((l.new_line_no, l.content.as_str(), add_bg)),
+                            &mut highlighter,
+                        );
+                        i += 1;
+                    }
+                }
+            }
+        }
+
+        // ── bottom gap (after last hunk) ────────────────────────────────
+        if let Some(last_hunk) = entry.hunks.last() {
+            if let Some(last_new) = hunk_last_new_line(last_hunk) {
+                let file_total = new_file_lines.len() as u32;
+                if last_new < file_total {
+                    render_gap(
+                        &mut lines,
+                        last_new + 1,
+                        file_total + 1,
+                        gap_idx,
+                        &mut highlighter,
+                        Some(false),
+                    );
+                }
+            }
+        }
+
+        lines
     }
 
     fn build_raw_diff_lines(&self, diff_area: &Rect) -> Vec<Line<'static>> {
@@ -1834,6 +2397,39 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
     }
 
     lines
+}
+
+/// Truncate `text` to `max_width` cells, replacing the trailing portion with
+/// `…` if it overflows. The result is exactly `max_width` cells wide,
+/// right-padded with spaces if `text` is shorter — keeping the column
+/// boundaries fixed in the side-by-side diff renderer.
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let count = text.chars().count();
+    if count <= max_width {
+        // Pad with spaces to reach exactly max_width cells.
+        let pad = max_width - count;
+        let mut out = String::with_capacity(text.len() + pad);
+        out.push_str(text);
+        for _ in 0..pad {
+            out.push(' ');
+        }
+        out
+    } else {
+        // Take max_width-1 chars + ellipsis. (max_width >= 1 here since we
+        // returned early on 0 above.)
+        let mut out: String = text.chars().take(max_width - 1).collect();
+        out.push('…');
+        out
+    }
+}
+
+/// Pad an empty (or short) string to exactly `width` cells of spaces — used
+/// for the empty side of a paired side-by-side row.
+fn pad_to_width(text: &str, width: usize) -> String {
+    truncate_to_width(text, width)
 }
 
 fn next_button_focus(

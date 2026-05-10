@@ -71,6 +71,38 @@ impl DiffEntry {
         parse_diff(&stdout)
     }
 
+    /// Cumulative diff between two arbitrary commits — used by the 2-commit
+    /// comparison mode (Space / Ctrl+click on two rows).
+    /// Runs `git diff <from>..<to>` so changes appear as if going from the
+    /// older endpoint to the newer one. Order detection is the caller's
+    /// responsibility.
+    pub fn load_for_commit_range(
+        repo_path: &Path,
+        from_hash: &str,
+        to_hash: &str,
+        context_lines: u32,
+    ) -> Result<Vec<Self>, String> {
+        let output = Command::new("git")
+            .args([
+                "diff",
+                &format!("--unified={}", context_lines),
+                &format!("{}..{}", from_hash, to_hash),
+            ])
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("Failed to run git diff: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "git diff failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_diff(&stdout)
+    }
+
     pub fn load_for_file(repo_path: &Path, hash: &str, file_path: &str) -> Result<Self, String> {
         Self::load_for_file_with_context(repo_path, hash, file_path, 3)
     }

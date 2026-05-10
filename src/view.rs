@@ -1,6 +1,7 @@
 mod views;
 
 pub mod branch_detail;
+mod compare;
 mod config;
 mod detail;
 mod graph_preview;
