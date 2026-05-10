@@ -202,6 +202,26 @@ impl<'a> ListView<'a> {
                     }
                     self.update_matched_message();
                 }
+                // `x` (UserEvent::Discard) is repurposed here as the regex
+                // toggle. The keymap is global (one key → one UserEvent), so
+                // we can't add a separate UserEvent::RegexToggle bound to `x`
+                // without colliding with the existing `x → Discard` binding
+                // used by the Uncommitted view. Instead we intercept Discard
+                // only inside the SearchState::Applied block — outside this
+                // block the list view ignores Discard, preserving the
+                // Uncommitted view's discard semantics.
+                UserEvent::Discard => {
+                    if let Some((ignore_case, fuzzy, regex)) =
+                        self.as_mut_list_state().toggle_regex()
+                    {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        ctx.core_config.search.regex = regex;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
+                    self.update_matched_message();
+                }
                 UserEvent::Cancel => {
                     self.as_mut_list_state().cancel_search();
                     self.clear_search_query();

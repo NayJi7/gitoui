@@ -257,6 +257,8 @@ pub struct CoreSearchConfig {
     pub ignore_case: bool,
     #[default = false]
     pub fuzzy: bool,
+    #[default = false]
+    pub regex: bool,
 }
 
 #[optional]
@@ -681,6 +683,7 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
         core.search.ignore_case,
     );
     set_nested_bool(&mut doc, &["core", "search", "fuzzy"], core.search.fuzzy);
+    set_nested_bool(&mut doc, &["core", "search", "regex"], core.search.regex);
 
     set_nested_string(
         &mut doc,

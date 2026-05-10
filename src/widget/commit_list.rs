@@ -7,6 +7,7 @@ use std::{
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use laurier::highlight::highlight_matched_text;
 use once_cell::sync::Lazy;
+use regex::RegexBuilder;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{Event, KeyEvent},
@@ -95,6 +96,7 @@ pub enum SearchState {
         match_index: usize,
         ignore_case: bool,
         fuzzy: bool,
+        regex: bool,
         transient_message: TransientMessage,
     },
     Applied {
@@ -102,6 +104,7 @@ pub enum SearchState {
         total_match: usize,
         ignore_case: bool,
         fuzzy: bool,
+        regex: bool,
     },
 }
 
@@ -136,6 +139,8 @@ pub enum TransientMessage {
     IgnoreCaseOn,
     FuzzyOff,
     FuzzyOn,
+    RegexOff,
+    RegexOn,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -191,26 +196,59 @@ impl SearchMatchPosition {
 }
 
 struct SearchMatcher {
+    /// The search query; lowercased when `ignore_case` is on AND we're not in
+    /// regex mode (regex case-insensitivity is handled by RegexBuilder instead).
     query: String,
     ignore_case: bool,
     fuzzy: bool,
+    regex: bool,
+    /// Pre-compiled regex when `regex` is on. `None` if regex is off OR the
+    /// pattern failed to compile — in the latter case the matcher returns no
+    /// matches at all (silent fallback; the empty result list signals the user
+    /// that their pattern is invalid).
+    regex_compiled: Option<regex::Regex>,
 }
 
 impl SearchMatcher {
-    fn new(query: &str, ignore_case: bool, fuzzy: bool) -> Self {
-        let query = if ignore_case {
+    fn new(query: &str, ignore_case: bool, fuzzy: bool, regex: bool) -> Self {
+        // Regex takes precedence over fuzzy when both happen to be enabled —
+        // fuzzy is a substring-style matcher, regex is a strict pattern match.
+        let regex_compiled = if regex && !query.is_empty() {
+            RegexBuilder::new(query)
+                .case_insensitive(ignore_case)
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        // Lowercasing the stored query only matters for the literal / fuzzy
+        // paths; regex uses RegexBuilder's case_insensitive flag instead.
+        let stored_query = if ignore_case && !regex {
             query.to_lowercase()
         } else {
             query.into()
         };
         Self {
-            query,
+            query: stored_query,
             ignore_case,
             fuzzy,
+            regex,
+            regex_compiled,
         }
     }
 
     fn matched_position(&self, s: &str) -> Option<SearchMatchPosition> {
+        if self.regex {
+            // regex_compiled is None if compilation failed → return no match.
+            let re = self.regex_compiled.as_ref()?;
+            let m = re.find(s)?;
+            // Highlight indices cover every byte of the match so the renderer
+            // can tint the whole span (works for ASCII; multi-byte chars get
+            // their bytes individually marked, which is fine since the
+            // highlighter operates per-byte too).
+            let indices: Vec<usize> = (m.start()..m.end()).collect();
+            return Some(SearchMatchPosition::new(indices));
+        }
         if self.fuzzy {
             let result = if self.ignore_case {
                 FUZZY_MATCHER.fuzzy_indices(&s.to_lowercase(), &self.query)
@@ -265,6 +303,7 @@ pub struct CommitListState<'a> {
 
     default_ignore_case: bool,
     default_fuzzy: bool,
+    default_regex: bool,
 
     pub ref_hit_areas: Vec<RefHitArea>,
     pub hovered_branch: Option<String>,
@@ -295,6 +334,7 @@ impl<'a> CommitListState<'a> {
         branch_color_map: FxHashMap<String, Color>,
         default_ignore_case: bool,
         default_fuzzy: bool,
+        default_regex: bool,
     ) -> CommitListState<'a> {
         let total = commits.len();
         let _has_uncommitted = commits.first().map_or(false, |c| c.is_uncommitted);
@@ -328,6 +368,7 @@ impl<'a> CommitListState<'a> {
             height: 0,
             default_ignore_case,
             default_fuzzy,
+            default_regex,
             ref_hit_areas: Vec::new(),
             hovered_branch: None,
             hovered_tag: None,
@@ -713,14 +754,23 @@ impl<'a> CommitListState<'a> {
         self.search_state
     }
 
-    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
+    /// Returns `(ignore_case, fuzzy, regex)` for the active search state, or
+    /// `None` when search is inactive. Used by the footer hint to render
+    /// `[ON]/[OFF]` for each modifier.
+    pub fn search_case_fuzzy_regex(&self) -> Option<(bool, bool, bool)> {
         match self.search_state {
             SearchState::Searching {
-                ignore_case, fuzzy, ..
+                ignore_case,
+                fuzzy,
+                regex,
+                ..
             }
             | SearchState::Applied {
-                ignore_case, fuzzy, ..
-            } => Some((ignore_case, fuzzy)),
+                ignore_case,
+                fuzzy,
+                regex,
+                ..
+            } => Some((ignore_case, fuzzy, regex)),
             _ => None,
         }
     }
@@ -764,6 +814,7 @@ impl<'a> CommitListState<'a> {
                 match_index: 0,
                 ignore_case: self.default_ignore_case,
                 fuzzy: self.default_fuzzy,
+                regex: self.default_regex,
                 transient_message: TransientMessage::None,
             };
             self.search_input.reset();
@@ -783,11 +834,12 @@ impl<'a> CommitListState<'a> {
             start_index,
             ignore_case,
             fuzzy,
+            regex,
             ..
         } = self.search_state
         {
             self.search_input.handle_event(&Event::Key(key));
-            self.update_search_matches(ignore_case, fuzzy);
+            self.update_search_matches(ignore_case, fuzzy, regex);
             self.select_current_or_next_match_index(start_index);
         }
     }
@@ -797,6 +849,7 @@ impl<'a> CommitListState<'a> {
             match_index,
             ignore_case,
             fuzzy,
+            regex,
             ..
         } = self.search_state
         {
@@ -809,6 +862,7 @@ impl<'a> CommitListState<'a> {
                     total_match,
                     ignore_case,
                     fuzzy,
+                    regex,
                 };
             }
         }
@@ -842,7 +896,6 @@ impl<'a> CommitListState<'a> {
         if let SearchState::Applied {
             match_index,
             ignore_case,
-            fuzzy: _,
             ..
         } = &mut self.search_state
         {
@@ -851,16 +904,8 @@ impl<'a> CommitListState<'a> {
             start_index = *match_index;
         }
 
-        let (ignore_case, fuzzy) = match self.search_state {
-            SearchState::Searching {
-                ignore_case, fuzzy, ..
-            }
-            | SearchState::Applied {
-                ignore_case, fuzzy, ..
-            } => (ignore_case, fuzzy),
-            _ => return None,
-        };
-        self.update_search_matches(ignore_case, fuzzy);
+        let (ignore_case, fuzzy, regex) = self.search_modifiers()?;
+        self.update_search_matches(ignore_case, fuzzy, regex);
         self.select_current_or_next_match_index(start_index);
         if is_applied {
             let total_match = self.search_matches.iter().filter(|m| m.matched()).count();
@@ -889,10 +934,7 @@ impl<'a> CommitListState<'a> {
             };
         }
         if let SearchState::Applied {
-            match_index,
-            ignore_case: _,
-            fuzzy,
-            ..
+            match_index, fuzzy, ..
         } = &mut self.search_state
         {
             *fuzzy = !*fuzzy;
@@ -900,16 +942,8 @@ impl<'a> CommitListState<'a> {
             start_index = *match_index;
         }
 
-        let (ignore_case, fuzzy) = match self.search_state {
-            SearchState::Searching {
-                ignore_case, fuzzy, ..
-            }
-            | SearchState::Applied {
-                ignore_case, fuzzy, ..
-            } => (ignore_case, fuzzy),
-            _ => return None,
-        };
-        self.update_search_matches(ignore_case, fuzzy);
+        let (ignore_case, fuzzy, regex) = self.search_modifiers()?;
+        self.update_search_matches(ignore_case, fuzzy, regex);
         self.select_current_or_next_match_index(start_index);
         if is_applied {
             let total_match = self.search_matches.iter().filter(|m| m.matched()).count();
@@ -919,6 +953,70 @@ impl<'a> CommitListState<'a> {
         }
         self.default_fuzzy = fuzzy;
         Some((ignore_case, fuzzy))
+    }
+
+    /// Toggle the regex matching mode. Mirrors `toggle_ignore_case` /
+    /// `toggle_fuzzy`: only fires meaningfully in `Searching` / `Applied`
+    /// states (the dispatch in `view::list` already gates on `Applied`), saves
+    /// the new state to `default_regex` so the next `start_search` inherits
+    /// it, and returns the resulting `(ignore_case, fuzzy, regex)` triple so
+    /// the caller can persist it to the config.
+    pub fn toggle_regex(&mut self) -> Option<(bool, bool, bool)> {
+        let mut is_applied = false;
+        let mut start_index = self.current_selected_index();
+        if let SearchState::Searching {
+            regex,
+            transient_message,
+            ..
+        } = &mut self.search_state
+        {
+            *regex = !*regex;
+            *transient_message = if *regex {
+                TransientMessage::RegexOn
+            } else {
+                TransientMessage::RegexOff
+            };
+        }
+        if let SearchState::Applied {
+            match_index, regex, ..
+        } = &mut self.search_state
+        {
+            *regex = !*regex;
+            is_applied = true;
+            start_index = *match_index;
+        }
+
+        let (ignore_case, fuzzy, regex) = self.search_modifiers()?;
+        self.update_search_matches(ignore_case, fuzzy, regex);
+        self.select_current_or_next_match_index(start_index);
+        if is_applied {
+            let total_match = self.search_matches.iter().filter(|m| m.matched()).count();
+            if let SearchState::Applied { match_index, .. } = &mut self.search_state {
+                *match_index = start_index.min(total_match.saturating_sub(1));
+            }
+        }
+        self.default_regex = regex;
+        Some((ignore_case, fuzzy, regex))
+    }
+
+    /// Helper used by every toggle to read the current modifier triple in one
+    /// shot (returns `None` when search is inactive — callers should bail).
+    fn search_modifiers(&self) -> Option<(bool, bool, bool)> {
+        match self.search_state {
+            SearchState::Searching {
+                ignore_case,
+                fuzzy,
+                regex,
+                ..
+            }
+            | SearchState::Applied {
+                ignore_case,
+                fuzzy,
+                regex,
+                ..
+            } => Some((ignore_case, fuzzy, regex)),
+            _ => None,
+        }
     }
 
     pub fn search_query_string(&self) -> Option<String> {
@@ -965,14 +1063,16 @@ impl<'a> CommitListState<'a> {
                 TransientMessage::IgnoreCaseOff => Some("Case: OFF".to_string()),
                 TransientMessage::FuzzyOn => Some("Fuzzy match: ON ".to_string()),
                 TransientMessage::FuzzyOff => Some("Fuzzy match: OFF".to_string()),
+                TransientMessage::RegexOn => Some("Regex match: ON ".to_string()),
+                TransientMessage::RegexOff => Some("Regex match: OFF".to_string()),
             }
         } else {
             None
         }
     }
 
-    fn update_search_matches(&mut self, ignore_case: bool, fuzzy: bool) {
-        let matcher = SearchMatcher::new(self.search_input.value(), ignore_case, fuzzy);
+    fn update_search_matches(&mut self, ignore_case: bool, fuzzy: bool, regex: bool) {
+        let matcher = SearchMatcher::new(self.search_input.value(), ignore_case, fuzzy, regex);
         let mut match_index = 1;
         for (i, commit_info) in self.commits.iter().enumerate() {
             let m = &mut self.search_matches[i];

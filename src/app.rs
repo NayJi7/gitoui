@@ -292,6 +292,7 @@ impl<'a> App<'a> {
             branch_color_map,
             ctx.core_config.search.ignore_case,
             ctx.core_config.search.fuzzy,
+            ctx.core_config.search.regex,
         );
         if let InitialSelection::Head = initial_selection {
             match repository.head() {
@@ -943,7 +944,21 @@ impl App<'_> {
         } else {
             9u16
         };
-        let path_width = area.width.saturating_sub(icon_cell_width + 2);
+
+        // Numeric prefix (vim-style count, e.g. "10" before `j` to skip 10
+        // commits). Rendered in the header to the left of the logo, separated
+        // by a vertical bar — when empty, no extra space is reserved and the
+        // layout falls back to the previous path-then-logo arrangement.
+        let prefix_str = self.app_status.numeric_prefix.as_str();
+        let prefix_block_width: u16 = if prefix_str.is_empty() {
+            0
+        } else {
+            // <digits> + " │ " (3 cells: space, bar, space)
+            prefix_str.chars().count() as u16 + 3
+        };
+        let path_width = area
+            .width
+            .saturating_sub(icon_cell_width + 2 + prefix_block_width);
 
         let [content_row, separator_row] = ratatui::layout::Layout::vertical([
             ratatui::layout::Constraint::Length(1),
@@ -951,12 +966,20 @@ impl App<'_> {
         ])
         .areas(area);
 
-        // Content row: path left, icon right.
+        // Content row: path left, [optional prefix block | icon] right.
         let [left_area, right_area] = ratatui::layout::Layout::horizontal([
             ratatui::layout::Constraint::Min(0),
-            ratatui::layout::Constraint::Length(icon_cell_width + 2),
+            ratatui::layout::Constraint::Length(icon_cell_width + 2 + prefix_block_width),
         ])
         .areas(content_row);
+
+        // Sub-split the right side into [prefix_area, icon_area] so the icon
+        // rendering below keeps using its own dedicated rectangle.
+        let [prefix_area, right_area] = ratatui::layout::Layout::horizontal([
+            ratatui::layout::Constraint::Length(prefix_block_width),
+            ratatui::layout::Constraint::Length(icon_cell_width + 2),
+        ])
+        .areas(right_area);
 
         let white = ratatui::style::Color::White;
         let dim_white = ratatui::style::Color::Rgb(160, 160, 160);
@@ -988,6 +1011,29 @@ impl App<'_> {
             Paragraph::new(Line::from(path_spans)),
             left_area,
         );
+
+        // Numeric prefix block: "<digits> │ " right before the logo. Rendered
+        // here (not in the footer) so the user sees the count where their eye
+        // already tracks the brand. Empty prefix → empty area, no bar shown.
+        if !prefix_str.is_empty() {
+            let prefix_line = Line::from(vec![
+                Span::styled(
+                    prefix_str,
+                    ratatui::style::Style::default()
+                        .fg(self.ctx.color_theme.status_input_transient_fg)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(
+                    " │ ",
+                    ratatui::style::Style::default().fg(self.ctx.color_theme.divider_fg),
+                ),
+            ]);
+            f.render_widget(
+                Paragraph::new(prefix_line)
+                    .alignment(ratatui::layout::Alignment::Right),
+                prefix_area,
+            );
+        }
 
         // Icon: [G logo OR spinner frame] + gap + wordmark, or text fallback.
         // The spinner animation lives here in the header (safe zone — not the last row).
@@ -1088,20 +1134,9 @@ impl App<'_> {
             && !is_config_active;
 
         let mut spans = match &self.app_status.status_line {
-            StatusLine::None if self.app_status.numeric_prefix.is_empty() => vec![],
-            StatusLine::None => {
-                // When show_enhanced the prefix is rendered after the HEAD indicator;
-                // when not enhanced (search / config active) the prefix never accumulates
-                // because key handling blocks it — so this branch only fires without enhanced.
-                if show_enhanced {
-                    vec![]
-                } else {
-                    vec![Span::styled(
-                        self.app_status.numeric_prefix.as_str(),
-                        Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
-                    )]
-                }
-            }
+            // Numeric prefix is now rendered in the header (left of the logo),
+            // so the footer's None branch is empty regardless of prefix state.
+            StatusLine::None => vec![],
             StatusLine::Input(msg, _, transient_msg) => {
                 let msg_w = console::measure_text_width(msg.as_str());
                 if let Some(t_msg) = transient_msg {
@@ -1184,11 +1219,17 @@ impl App<'_> {
             let shortcut_text: String = if is_search_querying {
                 "⌘ Esc:cancel".into()
             } else if is_search_active {
-                let (ignore_case, fuzzy) = self.view.search_case_fuzzy().unwrap_or((false, false));
+                let (ignore_case, fuzzy, regex) = self
+                    .view
+                    .search_case_fuzzy_regex()
+                    .unwrap_or((false, false, false));
                 // ON = case-sensitive (ignore_case=false), OFF = case-insensitive (ignore_case=true)
                 let case_str = if ignore_case { "[OFF]" } else { "[ON]" };
                 let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
-                format!("⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏n:next▕▏N:prev▕▏Esc:clear")
+                let regex_str = if regex { "[ON]" } else { "[OFF]" };
+                format!(
+                    "⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏x:regex{regex_str}▕▏n:next▕▏N:prev▕▏Esc:clear"
+                )
             } else if is_config_active {
                 self.view
                     .config_footer_hint()
@@ -1368,17 +1409,7 @@ impl App<'_> {
                 }
             }
 
-            // Show the numeric prefix (vim-style count) after the HEAD info, clearly
-            // separated, so it never overlaps the branch name.
-            if !self.app_status.numeric_prefix.is_empty() {
-                spans.push(Span::styled(" │ ", dim_separator));
-                spans.push(Span::styled(
-                    self.app_status.numeric_prefix.as_str(),
-                    Style::default()
-                        .fg(self.ctx.color_theme.status_input_transient_fg)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            }
+            // (Numeric prefix moved to the header, left of the logo.)
         }
 
         let line = Line::from(spans);

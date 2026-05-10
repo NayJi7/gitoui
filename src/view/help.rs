@@ -176,8 +176,8 @@ impl<'a> HelpView<'a> {
         self.before.is_search_querying()
     }
 
-    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
-        self.before.search_case_fuzzy()
+    pub fn search_case_fuzzy_regex(&self) -> Option<(bool, bool, bool)> {
+        self.before.search_case_fuzzy_regex()
     }
 
     fn scroll_down(&mut self) {

@@ -272,8 +272,14 @@ pub struct Sender {
 }
 
 impl Sender {
+    // `mpsc::channel` is unbounded, so the only failure mode is a closed
+    // channel — which only happens after the receiver has been dropped, i.e.
+    // during final shutdown when nothing will consume the event anyway.
+    // Silently dropping is correct in that race; panicking on the spawned
+    // poller thread (or any view-side sender) just pollutes the terminal
+    // after teardown.
     pub fn send(&self, event: AppEvent) {
-        self.tx.send(event).unwrap();
+        let _ = self.tx.send(event);
     }
 
     pub fn try_send(&self, event: AppEvent) {
@@ -720,5 +726,17 @@ mod tests {
 
         assert_eq!(event1, event2);
         assert_ne!(event1, event3);
+    }
+
+    // Regression: dropping the receiver before the spawned event-poller thread
+    // (or any view-side `Sender::send` call) used to panic with `SendError`.
+    // See src/event.rs Sender::send doc — silent drop is correct on shutdown.
+    #[test]
+    fn sender_send_after_receiver_drop_does_not_panic() {
+        let (tx, rx) = mpsc::channel();
+        let sender = Sender { tx };
+        drop(rx);
+        sender.send(AppEvent::Tick);
+        sender.send(AppEvent::Quit);
     }
 }

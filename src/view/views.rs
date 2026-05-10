@@ -213,16 +213,19 @@ impl<'a> View<'a> {
         }
     }
 
-    pub fn search_case_fuzzy(&self) -> Option<(bool, bool)> {
+    /// Returns `(ignore_case, fuzzy, regex)` of the active search modifier
+    /// state, or `None` when search isn't active. Used by the status-bar
+    /// footer hint to render `[ON]/[OFF]` for each modifier.
+    pub fn search_case_fuzzy_regex(&self) -> Option<(bool, bool, bool)> {
         match self {
             View::Default => None,
-            View::List(view) => view.as_list_state().search_case_fuzzy(),
-            View::Detail(view) => view.as_list_state().search_case_fuzzy(),
-            View::Diff(view) => view.as_list_state().and_then(|s| s.search_case_fuzzy()),
-            View::UserCommand(view) => view.as_list_state().search_case_fuzzy(),
-            View::Refs(view) => view.as_list_state().search_case_fuzzy(),
-            View::Help(view) => view.search_case_fuzzy(),
-            View::Config(view) => view.search_case_fuzzy(),
+            View::List(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Detail(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Diff(view) => view.as_list_state().and_then(|s| s.search_case_fuzzy_regex()),
+            View::UserCommand(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Refs(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Help(view) => view.search_case_fuzzy_regex(),
+            View::Config(view) => view.search_case_fuzzy_regex(),
             View::Dialog(_) => None,
             View::BranchDetail(_) => None,
             View::TagDetail(_) => None,
