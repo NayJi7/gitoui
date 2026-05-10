@@ -108,6 +108,9 @@ pub enum AppEvent {
     SwitchWorktree {
         path: String,
     },
+    /// Sent (debounced) when the .git directory changes — triggers a refresh
+    /// of the current view if the user isn't in an input/dialog state.
+    FilesystemChanged,
 }
 
 #[derive(Debug, Clone)]

@@ -43,6 +43,7 @@ tui-input = "0.15.3"
 tui-tree-widget = "0.24.0"
 umbra = "0.4.0"
 two-face = { version = "0.5.1", default-features = false, features = ["syntect-fancy"] }
+notify-debouncer-mini = { version = "0.7.0", default-features = false }
 
 [dev-dependencies]
 dircpy = "0.3.20"

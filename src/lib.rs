@@ -15,6 +15,7 @@ mod event;
 mod external;
 mod keybind;
 mod view;
+mod watcher;
 mod widget;
 
 use std::{path::Path, rc::Rc};
@@ -148,6 +149,12 @@ pub fn run() -> Result<()> {
     let ec = event::EventController::init();
     let mut refresh_view_context = None;
     let mut terminal = None;
+    // Filesystem watcher on .git/ — keeps the UI in sync with external git
+    // operations (commits from another shell, push/pull/fetch, branch
+    // switches, …). Held alive for the whole `run()` lifetime; dropping it
+    // stops the watcher thread. Created at most once on the first iteration
+    // where the .git directory becomes available.
+    let mut _git_watcher: Option<_> = None;
 
     let ret = loop {
         let (mut core_config, ui_config, graph_config, mut color_theme, keybind_patch) =
@@ -307,6 +314,12 @@ pub fn run() -> Result<()> {
                 continue;
             }
         };
+
+        // Start the filesystem watcher once per run() — the repo path is
+        // stable across config-reload iterations.
+        if _git_watcher.is_none() {
+            _git_watcher = watcher::start(repository.path(), ec.sender());
+        }
 
         let graph = graph::calc_graph(&repository);
 

@@ -594,6 +594,22 @@ impl App<'_> {
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
                 }
+                AppEvent::FilesystemChanged => {
+                    // Auto-refresh from external git activity. Skip when the
+                    // user is typing or interacting with a modal so we don't
+                    // wipe in-progress input. Dialogs, text-input fields
+                    // (commit message, rename, search…), and status-line
+                    // inputs all qualify.
+                    let is_dialog = matches!(self.view, View::Dialog(_));
+                    let is_input = matches!(
+                        self.app_status.status_line,
+                        StatusLine::Input(_, _, _)
+                    );
+                    let is_view_input = self.view.is_input_active();
+                    if !is_dialog && !is_input && !is_view_input {
+                        self.view.refresh();
+                    }
+                }
                 AppEvent::AvatarsUpdated => {}
                 AppEvent::ClearStatusLine => {
                     self.clear_status_line();
