@@ -132,6 +132,7 @@ impl<'a> View<'a> {
     pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
         match self {
             View::Detail(view) => view.drain_pending_avatar_deletes(),
+            View::Config(view) => view.drain_pending_avatar_deletes(),
             _ => Vec::new(),
         }
     }
@@ -145,7 +146,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.drain_pending_graph_uploads(),
             View::Refs(view) => view.drain_pending_graph_uploads(),
             View::Help(_) => Vec::new(),
-            View::Config(_) => Vec::new(),
+            View::Config(view) => view.drain_pending_graph_uploads(),
             View::Dialog(_) => Vec::new(),
             View::BranchDetail(view) => view.drain_pending_graph_uploads(),
             View::TagDetail(view) => view.drain_pending_graph_uploads(),

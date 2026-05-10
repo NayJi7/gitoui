@@ -3,6 +3,7 @@ mod views;
 pub mod branch_detail;
 mod config;
 mod detail;
+mod graph_preview;
 pub mod dialog;
 mod diff;
 pub mod file_history;

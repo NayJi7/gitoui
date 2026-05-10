@@ -83,6 +83,7 @@ impl Clone for AppContext {
             git_default_branch: self.git_default_branch.clone(),
             github_auth_state: self.github_auth_state.clone(),
             branch_color_map: self.branch_color_map.clone(),
+            graph_color_set: self.graph_color_set.clone(),
         }
     }
 }
@@ -116,6 +117,7 @@ pub struct AppContext {
     pub git_default_branch: String,
     pub github_auth_state: GithubAuthState,
     pub branch_color_map: FxHashMap<String, Color>,
+    pub graph_color_set: GraphColorSet,
 }
 
 impl Default for AppContext {
@@ -137,6 +139,7 @@ impl Default for AppContext {
             git_default_branch: String::new(),
             github_auth_state: GithubAuthState::default(),
             branch_color_map: FxHashMap::default(),
+            graph_color_set: GraphColorSet::new(&crate::config::GraphColorConfig::default()),
         }
     }
 }

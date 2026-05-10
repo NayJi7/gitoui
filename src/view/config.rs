@@ -15,7 +15,7 @@ use crate::{
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
-    view::View,
+    view::{graph_preview::GraphPreview, View},
     GraphStyle, ImageProtocolType,
 };
 
@@ -54,6 +54,11 @@ pub struct ConfigView<'a> {
     editing_text: bool,
     editing_value: String,
     theme_preview: Option<SyntaxHighlighter>,
+    graph_preview: Option<GraphPreview>,
+    pending_preview_uploads: Vec<String>,
+    cumulative_preview_image_ids: Vec<u32>,
+    last_preview_rows: Option<(u16, u16)>,
+    pending_preview_deletes: Vec<u16>,
     left_area: Rect,
     left_item_rows: Vec<Option<usize>>,
 }
@@ -158,6 +163,11 @@ impl<'a> ConfigView<'a> {
             editing_text: false,
             editing_value: String::new(),
             theme_preview: None,
+            graph_preview: None,
+            pending_preview_uploads: Vec::new(),
+            cumulative_preview_image_ids: Vec::new(),
+            last_preview_rows: None,
+            pending_preview_deletes: Vec::new(),
             left_area: Rect::default(),
             left_item_rows: Vec::new(),
         }
@@ -871,15 +881,36 @@ impl<'a> ConfigView<'a> {
                     Style::default().add_modifier(Modifier::BOLD),
                 )]));
                 right_lines.push(Line::from(""));
-                let style = self.core_config.graph_style();
-                let preview = graph_style_preview_lines(style, &self.ctx.color_theme);
-                right_lines.extend(preview);
+                // Reserve 5 blank lines under "Preview" (3 image rows + 2 vertical
+                // padding rows). Image cells will be written directly to the buffer
+                // after the paragraph is rendered.
+                for _ in 0..5 {
+                    right_lines.push(Line::from(""));
+                }
             }
             _ => {}
         }
 
+        // Leaving the Graph Style item — pre-clear the cells that previously held
+        // the preview so labels/image-trailing-spaces are overwritten with plain
+        // spaces. Paragraph rendering will then write the new content (e.g. the
+        // theme code preview) over those spaces. Kitty persistent placements are
+        // evicted via the post-draw `pending_preview_deletes` queue.
+        if self.selected != 1 {
+            if let Some((y, count)) = self.last_preview_rows.take() {
+                self.clear_preview_cells(f, right_area, y, count);
+                for i in 0..count {
+                    self.pending_preview_deletes.push(y + i);
+                }
+            }
+        }
+
         let right_paragraph = Paragraph::new(right_lines);
         f.render_widget(right_paragraph, right_area);
+
+        if self.selected == 1 {
+            self.render_graph_style_preview(f, right_area);
+        }
 
         if self.editing_text
             && self.selected >= TEXT_EDIT_START_INDEX
@@ -937,6 +968,146 @@ impl<'a> ConfigView<'a> {
         let row_idx = (row - self.left_area.y) as usize;
         self.left_item_rows.get(row_idx).and_then(|idx| *idx)
     }
+
+    fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
+        let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
+        let needs_rebuild = self
+            .graph_preview
+            .as_ref()
+            .map(|p| p.style != style)
+            .unwrap_or(true);
+        if needs_rebuild {
+            let bg_rgb = if let ratatui::style::Color::Rgb(r, g, b) = self.ctx.color_theme.bg {
+                Some((r, g, b))
+            } else {
+                None
+            };
+            let mut preview = GraphPreview::build(
+                style,
+                &self.ctx.graph_color_set,
+                self.ctx.image_protocol,
+                bg_rgb,
+            );
+            self.pending_preview_uploads
+                .append(&mut preview.pending_uploads);
+            self.cumulative_preview_image_ids
+                .extend(preview.image_ids.iter().copied());
+            self.graph_preview = Some(preview);
+        }
+
+        let preview = match &self.graph_preview {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Image rows live just below the "Preview" header/blank within right_area.
+        // Layout: 0=Details header, 1=blank, 2=description (1 line), 3=blank,
+        //         4="Preview", 5=blank, 6..8=image rows (3 commits).
+        let preview_top = right_area.y.saturating_add(6);
+        // Labels: "main" matches the lane-0 branch color, "feature" the lane-1
+        // branch color. Third row (fork commit) intentionally has no label.
+        let main_color = self.ctx.graph_color_set.get(0).to_ratatui_color();
+        let feature_color = self.ctx.graph_color_set.get(1).to_ratatui_color();
+        let labels: [&str; 3] = ["main", "feature", ""];
+        let label_styles = [
+            Style::default().fg(main_color).add_modifier(Modifier::BOLD),
+            Style::default().fg(feature_color).add_modifier(Modifier::BOLD),
+            Style::default(),
+        ];
+
+        let buf = f.buffer_mut();
+        let max_image_cells = right_area.width as usize;
+        let mut max_used_cells = 0usize;
+        for (i, image) in preview.rows.iter().enumerate() {
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            let used = image.cells().len().min(max_image_cells);
+            if used > max_used_cells {
+                max_used_cells = used;
+            }
+            for (x, cell) in image.cells().iter().take(max_image_cells).enumerate() {
+                let col = right_area.x + x as u16;
+                if col >= right_area.x.saturating_add(right_area.width) {
+                    break;
+                }
+                let buf_cell = &mut buf[(col, y)];
+                buf_cell.set_symbol(cell.symbol());
+                buf_cell.set_style(cell.style().bg(self.ctx.color_theme.bg));
+                buf_cell.set_skip(cell.skip());
+            }
+        }
+
+        // Labels are written to the right of the widest image row, with a 2-cell gap.
+        let label_x = right_area.x + max_used_cells as u16 + 2;
+        for (i, label) in labels.iter().enumerate() {
+            if i >= preview.rows.len() {
+                break;
+            }
+            if label.is_empty() {
+                continue;
+            }
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            let area = Rect {
+                x: label_x.min(right_area.x.saturating_add(right_area.width)),
+                y,
+                width: right_area
+                    .x
+                    .saturating_add(right_area.width)
+                    .saturating_sub(label_x),
+                height: 1,
+            };
+            if area.width == 0 {
+                continue;
+            }
+            let line = Line::from(Span::styled((*label).to_string(), label_styles[i]));
+            f.render_widget(Paragraph::new(line), area);
+        }
+
+        // Record where we drew the preview so we can delete the Kitty placements
+        // when the user navigates to a different config item.
+        self.last_preview_rows = Some((preview_top, preview.rows.len() as u16));
+    }
+
+    fn clear_preview_cells(&self, f: &mut Frame, right_area: Rect, y_start: u16, count: u16) {
+        // We only need to overwrite the previous frame's text-bearing cells (image
+        // placeholders and labels) with a regular space so the buffer diff sends an
+        // update. We deliberately avoid embedding the protocol's clear-cell escape
+        // here, because for Kitty proper that escape is a long string whose unicode
+        // width pushes ratatui's `to_skip` counter past the trailing cells, causing
+        // their updates to be dropped. Kitty graphics layers are removed via the
+        // post-draw `delete_row` calls in `pending_preview_deletes`.
+        let buf = f.buffer_mut();
+        let right_end = right_area.x.saturating_add(right_area.width);
+        let bottom = right_area.y.saturating_add(right_area.height);
+        let bg_style = Style::default()
+            .fg(self.ctx.color_theme.fg)
+            .bg(self.ctx.color_theme.bg);
+        for i in 0..count {
+            let y = y_start + i;
+            if y >= bottom {
+                break;
+            }
+            for col in right_area.x..right_end {
+                let buf_cell = &mut buf[(col, y)];
+                buf_cell.set_symbol(" ");
+                buf_cell.set_style(bg_style);
+                buf_cell.set_skip(false);
+            }
+        }
+    }
+
+    pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_preview_uploads)
+    }
+
+    pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
+        std::mem::take(&mut self.pending_preview_deletes)
+    }
 }
 
 impl<'a> ConfigView<'a> {
@@ -950,7 +1121,11 @@ impl<'a> ConfigView<'a> {
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
-        self.before.graph_image_ids_sorted()
+        let mut ids = self.before.graph_image_ids_sorted();
+        ids.extend(self.cumulative_preview_image_ids.iter().copied());
+        ids.sort();
+        ids.dedup();
+        ids
     }
 
     pub fn is_search_active(&self) -> bool {
@@ -1149,49 +1324,6 @@ fn config_value_display(index: usize, value: &str, editing: bool, editing_value:
     }
 }
 
-fn graph_style_preview_lines(
-    style: GraphStyle,
-    theme: &crate::color::ColorTheme,
-) -> Vec<ratatui::text::Line<'static>> {
-    let node_style = ratatui::style::Style::default()
-        .fg(theme.list_ref_branch_fg)
-        .add_modifier(ratatui::style::Modifier::BOLD);
-    let line_style = ratatui::style::Style::default().fg(theme.divider_fg);
-    let label_style = ratatui::style::Style::default().fg(theme.detail_label_fg);
-    let accent_style = ratatui::style::Style::default().fg(theme.list_ref_stash_fg);
-
-    use ratatui::text::{Line, Span};
-
-    let (fork_char, conn_char) = match style {
-        GraphStyle::Angular => ("─┐", "│"),
-        GraphStyle::Rounded => ("─╮", "│"),
-        GraphStyle::Smooth  => (" ╲", " "),
-    };
-
-    vec![
-        Line::from(vec![
-            Span::styled("  ● ", node_style),
-            Span::styled(fork_char, line_style),
-            Span::styled("  ● ", node_style),
-            Span::styled("feature", label_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  │ ", line_style),
-            Span::styled(conn_char, line_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  ● ", node_style),
-            Span::styled("  ← fork", accent_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  │", line_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  ●", node_style),
-            Span::styled("  main", label_style),
-        ]),
-    ]
-}
 
 #[cfg(test)]
 mod tests {
