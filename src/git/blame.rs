@@ -32,6 +32,9 @@ pub struct BlameLine {
     pub hash: String,
     pub short_hash: String,
     pub author: String,
+    /// Lowercase e-mail address stripped of angle brackets, e.g.
+    /// `alice@example.com`. Empty string when git didn't provide one.
+    pub author_mail: String,
     /// Author time in the local timezone. None if porcelain didn't provide
     /// it (defensive — shouldn't happen with vanilla git).
     pub author_time: Option<DateTime<Local>>,
@@ -51,6 +54,7 @@ pub struct BlameLine {
 #[derive(Debug, Clone, Default)]
 struct CommitHeader {
     author: String,
+    author_mail: String,
     author_time: Option<i64>,
     summary: String,
     boundary: bool,
@@ -102,6 +106,13 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
             if let Some((key, value)) = next.split_once(' ') {
                 match key {
                     "author" => header.author = value.to_string(),
+                    "author-mail" => {
+                        // git outputs `<email@domain>` — strip angle brackets.
+                        header.author_mail = value
+                            .trim_start_matches('<')
+                            .trim_end_matches('>')
+                            .to_lowercase();
+                    }
                     "author-time" => header.author_time = value.parse().ok(),
                     "summary" => header.summary = value.to_string(),
                     _ => {}
@@ -123,6 +134,7 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
             hash: sha,
             short_hash,
             author: header.author.clone(),
+            author_mail: header.author_mail.clone(),
             author_time,
             summary: header.summary.clone(),
             line_no: final_line,

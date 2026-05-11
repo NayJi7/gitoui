@@ -83,6 +83,14 @@ pub struct BlameView<'a> {
     /// calling `Local::now()` + integer arithmetic for every visible row on
     /// every frame; entries are recomputed at most once per minute.
     rel_time_cache: FxHashMap<i64, (String, std::time::Instant)>,
+    /// Scroll position from the last avatar render pass. Changing only
+    /// causes a full re-render; selection changes use the lighter selective
+    /// path instead (mirrors commit_list's 3-path approach).
+    avatar_stable_key: Option<(usize, usize)>,
+    /// Which block was active during the last avatar render pass. Used to
+    /// detect selection-only changes so we only re-render the two affected
+    /// block heads instead of every visible row.
+    avatar_prev_active_block: Option<Option<usize>>,
 }
 
 /// How long a cached relative-time string stays valid. One minute matches
@@ -139,6 +147,8 @@ impl<'a> BlameView<'a> {
             ctx,
             tx,
             rel_time_cache: FxHashMap::default(),
+            avatar_stable_key: None,
+            avatar_prev_active_block: None,
         }
     }
 
@@ -184,6 +194,49 @@ impl<'a> BlameView<'a> {
                 self.ctx.color_theme.bg,
                 self.ctx.color_theme.list_selected_bg,
             );
+        }
+        self.ensure_visible_blame_avatars();
+    }
+
+    /// Upload/prefetch avatars for the blame annotation column. Only the
+    /// normal (non-selected) variant is needed since blame doesn't use a
+    /// per-row selected-bg on the annotation side.
+    fn ensure_visible_blame_avatars(&mut self) {
+        let bg = self.ctx.color_theme.bg;
+        let start = self.scroll_offset;
+        let end = (start + self.view_height).min(self.lines.len());
+        if start >= end {
+            return;
+        }
+
+        // Collect commit hashes for GitHub prefetch (needed by avatar API).
+        let hashes: Vec<String> = self.lines[start..end]
+            .iter()
+            .filter(|bl| !bl.author_mail.is_empty())
+            .map(|bl| bl.hash.clone())
+            .collect();
+
+        let mut avatar_manager = self.ctx.avatar_manager.lock().unwrap();
+        if !avatar_manager.is_enabled() {
+            return;
+        }
+        for i in start..end {
+            let bl = &self.lines[i];
+            if bl.author_mail.is_empty() || !self.is_block_head(i) {
+                continue;
+            }
+            let email = &bl.author_mail;
+            // Only the normal (non-selected) variant. Preparing the selected
+            // variant on-demand would require a synchronous PNG decode+composite
+            // (~50–200 ms) the first time each block gains focus, causing
+            // visible freezes when navigating through many distinct commits.
+            if avatar_manager.prepared_image(email, 1, false).is_none() {
+                if avatar_manager.cached_avatar_exists(email) {
+                    avatar_manager.ensure_uploaded(email, 1, false, bg);
+                } else {
+                    avatar_manager.prefetch(hashes.clone(), email);
+                }
+            }
         }
     }
 
@@ -371,10 +424,14 @@ impl<'a> BlameView<'a> {
         let sep_mid: usize = 1; // space between chrome columns
         let sep_border: usize = 3; // " │ "
 
+        let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        // 2 image cells + 1 space separator before the hash column.
+        let avatar_col_w: usize = if avatars_enabled { 3 } else { 0 };
+
         let target_left = total_w / 3;
         // Fixed part of the left column when neither author nor subject is shown.
         let fixed_left =
-            bar_w + hash_w + sep_mid + reltime_w + sep_border + lineno_w + sep_border;
+            bar_w + avatar_col_w + hash_w + sep_mid + reltime_w + sep_border + lineno_w + sep_border;
         let extra = target_left.saturating_sub(fixed_left);
         let (author_w, subject_w) = if extra >= 14 {
             // Roomy: author + subject share the leftover, author capped at 10.
@@ -416,7 +473,7 @@ impl<'a> BlameView<'a> {
             .map(|t| self.cached_relative_time(t.as_ref()))
             .collect();
 
-        let visible_lines: Vec<Line<'static>> = visible_range
+        let visible_lines: Vec<Line<'static>> = visible_range.clone()
             .enumerate()
             .map(|(j, i)| {
                 let bl = &self.lines[i];
@@ -425,6 +482,7 @@ impl<'a> BlameView<'a> {
                     i,
                     show_author,
                     show_subject,
+                    avatars_enabled,
                     hash_w,
                     author_w,
                     &rel_times[j],
@@ -438,6 +496,127 @@ impl<'a> BlameView<'a> {
             .collect();
 
         f.render_widget(Paragraph::new(visible_lines), content);
+
+        // ── Avatar image pass (3-path like commit_list) ─────────────────────
+        // Kitty images live in a separate terminal layer — written directly into
+        // the buffer AFTER the Paragraph so text layout is already finalised.
+        //
+        // Path 1 — fully stable (scroll + selection unchanged): skip all cells.
+        // Path 2 — selective (only selection changed): update only the two block
+        //           heads that gained/lost active state; skip everything else.
+        // Path 3 — full (scroll changed): re-render every visible row.
+        //
+        // Paths 1 and 2 emit O(1) Kitty APCs even for large files; only path 3
+        // scales with row count (and it only fires on actual scrolls).
+        if avatars_enabled {
+            let scroll_key = (self.scroll_offset, self.view_height);
+            let active_block = self.hovered_block.or(self.focused_block);
+
+            let scroll_stable = self.avatar_stable_key == Some(scroll_key);
+            let select_stable = self.avatar_prev_active_block == Some(active_block);
+
+            let buf = f.buffer_mut();
+            let avatar_x = content.left() + bar_w as u16;
+            let avatar_manager = self.ctx.avatar_manager.lock().unwrap();
+            let clear_cell = self.ctx.image_protocol.clear_cell();
+            let normal_bg = self.ctx.color_theme.bg;
+            let sel_bg = self.ctx.color_theme.list_selected_bg;
+
+            // Helper: write avatar or clear for a block head row.
+            macro_rules! write_head {
+                ($j:expr, $i:expr, $is_now_active:expr) => {{
+                    let y = content.top() + $j as u16;
+                    let bl = &self.lines[$i];
+                    let row_bg = if $is_now_active { sel_bg } else { normal_bg };
+                    let prepared = avatar_manager.prepared_image(&bl.author_mail, 1, false);
+                    if let Some(p) = prepared {
+                        for (x, c) in p.cells().iter().enumerate() {
+                            let cell = &mut buf[(avatar_x + x as u16, y)];
+                            cell.set_symbol(c.symbol());
+                            cell.set_style(c.style().bg(row_bg));
+                            cell.set_skip(c.skip());
+                        }
+                    } else {
+                        for x in 0..2u16 {
+                            let cell = &mut buf[(avatar_x + x, y)];
+                            cell.set_symbol(clear_cell.symbol());
+                            cell.set_style(clear_cell.style().bg(row_bg));
+                            cell.set_skip(clear_cell.skip());
+                        }
+                    }
+                }};
+            }
+
+            if scroll_stable && select_stable {
+                // ── Path 1: nothing changed ──────────────────────────────────
+                for j in 0..self.view_height.min(
+                    self.lines.len().saturating_sub(self.scroll_offset)
+                ) {
+                    let y = content.top() + j as u16;
+                    for x in 0..2u16 {
+                        buf[(avatar_x + x, y)].set_skip(true);
+                    }
+                }
+            } else if scroll_stable {
+                // ── Path 2: selection changed, scroll same ───────────────────
+                let old_active = self.avatar_prev_active_block.flatten();
+
+                for (j, i) in visible_range.enumerate() {
+                    let y = content.top() + j as u16;
+                    let block_idx = self.block_at_line(i);
+                    let is_head = self.is_block_head(i);
+
+                    let was_active =
+                        old_active.is_some() && block_idx == old_active;
+                    let is_now_active =
+                        active_block.is_some() && block_idx == active_block;
+
+                    if !was_active && !is_now_active {
+                        // Block state unchanged → preserve image or skip.
+                        for x in 0..2u16 {
+                            buf[(avatar_x + x, y)].set_skip(true);
+                        }
+                    } else if is_head {
+                        write_head!(j, i, is_now_active);
+                    } else {
+                        // Continuation of a block that changed active state:
+                        // bg needs updating. No image to delete — plain space.
+                        let row_bg = if is_now_active { sel_bg } else { normal_bg };
+                        for x in 0..2u16 {
+                            let cell = &mut buf[(avatar_x + x, y)];
+                            cell.set_symbol(" ");
+                            cell.set_style(ratatui::style::Style::default().bg(row_bg));
+                            cell.set_skip(false);
+                        }
+                    }
+                }
+            } else {
+                // ── Path 3: scroll changed — full render ─────────────────────
+                for (j, i) in visible_range.enumerate() {
+                    let y = content.top() + j as u16;
+                    let is_head = self.is_block_head(i);
+                    let block_idx = self.block_at_line(i);
+                    let is_now_active =
+                        active_block.is_some() && block_idx == active_block;
+                    let row_bg = if is_now_active { sel_bg } else { normal_bg };
+
+                    if is_head && !self.lines[i].author_mail.is_empty() {
+                        write_head!(j, i, is_now_active);
+                    } else {
+                        // Continuation or missing email — clear any stale image.
+                        for x in 0..2u16 {
+                            let cell = &mut buf[(avatar_x + x, y)];
+                            cell.set_symbol(clear_cell.symbol());
+                            cell.set_style(clear_cell.style().bg(row_bg));
+                            cell.set_skip(clear_cell.skip());
+                        }
+                    }
+                }
+                self.avatar_stable_key = Some(scroll_key);
+            }
+
+            self.avatar_prev_active_block = Some(active_block);
+        }
     }
 
     pub fn update_layout(&mut self, _area: Rect) {}
@@ -569,6 +748,7 @@ impl<'a> BlameView<'a> {
         idx: usize,
         show_author: bool,
         show_subject: bool,
+        avatars_enabled: bool,
         hash_w: usize,
         author_w: usize,
         rel_time: &str,
@@ -620,6 +800,17 @@ impl<'a> BlameView<'a> {
             Style::default().fg(bar_color).bg(row_bg),
         ));
         spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
+
+        // Avatar placeholder — 2 image cells + 1 separator space. The actual
+        // Kitty image bytes are written directly to the buffer AFTER the
+        // Paragraph renders (see the avatar image pass in render()). Here we
+        // just reserve the space so the following text columns don't overlap.
+        if avatars_enabled {
+            spans.push(Span::styled(
+                "   ".to_string(),
+                Style::default().bg(row_bg),
+            ));
+        }
 
         if self.is_block_head(idx) {
             // Hash

@@ -1,9 +1,10 @@
 use std::rc::Rc;
 
 use ratatui::{
+    buffer::Buffer,
     crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Style, Stylize, Modifier},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -40,6 +41,12 @@ pub struct FileHistoryView<'a> {
     content_area: Option<Rect>,
     ctx: Rc<AppContext>,
     tx: Sender,
+    /// Scroll position from the last avatar render pass.
+    avatar_stable_key: Option<(usize, usize)>,
+    /// Active row (hovered ?? selected) from the last avatar render pass.
+    /// Used for the selective path: only the two rows that gained/lost active
+    /// state are re-rendered; everything else is skipped.
+    avatar_prev_active_row: Option<usize>,
 }
 
 impl<'a> FileHistoryView<'a> {
@@ -61,6 +68,8 @@ impl<'a> FileHistoryView<'a> {
             content_area: None,
             ctx,
             tx,
+            avatar_stable_key: None,
+            avatar_prev_active_row: None,
         }
     }
 
@@ -90,6 +99,40 @@ impl<'a> FileHistoryView<'a> {
                 self.ctx.color_theme.bg,
                 self.ctx.color_theme.list_selected_bg,
             );
+        }
+        self.ensure_visible_file_history_avatars();
+    }
+
+    fn ensure_visible_file_history_avatars(&mut self) {
+        let bg = self.ctx.color_theme.bg;
+        let start = self.scroll_offset;
+        let end = (start + self.view_height).min(self.entries.len());
+        if start >= end {
+            return;
+        }
+
+        let hashes: Vec<String> = self.entries[start..end]
+            .iter()
+            .filter(|e| !e.author_email.is_empty())
+            .map(|e| e.hash.clone())
+            .collect();
+
+        let mut avatar_manager = self.ctx.avatar_manager.lock().unwrap();
+        if !avatar_manager.is_enabled() {
+            return;
+        }
+        for entry in self.entries.iter().skip(start).take(end - start) {
+            if entry.author_email.is_empty() {
+                continue;
+            }
+            let email = &entry.author_email;
+            if avatar_manager.prepared_image(email, 1, false).is_none() {
+                if avatar_manager.cached_avatar_exists(email) {
+                    avatar_manager.ensure_uploaded(email, 1, false, bg);
+                } else {
+                    avatar_manager.prefetch(hashes.clone(), email);
+                }
+            }
         }
     }
 
@@ -270,7 +313,10 @@ impl<'a> FileHistoryView<'a> {
 
         // ── Subject column gets whatever's left after the fixed columns ──
         let total_w = content_area.width as usize;
-        let fixed_w = PREFIX_W + HASH_W + COL_GAP + COL_GAP + AUTHOR_W + COL_GAP + DATE_W;
+        let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        // 2 image cells + 1 space before the author name.
+        let avatar_col_w: usize = if avatars_enabled { 3 } else { 0 };
+        let fixed_w = PREFIX_W + HASH_W + COL_GAP + COL_GAP + avatar_col_w + AUTHOR_W + COL_GAP + DATE_W;
         let subject_w = total_w.saturating_sub(fixed_w).max(10);
 
         let theme = &self.ctx.color_theme;
@@ -315,9 +361,25 @@ impl<'a> FileHistoryView<'a> {
                 let author = truncate_to_width(&entry.author, AUTHOR_W);
                 let date = truncate_to_width(&entry.date, DATE_W);
 
-                let row_w_used =
-                    PREFIX_W + HASH_W + COL_GAP + subject_w + COL_GAP + AUTHOR_W + COL_GAP + DATE_W;
+                let row_w_used = PREFIX_W
+                    + HASH_W
+                    + COL_GAP
+                    + subject_w
+                    + COL_GAP
+                    + avatar_col_w
+                    + AUTHOR_W
+                    + COL_GAP
+                    + DATE_W;
                 let trailing_pad = total_w.saturating_sub(row_w_used);
+
+                // Avatar placeholder (2 image cells + 1 space). The actual
+                // Kitty image bytes are written into the buffer after the
+                // Paragraph renders — these spaces just reserve the columns.
+                let avatar_span = if avatars_enabled {
+                    Span::styled("   ".to_string(), Style::default().bg(bg))
+                } else {
+                    Span::raw("")
+                };
 
                 Line::from(vec![
                     prefix_span,
@@ -331,6 +393,7 @@ impl<'a> FileHistoryView<'a> {
                         Style::default().fg(subject_fg).bg(bg),
                     ),
                     Span::styled(" ".repeat(COL_GAP), Style::default().bg(bg)),
+                    avatar_span,
                     Span::styled(
                         pad_right(&author, AUTHOR_W),
                         Style::default().fg(author_fg).bg(bg),
@@ -346,6 +409,116 @@ impl<'a> FileHistoryView<'a> {
             .collect();
 
         f.render_widget(Paragraph::new(lines), content_area);
+
+        // ── Avatar image pass (3-path like commit_list) ─────────────────────
+        if avatars_enabled {
+            let active_row = self.hovered.unwrap_or(self.selected);
+            let scroll_key = (self.scroll_offset, self.view_height);
+
+            let scroll_stable = self.avatar_stable_key == Some(scroll_key);
+            let select_stable = self.avatar_prev_active_row == Some(active_row);
+
+            let avatar_col_start = (PREFIX_W + HASH_W + COL_GAP + subject_w + COL_GAP) as u16;
+            let avatar_x = content_area.left() + avatar_col_start;
+
+            let buf: &mut Buffer = f.buffer_mut();
+            let clear_cell = self.ctx.image_protocol.clear_cell();
+            let avatar_manager = self.ctx.avatar_manager.lock().unwrap();
+            let normal_bg = self.ctx.color_theme.bg;
+            let sel_bg = self.ctx.color_theme.list_selected_bg;
+
+            // Helper: write avatar or clear for one row.
+            macro_rules! write_row {
+                ($j:expr, $entry:expr, $is_now_active:expr) => {{
+                    let y = content_area.top() + ($j - self.scroll_offset) as u16;
+                    let bg = if $is_now_active { sel_bg } else { normal_bg };
+                    let prepared = avatar_manager.prepared_image(&$entry.author_email, 1, false);
+                    if let Some(p) = prepared {
+                        for (x, c) in p.cells().iter().enumerate() {
+                            let cell = &mut buf[(avatar_x + x as u16, y)];
+                            cell.set_symbol(c.symbol());
+                            cell.set_style(c.style().bg(bg));
+                            cell.set_skip(c.skip());
+                        }
+                    } else {
+                        for x in 0..2u16 {
+                            let cell = &mut buf[(avatar_x + x, y)];
+                            cell.set_symbol(clear_cell.symbol());
+                            cell.set_style(clear_cell.style().bg(bg));
+                            cell.set_skip(clear_cell.skip());
+                        }
+                    }
+                }};
+            }
+
+            if scroll_stable && select_stable {
+                // ── Path 1: nothing changed ──────────────────────────────────
+                for j in 0..self.view_height.min(self.entries.len().saturating_sub(self.scroll_offset)) {
+                    let y = content_area.top() + j as u16;
+                    for x in 0..2u16 {
+                        buf[(avatar_x + x, y)].set_skip(true);
+                    }
+                }
+            } else if scroll_stable {
+                // ── Path 2: only selection changed ───────────────────────────
+                let old_active = self.avatar_prev_active_row;
+
+                for (j, entry) in self
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .skip(self.scroll_offset)
+                    .take(self.view_height)
+                {
+                    let y = content_area.top() + (j - self.scroll_offset) as u16;
+                    let was_active = old_active == Some(j);
+                    let is_now_active = j == active_row;
+
+                    if !was_active && !is_now_active {
+                        for x in 0..2u16 {
+                            buf[(avatar_x + x, y)].set_skip(true);
+                        }
+                    } else if !entry.author_email.is_empty() {
+                        write_row!(j, entry, is_now_active);
+                    } else {
+                        let bg = if is_now_active { sel_bg } else { normal_bg };
+                        for x in 0..2u16 {
+                            let cell = &mut buf[(avatar_x + x, y)];
+                            cell.set_symbol(clear_cell.symbol());
+                            cell.set_style(clear_cell.style().bg(bg));
+                            cell.set_skip(clear_cell.skip());
+                        }
+                    }
+                }
+            } else {
+                // ── Path 3: scroll changed — full render ─────────────────────
+                for (j, entry) in self
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .skip(self.scroll_offset)
+                    .take(self.view_height)
+                {
+                    let y = content_area.top() + (j - self.scroll_offset) as u16;
+                    let is_now_active = j == active_row;
+                    let bg = if is_now_active { sel_bg } else { normal_bg };
+
+                    if !entry.author_email.is_empty() {
+                        write_row!(j, entry, is_now_active);
+                    } else {
+                        for x in 0..2u16 {
+                            let cell = &mut buf[(avatar_x + x, y)];
+                            cell.set_symbol(clear_cell.symbol());
+                            cell.set_style(clear_cell.style().bg(bg));
+                            cell.set_skip(clear_cell.skip());
+                        }
+                    }
+                }
+                self.avatar_stable_key = Some(scroll_key);
+            }
+
+            self.avatar_prev_active_row = Some(active_row);
+        }
     }
 
     pub fn update_layout(&mut self, _area: Rect) {}

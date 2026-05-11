@@ -469,6 +469,7 @@ pub struct FileHistoryEntry {
     pub short_hash: String,
     pub subject: String,
     pub author: String,
+    pub author_email: String,
     pub date: String,
 }
 
@@ -478,7 +479,7 @@ pub fn file_history(path: &Path, file_path: &str) -> Result<Vec<FileHistoryEntry
         .args([
             "log",
             "--follow",
-            "--format=%H|%s|%an|%ar",
+            "--format=%H|%s|%an|%ae|%ar",
             "--",
             file_path,
         ])
@@ -498,8 +499,8 @@ pub fn file_history(path: &Path, file_path: &str) -> Result<Vec<FileHistoryEntry
         .lines()
         .filter(|l| !l.is_empty())
         .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(4, '|').collect();
-            if parts.len() < 4 {
+            let parts: Vec<&str> = line.splitn(5, '|').collect();
+            if parts.len() < 5 {
                 return None;
             }
             let hash = parts[0].to_string();
@@ -509,7 +510,8 @@ pub fn file_history(path: &Path, file_path: &str) -> Result<Vec<FileHistoryEntry
                 short_hash,
                 subject: parts[1].to_string(),
                 author: parts[2].to_string(),
-                date: parts[3].to_string(),
+                author_email: parts[3].to_lowercase(),
+                date: parts[4].to_string(),
             })
         })
         .collect();
