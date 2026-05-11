@@ -585,6 +585,22 @@ impl CoreConfig {
     pub fn set_graph_style(&mut self, style: crate::GraphStyle) {
         self.option.graph_style = Some(style);
     }
+    pub fn graph_width(&self) -> crate::GraphWidthType {
+        self.option
+            .graph_width
+            .unwrap_or(crate::GraphWidthType::Auto)
+    }
+    pub fn set_graph_width(&mut self, width: crate::GraphWidthType) {
+        self.option.graph_width = Some(width);
+    }
+    pub fn initial_selection(&self) -> crate::InitialSelection {
+        self.option
+            .initial_selection
+            .unwrap_or(crate::InitialSelection::Latest)
+    }
+    pub fn set_initial_selection(&mut self, sel: crate::InitialSelection) {
+        self.option.initial_selection = Some(sel);
+    }
     pub fn protocol(&self) -> Option<crate::ImageProtocolType> {
         self.option.protocol
     }
@@ -669,6 +685,29 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
                 crate::GraphStyle::Rounded => "rounded",
                 crate::GraphStyle::Angular => "angular",
                 crate::GraphStyle::Smooth => "smooth",
+            },
+        );
+    }
+
+    if let Some(width) = core.option.graph_width {
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "graph_width"],
+            match width {
+                crate::GraphWidthType::Auto => "auto",
+                crate::GraphWidthType::Double => "double",
+                crate::GraphWidthType::Single => "single",
+            },
+        );
+    }
+
+    if let Some(sel) = core.option.initial_selection {
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "initial_selection"],
+            match sel {
+                crate::InitialSelection::Latest => "latest",
+                crate::InitialSelection::Head => "head",
             },
         );
     }

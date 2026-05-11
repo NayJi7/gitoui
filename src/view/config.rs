@@ -16,13 +16,28 @@ use crate::{
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
     view::{graph_preview::GraphPreview, View},
-    GraphStyle, ImageProtocolType,
+    GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection,
 };
 
-const CONFIG_ITEM_COUNT: usize = 11;
-const TEXT_EDIT_START_INDEX: usize = 6;
-const GITHUB_AUTH_INDEX: usize = 9;
-const GITHUB_AVATARS_INDEX: usize = 10;
+// Item indices — listed here so future inserts only have to touch one spot
+// instead of hunting for `selected == N` matches scattered through the file.
+//   0  Theme
+//   1  Graph Style
+//   2  Graph Width
+//   3  Initial Selection
+//   4  Diff Mode
+//   5  Mouse
+//   6  Date Format
+//   7  Image Protocol
+//   8  Git Name          ← TEXT_EDIT_START_INDEX
+//   9  Git Email
+//  10  Default Branch
+//  11  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  12  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 13;
+const TEXT_EDIT_START_INDEX: usize = 8;
+const GITHUB_AUTH_INDEX: usize = 11;
+const GITHUB_AVATARS_INDEX: usize = 12;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -65,16 +80,21 @@ pub struct ConfigView<'a> {
 
 impl<'a> ConfigView<'a> {
     fn config_left_width(&self, total_width: u16) -> u16 {
+        // NOTE: This array is only used to compute the left column width.
+        // The display order in the UI lives in `render()` — see the `items`
+        // vec there for the actual rendering order.
         let values = [
+            self.core_config.option.theme.clone(),
             graph_style_display(self.core_config.graph_style()),
+            graph_width_display(self.core_config.graph_width()),
+            initial_selection_display(self.core_config.initial_selection()),
             diff_mode_display(self.ui_config.common.diff_mode),
             mouse_display(self.ui_config.common.mouse_enabled),
-            protocol_display(self.core_config.protocol()),
-            self.core_config.option.theme.clone(),
             self.core_config
                 .date_time_format()
                 .display_name()
                 .to_string(),
+            protocol_display(self.core_config.protocol()),
             self.core_config
                 .user_name()
                 .map(|s| s.to_string())
@@ -97,6 +117,8 @@ impl<'a> ConfigView<'a> {
         let names = [
             "Theme",
             "Graph Style",
+            "Graph Width",
+            "Initial Select",
             "Diff Mode",
             "Mouse",
             "Date Format",
@@ -292,9 +314,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            6 => self.core_config.user_name().unwrap_or("").to_string(),
-            7 => self.core_config.user_email().unwrap_or("").to_string(),
-            8 => self.core_config.default_branch().unwrap_or("").to_string(),
+            8 => self.core_config.user_name().unwrap_or("").to_string(),
+            9 => self.core_config.user_email().unwrap_or("").to_string(),
+            10 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -429,9 +451,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            6 => self.core_config.set_user_name(value),
-            7 => self.core_config.set_user_email(value),
-            8 => self.core_config.set_default_branch(value),
+            8 => self.core_config.set_user_name(value),
+            9 => self.core_config.set_user_email(value),
+            10 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -467,6 +489,24 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_graph_style(prev);
             }
             2 => {
+                let prev = match self.core_config.graph_width() {
+                    GraphWidthType::Auto => GraphWidthType::Single,
+                    GraphWidthType::Double => GraphWidthType::Auto,
+                    GraphWidthType::Single => GraphWidthType::Double,
+                };
+                self.core_config.set_graph_width(prev);
+                // Drop the cached preview so the next render rebuilds at
+                // the new cell width.
+                self.graph_preview = None;
+            }
+            3 => {
+                let prev = match self.core_config.initial_selection() {
+                    InitialSelection::Latest => InitialSelection::Head,
+                    InitialSelection::Head => InitialSelection::Latest,
+                };
+                self.core_config.set_initial_selection(prev);
+            }
+            4 => {
                 let prev = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::SideBySideEnhanced,
                     DiffMode::Raw => DiffMode::Enhanced,
@@ -475,16 +515,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(prev);
             }
-            3 => {
+            5 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            4 => {
+            6 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            5 => {
+            7 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -534,6 +574,22 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_graph_style(next);
             }
             2 => {
+                let next = match self.core_config.graph_width() {
+                    GraphWidthType::Auto => GraphWidthType::Double,
+                    GraphWidthType::Double => GraphWidthType::Single,
+                    GraphWidthType::Single => GraphWidthType::Auto,
+                };
+                self.core_config.set_graph_width(next);
+                self.graph_preview = None;
+            }
+            3 => {
+                let next = match self.core_config.initial_selection() {
+                    InitialSelection::Latest => InitialSelection::Head,
+                    InitialSelection::Head => InitialSelection::Latest,
+                };
+                self.core_config.set_initial_selection(next);
+            }
+            4 => {
                 let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::SideBySide,
@@ -542,16 +598,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(next);
             }
-            3 => {
+            5 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            4 => {
+            6 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            5 => {
+            7 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -642,7 +698,12 @@ impl<'a> ConfigView<'a> {
         self.left_area = left_area;
         self.render_vertical_separator(f, separator_area);
 
-        // Items list (left column)
+        // Items list (left column) — index order MUST stay in sync with the
+        // constants block at the top of the file (TEXT_EDIT_START_INDEX,
+        // GITHUB_AUTH_INDEX, GITHUB_AVATARS_INDEX) and the `match self.selected`
+        // arms in `cycle_option`/`cycle_option_prev`/`start_text_edit`/
+        // `finish_text_edit`. Inserting a new item between existing ones
+        // requires shifting indices in all of those places too.
         let items = vec![
             (
                 "Theme",
@@ -652,6 +713,16 @@ impl<'a> ConfigView<'a> {
             (
                 "Graph Style",
                 graph_style_display(self.core_config.graph_style()),
+                false,
+            ),
+            (
+                "Graph Width",
+                graph_width_display(self.core_config.graph_width()),
+                false,
+            ),
+            (
+                "Initial Select",
+                initial_selection_display(self.core_config.initial_selection()),
                 false,
             ),
             (
@@ -722,7 +793,7 @@ impl<'a> ConfigView<'a> {
         let mut lines: Vec<Line> = vec![config_section_line("Interface", &self.ctx.color_theme)];
         let mut item_rows: Vec<Option<usize>> = vec![None];
         for (i, (name, value, indented)) in items.iter().enumerate() {
-            if i == 6 {
+            if i == TEXT_EDIT_START_INDEX {
                 lines.push(Line::from(""));
                 item_rows.push(None);
                 lines.push(config_section_line("Git", &self.ctx.color_theme));
@@ -799,6 +870,8 @@ impl<'a> ConfigView<'a> {
         let descriptions: Vec<String> = vec![
             "Color theme applied to the entire interface, including diff syntax highlighting.".into(),
             "Controls how commit connection lines are rendered in the graph.".into(),
+            "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
+            "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
             "Enhanced shows contextual line numbers; Raw shows plain git diff output.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
@@ -883,7 +956,7 @@ impl<'a> ConfigView<'a> {
                     }
                 }
             }
-            1 => {
+            1 | 2 => {
                 right_lines.push(Line::from(""));
                 right_lines.push(Line::from(vec![Span::styled(
                     "Preview",
@@ -900,12 +973,14 @@ impl<'a> ConfigView<'a> {
             _ => {}
         }
 
-        // Leaving the Graph Style item — pre-clear the cells that previously held
-        // the preview so labels/image-trailing-spaces are overwritten with plain
-        // spaces. Paragraph rendering will then write the new content (e.g. the
-        // theme code preview) over those spaces. Kitty persistent placements are
-        // evicted via the post-draw `pending_preview_deletes` queue.
-        if self.selected != 1 {
+        // Leaving the Graph Style / Graph Width items — pre-clear the cells
+        // that previously held the preview so labels/image-trailing-spaces
+        // are overwritten with plain spaces. Paragraph rendering will then
+        // write the new content (e.g. the theme code preview) over those
+        // spaces. Kitty persistent placements are evicted via the post-draw
+        // `pending_preview_deletes` queue.
+        let preview_active = matches!(self.selected, 1 | 2);
+        if !preview_active {
             if let Some((y, count)) = self.last_preview_rows.take() {
                 self.clear_preview_cells(f, right_area, y, count);
                 for i in 0..count {
@@ -917,7 +992,7 @@ impl<'a> ConfigView<'a> {
         let right_paragraph = Paragraph::new(right_lines);
         f.render_widget(right_paragraph, right_area);
 
-        if self.selected == 1 {
+        if preview_active {
             self.render_graph_style_preview(f, right_area);
         }
 
@@ -980,10 +1055,25 @@ impl<'a> ConfigView<'a> {
 
     fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
         let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
+        // Resolve "Auto" to the same Double/Single mapping the runtime uses
+        // — Sixel + KittyUnicode prefer Single cells, everything else Double.
+        let cell_width = match self.core_config.graph_width() {
+            GraphWidthType::Double => crate::graph::CellWidthType::Double,
+            GraphWidthType::Single => crate::graph::CellWidthType::Single,
+            GraphWidthType::Auto => {
+                use crate::protocol::ImageProtocol;
+                match self.ctx.image_protocol {
+                    ImageProtocol::Sixel | ImageProtocol::KittyUnicode { .. } => {
+                        crate::graph::CellWidthType::Single
+                    }
+                    _ => crate::graph::CellWidthType::Double,
+                }
+            }
+        };
         let needs_rebuild = self
             .graph_preview
             .as_ref()
-            .map(|p| p.style != style)
+            .map(|p| p.style != style || p.cell_width != cell_width)
             .unwrap_or(true);
         if needs_rebuild {
             let bg_rgb = if let ratatui::style::Color::Rgb(r, g, b) = self.ctx.color_theme.bg {
@@ -991,8 +1081,9 @@ impl<'a> ConfigView<'a> {
             } else {
                 None
             };
-            let mut preview = GraphPreview::build(
+            let mut preview = GraphPreview::build_with_cell_width(
                 style,
+                cell_width,
                 &self.ctx.graph_color_set,
                 self.ctx.image_protocol,
                 bg_rgb,
@@ -1027,6 +1118,25 @@ impl<'a> ConfigView<'a> {
         let buf = f.buffer_mut();
         let max_image_cells = right_area.width as usize;
         let mut max_used_cells = 0usize;
+        // Wipe each preview row end-to-end before drawing image + label so a
+        // wider previous frame (e.g. Double → Single) can't leave leftover
+        // label characters past the new label's right edge. Paragraph
+        // rendering only writes cells that contain glyphs, not the trailing
+        // ones — without this clear, switching cell widths produced ghost
+        // text like "ie" hanging next to the new "main" label.
+        let bg_style = ratatui::style::Style::default().bg(self.ctx.color_theme.bg);
+        for i in 0..preview.rows.len() {
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            for col in right_area.x..right_area.x.saturating_add(right_area.width) {
+                let buf_cell = &mut buf[(col, y)];
+                buf_cell.set_symbol(" ");
+                buf_cell.set_style(bg_style);
+                buf_cell.set_skip(false);
+            }
+        }
         for (i, image) in preview.rows.iter().enumerate() {
             let y = preview_top + i as u16;
             if y >= right_area.y.saturating_add(right_area.height) {
@@ -1185,6 +1295,21 @@ fn graph_style_display(style: GraphStyle) -> String {
         GraphStyle::Rounded => "Rounded".to_string(),
         GraphStyle::Angular => "Angular".to_string(),
         GraphStyle::Smooth => "Smooth".to_string(),
+    }
+}
+
+fn graph_width_display(width: GraphWidthType) -> String {
+    match width {
+        GraphWidthType::Auto => "Auto".to_string(),
+        GraphWidthType::Double => "Double".to_string(),
+        GraphWidthType::Single => "Single".to_string(),
+    }
+}
+
+fn initial_selection_display(sel: InitialSelection) -> String {
+    match sel {
+        InitialSelection::Latest => "Latest".to_string(),
+        InitialSelection::Head => "HEAD".to_string(),
     }
 }
 
@@ -1468,7 +1593,17 @@ mod tests {
             super::config_value_kind(super::GITHUB_AVATARS_INDEX),
             super::ConfigValueKind::Cycle
         );
-        assert_eq!(super::config_value_kind(6), super::ConfigValueKind::Input);
+        // First text-edit field (Git Name) sits at TEXT_EDIT_START_INDEX.
+        assert_eq!(
+            super::config_value_kind(super::TEXT_EDIT_START_INDEX),
+            super::ConfigValueKind::Input
+        );
+        // Items before the text-edit block are cycle-able.
+        assert_eq!(super::config_value_kind(0), super::ConfigValueKind::Cycle);
+        assert_eq!(
+            super::config_value_kind(super::TEXT_EDIT_START_INDEX - 1),
+            super::ConfigValueKind::Cycle
+        );
     }
 
     #[test]

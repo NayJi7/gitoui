@@ -196,7 +196,33 @@ impl From<garde::Report> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn run() -> Result<()> {
-    let args = Args::parse();
+    // Print the gitoui splash above clap's help / error output so the brand
+    // shows on every entry path, not just the "no-repo" prompt. clap's
+    // `parse()` would auto-exit before we get a chance to draw, so we use
+    // `try_parse()` and re-emit the formatted message ourselves.
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(err) => {
+            let proto = protocol::auto_detect();
+            print_no_repo_splash(proto);
+            // clap separates "expected" exits (--help / --version) from real
+            // failures via `ErrorKind`. We mirror clap's behaviour: success
+            // exit on help/version, non-zero on parse errors. Using `print`
+            // (stdout) for help/version and `eprint` (stderr) for errors
+            // matches what `parse()` would have done.
+            use clap::error::ErrorKind;
+            match err.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                    print!("{}", err);
+                    std::process::exit(0);
+                }
+                _ => {
+                    eprint!("{}", err);
+                    std::process::exit(2);
+                }
+            }
+        }
+    };
 
     highlight::init();
     let ec = event::EventController::init();

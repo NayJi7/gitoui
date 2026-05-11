@@ -12,6 +12,7 @@ use crate::{
 #[derive(Debug)]
 pub struct GraphPreview {
     pub style: GraphStyle,
+    pub cell_width: CellWidthType,
     pub rows: Vec<PreparedImage>,
     pub pending_uploads: Vec<String>,
     pub image_ids: Vec<u32>,
@@ -20,6 +21,22 @@ pub struct GraphPreview {
 impl GraphPreview {
     pub fn build(
         style: GraphStyle,
+        graph_color_set: &GraphColorSet,
+        image_protocol: ImageProtocol,
+        bg_rgb: Option<(u8, u8, u8)>,
+    ) -> Self {
+        Self::build_with_cell_width(
+            style,
+            CellWidthType::Double,
+            graph_color_set,
+            image_protocol,
+            bg_rgb,
+        )
+    }
+
+    pub fn build_with_cell_width(
+        style: GraphStyle,
+        cell_width_type: CellWidthType,
         graph_color_set: &GraphColorSet,
         image_protocol: ImageProtocol,
         bg_rgb: Option<(u8, u8, u8)>,
@@ -73,7 +90,6 @@ impl GraphPreview {
 
         let graph = calc_graph(&repository);
 
-        let cell_width_type = CellWidthType::Double;
         let mut manager = GraphImageManager::new(
             &graph,
             graph_color_set,
@@ -99,6 +115,7 @@ impl GraphPreview {
 
         GraphPreview {
             style,
+            cell_width: cell_width_type,
             rows,
             pending_uploads,
             image_ids,
