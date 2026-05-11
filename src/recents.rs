@@ -75,3 +75,128 @@ pub fn push(path: &Path) {
     recents.truncate(MAX_RECENTS);
     save(&recents);
 }
+
+#[cfg(test)]
+mod tests {
+    //! Baseline for the recents store — pinned ahead of the upcoming
+    //! "async write + in-memory cache" optimisation. Each test installs a
+    //! private XDG_CONFIG_HOME pointing at a tempdir so the suite can run
+    //! in parallel without stomping on the real user file.
+    //!
+    //! Env vars are process-global. The shared `ENV_LOCK` serialises tests
+    //! that touch `XDG_CONFIG_HOME`/`HOME` so they don't race.
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::TempDir;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        prev_xdg: Option<String>,
+        prev_home: Option<String>,
+        _dir: TempDir,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let dir = TempDir::new().unwrap();
+            let prev_xdg = std::env::var("XDG_CONFIG_HOME").ok();
+            let prev_home = std::env::var("HOME").ok();
+            std::env::set_var("XDG_CONFIG_HOME", dir.path());
+            Self {
+                prev_xdg,
+                prev_home,
+                _dir: dir,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev_xdg {
+                Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+            if let Some(v) = &self.prev_home {
+                std::env::set_var("HOME", v);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_load_returns_empty_vec() {
+        let _g = EnvGuard::new();
+        assert!(load().is_empty());
+    }
+
+    #[test]
+    fn push_then_load_round_trips() {
+        let _g = EnvGuard::new();
+        let target = TempDir::new().unwrap();
+        push(target.path());
+        let loaded = load();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0], target.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn most_recent_sits_at_index_zero() {
+        let _g = EnvGuard::new();
+        let a = TempDir::new().unwrap();
+        let b = TempDir::new().unwrap();
+        push(a.path());
+        push(b.path());
+        let loaded = load();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0], b.path().canonicalize().unwrap());
+        assert_eq!(loaded[1], a.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn repushing_a_path_dedupes_and_bumps_to_top() {
+        let _g = EnvGuard::new();
+        let a = TempDir::new().unwrap();
+        let b = TempDir::new().unwrap();
+        push(a.path());
+        push(b.path());
+        push(a.path());
+        let loaded = load();
+        assert_eq!(loaded.len(), 2, "must dedup, not grow");
+        assert_eq!(loaded[0], a.path().canonicalize().unwrap());
+        assert_eq!(loaded[1], b.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn list_caps_at_max_recents() {
+        let _g = EnvGuard::new();
+        let dirs: Vec<TempDir> = (0..MAX_RECENTS + 5)
+            .map(|_| TempDir::new().unwrap())
+            .collect();
+        for d in &dirs {
+            push(d.path());
+        }
+        let loaded = load();
+        assert_eq!(loaded.len(), MAX_RECENTS);
+        // The 5 oldest must have been dropped; the very last pushed is on top.
+        assert_eq!(
+            loaded[0],
+            dirs.last().unwrap().path().canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn path_with_special_chars_round_trips() {
+        let _g = EnvGuard::new();
+        // The serializer escapes `\` and `"`; round-trip a path containing both.
+        let base = TempDir::new().unwrap();
+        let weird = base.path().join("with \" quote and \\ slash");
+        std::fs::create_dir(&weird).unwrap();
+        push(&weird);
+        let loaded = load();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0], weird.canonicalize().unwrap());
+    }
+}

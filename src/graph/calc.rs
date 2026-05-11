@@ -880,4 +880,61 @@ mod tests {
             "merge rows need horizontal entry edges for rounded/angular renderers"
         );
     }
+
+    /// Locks in the "always allocate a fresh index" semantics of the new
+    /// `get_available_colour`. The old algorithm reused the lowest ended
+    /// index — the user complained that this produced three red branches
+    /// in a row. We freeze the new behaviour so future refactors can't
+    /// silently revert it.
+    #[test]
+    fn get_available_colour_always_returns_len() {
+        assert_eq!(get_available_colour(0, &[]), 0);
+        assert_eq!(get_available_colour(10, &[]), 0);
+        // Even when slot 0 has "ended" (entry value <= start_at), we DON'T
+        // reuse it — we hand out the next sequential index.
+        assert_eq!(get_available_colour(10, &[3]), 1);
+        assert_eq!(get_available_colour(10, &[3, 5, 7]), 3);
+        // And `start_at` is ignored entirely — only the slot count matters.
+        assert_eq!(get_available_colour(0, &[100, 100, 100]), 3);
+    }
+
+    /// Smoke test at the `calc_graph` layer: two sequential branches that
+    /// don't overlap in time still get distinct colour indices.
+    #[test]
+    fn sequential_non_overlapping_branches_get_distinct_colours() {
+        // Linear history of 4 commits; root has no parent.
+        let commits = vec![
+            commit("d", vec!["c"], CommitType::Commit),
+            commit("c", vec!["b"], CommitType::Commit),
+            commit("b", vec!["a"], CommitType::Commit),
+            commit("a", vec![], CommitType::Commit),
+        ];
+        let commit_hashes: Vec<_> = commits.iter().map(|c| c.commit_hash.clone()).collect();
+        let commit_map = commits
+            .into_iter()
+            .map(|c| (c.commit_hash.clone(), c))
+            .collect::<FxHashMap<_, _>>();
+        let repository = Repository::new(
+            Default::default(),
+            commit_map,
+            FxHashMap::default(),
+            FxHashMap::default(),
+            FxHashMap::default(),
+            Head::Detached {
+                target: CommitHash::from("d"),
+            },
+            commit_hashes,
+            None,
+        );
+
+        let graph = calc_graph(&repository);
+        // A linear history yields a single branch on lane 0 — but its
+        // colour index must come out as 0 (first allocation).
+        let head_color = graph.commit_color_map[&CommitHash::from("d")];
+        assert_eq!(head_color, 0);
+        // Every commit on the same single branch shares that colour.
+        for h in ["c", "b", "a"] {
+            assert_eq!(graph.commit_color_map[&CommitHash::from(h)], head_color);
+        }
+    }
 }

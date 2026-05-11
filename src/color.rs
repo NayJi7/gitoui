@@ -234,4 +234,90 @@ mod tests {
     fn test_parse_rgba_color(#[case] input: &str, #[case] expected: Option<GraphColor>) {
         assert_eq!(parse_rgba_color(input), expected);
     }
+
+    /// Baseline for `build_graph_color_set` — pinned ahead of the upcoming
+    /// "cache the parsed palette" optimisation. These tests freeze the
+    /// theme-vs-config precedence and the transparent-bg patching logic so
+    /// the cache layer can't silently flip any case.
+    mod build_graph_color_set_baseline {
+        use super::*;
+        use crate::config::GraphColorConfig;
+
+        fn cfg_with_branches(branches: Vec<&str>) -> GraphColorConfig {
+            let mut c = GraphColorConfig::default();
+            c.branches = branches.into_iter().map(|s| s.to_string()).collect();
+            c.background = "#222222".into();
+            c
+        }
+
+        #[test]
+        fn theme_branches_override_config_when_non_empty() {
+            let mut theme = ColorTheme::default();
+            theme.graph_branches = vec!["#aabbcc".into(), "#ddeeff".into()];
+            let cfg = cfg_with_branches(vec!["#111111", "#222222", "#333333"]);
+
+            let set = build_graph_color_set(&theme, &cfg);
+
+            // Theme palette won — 2 entries, not the 3 from the config.
+            assert_eq!(set.colors.len(), 2);
+            assert_eq!(set.get(0), GraphColor::from_rgb(0xaa, 0xbb, 0xcc));
+            assert_eq!(set.get(1), GraphColor::from_rgb(0xdd, 0xee, 0xff));
+        }
+
+        #[test]
+        fn empty_theme_branches_falls_back_to_config() {
+            let theme = ColorTheme::default(); // graph_branches = Vec::new()
+            let cfg = cfg_with_branches(vec!["#111111", "#222222", "#333333"]);
+
+            let set = build_graph_color_set(&theme, &cfg);
+
+            assert_eq!(set.colors.len(), 3);
+            assert_eq!(set.get(0), GraphColor::from_rgb(0x11, 0x11, 0x11));
+            assert_eq!(set.get(2), GraphColor::from_rgb(0x33, 0x33, 0x33));
+        }
+
+        #[test]
+        fn transparent_background_is_patched_with_theme_bg() {
+            let mut theme = ColorTheme::default();
+            theme.bg = RatatuiColor::Rgb(0x1a, 0x1b, 0x26);
+            let mut cfg = cfg_with_branches(vec!["#ffffff"]);
+            cfg.background = "#00000000".into(); // explicit transparent sentinel
+
+            let set = build_graph_color_set(&theme, &cfg);
+
+            // Patched: theme bg with full alpha.
+            assert_eq!(
+                set.background_color,
+                GraphColor::from_rgba(0x1a, 0x1b, 0x26, 0xff)
+            );
+        }
+
+        #[test]
+        fn explicit_background_is_kept_unchanged() {
+            let mut theme = ColorTheme::default();
+            theme.bg = RatatuiColor::Rgb(0x1a, 0x1b, 0x26);
+            let mut cfg = cfg_with_branches(vec!["#ffffff"]);
+            cfg.background = "#abcdef".into();
+
+            let set = build_graph_color_set(&theme, &cfg);
+
+            assert_eq!(
+                set.background_color,
+                GraphColor::from_rgb(0xab, 0xcd, 0xef)
+            );
+        }
+
+        #[test]
+        fn non_rgb_theme_bg_skips_patching() {
+            let mut theme = ColorTheme::default();
+            theme.bg = RatatuiColor::Reset; // not an RGB triple
+            let mut cfg = cfg_with_branches(vec!["#ffffff"]);
+            cfg.background = "#00000000".into();
+
+            let set = build_graph_color_set(&theme, &cfg);
+
+            // Stays transparent — patching only fires on RGB bg.
+            assert_eq!(set.background_color, GraphColor::transparent());
+        }
+    }
 }
