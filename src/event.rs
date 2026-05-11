@@ -186,12 +186,18 @@ pub enum DialogKind {
     ConfirmDeleteWorktree { path: String, display_name: String, is_dirty: bool },
     // Add new worktree
     AddWorktree,
+    // Checkout blocked by local changes — pick a resolution path.
+    CheckoutHasLocalChanges { target: String, is_branch: bool },
 }
 
 #[derive(Debug, Clone)]
 pub enum GitAction {
     // Commit actions
     Checkout,
+    /// Discard all local changes, then checkout the target.
+    CheckoutDiscard,
+    /// Stash local changes, then checkout the target.
+    CheckoutStash,
     CreateBranch {
         name: String,
         checkout: bool,

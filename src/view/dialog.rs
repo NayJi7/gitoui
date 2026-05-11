@@ -74,6 +74,8 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
             DialogKind::AddWorktree => (vec![false], 0),
+            // Two radio options: 0=Stash, 1=Discard. Default to Stash (safer).
+            DialogKind::CheckoutHasLocalChanges { .. } => (vec![], 0),
             _ => (vec![], 0),
         };
 
@@ -89,7 +91,10 @@ impl<'a> DialogView<'a> {
 
         let focused = if Self::has_input_for(&kind) {
             DialogElement::Input
-        } else if matches!(kind, DialogKind::Reset { .. }) {
+        } else if matches!(
+            kind,
+            DialogKind::Reset { .. } | DialogKind::CheckoutHasLocalChanges { .. }
+        ) {
             DialogElement::Radio(dropdown_selected)
         } else if !checkboxes.is_empty() {
             DialogElement::Checkbox(0)
@@ -157,6 +162,7 @@ impl<'a> DialogView<'a> {
             DialogKind::Reset { .. } => 3,
             DialogKind::ChooseRemote { remotes, .. } => remotes.len(),
             DialogKind::SetUpstream { remotes, .. } => remotes.len(),
+            DialogKind::CheckoutHasLocalChanges { .. } => 2,
             _ => 0,
         }
     }
@@ -1116,6 +1122,26 @@ impl<'a> DialogView<'a> {
                     ));
                 }
             }
+            DialogKind::CheckoutHasLocalChanges { target, is_branch } => {
+                let kind_str = if *is_branch { "branch" } else { "commit" };
+                lines.push(info_line(
+                    &format!("Checkout {}:", kind_str),
+                    target,
+                    dim_fg,
+                    yellow,
+                ));
+                lines.push(Line::from(""));
+                lines.push(warning_line(
+                    "Local changes would be overwritten by checkout.",
+                    warn_fg,
+                ));
+                lines.push(Line::from(""));
+                lines.push(label_line("Choose how to proceed:", dim_fg));
+                self.radio_rows.push(lines.len());
+                lines.push(self.radio_line(0, "Stash changes, then checkout"));
+                self.radio_rows.push(lines.len());
+                lines.push(self.radio_line(1, "Discard changes, then checkout"));
+            }
             DialogKind::ConfirmSwitchWorktree {
                 path,
                 display_name,
@@ -1185,6 +1211,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmSwitchWorktree { .. } => " Switch Worktree ",
             DialogKind::ConfirmDeleteWorktree { .. } => " Remove Worktree ",
             DialogKind::AddWorktree => " Add Worktree ",
+            DialogKind::CheckoutHasLocalChanges { .. } => " Checkout — Local Changes ",
         }
         .to_string()
     }
@@ -1669,6 +1696,13 @@ impl<'a> DialogView<'a> {
                     String::new(),
                     GitAction::AddWorktree { name, checkout },
                 )
+            }
+            DialogKind::CheckoutHasLocalChanges { target, .. } => {
+                let action = match self.dropdown_selected {
+                    1 => GitAction::CheckoutDiscard,
+                    _ => GitAction::CheckoutStash,
+                };
+                (target.clone(), action)
             }
             // Handled by early-return above; these arms are unreachable at runtime.
             DialogKind::ConfirmSwitchWorktree { .. } => unreachable!(),

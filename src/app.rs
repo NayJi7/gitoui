@@ -3764,6 +3764,13 @@ impl App<'_> {
                 | GitAction::PushTag
                 | GitAction::AddTag { .. }
         );
+        // Track plain Checkout so we can intercept the "local changes would
+        // be overwritten" error and offer Stash/Discard recovery options.
+        let checkout_target = if matches!(&action, GitAction::Checkout) {
+            Some(target.clone())
+        } else {
+            None
+        };
         if matches!(&action, GitAction::Rebase { .. }) {
             self.start_spinner("Rebasing\u{2026}");
         }
@@ -3777,6 +3784,20 @@ impl App<'_> {
                 } else {
                     actions::checkout_commit(repo_path, &target)
                 };
+                (r, None)
+            }
+            GitAction::CheckoutDiscard => {
+                // Discard everything (tracked + untracked) then checkout.
+                let r = actions::discard_all(repo_path)
+                    .and_then(|_| actions::clean_untracked(repo_path))
+                    .and_then(|_| actions::checkout_commit(repo_path, &target));
+                (r, None)
+            }
+            GitAction::CheckoutStash => {
+                // Auto-stash current changes (including untracked) then checkout.
+                let msg = format!("gitoui auto-stash before checkout: {}", target);
+                let r = actions::stash(repo_path, Some(&msg), true)
+                    .and_then(|_| actions::checkout_commit(repo_path, &target));
                 (r, None)
             }
             GitAction::CreateBranch { name, checkout } => (
@@ -3992,6 +4013,25 @@ impl App<'_> {
                 }
             }
             Err(msg) => {
+                // If a plain checkout failed because of a dirty working tree,
+                // surface the recovery dialog (Stash / Discard / Cancel)
+                // instead of just printing the raw git error.
+                if let Some(target) = checkout_target {
+                    if msg.contains("would be overwritten by checkout")
+                        || msg.contains("overwritten by checkout")
+                    {
+                        self.close_dialog();
+                        let is_branch = !target.chars().all(|c| c.is_ascii_hexdigit())
+                            || target.len() < 7;
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::CheckoutHasLocalChanges {
+                                target,
+                                is_branch,
+                            },
+                        ));
+                        return;
+                    }
+                }
                 self.ec.send(AppEvent::NotifyError(msg));
             }
         }
