@@ -177,6 +177,69 @@ fn rename_records_move_with_from_and_to() {
 }
 
 #[test]
+fn merge_commit_returns_diff_against_first_parent() {
+    // `git log` hides diffs for merge commits unless coaxed; this test
+    // would have caught the empty-file-list regression in the Detail view
+    // when the implementation switched from `git diff` (which doesn't
+    // need such coaxing) to `git log --raw --numstat`.
+    let dir = create_test_repo();
+    std::fs::write(dir.path().join("a.txt"), "shared\n").unwrap();
+    add(&dir, "a.txt");
+    let _ = commit(&dir, "root");
+
+    // feature branch modifies a.txt
+    Command::new("git")
+        .args(["checkout", "-b", "feat"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::fs::write(dir.path().join("a.txt"), "shared\nfrom-feat\n").unwrap();
+    add(&dir, "a.txt");
+    let _ = commit(&dir, "feat work");
+
+    // main adds a new file b.txt
+    Command::new("git")
+        .args(["checkout", "main"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::fs::write(dir.path().join("b.txt"), "main-only\n").unwrap();
+    add(&dir, "b.txt");
+    let _ = commit(&dir, "main side");
+
+    // merge feat into main — creates a 2-parent merge commit
+    Command::new("git")
+        .args(["merge", "--no-ff", "-m", "merge feat", "feat"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let hash_output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let hash = String::from_utf8(hash_output.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let hash = CommitHash::from(hash.as_str());
+
+    let changes = gitoui::git::get_diff_summary(dir.path(), &hash);
+    // Vs first parent (main): a.txt was modified on the feat side, so we
+    // expect at least one change. Empty would mean the merge regressed
+    // back to git log's default "no diff for merges" behaviour.
+    assert!(
+        !changes.is_empty(),
+        "merge commit must surface diff vs first parent, got empty list"
+    );
+    assert!(
+        changes.iter().any(|c| matches!(c, FileChange::Modify { path, .. } if path == "a.txt")),
+        "expected a.txt to appear as Modify, got {:?}",
+        changes
+    );
+}
+
+#[test]
 fn multiple_files_returned_in_one_call() {
     let dir = create_test_repo();
     std::fs::write(dir.path().join("a.txt"), "1\n").unwrap();

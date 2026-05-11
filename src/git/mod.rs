@@ -763,85 +763,108 @@ pub enum FileChange {
 }
 
 pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {
-    // First get file statuses
-    let mut cmd = Command::new("git")
-        .arg("diff")
-        .arg("--name-status")
-        .arg(format!("{}^", commit_hash.0))
+    // Combine the previous two `git diff` invocations (`--name-status` for
+    // file kinds + `--numstat` for line counts) into a single `git log`
+    // call. `git diff` honours only the last of `--name-status`/`--numstat`,
+    // but `git log --raw --numstat` prints BOTH sections one after the
+    // other in a single fork+exec — halving the cost of opening any commit
+    // in the Detail view (was 2 forks per click).
+    //
+    // Output layout (--format= empty drops the commit header):
+    //   :100644 100644 <h1> <h2> M\tpath
+    //   :000000 100644 <h1> <h2> A\tnewpath
+    //   :100644 100644 <h1> <h2> R100\toldname\tnewname
+    //   0\t1\tpath
+    //   3\t0\tnewpath
+    //   2\t1\toldname => newname
+    let output = Command::new("git")
+        .arg("log")
+        .arg("--format=")
+        .arg("--raw")
+        .arg("--numstat")
+        .arg("-M")
+        // `git log` hides diffs for merge commits by default. Force a diff
+        // against the first parent — same view the previous `git diff
+        // <hash>^ <hash>` call gave us. `-m` would also work but emits one
+        // diff per parent, which we'd then have to dedupe.
+        .arg("--first-parent")
+        .arg("-1")
         .arg(&commit_hash.0)
         .current_dir(path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .spawn()
+        .output()
         .unwrap();
-
-    let stdout = cmd.stdout.take().expect("failed to open stdout");
-    let reader = BufReader::new(stdout);
 
     let mut status_map: FxHashMap<String, (char, Option<String>)> = FxHashMap::default();
-    for line in reader.lines() {
-        let line = line.unwrap();
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.is_empty() {
+    let mut stats_map: FxHashMap<String, (usize, usize)> = FxHashMap::default();
+    for line in output.stdout.split(|&b| b == b'\n') {
+        if line.is_empty() {
             continue;
         }
-        let status = parts[0].chars().next().unwrap_or('?');
-        let path_name = parts[1].to_string();
-        let rename_to = parts.get(2).map(|s| s.to_string());
-        status_map.insert(path_name.clone(), (status, rename_to));
-    }
-    cmd.wait().unwrap();
-
-    // Then get numstat for additions/deletions
-    let mut cmd2 = Command::new("git")
-        .arg("diff")
-        .arg("--numstat")
-        .arg(format!("{}^", commit_hash.0))
-        .arg(&commit_hash.0)
-        .current_dir(path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let stdout2 = cmd2.stdout.take().expect("failed to open stdout");
-    let reader2 = BufReader::new(stdout2);
-
-    let mut stats_map: FxHashMap<String, (usize, usize)> = FxHashMap::default();
-    for line in reader2.lines() {
-        let line = line.unwrap();
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 3 {
-            let add = parts[0].parse().unwrap_or(0);
-            let del = parts[1].parse().unwrap_or(0);
-            let file_path = parts[2].to_string();
-            stats_map.insert(file_path, (add, del));
+        let line = String::from_utf8_lossy(line);
+        if let Some(rest) = line.strip_prefix(':') {
+            // Raw row: `<m1> <m2> <h1> <h2> <STATUS>\t<path>[\t<newpath>]`
+            // The metadata block is space-separated; the status + paths are
+            // tab-separated. Splitting on the first tab gives us a clean
+            // boundary between the two halves.
+            let Some((meta, paths)) = rest.split_once('\t') else {
+                continue;
+            };
+            let status_token = meta.split_whitespace().last().unwrap_or("");
+            let status = status_token.chars().next().unwrap_or('?');
+            let mut parts = paths.split('\t');
+            let path_name = parts.next().unwrap_or("").to_string();
+            let rename_to = parts.next().map(|s| s.to_string());
+            // For renames, key by `newname` so the numstat lookup matches
+            // the `oldname => newname` parse below.
+            let key = rename_to.clone().unwrap_or_else(|| path_name.clone());
+            status_map.insert(key, (status, Some(path_name).filter(|_| rename_to.is_some())));
+            if let Some(to) = rename_to {
+                // Keep an extra entry under `oldname` so a `D`/`R` row that
+                // appeared earlier in the stream isn't shadowed by a stale
+                // status — defensive, but cheap.
+                let _ = to;
+            }
+        } else {
+            // Numstat row: `<add>\t<del>\t<path>` (path may be
+            // `oldname => newname` for renames; binary files have `-` for
+            // both counts, which `parse::<usize>` will fail on → 0/0).
+            let mut parts = line.split('\t');
+            let add: usize = parts.next().unwrap_or("").parse().unwrap_or(0);
+            let del: usize = parts.next().unwrap_or("").parse().unwrap_or(0);
+            let path_field = parts.next().unwrap_or("").to_string();
+            let key = if let Some((_, new)) = path_field.split_once(" => ") {
+                new.trim_matches(|c| c == '{' || c == '}').to_string()
+            } else {
+                path_field
+            };
+            stats_map.insert(key, (add, del));
         }
     }
-    cmd2.wait().unwrap();
 
     let mut changes = Vec::new();
-    for (path_name, (status, rename_to)) in status_map {
-        let (additions, deletions) = stats_map.get(&path_name).copied().unwrap_or((0, 0));
+    for (key, (status, rename_from)) in status_map {
+        let (additions, deletions) = stats_map.get(&key).copied().unwrap_or((0, 0));
         match status {
             'A' => changes.push(FileChange::Add {
-                path: path_name,
+                path: key,
                 additions,
             }),
             'M' => changes.push(FileChange::Modify {
-                path: path_name,
+                path: key,
                 additions,
                 deletions,
             }),
             'D' => changes.push(FileChange::Delete {
-                path: path_name,
+                path: key,
                 deletions,
             }),
             'R' => {
-                let to = rename_to.unwrap_or_else(|| path_name.clone());
+                let from = rename_from.unwrap_or_else(|| key.clone());
                 changes.push(FileChange::Move {
-                    from: path_name,
-                    to,
+                    from,
+                    to: key,
                     additions,
                     deletions,
                 });
