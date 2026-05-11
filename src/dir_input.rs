@@ -14,6 +14,7 @@
 //! the eventual `std::env::set_current_dir` call to verify the target.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// How many suggestions we keep in memory — the list is still capped here
 /// to bound allocation, but the dropdown only renders `MAX_VISIBLE` rows
@@ -22,6 +23,13 @@ const MAX_SUGGESTIONS: usize = 50;
 /// How many rows the dropdown shows on screen at once. The list scrolls
 /// inside this window via ↑/↓ or the mouse wheel.
 pub const MAX_VISIBLE: usize = 8;
+/// Idle time after the last text edit before we re-read the parent directory
+/// for filesystem suggestions. Each keystroke would otherwise trigger a
+/// `std::fs::read_dir()` syscall — fine on local SSDs (~1 ms) but visibly
+/// laggy on NFS / network mounts / massive dirs like `~/Downloads`. 150 ms
+/// is short enough that suggestions still feel "live" but long enough to
+/// coalesce a burst of typing into a single read.
+const SUGGESTIONS_DEBOUNCE: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SuggestionKind {
@@ -56,6 +64,11 @@ pub struct DirInputState {
     /// to be deleted again (Kitty doesn't auto-drop placements when their
     /// placeholder cell is overwritten).
     pub last_rendered_height: u16,
+    /// Set whenever the input text is mutated. The App's main loop calls
+    /// `flush_pending_refresh` before each render; once `SUGGESTIONS_DEBOUNCE`
+    /// has elapsed since the last edit, the filesystem read finally fires.
+    /// `None` means "suggestions are up to date with the current text".
+    pub text_dirty_since: Option<Instant>,
 }
 
 impl DirInputState {
@@ -66,6 +79,9 @@ impl DirInputState {
         self.selected = None;
         self.scroll = 0;
         self.last_rendered_height = 0;
+        // Open is the one place where we still refresh synchronously — the
+        // user expects to see *something* the moment the overlay appears.
+        self.text_dirty_since = None;
         self.refresh_suggestions(recents);
     }
 
@@ -77,16 +93,24 @@ impl DirInputState {
         self.scroll = 0;
         self.last_rendered_height = 0;
         self.suggestions.clear();
+        self.text_dirty_since = None;
     }
 
-    pub fn insert_char(&mut self, c: char, recents: &[PathBuf]) {
+    /// Mark suggestions stale without doing the filesystem read. The App's
+    /// per-frame `flush_pending_refresh` picks it up `SUGGESTIONS_DEBOUNCE`
+    /// later (or immediately on Tab/Enter, via `force_refresh`).
+    fn mark_dirty(&mut self) {
+        self.text_dirty_since = Some(Instant::now());
+    }
+
+    pub fn insert_char(&mut self, c: char, _recents: &[PathBuf]) {
         self.text.insert(self.cursor, c);
         self.cursor += c.len_utf8();
         self.selected = None;
-        self.refresh_suggestions(recents);
+        self.mark_dirty();
     }
 
-    pub fn backspace(&mut self, recents: &[PathBuf]) {
+    pub fn backspace(&mut self, _recents: &[PathBuf]) {
         if self.cursor == 0 {
             return;
         }
@@ -99,7 +123,7 @@ impl DirInputState {
         self.text.replace_range(new_cursor..self.cursor, "");
         self.cursor = new_cursor;
         self.selected = None;
-        self.refresh_suggestions(recents);
+        self.mark_dirty();
     }
 
     pub fn move_cursor_left(&mut self) {
@@ -181,7 +205,7 @@ impl DirInputState {
     }
 
     /// Delete the previous word (and any trailing boundary chars before it).
-    pub fn delete_word_left(&mut self, recents: &[PathBuf]) {
+    pub fn delete_word_left(&mut self, _recents: &[PathBuf]) {
         if self.cursor == 0 {
             return;
         }
@@ -189,22 +213,22 @@ impl DirInputState {
         self.move_cursor_word_left();
         self.text.replace_range(self.cursor..old_cursor, "");
         self.selected = None;
-        self.refresh_suggestions(recents);
+        self.mark_dirty();
     }
 
     /// Delete the character to the right of the cursor (forward Delete key).
-    pub fn delete_right(&mut self, recents: &[PathBuf]) {
+    pub fn delete_right(&mut self, _recents: &[PathBuf]) {
         if self.cursor >= self.text.len() {
             return;
         }
         let next = next_char_boundary(&self.text, self.cursor);
         self.text.replace_range(self.cursor..next, "");
         self.selected = None;
-        self.refresh_suggestions(recents);
+        self.mark_dirty();
     }
 
     /// Delete the next word starting at the cursor (Ctrl+Delete).
-    pub fn delete_word_right(&mut self, recents: &[PathBuf]) {
+    pub fn delete_word_right(&mut self, _recents: &[PathBuf]) {
         if self.cursor >= self.text.len() {
             return;
         }
@@ -213,7 +237,7 @@ impl DirInputState {
         self.text.replace_range(old_cursor..self.cursor, "");
         self.cursor = old_cursor;
         self.selected = None;
-        self.refresh_suggestions(recents);
+        self.mark_dirty();
     }
 
     pub fn select_next(&mut self) {
@@ -277,6 +301,34 @@ impl DirInputState {
 
     pub fn refresh_suggestions_from(&mut self, recents: &[PathBuf]) {
         self.refresh_suggestions(recents);
+        self.text_dirty_since = None;
+    }
+
+    /// Called by the App's main loop before each render: if the input was
+    /// mutated more than `SUGGESTIONS_DEBOUNCE` ago, run the filesystem
+    /// read now. Returns `true` if a refresh actually happened — callers
+    /// use it to flag `needs_draw` so the new suggestions show on screen.
+    pub fn flush_pending_refresh(&mut self, recents: &[PathBuf]) -> bool {
+        let Some(dirty_at) = self.text_dirty_since else {
+            return false;
+        };
+        if dirty_at.elapsed() < SUGGESTIONS_DEBOUNCE {
+            return false;
+        }
+        self.refresh_suggestions(recents);
+        self.text_dirty_since = None;
+        true
+    }
+
+    /// Synchronous refresh for actions that need *current* suggestions
+    /// regardless of debounce state — Tab (complete) and Enter (resolve).
+    /// Without this, a fast typist + Tab would complete against a stale
+    /// suggestion list.
+    pub fn force_refresh(&mut self, recents: &[PathBuf]) {
+        if self.text_dirty_since.is_some() {
+            self.refresh_suggestions(recents);
+            self.text_dirty_since = None;
+        }
     }
 
     fn refresh_suggestions(&mut self, recents: &[PathBuf]) {

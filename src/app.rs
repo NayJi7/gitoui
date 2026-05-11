@@ -432,6 +432,20 @@ impl App<'_> {
                 }
             }
 
+            // Debounced filesystem read for the dir-input overlay's
+            // suggestion dropdown. The edit methods (insert_char,
+            // backspace, etc.) only mark the input as dirty — the actual
+            // `read_dir()` happens here, once the user has stopped typing
+            // for `SUGGESTIONS_DEBOUNCE`. Fires regardless of `needs_draw`
+            // because the Tick that wakes us up (spinner_active during
+            // the overlay) drives this loop iteration.
+            if self.dir_input.active {
+                let recents = self.dir_recents.clone();
+                if self.dir_input.flush_pending_refresh(&recents) {
+                    needs_draw = true;
+                }
+            }
+
             if needs_draw {
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
@@ -1104,6 +1118,13 @@ impl App<'_> {
                 None
             }
             KeyCode::Enter => {
+                // The user may have hit Enter while typing inside the
+                // debounce window — force a sync refresh so `.resolve()`
+                // sees up-to-date suggestions (Enter prefers the focused
+                // suggestion when one is selected). Without this, fast
+                // typist → Enter could commit a stale completion.
+                let recents = self.dir_recents.clone();
+                self.dir_input.force_refresh(&recents);
                 let cwd = std::env::current_dir().unwrap_or_default();
                 self.dir_input.resolve(&cwd)
             }
@@ -1118,13 +1139,16 @@ impl App<'_> {
             KeyCode::Tab => {
                 // Tab = pick the currently focused suggestion as if the user
                 // had typed it, so they can keep refining (e.g. completing
-                // `~/work/` → `~/work/api/`).
+                // `~/work/` → `~/work/api/`). Force a sync refresh first in
+                // case the debounce window is still pending — we want the
+                // *current* selected suggestion, not a stale snapshot.
+                let recents = self.dir_recents.clone();
+                self.dir_input.force_refresh(&recents);
                 if let Some(i) = self.dir_input.selected {
                     if let Some(s) = self.dir_input.suggestions.get(i).cloned() {
                         self.dir_input.text = s.display;
                         self.dir_input.cursor = self.dir_input.text.len();
                         self.dir_input.selected = None;
-                        let recents = self.dir_recents.clone();
                         self.dir_input.refresh_suggestions_from(&recents);
                     }
                 }
