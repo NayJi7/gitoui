@@ -681,8 +681,22 @@ impl App<'_> {
                         }
                     }
 
+                    // True when a text field is actively capturing character
+                    // input: dialog Input/SecondInput, config text edit, diff
+                    // search, or the list search bar (StatusLine::Input).
+                    let text_input_active =
+                        self.view.is_input_active()
+                            || matches!(
+                                self.app_status.status_line,
+                                StatusLine::Input(_, _, _)
+                            );
+
                     match user_event {
-                        Some(UserEvent::ForceQuit) | Some(UserEvent::Quit) => {
+                        Some(UserEvent::ForceQuit) => {
+                            // Ctrl+C always quits — it cannot produce a printable char.
+                            self.ec.send(AppEvent::Quit);
+                        }
+                        Some(UserEvent::Quit) if !text_input_active => {
                             self.ec.send(AppEvent::Quit);
                         }
                         Some(UserEvent::Drop)
@@ -729,11 +743,22 @@ impl App<'_> {
                             );
                         }
                         Some(ue) => {
-                            // When a text input is active, treat Left/Right as cursor movement
-                            // instead of navigation so the raw KeyEvent reaches the view.
-                            if self.view.is_input_active()
-                                && matches!(ue, UserEvent::NavigateLeft | UserEvent::NavigateRight)
-                            {
+                            // When a text field is capturing input, only pass
+                            // through structural dialog events. Everything else
+                            // (letter keys, Backspace, Delete, Ctrl+arrows…)
+                            // is forwarded as Unknown so the view's raw key
+                            // handler inserts the character or moves the cursor.
+                            let forward_as_raw = text_input_active
+                                && !matches!(
+                                    ue,
+                                    UserEvent::Cancel
+                                        | UserEvent::Close
+                                        | UserEvent::Confirm
+                                        | UserEvent::NavigateUp
+                                        | UserEvent::NavigateDown
+                                        | UserEvent::RefList
+                                );
+                            if forward_as_raw {
                                 self.app_status.numeric_prefix.clear();
                                 self.handle_view_event_clearing_detail_avatar(
                                     UserEventWithCount::from_event(UserEvent::Unknown),

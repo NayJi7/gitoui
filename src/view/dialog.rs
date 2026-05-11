@@ -269,6 +269,25 @@ impl<'a> DialogView<'a> {
             }
 
             match key.code {
+                // Ctrl+H is the terminal alias for Ctrl+Backspace (ASCII ^H).
+                // Must be checked before the generic Char(c) arm.
+                ratatui::crossterm::event::KeyCode::Char('h')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_left(&self.input_value, self.input_cursor);
+                    self.input_value.drain(new_pos..self.input_cursor);
+                    self.input_cursor = new_pos;
+                    return;
+                }
+                // Ctrl+W: Unix word-delete-left alias (same as Ctrl+Backspace).
+                ratatui::crossterm::event::KeyCode::Char('w')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_left(&self.input_value, self.input_cursor);
+                    self.input_value.drain(new_pos..self.input_cursor);
+                    self.input_cursor = new_pos;
+                    return;
+                }
                 ratatui::crossterm::event::KeyCode::Char(c) => {
                     self.input_value.insert(self.input_cursor, c);
                     self.input_cursor += 1;
@@ -287,6 +306,13 @@ impl<'a> DialogView<'a> {
                         self.input_cursor -= 1;
                         self.input_value.remove(self.input_cursor);
                     }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Delete
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_right(&self.input_value, self.input_cursor);
+                    self.input_value.drain(self.input_cursor..new_pos);
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Delete => {
@@ -334,6 +360,22 @@ impl<'a> DialogView<'a> {
         if matches!(self.focused, DialogElement::SecondInput) {
             use ratatui::crossterm::event::KeyModifiers;
             match key.code {
+                ratatui::crossterm::event::KeyCode::Char('h')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_left(&self.second_input_value, self.second_input_cursor);
+                    self.second_input_value.drain(new_pos..self.second_input_cursor);
+                    self.second_input_cursor = new_pos;
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Char('w')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_left(&self.second_input_value, self.second_input_cursor);
+                    self.second_input_value.drain(new_pos..self.second_input_cursor);
+                    self.second_input_cursor = new_pos;
+                    return;
+                }
                 ratatui::crossterm::event::KeyCode::Char(c) => {
                     self.second_input_value.insert(self.second_input_cursor, c);
                     self.second_input_cursor += 1;
@@ -352,6 +394,13 @@ impl<'a> DialogView<'a> {
                         self.second_input_cursor -= 1;
                         self.second_input_value.remove(self.second_input_cursor);
                     }
+                    return;
+                }
+                ratatui::crossterm::event::KeyCode::Delete
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    let new_pos = word_right(&self.second_input_value, self.second_input_cursor);
+                    self.second_input_value.drain(self.second_input_cursor..new_pos);
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Delete => {
