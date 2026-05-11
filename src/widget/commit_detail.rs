@@ -443,7 +443,19 @@ impl CommitDetail<'_> {
         value_lines.push(self.divider_line(width as usize));
 
         label_lines.push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.extend(self.commit_message_lines());
+        let msg_lines = self.commit_message_lines();
+        let msg_len = msg_lines.len();
+        value_lines.extend(msg_lines);
+        // Mirror the body lines in the left column: "Body:" on the first body
+        // row, then empty labels for continuation rows so the divider below
+        // stays aligned in both columns.
+        if msg_len > 1 {
+            label_lines
+                .push(Line::from("     Body: ").fg(self.ctx.color_theme.detail_label_fg));
+            for _ in 2..msg_len {
+                label_lines.push(Line::from(""));
+            }
+        }
 
         // Divider before changes
         label_lines.push(Line::from(""));
@@ -652,18 +664,10 @@ impl CommitDetail<'_> {
 
     fn commit_message_lines(&self) -> Vec<Line<'_>> {
         let commit_message_line = Line::from(self.commit.commit_message.as_str().bold());
-
         let mut lines = vec![commit_message_line];
-
-        if self.commit.body.is_empty() {
-            return lines;
+        if !self.commit.body.is_empty() {
+            lines.extend(self.commit.body.lines().map(Line::raw));
         }
-
-        let body_lines = self.commit.body.lines().map(Line::raw);
-
-        lines.push(self.empty_line());
-        lines.extend(body_lines);
-
         lines
     }
 

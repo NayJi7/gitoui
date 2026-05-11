@@ -18,6 +18,7 @@ use std::rc::Rc;
 enum DialogElement {
     Input,
     SecondInput,
+    BodyExpand,
     Checkbox(usize),
     Radio(usize),
     Validate,
@@ -40,6 +41,9 @@ pub struct DialogView<'a> {
     inner_area: Rect,
     input_row: Option<usize>,
     second_input_row: Option<usize>,
+    /// Row index (within inner_area) of the "[ ↵ add body ]" expand button.
+    /// Only set for CommitWithMessage / AmendMessage when no body exists yet.
+    body_expand_row: Option<usize>,
     checkbox_rows: Vec<usize>,
     radio_rows: Vec<usize>,
     button_row: usize,
@@ -108,6 +112,7 @@ impl<'a> DialogView<'a> {
             inner_area: Rect::default(),
             input_row: None,
             second_input_row: None,
+            body_expand_row: None,
             checkbox_rows: Vec::new(),
             radio_rows: Vec::new(),
             button_row: 0,
@@ -161,6 +166,14 @@ impl<'a> DialogView<'a> {
         }
         if self.has_second_input_field() {
             els.push(DialogElement::SecondInput);
+        }
+        // Body expand button is focusable only when no body exists yet.
+        if matches!(
+            self.kind,
+            DialogKind::CommitWithMessage | DialogKind::AmendMessage { .. }
+        ) && !self.input_value.contains('\n')
+        {
+            els.push(DialogElement::BodyExpand);
         }
         let n = self.radio_count();
         if n > 0 {
@@ -251,11 +264,14 @@ impl<'a> DialogView<'a> {
                 self.kind,
                 DialogKind::CommitWithMessage | DialogKind::AmendMessage { .. }
             ) {
-                if key.code == KeyCode::Enter
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
-                    self.input_value.insert(self.input_cursor, '\n');
-                    self.input_cursor += 1;
+                // Ctrl+Enter OR Alt+Enter → insert newline into message body.
+                // Alt+Enter is the reliable cross-terminal alias (Ctrl+Enter
+                // can be swallowed or re-encoded differently per terminal).
+                let is_newline_key = key.code == KeyCode::Enter
+                    && (key.modifiers.contains(KeyModifiers::CONTROL)
+                        || key.modifiers.contains(KeyModifiers::ALT));
+                if is_newline_key {
+                    self.insert_body_newline();
                     return;
                 }
                 if key.code == KeyCode::Up {
@@ -263,7 +279,20 @@ impl<'a> DialogView<'a> {
                     return;
                 }
                 if key.code == KeyCode::Down {
-                    self.move_cursor_down();
+                    if !self.input_value.contains('\n') {
+                        // No body yet — arrow down moves focus to expand button.
+                        self.focused = DialogElement::BodyExpand;
+                    } else {
+                        let (line_idx, _) =
+                            Self::cursor_line_col(&self.input_value, self.input_cursor);
+                        let total_lines = self.input_value.split('\n').count();
+                        if line_idx + 1 >= total_lines {
+                            // Already on last line — leave input and go to next element.
+                            self.focus_next();
+                        } else {
+                            self.move_cursor_down();
+                        }
+                    }
                     return;
                 }
             }
@@ -456,6 +485,7 @@ impl<'a> DialogView<'a> {
                 DialogElement::Radio(i) => {
                     self.dropdown_selected = i;
                 }
+                DialogElement::BodyExpand => self.insert_body_newline(),
                 DialogElement::Input => {
                     self.focus_next();
                 }
@@ -528,6 +558,18 @@ impl<'a> DialogView<'a> {
         }
     }
 
+    /// Insert a newline at the end of the subject line and move the cursor
+    /// into the body area. Used by the `[ ↵ add body ]` button and Alt+Enter.
+    fn insert_body_newline(&mut self) {
+        // Always append to the end of the first line (subject), regardless
+        // of cursor position — the body button always starts a new body.
+        let subject_end = self.input_value.find('\n').unwrap_or(self.input_value.len());
+        self.input_value.insert(subject_end, '\n');
+        self.input_cursor = subject_end + 1;
+        self.focused = DialogElement::Input;
+        self.body_expand_row = None;
+    }
+
     pub fn handle_click(&mut self, col: u16, row: u16) {
         if let Some(element) = self.find_element_at(col, row) {
             self.focused = element;
@@ -538,6 +580,7 @@ impl<'a> DialogView<'a> {
                 DialogElement::Radio(i) => {
                     self.dropdown_selected = i;
                 }
+                DialogElement::BodyExpand => self.insert_body_newline(),
                 DialogElement::Input | DialogElement::SecondInput => {}
             }
         }
@@ -571,6 +614,13 @@ impl<'a> DialogView<'a> {
 
     fn find_element_at_inner(&self, col: u16, row: u16) -> Option<DialogElement> {
         let row = row as usize;
+
+        // Body expand button (takes priority over the generic input-row check below).
+        if let Some(expand_row) = self.body_expand_row {
+            if row == expand_row {
+                return Some(DialogElement::BodyExpand);
+            }
+        }
 
         if row == self.button_row {
             let (vs, ve) = self.validate_col;
@@ -673,8 +723,8 @@ impl<'a> DialogView<'a> {
                     let row_offset = if line_idx == 0 {
                         0u16
                     } else {
-                        // +1 for separator row, then body line index
-                        1 + line_idx as u16
+                        // +1 for separator row, +1 for "Body:" label, then body line index
+                        2 + line_idx as u16
                     };
                     let cx = self.inner_area.x + 1 + col as u16;
                     let cy = self.inner_area.y + input_row as u16 + row_offset;
@@ -720,6 +770,7 @@ impl<'a> DialogView<'a> {
         self.second_input_row = None;
         self.checkbox_rows.clear();
         self.radio_rows.clear();
+        self.body_expand_row = None;
 
         let theme = &self.ctx.color_theme;
         let dim_fg = theme.list_commit_message_fg;
@@ -877,6 +928,9 @@ impl<'a> DialogView<'a> {
                 for ml in self.multiline_input_lines(fg, dim_fg, divider_fg, inner_width) {
                     lines.push(ml);
                 }
+                if !self.input_value.contains('\n') {
+                    self.body_expand_row = self.input_row.map(|r| r + 2);
+                }
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Amend previous commit"));
@@ -1002,6 +1056,9 @@ impl<'a> DialogView<'a> {
                 self.input_row = Some(lines.len());
                 for ml in self.multiline_input_lines(fg, dim_fg, divider_fg, inner_width) {
                     lines.push(ml);
+                }
+                if !self.input_value.contains('\n') {
+                    self.body_expand_row = self.input_row.map(|r| r + 2);
                 }
             }
             DialogKind::AddWorktree => {
@@ -1208,11 +1265,23 @@ impl<'a> DialogView<'a> {
             Style::default().fg(divider_fg),
         )));
 
-        // --- Body lines (indices 1+), capped so total rows ≤ 8 ---
-        // We already used 2 rows (subject + separator), so max 6 body rows.
-        let max_body_rows = 6usize;
+        // --- Body area (rows 2+): "Body:" label + content, or expand button ---
+        // Total cap: 8 rows (1 subject + 1 sep + 1 label + 5 body, or 1+1+1 button).
         if value_lines.len() > 1 {
-            for body_line in value_lines[1..].iter().take(max_body_rows) {
+            // Body exists: label row then content lines (max 5 body rows = 8 total).
+            // Skip leading blank lines that come from a "\n\n" git-convention separator
+            // so the body area looks clean whether input_value has "\n" or "\n\n".
+            let body_content: Vec<&str> = value_lines[1..]
+                .iter()
+                .skip_while(|l| l.is_empty())
+                .copied()
+                .collect();
+            result.push(Line::from(Span::styled(
+                "  Body:",
+                Style::default().fg(dim_fg),
+            )));
+            let max_body_rows = 5usize;
+            for body_line in body_content.iter().take(max_body_rows) {
                 let padded = format!("{:<width$}", body_line, width = content_width);
                 result.push(Line::from(vec![
                     Span::raw(" "),
@@ -1221,20 +1290,18 @@ impl<'a> DialogView<'a> {
                 ]));
             }
         } else {
-            // Show placeholder hint when there is no body yet.
-            let placeholder = "(optional body — Ctrl+Enter for newline)";
-            let padded = format!("{:<width$}", placeholder, width = content_width);
-            result.push(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    padded,
-                    Style::default()
-                        .fg(dim_fg)
-                        .bg(input_bg)
-                        .add_modifier(Modifier::DIM),
-                ),
-                Span::raw(" "),
-            ]));
+            // No body yet: focusable chevron button (no input_bg so it looks
+            // clearly distinct from the subject field). Tab or click to focus,
+            // then Enter/click to expand the body area.
+            let highlighted = self.is_highlighted(DialogElement::BodyExpand);
+            let btn_text = "[ ▼  add body ]";
+            let btn_padded = format!("{:^width$}", btn_text, width = inner_width as usize);
+            let btn_style = if highlighted {
+                Style::default().fg(fg).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(divider_fg)
+            };
+            result.push(Line::from(Span::styled(btn_padded, btn_style)));
         }
 
         result
@@ -1493,7 +1560,7 @@ impl<'a> DialogView<'a> {
                 (
                     String::new(),
                     GitAction::Commit {
-                        message: self.input_value.clone(),
+                        message: Self::to_git_message(&self.input_value),
                         amend,
                     },
                 )
@@ -1569,7 +1636,7 @@ impl<'a> DialogView<'a> {
                 (
                     String::new(),
                     GitAction::Commit {
-                        message: self.input_value.trim().to_string(),
+                        message: Self::to_git_message(&self.input_value),
                         amend: true,
                     },
                 )
@@ -1592,6 +1659,23 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmDeleteWorktree { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
+    }
+
+    /// Normalise a commit message to follow git convention:
+    /// subject and body are separated by a blank line (`\n\n`).
+    /// If the dialog inserted only a single `\n`, this upgrades it.
+    fn to_git_message(input: &str) -> String {
+        if let Some(nl) = input.find('\n') {
+            let subject = &input[..nl];
+            let rest = input[nl + 1..].trim_start_matches('\n');
+            if rest.is_empty() {
+                subject.to_string()
+            } else {
+                format!("{}\n\n{}", subject, rest)
+            }
+        } else {
+            input.to_string()
+        }
     }
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {

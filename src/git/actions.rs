@@ -300,11 +300,20 @@ pub fn stash(path: &Path, message: Option<&str>, include_untracked: bool) -> Git
 }
 
 pub fn commit(path: &Path, message: &str, amend: bool) -> GitResult {
-    if amend {
-        run_git(path, &["commit", "--amend", "-m", message])
+    // Write to a temp file so multiline messages (subject\n\nbody) are
+    // preserved exactly — git commit -m can swallow embedded newlines on
+    // some platforms, whereas -F always reads the file verbatim.
+    let tmp = path.join(".git").join("GITOUI_COMMIT_MSG_TMP");
+    std::fs::write(&tmp, message)
+        .map_err(|e| format!("Failed to write commit message: {}", e))?;
+    let tmp_str = tmp.to_string_lossy().into_owned();
+    let result = if amend {
+        run_git(path, &["commit", "--amend", "-F", &tmp_str])
     } else {
-        run_git(path, &["commit", "-m", message])
-    }
+        run_git(path, &["commit", "-F", &tmp_str])
+    };
+    let _ = std::fs::remove_file(&tmp);
+    result
 }
 
 pub fn fetch(path: &Path) -> GitResult {

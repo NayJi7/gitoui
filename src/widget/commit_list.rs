@@ -1490,11 +1490,18 @@ impl CommitList<'_> {
             let max_width = max_width.saturating_sub(ref_spans_width);
             let commit = commit_info.commit;
             if max_width > ELLIPSIS.len() {
-                let truncate = console::measure_text_width(&commit.commit_message) > max_width;
+                // Always take the first line only: %s should already be single-line
+                // but defensively guard against any embedded newlines.
+                let subject = commit
+                    .commit_message
+                    .lines()
+                    .next()
+                    .unwrap_or(&commit.commit_message);
+                let truncate = console::measure_text_width(subject) > max_width;
                 let commit_message = if truncate {
-                    console::truncate_str(&commit.commit_message, max_width, ELLIPSIS).to_string()
+                    console::truncate_str(subject, max_width, ELLIPSIS).to_string()
                 } else {
-                    commit.commit_message.to_string()
+                    subject.to_string()
                 };
 
                 let sub_spans = if let Some(pos) = state.search_matches[state.offset + i]
