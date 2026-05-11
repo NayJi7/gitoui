@@ -311,8 +311,10 @@ impl<'a> UncommittedView<'a> {
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             let mut clicked_on_file = false;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
-                // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
-                let visible_row = row.saturating_sub(detail_area.y + 4) as usize;
+                // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + [banner?] + content
+                let banner_offset = if self.has_conflicts() { 1 } else { 0 };
+                let visible_row =
+                    row.saturating_sub(detail_area.y + 4 + banner_offset) as usize;
 
                 // Content layout: each section takes N lines (N=1 if empty, N=len if files)
                 // Separators between sections add 1 line each
@@ -416,8 +418,9 @@ impl<'a> UncommittedView<'a> {
             // Files area hover (left side)
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
-                // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
-                let scroll_start = detail_area.y + 4;
+                // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + [banner?] + content
+                let banner_offset = if self.has_conflicts() { 1 } else { 0 };
+                let scroll_start = detail_area.y + 4 + banner_offset;
                 let visible_row = row.saturating_sub(scroll_start) as usize;
 
                 // Content layout: each section takes N lines (N=1 if empty, N=len if files)
@@ -479,6 +482,15 @@ impl<'a> UncommittedView<'a> {
         self.state
             .selected_file(&self.unstaged, &self.staged, &self.untracked)
             .map(|f| f.path.as_str())
+    }
+
+    /// Returns true when an unmerged file is present — must mirror the
+    /// banner-rendering condition in `widget/uncommitted.rs` so click/hover
+    /// row maths stay aligned with what the user sees.
+    fn has_conflicts(&self) -> bool {
+        self.unstaged
+            .iter()
+            .any(|f| f.status == StatusType::Unmerged)
     }
 
     pub fn section(&self) -> UncommittedSection {
