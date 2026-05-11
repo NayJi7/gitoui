@@ -1202,7 +1202,13 @@ impl App<'_> {
                 self.dir_input.force_refresh(&recents);
                 if let Some(i) = self.dir_input.selected {
                     if let Some(s) = self.dir_input.suggestions.get(i).cloned() {
-                        self.dir_input.text = s.display;
+                        // Append "/" so the next keystroke (or immediate
+                        // refresh) shows the children of the completed dir.
+                        self.dir_input.text = if s.display.ends_with('/') {
+                            s.display
+                        } else {
+                            format!("{}/", s.display)
+                        };
                         self.dir_input.cursor = self.dir_input.text.len();
                         self.dir_input.selected = None;
                         self.dir_input.refresh_suggestions_from(&recents);
