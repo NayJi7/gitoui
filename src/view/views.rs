@@ -8,9 +8,10 @@ use crate::{
     git::{Commit, CommitHash, FileChange, Ref},
     view::{
         blame::BlameView, branch_detail::BranchDetailView, compare::CompareView,
-        config::ConfigView, detail::DetailView, dialog::DialogView, diff::DiffView,
-        file_history::FileHistoryView, help::HelpView, list::ListView, refs::RefsView,
-        tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
+        config::ConfigView, conflict::ConflictView, detail::DetailView, dialog::DialogView,
+        diff::DiffView, file_history::FileHistoryView, help::HelpView, list::ListView,
+        refs::RefsView, tag_detail::TagDetailView, uncommitted::UncommittedView,
+        user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -33,6 +34,7 @@ pub enum View<'a> {
     FileHistory(Box<FileHistoryView<'a>>),
     Blame(Box<BlameView<'a>>),
     Compare(Box<CompareView<'a>>),
+    Conflict(Box<ConflictView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -53,6 +55,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.handle_event(event_with_count, key_event),
             View::Blame(view) => view.handle_event(event_with_count, key_event),
             View::Compare(view) => view.handle_event(event_with_count, key_event),
+            View::Conflict(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -73,6 +76,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.render(f, area),
             View::Blame(view) => view.render(f, area),
             View::Compare(view) => view.render(f, area),
+            View::Conflict(view) => view.render(f, area),
         }
     }
 
@@ -93,6 +97,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.update_layout(area),
             View::Blame(view) => view.update_layout(area),
             View::Compare(view) => view.update_layout(area),
+            View::Conflict(view) => view.update_layout(area),
         }
     }
 
@@ -113,6 +118,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.prepare_graph_uploads(),
             View::Blame(view) => view.prepare_graph_uploads(),
             View::Compare(view) => view.prepare_graph_uploads(),
+            View::Conflict(view) => view.prepare_graph_uploads(),
         }
     }
 
@@ -129,6 +135,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.clear_graph_images(),
             View::Blame(view) => view.clear_graph_images(),
             View::Compare(view) => view.clear_graph_images(),
+            View::Conflict(view) => view.clear_graph_images(),
             _ => {}
         }
     }
@@ -166,6 +173,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.drain_pending_graph_uploads(),
             View::Blame(view) => view.drain_pending_graph_uploads(),
             View::Compare(view) => view.drain_pending_graph_uploads(),
+            View::Conflict(view) => view.drain_pending_graph_uploads(),
         }
     }
 
@@ -186,6 +194,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.graph_image_ids_sorted(),
             View::Blame(view) => view.graph_image_ids_sorted(),
             View::Compare(view) => view.graph_image_ids_sorted(),
+            View::Conflict(view) => view.graph_image_ids_sorted(),
         }
     }
 
@@ -208,6 +217,7 @@ impl<'a> View<'a> {
             View::FileHistory(_) => false,
             View::Blame(_) => false,
             View::Compare(_) => false,
+            View::Conflict(_) => false,
         }
     }
 
@@ -230,6 +240,7 @@ impl<'a> View<'a> {
             View::FileHistory(_) => false,
             View::Blame(_) => false,
             View::Compare(_) => false,
+            View::Conflict(_) => false,
         }
     }
 
@@ -253,6 +264,7 @@ impl<'a> View<'a> {
             View::FileHistory(_) => None,
             View::Blame(_) => None,
             View::Compare(_) => None,
+            View::Conflict(_) => None,
         }
     }
 
@@ -446,6 +458,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.handle_click(col, row),
             View::Blame(view) => view.handle_click(col, row),
             View::Compare(view) => view.handle_click(col, row),
+            View::Conflict(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -504,6 +517,10 @@ impl<'a> View<'a> {
                 true
             }
             View::Compare(view) => view.handle_mouse_move(col, row),
+            View::Conflict(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
             _ => false,
         }
     }
@@ -525,6 +542,7 @@ impl<'a> View<'a> {
             View::FileHistory(view) => view.refresh(),
             View::Blame(view) => view.refresh(),
             View::Compare(view) => view.refresh(),
+            View::Conflict(view) => view.refresh(),
         }
     }
 
@@ -557,6 +575,7 @@ impl<'a> View<'a> {
             View::FileHistory(v) => v.update_color_theme(theme),
             View::Blame(v) => v.update_color_theme(theme),
             View::Compare(v) => v.update_color_theme(theme),
+            View::Conflict(v) => v.update_color_theme(theme),
         }
     }
 
@@ -594,6 +613,30 @@ impl<'a> View<'a> {
             ctx,
             tx,
         )))
+    }
+
+    pub fn of_conflict(
+        commit_list_state: Option<CommitListState<'a>>,
+        repo_path: std::path::PathBuf,
+        file: crate::git::conflict::ConflictFile,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Conflict(Box::new(ConflictView::new(
+            commit_list_state,
+            repo_path,
+            file,
+            ctx,
+            tx,
+        )))
+    }
+
+    /// Conflict-editor footer hint. Status bar pulls this when active.
+    pub fn conflict_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Conflict(view) => Some(view.footer_hint()),
+            _ => None,
+        }
     }
 
     pub fn of_blame(

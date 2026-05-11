@@ -389,9 +389,10 @@ impl<'a> UncommittedWidget<'a> {
         };
 
         if let Some(banner_area) = banner_area {
+            let noun = if conflict_count == 1 { "conflict" } else { "conflicts" };
             let banner_text = format!(
-                " ⚠  {} conflict(s) — edit then mark resolved with [a]",
-                conflict_count
+                " ⚠  {} {} — press to resolve",
+                conflict_count, noun
             );
             let banner_line = Line::from(Span::styled(
                 banner_text,

@@ -4,6 +4,7 @@ pub mod blame;
 pub mod branch_detail;
 mod compare;
 mod config;
+pub mod conflict;
 mod detail;
 mod graph_preview;
 pub mod dialog;

@@ -46,6 +46,9 @@ pub struct CommitInfo<'a> {
     pub uncommitted_staged: usize,
     pub uncommitted_unstaged: usize,
     pub uncommitted_untracked: usize,
+    /// Files with status Unmerged (active merge conflict). Drives the
+    /// "⚠ N conflict(s)" badge on the Uncommitted Changes row.
+    pub uncommitted_unmerged: usize,
     pub uncommitted_last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
@@ -59,6 +62,7 @@ impl<'a> CommitInfo<'a> {
             uncommitted_staged: 0,
             uncommitted_unstaged: 0,
             uncommitted_untracked: 0,
+            uncommitted_unmerged: 0,
             uncommitted_last_modified: None,
         }
     }
@@ -69,6 +73,7 @@ impl<'a> CommitInfo<'a> {
         staged: usize,
         unstaged: usize,
         untracked: usize,
+        unmerged: usize,
         last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
     ) -> Self {
         Self {
@@ -79,6 +84,7 @@ impl<'a> CommitInfo<'a> {
             uncommitted_staged: staged,
             uncommitted_unstaged: unstaged,
             uncommitted_untracked: untracked,
+            uncommitted_unmerged: unmerged,
             uncommitted_last_modified: last_modified,
         }
     }
@@ -1839,11 +1845,12 @@ impl CommitList<'_> {
         let total = commit_info.uncommitted_staged
             + commit_info.uncommitted_unstaged
             + commit_info.uncommitted_untracked;
+        let unmerged = commit_info.uncommitted_unmerged;
         // Same #808080 grey as graph::image's UNCOMMITTED_COLOR and as the
         // marker `│` for this row — keeps the whole uncommitted line tonally
         // unified instead of mixing graph grey with default white text.
         let uncommitted_grey = Color::Rgb(0x80, 0x80, 0x80);
-        let spans: Vec<Span> = vec![
+        let mut spans: Vec<Span> = vec![
             Span::raw("Uncommitted Changes")
                 .fg(uncommitted_grey)
                 .add_modifier(Modifier::BOLD),
@@ -1851,6 +1858,16 @@ impl CommitList<'_> {
                 .fg(uncommitted_grey)
                 .add_modifier(Modifier::BOLD),
         ];
+        // Conflict badge — visible directly on the commit list so the user
+        // knows there's a merge in progress without opening Uncommitted Details.
+        if unmerged > 0 {
+            let noun = if unmerged == 1 { "conflict" } else { "conflicts" };
+            spans.push(
+                Span::raw(format!("  ⚠ {} {}", unmerged, noun))
+                    .fg(self.ctx.color_theme.status_error_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
         self.to_commit_list_item(i, spans, state)
     }
 

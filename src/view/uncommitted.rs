@@ -178,9 +178,12 @@ impl<'a> UncommittedView<'a> {
                         .selected_file(&self.unstaged, &self.staged, &self.untracked)
                 {
                     if file.status == StatusType::Unmerged {
-                        self.tx.send(AppEvent::NotifyWarn(
-                            "Conflicted file — edit to resolve, then press [a] to mark as resolved".to_string(),
-                        ));
+                        // Enter (or click) on a conflicted file opens the
+                        // three-way resolve editor directly — no dedicated
+                        // key, the default action does the right thing.
+                        self.tx.send(AppEvent::OpenConflictEditor {
+                            file_path: file.path.clone(),
+                        });
                     } else if file.status == StatusType::Deleted {
                         self.tx.send(AppEvent::NotifyWarn(
                             "Cannot view diff for a deleted file.".to_string(),
@@ -372,7 +375,13 @@ impl<'a> UncommittedView<'a> {
                     self.state
                         .selected_file(&self.unstaged, &self.staged, &self.untracked)
                 {
-                    if file.status == StatusType::Deleted {
+                    if file.status == StatusType::Unmerged {
+                        // Click on a conflicted file opens the resolve editor —
+                        // same default action as Enter, no extra hotkey needed.
+                        self.tx.send(AppEvent::OpenConflictEditor {
+                            file_path: file.path.clone(),
+                        });
+                    } else if file.status == StatusType::Deleted {
                         self.tx.send(AppEvent::NotifyWarn(
                             "Cannot view diff for a deleted file.".to_string(),
                         ));

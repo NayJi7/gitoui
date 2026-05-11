@@ -127,6 +127,10 @@ pub enum AppEvent {
         file_path: String,
     },
     CloseBlame,
+    OpenConflictEditor {
+        file_path: String,
+    },
+    CloseConflictEditor,
     OpenDetailByHash {
         hash: String,
     },

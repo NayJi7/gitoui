@@ -258,6 +258,11 @@ impl<'a> App<'a> {
                 if commit.commit_type == crate::git::CommitType::Uncommitted {
                     let changes = repository.uncommitted_changes().unwrap();
                     let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
+                    let unmerged = changes
+                        .unstaged
+                        .iter()
+                        .filter(|f| f.status == crate::git::status::StatusType::Unmerged)
+                        .count();
                     // Match the #808080 used by graph::image for the uncommitted
                     // line — keeps the marker `│` and the message text visually
                     // consistent with the graph rendering.
@@ -267,6 +272,7 @@ impl<'a> App<'a> {
                         changes.staged.len(),
                         changes.unstaged.len(),
                         changes.untracked.len(),
+                        unmerged,
                         last_modified,
                     )
                 } else {
@@ -1140,6 +1146,19 @@ impl App<'_> {
                     self.close_blame();
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
+                }
+                AppEvent::OpenConflictEditor { file_path } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_conflict_editor(file_path);
+                }
+                AppEvent::CloseConflictEditor => {
+                    // close_conflict_editor() enqueues AppEvent::Refresh, which
+                    // returns Ret::Refresh on its turn and re-initialises the
+                    // whole app (clearing the terminal as part of that re-entry).
+                    // No need to clear manually here — doing so flashed the
+                    // commit list twice on every save.
+                    self.close_conflict_editor();
                 }
                 AppEvent::OpenDetailByHash { hash } => {
                     self.clear_image(Some(terminal))?;
@@ -2052,6 +2071,10 @@ impl App<'_> {
                         .view
                         .compare_footer_hint()
                         .unwrap_or_else(|| "⌘ Tab:focus▕▏↑↓:navigate▕▏Esc:close".into()),
+                    View::Conflict(_) => self
+                        .view
+                        .conflict_footer_hint()
+                        .unwrap_or_else(|| "⌘ o/t/b/B:pick▕▏n/p:nav▕▏↵:save▕▏esc:cancel".into()),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -2644,6 +2667,68 @@ impl App<'_> {
             let commit_list_state = view.take_list_state();
             if let Some(state) = commit_list_state {
                 self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_conflict_editor(&mut self, file_path: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        let full_path = repo_path.join(&file_path);
+        let parsed = match crate::git::conflict::parse_conflict_path(&full_path) {
+            Ok(p) => p,
+            Err(e) => {
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "Cannot read {}: {}",
+                    file_path, e
+                )));
+                return;
+            }
+        };
+        if parsed.hunk_count() == 0 {
+            self.ec.send(AppEvent::NotifyError(format!(
+                "{} has no conflict markers",
+                file_path
+            )));
+            return;
+        }
+        // Use the user's chosen relative path as the parsed file path so save
+        // resolves back to the repo-relative location.
+        let mut parsed = parsed;
+        parsed.path = file_path;
+
+        let commit_list_state = match self.view {
+            View::Uncommitted(ref mut view) => view.take_list_state(),
+            View::Diff(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        self.view = View::of_conflict(
+            commit_list_state,
+            repo_path,
+            parsed,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_conflict_editor(&mut self) {
+        if let View::Conflict(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                // Snapshot the current selection so the post-refresh view
+                // lands on the same commit row.
+                let list_context = crate::view::ListRefreshViewContext::from(&state);
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+                // FULL refresh — the repository caches uncommitted_changes,
+                // so a partial RefreshUncommitted would leave the conflict
+                // badge stale ("⚠ 1 conflict") even after the file has been
+                // staged. AppEvent::Refresh reloads the repository so the
+                // commit-list badge recomputes from fresh status data.
+                self.ec.send(AppEvent::Refresh(
+                    crate::view::RefreshViewContext::List {
+                        list_context,
+                        pending_notification: None,
+                    },
+                ));
             }
         }
     }

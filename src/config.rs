@@ -422,6 +422,21 @@ pub enum DiffMode {
     SideBySideEnhanced,
 }
 
+/// Layout for the merge-conflict editor opened with `a` on an unmerged file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConflictViewMode {
+    /// Three vertical panes side by side: Ours | Base | Theirs.
+    /// Falls back to TwoPane automatically when the terminal is too narrow.
+    ThreePane,
+    /// Two vertical panes: Ours | Theirs (base is hidden).
+    #[default]
+    TwoPane,
+    /// Stacked, full-width: one hunk shown at a time with Ours then Theirs
+    /// rendered top-to-bottom. Best for narrow terminals.
+    Inline,
+}
+
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct UiCommonConfig {
@@ -431,6 +446,8 @@ pub struct UiCommonConfig {
     pub mouse_enabled: bool,
     #[default(DiffMode::Enhanced)]
     pub diff_mode: DiffMode,
+    #[default(ConflictViewMode::TwoPane)]
+    pub conflict_view: ConflictViewMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -658,6 +675,12 @@ impl UiCommonConfig {
     pub fn set_mouse_enabled(&mut self, enabled: bool) {
         self.mouse_enabled = enabled;
     }
+    pub fn conflict_view(&self) -> ConflictViewMode {
+        self.conflict_view
+    }
+    pub fn set_conflict_view(&mut self, mode: ConflictViewMode) {
+        self.conflict_view = mode;
+    }
 }
 
 pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
@@ -734,6 +757,16 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
             DiffMode::Raw => "raw",
             DiffMode::SideBySide => "side-by-side",
             DiffMode::SideBySideEnhanced => "side-by-side-enhanced",
+        },
+    );
+
+    set_nested_string(
+        &mut doc,
+        &["ui", "common", "conflict_view"],
+        match ui.common.conflict_view {
+            ConflictViewMode::ThreePane => "three-pane",
+            ConflictViewMode::TwoPane => "two-pane",
+            ConflictViewMode::Inline => "inline",
         },
     );
 

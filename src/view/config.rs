@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
-    config::{save, CoreConfig, DiffMode, UiConfig},
+    config::{save, ConflictViewMode, CoreConfig, DiffMode, UiConfig},
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
@@ -26,18 +26,19 @@ use crate::{
 //   2  Graph Width
 //   3  Initial Selection
 //   4  Diff Mode
-//   5  Mouse
-//   6  Date Format
-//   7  Image Protocol
-//   8  Git Name          ← TEXT_EDIT_START_INDEX
-//   9  Git Email
-//  10  Default Branch
-//  11  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  12  Github Avatars    ← GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 13;
-const TEXT_EDIT_START_INDEX: usize = 8;
-const GITHUB_AUTH_INDEX: usize = 11;
-const GITHUB_AVATARS_INDEX: usize = 12;
+//   5  Resolve Mode      ← merge-conflict editor layout
+//   6  Mouse
+//   7  Date Format
+//   8  Image Protocol
+//   9  Git Name          ← TEXT_EDIT_START_INDEX
+//  10  Git Email
+//  11  Default Branch
+//  12  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  13  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 14;
+const TEXT_EDIT_START_INDEX: usize = 9;
+const GITHUB_AUTH_INDEX: usize = 12;
+const GITHUB_AVATARS_INDEX: usize = 13;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -89,6 +90,7 @@ impl<'a> ConfigView<'a> {
             graph_width_display(self.core_config.graph_width()),
             initial_selection_display(self.core_config.initial_selection()),
             diff_mode_display(self.ui_config.common.diff_mode),
+            conflict_view_display(self.ui_config.common.conflict_view),
             mouse_display(self.ui_config.common.mouse_enabled),
             self.core_config
                 .date_time_format()
@@ -120,6 +122,7 @@ impl<'a> ConfigView<'a> {
             "Graph Width",
             "Initial Select",
             "Diff Mode",
+            "Resolve Mode",
             "Mouse",
             "Date Format",
             "Image Protocol",
@@ -314,9 +317,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            8 => self.core_config.user_name().unwrap_or("").to_string(),
-            9 => self.core_config.user_email().unwrap_or("").to_string(),
-            10 => self.core_config.default_branch().unwrap_or("").to_string(),
+            9 => self.core_config.user_name().unwrap_or("").to_string(),
+            10 => self.core_config.user_email().unwrap_or("").to_string(),
+            11 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -451,9 +454,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            8 => self.core_config.set_user_name(value),
-            9 => self.core_config.set_user_email(value),
-            10 => self.core_config.set_default_branch(value),
+            9 => self.core_config.set_user_name(value),
+            10 => self.core_config.set_user_email(value),
+            11 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -516,15 +519,23 @@ impl<'a> ConfigView<'a> {
                 self.ui_config.common.set_diff_mode(prev);
             }
             5 => {
+                let prev = match self.ui_config.common.conflict_view {
+                    ConflictViewMode::ThreePane => ConflictViewMode::Inline,
+                    ConflictViewMode::TwoPane => ConflictViewMode::ThreePane,
+                    ConflictViewMode::Inline => ConflictViewMode::TwoPane,
+                };
+                self.ui_config.common.set_conflict_view(prev);
+            }
+            6 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            6 => {
+            7 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            7 => {
+            8 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -599,15 +610,23 @@ impl<'a> ConfigView<'a> {
                 self.ui_config.common.set_diff_mode(next);
             }
             5 => {
+                let next = match self.ui_config.common.conflict_view {
+                    ConflictViewMode::ThreePane => ConflictViewMode::TwoPane,
+                    ConflictViewMode::TwoPane => ConflictViewMode::Inline,
+                    ConflictViewMode::Inline => ConflictViewMode::ThreePane,
+                };
+                self.ui_config.common.set_conflict_view(next);
+            }
+            6 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            6 => {
+            7 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            7 => {
+            8 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -728,6 +747,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Diff Mode",
                 diff_mode_display(self.ui_config.common.diff_mode),
+                false,
+            ),
+            (
+                "Resolve Mode",
+                conflict_view_display(self.ui_config.common.conflict_view),
                 false,
             ),
             (
@@ -873,6 +897,7 @@ impl<'a> ConfigView<'a> {
             "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
             "Enhanced shows contextual line numbers; Raw shows plain git diff output.".into(),
+            conflict_view_description(self.ui_config.common.conflict_view),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
             "Terminal image protocol used for rendering commit graph images.".into(),
@@ -1320,6 +1345,58 @@ fn diff_mode_display(mode: DiffMode) -> String {
         DiffMode::SideBySide => "Side by side".to_string(),
         DiffMode::SideBySideEnhanced => "Side by side (enhanced)".to_string(),
     }
+}
+
+fn conflict_view_display(mode: ConflictViewMode) -> String {
+    match mode {
+        ConflictViewMode::ThreePane => "Three-pane".to_string(),
+        ConflictViewMode::TwoPane => "Two-pane".to_string(),
+        ConflictViewMode::Inline => "Inline".to_string(),
+    }
+}
+
+/// Description shown in the right column of the Config view for the
+/// "Resolve Mode" option. Generic text + a compact adaptive ASCII preview
+/// of the picked layout (a single highlighted hunk row + `…` placeholder).
+fn conflict_view_description(mode: ConflictViewMode) -> String {
+    let intro = "Layout used by the merge-conflict editor (opened with `a` \
+on an unmerged file).\n\n\
+  • Ours    = HEAD / current branch\n\
+  • Base    = common ancestor (three-pane only)\n\
+  • Theirs  = the incoming branch\n\n\
+A Result preview is always shown so you see the file as it will be saved.\n\n";
+    let preview = match mode {
+        ConflictViewMode::ThreePane => {
+            "┌─ Ours ───┬─ Base ───┬─ Theirs ─┐\n\
+             │▌ ours    │▌ base    │▌ theirs  │\n\
+             │  …       │  …       │  …       │\n\
+             └──────────┴──────────┴──────────┘\n\
+             ┌─ Result ──────────────────────┐\n\
+             │  ours    ← Ours               │\n\
+             └───────────────────────────────┘"
+        }
+        ConflictViewMode::TwoPane => {
+            "┌─ Ours ────────┬─ Theirs ───────┐\n\
+             │▌ code ours    │▌ code theirs   │\n\
+             │  …            │  …             │\n\
+             └───────────────┴────────────────┘\n\
+             ┌─ Result ────────────────────────┐\n\
+             │  code ours    ← Ours            │\n\
+             └─────────────────────────────────┘"
+        }
+        ConflictViewMode::Inline => {
+            "┌─ Ours ──────────────────────────┐\n\
+             │▌ code ours                      │\n\
+             │  …                              │\n\
+             ├─ Theirs ────────────────────────┤\n\
+             │▌ code theirs                    │\n\
+             │  …                              │\n\
+             ├─ Result ────────────────────────┤\n\
+             │  code ours    ← Ours            │\n\
+             └─────────────────────────────────┘"
+        }
+    };
+    format!("{}{}", intro, preview)
 }
 
 fn mouse_display(enabled: bool) -> String {
