@@ -299,38 +299,49 @@ fn check_git_repository(path: &Path) -> Result<()> {
 /// cd. We deliberately reject subfolders of a repo — opening `~/proj/src/`
 /// when the repo lives at `~/proj/` should fail, since gitoui's whole UI
 /// is anchored at the repo root. Returns false on any I/O error.
+///
+/// Combines `--is-bare-repository` and `--show-toplevel` into a single
+/// `git rev-parse` invocation — `git` prints one result per flag on its
+/// own line, so we get both answers for the cost of one fork+exec. The
+/// dir-input overlay calls this on every Enter / 2nd-click; halving the
+/// process count makes the cd commit feel instant on slower machines.
 pub fn is_git_path(path: &Path) -> bool {
-    // Bare-repo case: accept anything `git rev-parse --is-bare-repository`
-    // says yes to (bare repos don't have a work tree, so we can't compare
-    // toplevels — the directory itself IS the repo).
-    let is_bare = Command::new("git")
+    let output = Command::new("git")
         .arg("rev-parse")
         .arg("--is-bare-repository")
-        .current_dir(path)
-        .output()
-        .map(|out| out.status.success() && out.stdout == b"true\n")
-        .unwrap_or(false);
-    if is_bare {
-        return true;
-    }
-    // Work-tree case: compare the path to `git rev-parse --show-toplevel`.
-    // Equal → repo root, accept. Different → we're inside a subfolder of a
-    // larger repo, reject. Canonicalize both sides so symlinks and trailing
-    // slashes don't false-negative.
-    let toplevel_out = Command::new("git")
-        .arg("rev-parse")
         .arg("--show-toplevel")
         .current_dir(path)
         .output();
-    let Ok(out) = toplevel_out else { return false };
+    let Ok(out) = output else { return false };
+    // stdout layout (git processes flags left-to-right and prints each
+    // result on its own line):
+    //   work-tree root:  "false\n<path>\n"     exit 0
+    //   subfolder:       "false\n<root>\n"     exit 0 — caught by the
+    //                                                   toplevel == path check
+    //   bare repo:       "true\n"              exit 128 — `--show-toplevel`
+    //                                                     fails ("must be run
+    //                                                     in a work tree") but
+    //                                                     `--is-bare-repository`
+    //                                                     already wrote "true"
+    //   non-repo:        ""                    exit 128
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut lines = stdout.lines();
+    if lines.next() == Some("true") {
+        // Bare repo — the toplevel error is expected and ignored.
+        return true;
+    }
+    // Past this point we need a clean exit; a non-success status means the
+    // path isn't inside any git tree (not just "no work tree").
     if !out.status.success() {
         return false;
     }
-    let toplevel = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let toplevel = lines.next().unwrap_or("").trim();
     if toplevel.is_empty() {
         return false;
     }
-    let toplevel_canon = std::fs::canonicalize(&toplevel).ok();
+    // Canonicalise both sides so symlinks and trailing slashes don't
+    // false-negative when comparing toplevel to the user-supplied path.
+    let toplevel_canon = std::fs::canonicalize(toplevel).ok();
     let target_canon = std::fs::canonicalize(path).ok();
     toplevel_canon == target_canon
 }

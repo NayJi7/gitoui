@@ -508,11 +508,21 @@ impl App<'_> {
                             continue;
                         }
                         if let Some(target) = target_path {
-                            // Reject non-git targets *before* doing the cd —
+                            // Reject invalid targets *before* doing the cd —
                             // a transient footer message is friendlier than
                             // tearing down the overlay and re-opening the
                             // current repo. The overlay stays open so the
-                            // user can pick another path.
+                            // user can pick another path. We distinguish
+                            // "path missing" from "path exists but isn't a
+                            // git repo root" so the user knows whether to
+                            // fix the typo or pick a different folder.
+                            if !target.exists() {
+                                self.dir_error_message = Some((
+                                    "directory does not exist".to_string(),
+                                    std::time::Instant::now(),
+                                ));
+                                continue;
+                            }
                             if !crate::git::is_git_path(&target) {
                                 self.dir_error_message = Some((
                                     "not a git directory".to_string(),
@@ -3282,10 +3292,17 @@ impl App<'_> {
                                 self.dir_input.selected = Some(idx);
                                 let cwd = std::env::current_dir().unwrap_or_default();
                                 if let Some(target) = self.dir_input.resolve(&cwd) {
-                                    // Same git-repo gate as the keyboard
-                                    // Enter path — keep the overlay open and
-                                    // surface a 2 s footer error if the
-                                    // target isn't inside a git work tree.
+                                    // Same gates as the keyboard Enter path:
+                                    // first reject missing paths with a clear
+                                    // "directory does not exist" message, then
+                                    // fall through to the git-root check.
+                                    if !target.exists() {
+                                        self.dir_error_message = Some((
+                                            "directory does not exist".to_string(),
+                                            std::time::Instant::now(),
+                                        ));
+                                        return Ok(true);
+                                    }
                                     if !crate::git::is_git_path(&target) {
                                         self.dir_error_message = Some((
                                             "not a git directory".to_string(),
