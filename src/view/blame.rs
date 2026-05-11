@@ -13,7 +13,7 @@
 //! continues alone underneath. Enter on the cursor row opens the commit's
 //! Detail view via `AppEvent::OpenDetailByHash`.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use ratatui::{
     crossterm::event::KeyEvent,
@@ -79,7 +79,16 @@ pub struct BlameView<'a> {
     commit_colors: FxHashMap<String, usize>,
     ctx: Rc<AppContext>,
     tx: Sender,
+    /// Cache: unix-timestamp (s) → (rendered string, computed_at). Avoids
+    /// calling `Local::now()` + integer arithmetic for every visible row on
+    /// every frame; entries are recomputed at most once per minute.
+    rel_time_cache: FxHashMap<i64, (String, std::time::Instant)>,
 }
+
+/// How long a cached relative-time string stays valid. One minute matches
+/// the coarsest sub-hour bucket ("Xm ago"), so strings never go stale by
+/// more than one display unit.
+const RELTIME_TTL: Duration = Duration::from_secs(60);
 
 impl<'a> BlameView<'a> {
     pub fn new(
@@ -129,7 +138,24 @@ impl<'a> BlameView<'a> {
             commit_colors,
             ctx,
             tx,
+            rel_time_cache: FxHashMap::default(),
         }
+    }
+
+    /// Return a cached relative-time string for `dt`. The cache entry is
+    /// recomputed at most once per `RELTIME_TTL` so `Local::now()` is not
+    /// called for every visible row on every frame.
+    fn cached_relative_time(&mut self, dt: Option<&chrono::DateTime<chrono::Local>>) -> String {
+        let Some(dt) = dt else { return "—".to_string() };
+        let key = dt.timestamp();
+        if let Some((s, computed_at)) = self.rel_time_cache.get(&key) {
+            if computed_at.elapsed() < RELTIME_TTL {
+                return s.clone();
+            }
+        }
+        let s = relative_time(Some(dt));
+        self.rel_time_cache.insert(key, (s.clone(), std::time::Instant::now()));
+        s
     }
 
     pub fn take_list_state(&mut self) -> Option<CommitListState<'a>> {
@@ -378,9 +404,21 @@ impl<'a> BlameView<'a> {
             &self.ctx.core_config.option.syntax_theme,
         );
 
-        let visible_lines: Vec<Line<'static>> = (self.scroll_offset
-            ..(self.scroll_offset + self.view_height).min(self.lines.len()))
-            .map(|i| {
+        let visible_range = self.scroll_offset
+            ..(self.scroll_offset + self.view_height).min(self.lines.len());
+
+        // Extract timestamps into an owned Vec so `&mut self` is free for the
+        // cache update below (avoids an aliasing conflict with self.lines).
+        let timestamps: Vec<Option<chrono::DateTime<chrono::Local>>> =
+            visible_range.clone().map(|i| self.lines[i].author_time).collect();
+        let rel_times: Vec<String> = timestamps
+            .iter()
+            .map(|t| self.cached_relative_time(t.as_ref()))
+            .collect();
+
+        let visible_lines: Vec<Line<'static>> = visible_range
+            .enumerate()
+            .map(|(j, i)| {
                 let bl = &self.lines[i];
                 self.render_line(
                     bl,
@@ -389,6 +427,7 @@ impl<'a> BlameView<'a> {
                     show_subject,
                     hash_w,
                     author_w,
+                    &rel_times[j],
                     reltime_w,
                     subject_w,
                     lineno_w,
@@ -532,6 +571,7 @@ impl<'a> BlameView<'a> {
         show_subject: bool,
         hash_w: usize,
         author_w: usize,
+        rel_time: &str,
         reltime_w: usize,
         subject_w: usize,
         lineno_w: usize,
@@ -607,7 +647,7 @@ impl<'a> BlameView<'a> {
             }
 
             spans.push(Span::styled(
-                pad(&truncate(&relative_time(bl.author_time.as_ref()), reltime_w), reltime_w),
+                pad(&truncate(rel_time, reltime_w), reltime_w),
                 Style::default().fg(date_fg).bg(row_bg),
             ));
             spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
