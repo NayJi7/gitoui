@@ -400,10 +400,12 @@ impl<'a> App<'a> {
                 // On startup: load the saved list and surface the current
                 // working dir at the top so reopening the same project a few
                 // minutes later is one keystroke away.
+                let loaded = crate::recents::load();
                 if let Ok(cwd) = std::env::current_dir() {
-                    crate::recents::push(&cwd);
+                    crate::recents::push(&cwd, &loaded)
+                } else {
+                    loaded
                 }
-                crate::recents::load()
             },
         };
 
@@ -546,8 +548,7 @@ impl App<'_> {
                             }
                             match std::env::set_current_dir(&target) {
                                 Ok(_) => {
-                                    crate::recents::push(&target);
-                                    self.dir_recents = crate::recents::load();
+                                    self.dir_recents = crate::recents::push(&target, &self.dir_recents);
                                     self.dir_input.close();
                                     self.app_status.spinner_active = false;
                                     let _ = ratatui::crossterm::execute!(
@@ -3336,8 +3337,7 @@ impl App<'_> {
                                     }
                                     match std::env::set_current_dir(&target) {
                                         Ok(_) => {
-                                            crate::recents::push(&target);
-                                            self.dir_recents = crate::recents::load();
+                                            self.dir_recents = crate::recents::push(&target, &self.dir_recents);
                                             self.dir_input.close();
                                             self.dir_dropdown_area = None;
                                             self.app_status.spinner_active = false;

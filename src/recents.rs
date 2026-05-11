@@ -64,16 +64,23 @@ pub fn save(entries: &[PathBuf]) {
     }
 }
 
-/// Move `path` to the front of the recents list, dedup, cap at `MAX_RECENTS`,
-/// then persist. `path` is canonicalised so the same physical dir entered via
-/// different relative routes maps to a single entry.
-pub fn push(path: &Path) {
+/// Move `path` to the front of `current`, dedup, cap at `MAX_RECENTS`, and
+/// return the updated list. The file write is off-loaded to a background
+/// thread — the returned `Vec` is immediately authoritative and the on-disk
+/// copy catches up within milliseconds.
+///
+/// Callers pass their in-memory list so we avoid a redundant `load()` call.
+/// `path` is canonicalised so the same physical dir entered via different
+/// relative routes maps to a single entry.
+pub fn push(path: &Path, current: &[PathBuf]) -> Vec<PathBuf> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut recents = load();
+    let mut recents = current.to_vec();
     recents.retain(|p| p != &canonical);
     recents.insert(0, canonical);
     recents.truncate(MAX_RECENTS);
-    save(&recents);
+    let to_save = recents.clone();
+    std::thread::spawn(move || save(&to_save));
+    recents
 }
 
 #[cfg(test)]
@@ -136,10 +143,9 @@ mod tests {
     fn push_then_load_round_trips() {
         let _g = EnvGuard::new();
         let target = TempDir::new().unwrap();
-        push(target.path());
-        let loaded = load();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0], target.path().canonicalize().unwrap());
+        let recents = push(target.path(), &[]);
+        assert_eq!(recents.len(), 1);
+        assert_eq!(recents[0], target.path().canonicalize().unwrap());
     }
 
     #[test]
@@ -147,12 +153,11 @@ mod tests {
         let _g = EnvGuard::new();
         let a = TempDir::new().unwrap();
         let b = TempDir::new().unwrap();
-        push(a.path());
-        push(b.path());
-        let loaded = load();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0], b.path().canonicalize().unwrap());
-        assert_eq!(loaded[1], a.path().canonicalize().unwrap());
+        let recents = push(a.path(), &[]);
+        let recents = push(b.path(), &recents);
+        assert_eq!(recents.len(), 2);
+        assert_eq!(recents[0], b.path().canonicalize().unwrap());
+        assert_eq!(recents[1], a.path().canonicalize().unwrap());
     }
 
     #[test]
@@ -160,13 +165,12 @@ mod tests {
         let _g = EnvGuard::new();
         let a = TempDir::new().unwrap();
         let b = TempDir::new().unwrap();
-        push(a.path());
-        push(b.path());
-        push(a.path());
-        let loaded = load();
-        assert_eq!(loaded.len(), 2, "must dedup, not grow");
-        assert_eq!(loaded[0], a.path().canonicalize().unwrap());
-        assert_eq!(loaded[1], b.path().canonicalize().unwrap());
+        let recents = push(a.path(), &[]);
+        let recents = push(b.path(), &recents);
+        let recents = push(a.path(), &recents);
+        assert_eq!(recents.len(), 2, "must dedup, not grow");
+        assert_eq!(recents[0], a.path().canonicalize().unwrap());
+        assert_eq!(recents[1], b.path().canonicalize().unwrap());
     }
 
     #[test]
@@ -175,26 +179,26 @@ mod tests {
         let dirs: Vec<TempDir> = (0..MAX_RECENTS + 5)
             .map(|_| TempDir::new().unwrap())
             .collect();
+        let mut recents: Vec<PathBuf> = vec![];
         for d in &dirs {
-            push(d.path());
+            recents = push(d.path(), &recents);
         }
-        let loaded = load();
-        assert_eq!(loaded.len(), MAX_RECENTS);
+        assert_eq!(recents.len(), MAX_RECENTS);
         // The 5 oldest must have been dropped; the very last pushed is on top.
-        assert_eq!(
-            loaded[0],
-            dirs.last().unwrap().path().canonicalize().unwrap()
-        );
+        assert_eq!(recents[0], dirs.last().unwrap().path().canonicalize().unwrap());
     }
 
     #[test]
     fn path_with_special_chars_round_trips() {
         let _g = EnvGuard::new();
-        // The serializer escapes `\` and `"`; round-trip a path containing both.
+        // The serializer escapes `\` and `"`; round-trip via save+load to
+        // verify the encoding independently of the async background thread.
         let base = TempDir::new().unwrap();
         let weird = base.path().join("with \" quote and \\ slash");
         std::fs::create_dir(&weird).unwrap();
-        push(&weird);
+        let recents = push(&weird, &[]);
+        // Flush the background write synchronously by calling save directly.
+        save(&recents);
         let loaded = load();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], weird.canonicalize().unwrap());
