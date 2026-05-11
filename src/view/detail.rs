@@ -60,6 +60,24 @@ impl<'a> DetailView<'a> {
         }
     }
 
+    /// Pre-select the file whose path matches in the commit's change list.
+    /// Used when arriving from Blame / FileHistory so the user lands directly
+    /// on the file they were inspecting — `ensure_selected_visible` (run on
+    /// the next render) scrolls the file row into view automatically. Matches
+    /// against every variant of `FileChange` including the `from`/`to` sides
+    /// of a Move so renames in either direction still resolve.
+    pub fn select_file_by_path(&mut self, target: &str) {
+        let idx = self.changes.iter().position(|c| match c {
+            FileChange::Add { path, .. }
+            | FileChange::Modify { path, .. }
+            | FileChange::Delete { path, .. } => path == target,
+            FileChange::Move { from, to, .. } => to == target || from == target,
+        });
+        if let Some(i) = idx {
+            self.commit_detail_state.selected_file = i;
+        }
+    }
+
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
         let event = event_with_count.event;
         let count = event_with_count.count;
@@ -152,6 +170,17 @@ impl<'a> DetailView<'a> {
                         FileChange::Move { to, .. } => to.clone(),
                     };
                     self.tx.send(AppEvent::OpenBlame { file_path: path });
+                }
+            }
+            UserEvent::FileHistory => {
+                if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
+                    let path = match change {
+                        FileChange::Add { path, .. }
+                        | FileChange::Modify { path, .. }
+                        | FileChange::Delete { path, .. } => path.clone(),
+                        FileChange::Move { to, .. } => to.clone(),
+                    };
+                    self.tx.send(AppEvent::OpenFileHistory { file_path: path });
                 }
             }
             UserEvent::Cancel | UserEvent::Close => {

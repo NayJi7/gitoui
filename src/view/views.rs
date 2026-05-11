@@ -295,6 +295,13 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn file_history_footer_hint(&self) -> Option<String> {
+        match self {
+            View::FileHistory(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
     /// Returns the current 2-commit-compare state for the List view, used by
     /// the status bar to swap into a dedicated "Comparison: <a> → <b>" mode.
     /// `Some((marked, selected))` means a mark is active in the List view;
@@ -489,6 +496,10 @@ impl<'a> View<'a> {
                 true
             }
             View::Blame(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::FileHistory(view) => {
                 view.handle_mouse_move(col, row);
                 true
             }

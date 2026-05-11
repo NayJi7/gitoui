@@ -489,11 +489,11 @@ impl<'a> CompareView<'a> {
             let is_selected = i == self.selected_file_idx;
             let is_hovered = self.hovered_file_idx == Some(i);
 
-            // Selection indicator: `▸` in the theme's accent color
+            // Selection indicator: `▶` in the theme's accent color
             // (`list_head_fg` — typically cyan/teal/blue, the same colour
-            // used for HEAD elsewhere). Subtle and persistent — it tells
-            // the user "this is what's currently in the right pane".
-            let leading = if is_selected { "▸" } else { " " };
+            // used for HEAD elsewhere). Same glyph as the FileHistory view
+            // so the "selected row" cue feels uniform across the app.
+            let leading = if is_selected { "▶" } else { " " };
             let leading_style = if is_selected {
                 Style::default().fg(theme_head).add_modifier(Modifier::BOLD)
             } else {

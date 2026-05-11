@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use ratatui::{
     crossterm::event::KeyEvent,
-    layout::Rect,
-    style::{Modifier, Stylize},
+    layout::{Constraint, Layout, Rect},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -16,14 +16,28 @@ use crate::{
     widget::commit_list::CommitListState,
 };
 
+/// Per-row layout numbers — pulled into constants so the click/hover
+/// detection and the renderer agree on column boundaries.
+const PREFIX_W: usize = 2; // "▶ " / "  "
+const HASH_W: usize = 7;
+const COL_GAP: usize = 2; // breathing room between hash / subject / author / date
+const AUTHOR_W: usize = 16;
+const DATE_W: usize = 14;
+
 #[derive(Debug)]
 pub struct FileHistoryView<'a> {
     commit_list_state: Option<CommitListState<'a>>,
     file_path: String,
     entries: Vec<FileHistoryEntry>,
     selected: usize,
+    /// Row under the mouse cursor (None when mouse is outside the content
+    /// area). Drives the transient row highlight.
+    hovered: Option<usize>,
     scroll_offset: usize,
     view_height: usize,
+    /// Cached so `handle_click` / `handle_mouse_move` can translate absolute
+    /// terminal rows into entry indices. Populated by `render`.
+    content_area: Option<Rect>,
     ctx: Rc<AppContext>,
     tx: Sender,
 }
@@ -41,8 +55,10 @@ impl<'a> FileHistoryView<'a> {
             file_path,
             entries,
             selected: 0,
+            hovered: None,
             scroll_offset: 0,
             view_height: 0,
+            content_area: None,
             ctx,
             tx,
         }
@@ -50,6 +66,10 @@ impl<'a> FileHistoryView<'a> {
 
     pub fn take_list_state(&mut self) -> Option<CommitListState<'a>> {
         self.commit_list_state.take()
+    }
+
+    pub fn file_path(&self) -> &str {
+        &self.file_path
     }
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
@@ -93,17 +113,35 @@ impl<'a> FileHistoryView<'a> {
             .unwrap_or_default()
     }
 
+    /// Click anywhere on a row: select it AND open the commit in one gesture.
+    /// Mirrors the Blame view's click flow — no two-step "select then confirm"
+    /// dance.
     pub fn handle_click(&mut self, _col: u16, row: u16) {
-        if self.view_height == 0 {
+        let Some(area) = self.content_area else { return };
+        if row < area.y || row >= area.y + area.height {
             return;
         }
-        let clicked_idx = self.scroll_offset + row as usize;
-        if clicked_idx < self.entries.len() {
-            if self.selected == clicked_idx {
-                self.open_selected();
-            } else {
-                self.selected = clicked_idx;
+        let idx = self.scroll_offset + (row - area.y) as usize;
+        if idx >= self.entries.len() {
+            return;
+        }
+        self.selected = idx;
+        self.hovered = None;
+        self.open_selected();
+    }
+
+    pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
+        let Some(area) = self.content_area else { return };
+        if row < area.y || row >= area.y + area.height {
+            if self.hovered.is_some() {
+                self.hovered = None;
             }
+            return;
+        }
+        let idx = self.scroll_offset + (row - area.y) as usize;
+        let new_hover = if idx < self.entries.len() { Some(idx) } else { None };
+        if new_hover != self.hovered {
+            self.hovered = new_hover;
         }
     }
 
@@ -161,105 +199,144 @@ impl<'a> FileHistoryView<'a> {
                     file_path: self.file_path.clone(),
                 });
             }
+            UserEvent::ShortCopy => {
+                if let Some(entry) = self.entries.get(self.selected) {
+                    self.tx.send(AppEvent::CopyToClipboard {
+                        name: "Commit SHA".into(),
+                        value: entry.hash.clone(),
+                    });
+                }
+            }
+            UserEvent::FullCopy => {
+                if let Some(entry) = self.entries.get(self.selected) {
+                    self.tx.send(AppEvent::CopyToClipboard {
+                        name: "Commit message".into(),
+                        value: entry.subject.clone(),
+                    });
+                }
+            }
             _ => {}
         }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        // Reserve 2 lines for separator + title
-        self.view_height = area.height.saturating_sub(2) as usize;
-
-        let [sep_area, title_area, content_area] = ratatui::layout::Layout::vertical([
-            ratatui::layout::Constraint::Length(1),
-            ratatui::layout::Constraint::Length(1),
-            ratatui::layout::Constraint::Min(0),
+        let [sep_area, title_area, _spacer, content_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
         ])
         .areas(area);
 
-        // Separator line
+        self.view_height = content_area.height as usize;
+        self.content_area = Some(content_area);
+
+        // ── Separator ──────────────────────────────────────────────────
         let separator = Line::from(
             "─".repeat(area.width as usize)
                 .fg(self.ctx.color_theme.divider_fg),
         );
         f.render_widget(Paragraph::new(separator), sep_area);
 
-        // Title line
+        // ── Title ──────────────────────────────────────────────────────
         let title = Line::from(vec![
             Span::styled(
                 format!("─── File History: {} ", self.file_path),
-                ratatui::style::Style::default()
+                Style::default()
                     .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("({} commits)", self.entries.len()),
-                ratatui::style::Style::default().fg(self.ctx.color_theme.list_hash_fg),
+                Style::default().fg(self.ctx.color_theme.list_hash_fg),
             ),
         ]);
         f.render_widget(Paragraph::new(title), title_area);
 
         self.scroll_to_selected();
-        let visible_height = content_area.height as usize;
 
         if self.entries.is_empty() {
-            let no_history = Line::from(Span::styled(
+            let placeholder = Line::from(Span::styled(
                 " No history found for this file.",
-                ratatui::style::Style::default().fg(self.ctx.color_theme.status_warn_fg),
+                Style::default().fg(self.ctx.color_theme.status_warn_fg),
             ));
-            f.render_widget(Paragraph::new(no_history), content_area);
+            f.render_widget(Paragraph::new(placeholder), content_area);
             return;
         }
 
-        let max_subject = area.width.saturating_sub(30) as usize;
+        // ── Subject column gets whatever's left after the fixed columns ──
+        let total_w = content_area.width as usize;
+        let fixed_w = PREFIX_W + HASH_W + COL_GAP + COL_GAP + AUTHOR_W + COL_GAP + DATE_W;
+        let subject_w = total_w.saturating_sub(fixed_w).max(10);
+
+        let theme = &self.ctx.color_theme;
+        let head_fg = theme.list_head_fg;
+        let hash_fg = theme.list_hash_fg;
+        let subject_fg = theme.list_commit_message_fg;
+        let author_fg = theme.list_name_fg;
+        let date_fg = theme.list_date_fg;
+        let selected_bg = theme.list_selected_bg;
+        let normal_bg = theme.bg;
 
         let lines: Vec<Line> = self
             .entries
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
-            .take(visible_height)
+            .take(self.view_height)
             .map(|(i, entry)| {
-                let is_selected = i == self.selected;
-                let bg = if is_selected {
-                    self.ctx.color_theme.list_selected_bg
-                } else {
-                    self.ctx.color_theme.bg
-                };
-                let hash_style = ratatui::style::Style::default()
-                    .fg(self.ctx.color_theme.list_hash_fg)
-                    .bg(bg);
-                let subject_style = ratatui::style::Style::default()
-                    .fg(self.ctx.color_theme.list_commit_message_fg)
-                    .bg(bg);
-                let meta_style = ratatui::style::Style::default()
-                    .fg(self.ctx.color_theme.detail_label_fg)
-                    .bg(bg);
+                // Single active row — mouse hover wins over keyboard
+                // selection so the highlight always follows the mouse when
+                // present. Matches the Blame view exactly so the two
+                // file-centric views feel identical.
+                let active_row = self.hovered.unwrap_or(self.selected);
+                let is_active = i == active_row;
+                let bg = if is_active { selected_bg } else { normal_bg };
 
-                let prefix = if is_selected { "▶ " } else { "  " };
-                let subject = if entry.subject.chars().count() > max_subject {
-                    format!(
-                        "{}…",
-                        &entry
-                            .subject
-                            .chars()
-                            .take(max_subject.saturating_sub(1))
-                            .collect::<String>()
+                // Selection arrow in head-fg colour so it visually echoes
+                // the commit-list "current HEAD" marker.
+                let prefix_span = if is_active {
+                    Span::styled(
+                        "▶ ",
+                        Style::default()
+                            .fg(head_fg)
+                            .bg(bg)
+                            .add_modifier(Modifier::BOLD),
                     )
                 } else {
-                    entry.subject.clone()
+                    Span::styled("  ".to_string(), Style::default().bg(bg))
                 };
 
+                let subject = truncate_to_width(&entry.subject, subject_w);
+                let author = truncate_to_width(&entry.author, AUTHOR_W);
+                let date = truncate_to_width(&entry.date, DATE_W);
+
+                let row_w_used =
+                    PREFIX_W + HASH_W + COL_GAP + subject_w + COL_GAP + AUTHOR_W + COL_GAP + DATE_W;
+                let trailing_pad = total_w.saturating_sub(row_w_used);
+
                 Line::from(vec![
-                    Span::styled(prefix.to_string(), subject_style),
-                    Span::styled(format!("{} ", entry.short_hash), hash_style),
+                    prefix_span,
                     Span::styled(
-                        format!("{:<width$} ", subject, width = max_subject),
-                        subject_style,
+                        format!("{:width$}", entry.short_hash, width = HASH_W),
+                        Style::default().fg(hash_fg).bg(bg),
                     ),
+                    Span::styled(" ".repeat(COL_GAP), Style::default().bg(bg)),
                     Span::styled(
-                        format!("{} ({})", entry.author, entry.date),
-                        meta_style,
+                        pad_right(&subject, subject_w),
+                        Style::default().fg(subject_fg).bg(bg),
                     ),
+                    Span::styled(" ".repeat(COL_GAP), Style::default().bg(bg)),
+                    Span::styled(
+                        pad_right(&author, AUTHOR_W),
+                        Style::default().fg(author_fg).bg(bg),
+                    ),
+                    Span::styled(" ".repeat(COL_GAP), Style::default().bg(bg)),
+                    Span::styled(
+                        pad_right(&date, DATE_W),
+                        Style::default().fg(date_fg).bg(bg),
+                    ),
+                    Span::styled(" ".repeat(trailing_pad), Style::default().bg(bg)),
                 ])
             })
             .collect();
@@ -269,16 +346,39 @@ impl<'a> FileHistoryView<'a> {
 
     pub fn update_layout(&mut self, _area: Rect) {}
 
+    pub fn footer_hint(&self) -> String {
+        let mut parts: Vec<&str> = Vec::new();
+        if self.entries.len() > 1 {
+            parts.push("↑↓:navigate");
+        }
+        if !self.entries.is_empty() {
+            parts.push("Enter:open commit");
+            parts.push("c:msg");
+            parts.push("C:hash");
+        }
+        parts.push("b:blame");
+        parts.push("r:refresh");
+        format!("⌘ {}", parts.join("▕▏"))
+    }
+
     fn move_down(&mut self) {
-        if self.selected + 1 < self.entries.len() {
-            self.selected += 1;
+        // Mirrors the Blame view's hover-aware nav: arrow keys anchor at the
+        // mouse-hovered row when set, otherwise at the current selection.
+        // After the move, hover is cleared so the highlight follows the
+        // keyboard until the mouse moves again.
+        let anchor = self.hovered.unwrap_or(self.selected);
+        if anchor + 1 < self.entries.len() {
+            self.selected = anchor + 1;
+            self.hovered = None;
             self.scroll_to_selected();
         }
     }
 
     fn move_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
+        let anchor = self.hovered.unwrap_or(self.selected);
+        if anchor > 0 {
+            self.selected = anchor - 1;
+            self.hovered = None;
             self.scroll_to_selected();
         }
     }
@@ -300,5 +400,33 @@ impl<'a> FileHistoryView<'a> {
                 hash: entry.hash.clone(),
             });
         }
+    }
+}
+
+fn truncate_to_width(s: &str, w: usize) -> String {
+    if w == 0 {
+        return String::new();
+    }
+    let count = s.chars().count();
+    if count <= w {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(w.saturating_sub(1)).collect();
+        out.push('…');
+        out
+    }
+}
+
+fn pad_right(s: &str, w: usize) -> String {
+    let count = s.chars().count();
+    if count >= w {
+        s.chars().take(w).collect()
+    } else {
+        let mut out = String::with_capacity(s.len() + (w - count));
+        out.push_str(s);
+        for _ in 0..(w - count) {
+            out.push(' ');
+        }
+        out
     }
 }

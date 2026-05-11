@@ -215,6 +215,16 @@ impl<'a> UncommittedView<'a> {
                     }
                 }
             }
+            UserEvent::FileHistory => {
+                if let Some(file) =
+                    self.state
+                        .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                {
+                    self.tx.send(AppEvent::OpenFileHistory {
+                        file_path: file.path.clone(),
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -573,6 +583,9 @@ impl<'a> UncommittedView<'a> {
         // omitted here — they all live in the right-hand "Git Actions" panel
         // (see `widget/uncommitted.rs::render_action_bar`). Repeating them
         // here would just clutter the bottom strip.
+        if !self.unstaged.is_empty() || !self.staged.is_empty() || !self.untracked.is_empty() {
+            parts.push("H:history".to_string());
+        }
         parts.push("r:fetch".to_string());
         format!("⌘ {}", parts.join("▕▏"))
     }

@@ -1281,7 +1281,7 @@ impl App<'_> {
                         .view
                         .diff_footer_hint()
                         .unwrap_or_else(|| "⌘ c:copy-path".into()),
-                    View::Detail(_) => "⌘ ⇆:prev/next▕▏c:msg▕▏C:hash▕▏r:fetch".into(),
+                    View::Detail(_) => "⌘ ⇆:prev/next▕▏H:history▕▏c:msg▕▏C:hash▕▏r:fetch".into(),
                     View::Refs(_) => "⌘ D:delete▕▏c:copy-name▕▏r:fetch▕▏?:help".into(),
                     View::Help(_) => "⌘ ?:close".into(),
                     View::UserCommand(_) => "⌘ ?:help▕▏r:fetch".into(),
@@ -1296,7 +1296,10 @@ impl App<'_> {
                         .view
                         .uncommitted_footer_hint()
                         .unwrap_or_else(String::new),
-                    View::FileHistory(_) => "⌘ ?:help".into(),
+                    View::FileHistory(_) => self
+                        .view
+                        .file_history_footer_hint()
+                        .unwrap_or_else(|| "⌘ Esc:close".into()),
                     View::Blame(_) => self
                         .view
                         .blame_footer_hint()
@@ -1815,9 +1818,14 @@ impl App<'_> {
     }
 
     fn open_file_history(&mut self, file_path: String) {
+        // Same pattern as open_blame — grab the commit list state from
+        // whichever surrounding view triggered the open so we can return to
+        // it on Esc.
         let commit_list_state = match self.view {
             View::Diff(ref mut view) => view.take_list_state(),
             View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Blame(ref mut view) => view.take_list_state(),
+            View::Uncommitted(ref mut view) => view.take_list_state(),
             _ => None,
         };
         let repo_path = self.repository.path().to_path_buf();
@@ -1901,6 +1909,15 @@ impl App<'_> {
             return;
         }
 
+        // Carry the file path forward when the user dives into a commit from a
+        // file-centric view — the new Detail view will pre-select that file in
+        // its change list so the user lands exactly where they were looking.
+        let preselect_file: Option<String> = match self.view {
+            View::Blame(ref view) => Some(view.file_path().to_string()),
+            View::FileHistory(ref view) => Some(view.file_path().to_string()),
+            _ => None,
+        };
+
         let commit_list_state = match self.view {
             View::FileHistory(ref mut view) => view.take_list_state(),
             View::Blame(ref mut view) => view.take_list_state(),
@@ -1929,6 +1946,15 @@ impl App<'_> {
                 self.ctx.clone(),
                 self.ec.sender(),
             );
+            // Coming from Blame / FileHistory: jump straight to the file the
+            // user was looking at. `select_file_by_path` falls back to the
+            // default selection (file 0) when the path isn't in the commit's
+            // change list, so renames-with-no-match degrade gracefully.
+            if let Some(path) = preselect_file {
+                if let View::Detail(ref mut detail) = self.view {
+                    detail.select_file_by_path(&path);
+                }
+            }
         } else {
             self.ec.send(AppEvent::NotifyError(
                 "Cannot open commit detail: no list state available.".into(),

@@ -136,6 +136,10 @@ impl<'a> BlameView<'a> {
         self.commit_list_state.take()
     }
 
+    pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
         Rc::make_mut(&mut self.ctx).color_theme = theme;
     }
@@ -232,6 +236,11 @@ impl<'a> BlameView<'a> {
                 }
             }
             UserEvent::HelpToggle => self.tx.send(AppEvent::OpenHelp),
+            UserEvent::FileHistory => {
+                self.tx.send(AppEvent::OpenFileHistory {
+                    file_path: self.file_path.clone(),
+                });
+            }
             _ => {}
         }
     }
@@ -275,7 +284,8 @@ impl<'a> BlameView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        let [sep, title, content] = Layout::vertical([
+        let [sep, title, _spacer, content] = Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(0),
@@ -402,6 +412,7 @@ impl<'a> BlameView<'a> {
         if !self.blocks.is_empty() {
             parts.push("Enter:open commit");
         }
+        parts.push("H:history");
         parts.push("r:refresh");
         format!("⌘ {}", parts.join("▕▏"))
     }
