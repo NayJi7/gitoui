@@ -621,7 +621,12 @@ impl<'a> UncommittedWidget<'a> {
         let action_inner = action_block.inner(action_actions_area);
         action_block.render(action_actions_area, buf);
 
-        let actions = &[("Stash", 'i'), ("Commit", 'w'), ("Clean Untracked", 'v')];
+        let actions = &[
+            ("Stash", 'i'),
+            ("Commit", 'w'),
+            ("Clean Untracked", 'v'),
+            ("Blame", 'b'),
+        ];
 
         let mut lines = Vec::new();
         for (i, (label, key)) in actions.iter().enumerate() {

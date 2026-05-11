@@ -156,6 +156,11 @@ impl<'a> FileHistoryView<'a> {
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);
             }
+            UserEvent::Blame => {
+                self.tx.send(AppEvent::OpenBlame {
+                    file_path: self.file_path.clone(),
+                });
+            }
             _ => {}
         }
     }

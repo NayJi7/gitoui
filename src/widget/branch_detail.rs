@@ -32,7 +32,7 @@ pub const REMOTE_BRANCH_ACTIONS: &[(&str, &str)] = &[
     ("Checkout", "o"),
     ("Delete Remote", "D"),
     ("Merge into current", "m"),
-    ("Pull into current", "Z"),
+    ("Pull into current", "U"),
     ("Create Archive", "E"),
     ("Unselect", "T"),
     ("Copy Name", "V"),

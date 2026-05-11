@@ -201,6 +201,20 @@ impl<'a> UncommittedView<'a> {
             UserEvent::Refresh => {
                 self.refresh();
             }
+            UserEvent::Blame => {
+                // Open blame for the currently-selected file in any of the
+                // three lists. Skip deleted files (nothing to blame on disk).
+                if let Some(file) =
+                    self.state
+                        .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                {
+                    if file.status != StatusType::Deleted {
+                        self.tx.send(AppEvent::OpenBlame {
+                            file_path: file.path.clone(),
+                        });
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -267,6 +281,19 @@ impl<'a> UncommittedView<'a> {
                 } else if action_bar_row == 2 {
                     self.tx
                         .send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
+                } else if action_bar_row == 3 {
+                    // Blame the file currently selected in the left-hand list.
+                    if let Some(file) = self.state.selected_file(
+                        &self.unstaged,
+                        &self.staged,
+                        &self.untracked,
+                    ) {
+                        if file.status != StatusType::Deleted {
+                            self.tx.send(AppEvent::OpenBlame {
+                                file_path: file.path.clone(),
+                            });
+                        }
+                    }
                 }
                 return;
             }
@@ -533,7 +560,7 @@ impl<'a> UncommittedView<'a> {
         if can_unstage {
             parts.push("u:unstage".to_string());
             if has_staged {
-                parts.push("B:unstage-all".to_string());
+                parts.push("U:unstage-all".to_string());
             }
         }
         if can_discard {
@@ -542,15 +569,10 @@ impl<'a> UncommittedView<'a> {
                 parts.push("X:discard-all".to_string());
             }
         }
-        if has_staged {
-            parts.push("w:commit".to_string());
-        }
-        if has_unstaged || has_staged {
-            parts.push("i:stash".to_string());
-        }
-        if !self.untracked.is_empty() {
-            parts.push("v:clean".to_string());
-        }
+        // commit (w), stash (i) and clean-untracked (v) are deliberately
+        // omitted here — they all live in the right-hand "Git Actions" panel
+        // (see `widget/uncommitted.rs::render_action_bar`). Repeating them
+        // here would just clutter the bottom strip.
         parts.push("r:fetch".to_string());
         format!("⌘ {}", parts.join("▕▏"))
     }

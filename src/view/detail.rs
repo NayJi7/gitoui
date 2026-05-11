@@ -142,6 +142,18 @@ impl<'a> DetailView<'a> {
             UserEvent::Confirm => {
                 self.open_selected_file_diff();
             }
+            UserEvent::Blame => {
+                // Blame the currently-highlighted file in the commit's file list.
+                if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
+                    let path = match change {
+                        FileChange::Add { path, .. }
+                        | FileChange::Modify { path, .. }
+                        | FileChange::Delete { path, .. } => path.clone(),
+                        FileChange::Move { to, .. } => to.clone(),
+                    };
+                    self.tx.send(AppEvent::OpenBlame { file_path: path });
+                }
+            }
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
             }
@@ -525,37 +537,52 @@ impl<'a> DetailView<'a> {
                 _ => {}
             }
         } else {
+            // Indices must stay in sync with `COMMIT_ACTIONS` in
+            // `src/widget/commit_detail.rs`.
             match action_idx {
                 0 => self
                     .tx
                     .send(AppEvent::OpenDialog(DialogKind::AddTag { target: hash })),
-                1 => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch {
+                1 => {
+                    // Blame the currently-highlighted file in the commit's
+                    // change list. Same logic as the `b` keybind handler.
+                    if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
+                        let path = match change {
+                            FileChange::Add { path, .. }
+                            | FileChange::Modify { path, .. }
+                            | FileChange::Delete { path, .. } => path.clone(),
+                            FileChange::Move { to, .. } => to.clone(),
+                        };
+                        self.tx.send(AppEvent::OpenBlame { file_path: path });
+                    }
+                }
+                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::CreateBranch {
                     target: hash,
                 })),
-                2 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
+                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::Checkout {
                     target: hash,
                     is_branch: false,
                 })),
-                3 => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick {
+                4 => self.tx.send(AppEvent::OpenDialog(DialogKind::CherryPick {
                     target: hash,
                 })),
-                4 => self
-                    .tx
-                    .send(AppEvent::OpenDialog(DialogKind::Revert { target: hash })),
                 5 => self
                     .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Revert { target: hash })),
+                6 => self
+                    .tx
                     .send(AppEvent::OpenDialog(DialogKind::Drop { target: hash })),
-                6 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
+                7 => self.tx.send(AppEvent::OpenDialog(DialogKind::Merge {
                     target: hash,
                     is_branch: false,
                 })),
-                7 => self
-                    .tx
-                    .send(AppEvent::OpenDialog(DialogKind::Rebase { target: hash })),
                 8 => self
                     .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Rebase { target: hash })),
+                9 => self
+                    .tx
                     .send(AppEvent::OpenDialog(DialogKind::Reset { target: hash })),
-                9 => {
+                10 => {
                     if self.is_head_commit() {
                         self.tx.send(AppEvent::OpenDialog(DialogKind::AmendMessage {
                             current_message: self.commit.commit_message.clone(),

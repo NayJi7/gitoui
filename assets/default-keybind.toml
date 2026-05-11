@@ -51,7 +51,8 @@ full_copy = ["c"]
 
 # Phase 2 - Commit detail actions
 add_tag = ["t"]
-create_branch = ["b"]
+create_branch = ["shift-b"]
+blame = ["b"]
 checkout = ["o"]
 cherry_pick = ["shift-o"]
 revert = ["shift-r"]
@@ -64,7 +65,10 @@ reset = ["shift-s"]
 rename_branch = ["ctrl-r"]
 delete_branch = ["shift-d"]
 push_branch = ["shift-q"]
-pull_branch = ["shift-z"]
+# `pull` (shift-u) doubles as `pull_branch` in the BranchDetail view via
+# `UserEvent::PullBranch | UserEvent::Pull` — see `src/view/branch_detail.rs`.
+# Leaving this empty keeps `U` as the single canonical pull keybind.
+pull_branch = []
 set_upstream = ["shift-i"]
 create_archive = ["shift-e"]
 unselect_branch = ["shift-t"]
@@ -79,7 +83,11 @@ copy_tag_name = ["shift-y"]
 stage = ["a"]
 stage_all = ["shift-a"]
 unstage = ["u"]
-unstage_all = ["shift-b"]
+# `pull` (shift-u) doubles as unstage_all when the active view is Uncommitted —
+# see the `UserEvent::UnstageAll | UserEvent::Pull` match in
+# `src/view/uncommitted.rs`. Leaving this empty avoids a global keybind clash
+# with `pull` while preserving the U-for-unstage-all UX in the Uncommitted view.
+unstage_all = []
 discard = ["x"]
 discard_all = ["shift-x"]
 stash = ["i"]

@@ -123,6 +123,10 @@ pub enum AppEvent {
         stash_ref: String,
     },
     CloseFileHistory,
+    OpenBlame {
+        file_path: String,
+    },
+    CloseBlame,
     OpenDetailByHash {
         hash: String,
     },
@@ -537,6 +541,8 @@ pub enum UserEvent {
     AmendCommit,
     // Open file history (git log --follow)
     FileHistory,
+    // Open git blame for the file in the current context.
+    Blame,
     // Load more commits (extends the initial_load_count by load_more_count)
     LoadMore,
     // 2-commit comparison: Space / Ctrl+click toggles a "marked" commit
@@ -649,6 +655,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "abort_operation" => Ok(UserEvent::AbortOperation),
                         "amend_commit" => Ok(UserEvent::AmendCommit),
                         "file_history" => Ok(UserEvent::FileHistory),
+                        "blame" => Ok(UserEvent::Blame),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

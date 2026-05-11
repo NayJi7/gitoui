@@ -140,7 +140,8 @@ impl<'a> CommitDetail<'a> {
 
 pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
     ("Add Tag", "t"),
-    ("Create Branch", "b"),
+    ("Blame", "b"),
+    ("Create Branch", "B"),
     ("Checkout", "o"),
     ("Cherry Pick", "P"),
     ("Revert", "R"),
@@ -156,7 +157,7 @@ pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, &'static
     if is_head_commit {
         COMMIT_ACTIONS
     } else {
-        &COMMIT_ACTIONS[..9]
+        &COMMIT_ACTIONS[..10]
     }
 }
 

@@ -7,8 +7,8 @@ use crate::{
     event::{Sender, UserEventWithCount},
     git::{Commit, CommitHash, FileChange, Ref},
     view::{
-        branch_detail::BranchDetailView, compare::CompareView, config::ConfigView,
-        detail::DetailView, dialog::DialogView, diff::DiffView,
+        blame::BlameView, branch_detail::BranchDetailView, compare::CompareView,
+        config::ConfigView, detail::DetailView, dialog::DialogView, diff::DiffView,
         file_history::FileHistoryView, help::HelpView, list::ListView, refs::RefsView,
         tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
     },
@@ -31,6 +31,7 @@ pub enum View<'a> {
     TagDetail(Box<TagDetailView<'a>>),
     Uncommitted(Box<UncommittedView<'a>>),
     FileHistory(Box<FileHistoryView<'a>>),
+    Blame(Box<BlameView<'a>>),
     Compare(Box<CompareView<'a>>),
 }
 
@@ -50,6 +51,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.handle_event(event_with_count, key_event),
             View::Uncommitted(view) => view.handle_event(event_with_count, key_event),
             View::FileHistory(view) => view.handle_event(event_with_count, key_event),
+            View::Blame(view) => view.handle_event(event_with_count, key_event),
             View::Compare(view) => view.handle_event(event_with_count, key_event),
         }
     }
@@ -69,6 +71,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.render(f, area),
             View::Uncommitted(view) => view.render(f, area),
             View::FileHistory(view) => view.render(f, area),
+            View::Blame(view) => view.render(f, area),
             View::Compare(view) => view.render(f, area),
         }
     }
@@ -88,6 +91,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.update_layout(area),
             View::Uncommitted(view) => view.update_layout(area),
             View::FileHistory(view) => view.update_layout(area),
+            View::Blame(view) => view.update_layout(area),
             View::Compare(view) => view.update_layout(area),
         }
     }
@@ -107,6 +111,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.prepare_graph_uploads(),
             View::Uncommitted(view) => view.prepare_graph_uploads(),
             View::FileHistory(view) => view.prepare_graph_uploads(),
+            View::Blame(view) => view.prepare_graph_uploads(),
             View::Compare(view) => view.prepare_graph_uploads(),
         }
     }
@@ -122,6 +127,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.clear_graph_images(),
             View::Uncommitted(view) => view.clear_graph_images(),
             View::FileHistory(view) => view.clear_graph_images(),
+            View::Blame(view) => view.clear_graph_images(),
             View::Compare(view) => view.clear_graph_images(),
             _ => {}
         }
@@ -158,6 +164,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.drain_pending_graph_uploads(),
             View::Uncommitted(view) => view.drain_pending_graph_uploads(),
             View::FileHistory(view) => view.drain_pending_graph_uploads(),
+            View::Blame(view) => view.drain_pending_graph_uploads(),
             View::Compare(view) => view.drain_pending_graph_uploads(),
         }
     }
@@ -177,6 +184,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.graph_image_ids_sorted(),
             View::Uncommitted(view) => view.graph_image_ids_sorted(),
             View::FileHistory(view) => view.graph_image_ids_sorted(),
+            View::Blame(view) => view.graph_image_ids_sorted(),
             View::Compare(view) => view.graph_image_ids_sorted(),
         }
     }
@@ -198,6 +206,7 @@ impl<'a> View<'a> {
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
             View::FileHistory(_) => false,
+            View::Blame(_) => false,
             View::Compare(_) => false,
         }
     }
@@ -219,6 +228,7 @@ impl<'a> View<'a> {
             View::TagDetail(_) => false,
             View::Uncommitted(_) => false,
             View::FileHistory(_) => false,
+            View::Blame(_) => false,
             View::Compare(_) => false,
         }
     }
@@ -241,6 +251,7 @@ impl<'a> View<'a> {
             View::TagDetail(_) => None,
             View::Uncommitted(_) => None,
             View::FileHistory(_) => None,
+            View::Blame(_) => None,
             View::Compare(_) => None,
         }
     }
@@ -273,6 +284,13 @@ impl<'a> View<'a> {
     pub fn compare_footer_hint(&self) -> Option<String> {
         match self {
             View::Compare(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn blame_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Blame(view) => Some(view.footer_hint()),
             _ => None,
         }
     }
@@ -419,6 +437,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.handle_click(col, row),
             View::Uncommitted(view) => view.handle_click(col, row),
             View::FileHistory(view) => view.handle_click(col, row),
+            View::Blame(view) => view.handle_click(col, row),
             View::Compare(view) => view.handle_click(col, row),
             _ => {}
         }
@@ -469,6 +488,10 @@ impl<'a> View<'a> {
                 view.handle_mouse_move(col, row);
                 true
             }
+            View::Blame(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
             View::Compare(view) => view.handle_mouse_move(col, row),
             _ => false,
         }
@@ -489,6 +512,7 @@ impl<'a> View<'a> {
             View::TagDetail(view) => view.refresh(),
             View::Uncommitted(view) => view.refresh(),
             View::FileHistory(view) => view.refresh(),
+            View::Blame(view) => view.refresh(),
             View::Compare(view) => view.refresh(),
         }
     }
@@ -520,6 +544,7 @@ impl<'a> View<'a> {
             View::TagDetail(v) => v.update_color_theme(theme),
             View::Uncommitted(v) => v.update_color_theme(theme),
             View::FileHistory(v) => v.update_color_theme(theme),
+            View::Blame(v) => v.update_color_theme(theme),
             View::Compare(v) => v.update_color_theme(theme),
         }
     }
@@ -555,6 +580,22 @@ impl<'a> View<'a> {
             commit_list_state,
             file_path,
             entries,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_blame(
+        commit_list_state: Option<CommitListState<'a>>,
+        file_path: String,
+        lines: Vec<crate::git::blame::BlameLine>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Blame(Box::new(BlameView::new(
+            commit_list_state,
+            file_path,
+            lines,
             ctx,
             tx,
         )))

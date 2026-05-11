@@ -608,6 +608,18 @@ impl<'a> DiffView<'a> {
                     self.tx.send(AppEvent::OpenFileHistory { file_path });
                 }
             }
+            UserEvent::Blame => {
+                let file_path = self
+                    .title
+                    .strip_prefix("Diff (staged): ")
+                    .or_else(|| self.title.strip_prefix("Diff (unstaged): "))
+                    .or_else(|| self.title.strip_prefix("Diff: "))
+                    .unwrap_or(&self.title)
+                    .to_string();
+                if !file_path.is_empty() {
+                    self.tx.send(AppEvent::OpenBlame { file_path });
+                }
+            }
             _ => {}
         }
     }
@@ -2654,6 +2666,7 @@ impl<'a> DiffView<'a> {
             }
         }
         parts.push("f:search");
+        parts.push("b:blame");
         parts.push("H:history");
         parts.push("c:copy-path");
         parts.push("r:fetch");

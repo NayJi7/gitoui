@@ -808,6 +808,16 @@ impl App<'_> {
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
                 }
+                AppEvent::OpenBlame { file_path } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_blame(file_path);
+                }
+                AppEvent::CloseBlame => {
+                    self.close_blame();
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                }
                 AppEvent::OpenDetailByHash { hash } => {
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
@@ -1271,18 +1281,26 @@ impl App<'_> {
                         .view
                         .diff_footer_hint()
                         .unwrap_or_else(|| "⌘ c:copy-path".into()),
-                    View::Detail(_) => "⌘ ⇆:prev/next▕▏t:tag▕▏b:branch▕▏o:checkout▕▏m:merge▕▏e:rebase▕▏see action bar →▕▏c:msg▕▏C:hash▕▏r:fetch".into(),
+                    View::Detail(_) => "⌘ ⇆:prev/next▕▏c:msg▕▏C:hash▕▏r:fetch".into(),
                     View::Refs(_) => "⌘ D:delete▕▏c:copy-name▕▏r:fetch▕▏?:help".into(),
                     View::Help(_) => "⌘ ?:close".into(),
                     View::UserCommand(_) => "⌘ ?:help▕▏r:fetch".into(),
                     View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm".into(),
-                    View::BranchDetail(_) => "⌘ o:checkout▕▏m:merge▕▏e:rebase▕▏Q:push▕▏Z:pull▕▏I:upstream▕▏D:delete▕▏see action bar →▕▏V:copy-name▕▏r:fetch".into(),
-                    View::TagDetail(_) => "⌘ W:push▕▏F:delete▕▏Y:copy-name▕▏r:fetch".into(),
+                    // All branch / tag actions live in the right-hand action
+                    // bar — see `LOCAL_BRANCH_ACTIONS` / `REMOTE_BRANCH_ACTIONS`
+                    // / `TAG_ACTIONS`. The footer only keeps what's NOT in the
+                    // panel (fetch).
+                    View::BranchDetail(_) => "⌘ r:fetch".into(),
+                    View::TagDetail(_) => "⌘ r:fetch".into(),
                     View::Uncommitted(_) => self
                         .view
                         .uncommitted_footer_hint()
                         .unwrap_or_else(String::new),
                     View::FileHistory(_) => "⌘ ?:help".into(),
+                    View::Blame(_) => self
+                        .view
+                        .blame_footer_hint()
+                        .unwrap_or_else(|| "⌘ Esc:close".into()),
                     View::Compare(_) => self
                         .view
                         .compare_footer_hint()
@@ -1829,12 +1847,65 @@ impl App<'_> {
         }
     }
 
-    fn open_detail_by_hash(&mut self, hash: String) {
+    fn open_blame(&mut self, file_path: String) {
+        // Pull the commit list state from whichever surrounding view the user
+        // was in (Diff / Detail / FileHistory / Uncommitted) so closing the
+        // blame returns to the same overall app state.
         let commit_list_state = match self.view {
+            View::Diff(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
             View::FileHistory(ref mut view) => view.take_list_state(),
+            View::Uncommitted(ref mut view) => view.take_list_state(),
             _ => None,
         };
+        let repo_path = self.repository.path().to_path_buf();
+        match crate::git::blame::load_blame(&repo_path, &file_path) {
+            Ok(lines) => {
+                self.view = View::of_blame(
+                    commit_list_state,
+                    file_path,
+                    lines,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Err(msg) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Blame failed: {}", msg)));
+            }
+        }
+    }
+
+    fn close_blame(&mut self) {
+        if let View::Blame(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_detail_by_hash(&mut self, hash: String) {
         let commit_hash = CommitHash::from(hash.as_str());
+
+        // The Blame view can hand us any commit reachable from HEAD, including
+        // ones older than the current `max_count` cap or unreachable from the
+        // present refs. Bail out with a notification instead of panicking in
+        // `commit_detail` (which unwraps the in-memory commit map).
+        if self.repository.commit(&commit_hash).is_none() {
+            let short = if hash.len() >= 7 { &hash[..7] } else { hash.as_str() };
+            self.ec.send(AppEvent::NotifyWarn(format!(
+                "Commit {} is not in the loaded history — press `]` to load more.",
+                short
+            )));
+            return;
+        }
+
+        let commit_list_state = match self.view {
+            View::FileHistory(ref mut view) => view.take_list_state(),
+            View::Blame(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
         let (commit, changes) = self.repository.commit_detail(&commit_hash);
         let refs: Vec<Ref> = self
             .repository

@@ -1,5 +1,6 @@
 mod views;
 
+pub mod blame;
 pub mod branch_detail;
 mod compare;
 mod config;
