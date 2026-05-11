@@ -2368,6 +2368,13 @@ impl App<'_> {
     }
 
     fn open_file_diff(&mut self, hash: String, file_path: String) {
+        if crate::git::diff::is_binary_extension(&file_path) {
+            self.ec.send(AppEvent::NotifyWarn(format!(
+                "Binary file: diff not available for {}",
+                file_path
+            )));
+            return;
+        }
         let commit_list_state = match self.view {
             View::Detail(ref mut view) => view.take_list_state(),
             View::Diff(ref mut view) => view.take_list_state().unwrap(),
@@ -2686,6 +2693,13 @@ impl App<'_> {
     }
 
     fn open_uncommitted_diff(&mut self, file_path: String, is_staged: bool) {
+        if crate::git::diff::is_binary_extension(&file_path) {
+            self.ec.send(AppEvent::NotifyWarn(format!(
+                "Binary file: diff not available for {}",
+                file_path
+            )));
+            return;
+        }
         self.file_stream.clear();
 
         let (commit_list_state, all_files, is_untracked) = match self.view {

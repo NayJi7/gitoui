@@ -338,7 +338,7 @@ impl DiffEntry {
     }
 }
 
-fn is_binary_extension(file_path: &str) -> bool {
+pub fn is_binary_extension(file_path: &str) -> bool {
     let ext = std::path::Path::new(file_path)
         .extension()
         .and_then(|e| e.to_str())
