@@ -148,6 +148,8 @@ impl<'a> DialogView<'a> {
 
     fn has_second_input_field(&self) -> bool {
         matches!(self.kind, DialogKind::AddRemote)
+            || (matches!(self.kind, DialogKind::AddTag { .. })
+                && self.checkboxes.first().copied().unwrap_or(false))
     }
 
     fn radio_count(&self) -> usize {
@@ -164,7 +166,8 @@ impl<'a> DialogView<'a> {
         if self.has_input_field() {
             els.push(DialogElement::Input);
         }
-        if self.has_second_input_field() {
+        // AddRemote: SecondInput (URL) comes right after the name input.
+        if matches!(self.kind, DialogKind::AddRemote) {
             els.push(DialogElement::SecondInput);
         }
         // Body expand button is focusable only when no body exists yet.
@@ -184,6 +187,13 @@ impl<'a> DialogView<'a> {
             for i in 0..self.checkboxes.len() {
                 els.push(DialogElement::Checkbox(i));
             }
+        }
+        // AddTag: when annotated is checked, the Message: input lives below
+        // the checkbox, so it appears after Checkbox(0) in tab order.
+        if matches!(self.kind, DialogKind::AddTag { .. })
+            && self.checkboxes.first().copied().unwrap_or(false)
+        {
+            els.push(DialogElement::SecondInput);
         }
         els.push(DialogElement::Validate);
         els.push(DialogElement::Cancel);
@@ -791,6 +801,12 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Annotated tag"));
+                if self.checkboxes.first().copied().unwrap_or(false) {
+                    lines.push(Line::from(""));
+                    lines.push(label_line("Message:", dim_fg));
+                    self.second_input_row = Some(lines.len());
+                    lines.push(self.second_input_line(fg, inner_width));
+                }
             }
             DialogKind::CreateBranch { target } => {
                 lines.push(info_line("At:", target, dim_fg, yellow));
@@ -1424,9 +1440,9 @@ impl<'a> DialogView<'a> {
                         .send(AppEvent::NotifyError("Tag name cannot be empty".into()));
                     return;
                 }
-                let annotated = self.checkboxes.get(0).copied().unwrap_or(false);
-                let msg = if annotated && !self.input_value.is_empty() {
-                    Some(self.input_value.clone())
+                let annotated = self.checkboxes.first().copied().unwrap_or(false);
+                let msg = if annotated && !self.second_input_value.trim().is_empty() {
+                    Some(self.second_input_value.clone())
                 } else {
                     None
                 };
