@@ -544,15 +544,28 @@ pub struct GraphConfig {
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault, Validate)]
 pub struct GraphColorConfig {
     #[garde(length(min = 1), inner(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")))]
+    // Ordered for maximum *consecutive* contrast: adjacent palette indices
+    // are far apart in hue/saturation so neighbouring branches in the graph
+    // never read as "the same red" or "the same blue". 16 entries instead
+    // of 8 — with the previous palette, any repo with >8 active lanes
+    // wrapped around and showed three reds (this was the user complaint).
     #[default(vec![
         "#1f77b4".into(), // steel blue
         "#d62728".into(), // brick red
         "#2ca02c".into(), // forest green
         "#ff7f0e".into(), // orange
         "#9467bd".into(), // purple
-        "#8c564b".into(), // brown
-        "#e377c2".into(), // pink/rose
         "#17becf".into(), // teal
+        "#e377c2".into(), // pink
+        "#bcbd22".into(), // olive
+        "#fcbf49".into(), // amber
+        "#4dabf7".into(), // sky blue
+        "#20c997".into(), // emerald
+        "#8c564b".into(), // brown
+        "#fa8072".into(), // salmon
+        "#6f42c1".into(), // indigo
+        "#ffd43b".into(), // yellow
+        "#c92a2a".into(), // dark red
     ])]
     pub branches: Vec<String>,
     #[garde(pattern(r"^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"))]

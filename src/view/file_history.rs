@@ -247,7 +247,11 @@ impl<'a> FileHistoryView<'a> {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("({} commits)", self.entries.len()),
+                format!(
+                    "({} {})",
+                    self.entries.len(),
+                    if self.entries.len() == 1 { "commit" } else { "commits" }
+                ),
                 Style::default().fg(self.ctx.color_theme.list_hash_fg),
             ),
         ]);

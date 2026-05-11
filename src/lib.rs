@@ -11,9 +11,11 @@ pub mod themes;
 mod app;
 mod brand;
 mod check;
+mod dir_input;
 mod event;
 mod external;
 mod keybind;
+mod recents;
 mod view;
 mod watcher;
 mod widget;
@@ -212,7 +214,7 @@ pub fn run() -> Result<()> {
     let mut _git_watcher: Option<_> = None;
 
     let ret = loop {
-        let (mut core_config, ui_config, graph_config, mut color_theme, keybind_patch) =
+        let (mut core_config, ui_config, mut graph_config, mut color_theme, keybind_patch) =
             match config::load() {
                 Ok(config) => config,
                 Err(e) if terminal.is_none() => break Err(e),
@@ -224,6 +226,13 @@ pub fn run() -> Result<()> {
         if let Some(def) = crate::themes::get_theme(&core_config.option.theme) {
             color_theme = def.color_theme;
             core_config.option.syntax_theme = def.syntax_theme.to_owned();
+            // Theme-tinted graph palette wins over the generic config default
+            // — but only if the theme actually shipped one. An empty Vec means
+            // "the theme didn't customize the graph", so we leave the user's
+            // `[graph.color.branches]` setting alone.
+            if !color_theme.graph_branches.is_empty() {
+                graph_config.color.branches = color_theme.graph_branches.clone();
+            }
         }
         let keybind = keybind::KeyBind::new(keybind_patch);
 
@@ -247,23 +256,10 @@ pub fn run() -> Result<()> {
             .or(core_config.option.initial_selection)
             .into();
 
-        // If the config graph background is transparent (default), override it with the
-        // theme's bg color so Kitty composites against the correct color instead of the
-        // terminal's native background. Kitty images composite against the terminal-native bg
-        // for their transparent pixels, ignoring ANSI cell bg codes.
-        let graph_color_set = {
-            if graph_config.color.background == "#00000000" {
-                if let ratatui::style::Color::Rgb(r, g, b) = color_theme.bg {
-                    let mut patched = graph_config.color.clone();
-                    patched.background = format!("#{:02x}{:02x}{:02x}ff", r, g, b);
-                    color::GraphColorSet::new(&patched)
-                } else {
-                    color::GraphColorSet::new(&graph_config.color)
-                }
-            } else {
-                color::GraphColorSet::new(&graph_config.color)
-            }
-        };
+        // Centralised graph-palette construction — see `build_graph_color_set`
+        // for the theme-vs-config precedence and the transparent-background
+        // patching logic.
+        let graph_color_set = color::build_graph_color_set(&color_theme, &graph_config.color);
 
         let mouse_enabled = ui_config.common.mouse_enabled;
         let git_user_name = std::process::Command::new("git")
@@ -329,6 +325,7 @@ pub fn run() -> Result<()> {
             github_auth_state,
             branch_color_map: rustc_hash::FxHashMap::default(),
             graph_color_set: graph_color_set.clone(),
+            graph_config: graph_config.clone(),
             // Filled after the repository is loaded — see below.
             current_branch_remote_state: None,
         });

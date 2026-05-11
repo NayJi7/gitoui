@@ -102,6 +102,22 @@ impl<'a> GraphImageManager<'a> {
         self.clear_prepared_images();
     }
 
+    /// Replace the whole palette (branch colours + edge + bg) at once and
+    /// drop every cached image so the next render rebakes them with the new
+    /// colours. Called when the theme cycles live in the config view —
+    /// without this, the cached images keep the previous theme's branches
+    /// and background even after `update_color_theme` propagates downstream.
+    pub fn update_palette(&mut self, graph_color_set: &crate::color::GraphColorSet) {
+        self.image_params.edge_colors = graph_color_set
+            .colors
+            .iter()
+            .map(|c| c.to_image_color())
+            .collect();
+        self.image_params.circle_edge_color = graph_color_set.edge_color.to_image_color();
+        self.image_params.background_color = graph_color_set.background_color.to_image_color();
+        self.clear_prepared_images();
+    }
+
     pub fn ensure_uploaded(&mut self, commit_hash: &CommitHash) {
         if self.prepared_image_map.contains_key(commit_hash) {
             return;

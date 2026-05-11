@@ -40,6 +40,13 @@ pub fn get_theme(name: &str) -> Option<ThemeDefinition> {
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color { Color::Rgb(r, g, b) }
 
+/// Build the per-theme graph palette from a list of static hex strings.
+/// Each theme calls this with 12 colours tuned to its world so the commit
+/// graph reads as part of the theme instead of the generic Tab20 default.
+fn graph_palette(hex: &[&str]) -> Vec<String> {
+    hex.iter().map(|s| (*s).to_owned()).collect()
+}
+
 fn tokyo_night() -> ThemeDefinition {
     ThemeDefinition {
         syntax_theme: "base16-ocean.dark",
@@ -86,6 +93,11 @@ fn tokyo_night() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xe0, 0xaf, 0x68),
             status_error_fg:                rgb(0xf7, 0x76, 0x8e),
             divider_fg:                     rgb(0x3b, 0x42, 0x61),
+            graph_branches: graph_palette(&[
+                "#f7768e", "#7aa2f7", "#9ece6a", "#e0af68",
+                "#bb9af7", "#7dcfff", "#ff9e64", "#73daca",
+                "#ad8ee6", "#2ac3de", "#ff007c", "#41a6b5",
+            ]),
         },
     }
 }
@@ -136,6 +148,11 @@ fn dracula() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xf1, 0xfa, 0x8c),
             status_error_fg:                rgb(0xff, 0x55, 0x55),
             divider_fg:                     rgb(0x44, 0x47, 0x5a),
+            graph_branches: graph_palette(&[
+                "#ff5555", "#8be9fd", "#50fa7b", "#ffb86c",
+                "#bd93f9", "#ff79c6", "#f1fa8c", "#6272a4",
+                "#ff6e6e", "#69ff94", "#caa9fa", "#a4ffff",
+            ]),
         },
     }
 }
@@ -186,6 +203,11 @@ fn catppuccin_mocha() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xf9, 0xe2, 0xaf),
             status_error_fg:                rgb(0xf3, 0x8b, 0xa8),
             divider_fg:                     rgb(0x31, 0x32, 0x44),
+            graph_branches: graph_palette(&[
+                "#f38ba8", "#89b4fa", "#a6e3a1", "#fab387",
+                "#cba6f7", "#89dceb", "#f9e2af", "#94e2d5",
+                "#f5c2e7", "#b4befe", "#eba0ac", "#74c7ec",
+            ]),
         },
     }
 }
@@ -236,6 +258,11 @@ fn catppuccin_latte() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xdf, 0x8e, 0x1d),
             status_error_fg:                rgb(0xd2, 0x0f, 0x39),
             divider_fg:                     rgb(0xcc, 0xd0, 0xda),
+            graph_branches: graph_palette(&[
+                "#d20f39", "#1e66f5", "#40a02b", "#fe640b",
+                "#8839ef", "#04a5e5", "#df8e1d", "#179299",
+                "#ea76cb", "#7287fd", "#e64553", "#209fb5",
+            ]),
         },
     }
 }
@@ -286,6 +313,11 @@ fn gruvbox_dark() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xfa, 0xbd, 0x2f),
             status_error_fg:                rgb(0xfb, 0x49, 0x34),
             divider_fg:                     rgb(0x3c, 0x38, 0x36),
+            graph_branches: graph_palette(&[
+                "#fb4934", "#83a598", "#b8bb26", "#fe8019",
+                "#d3869b", "#8ec07c", "#fabd2f", "#458588",
+                "#cc241d", "#689d6a", "#d65d0e", "#b16286",
+            ]),
         },
     }
 }
@@ -336,6 +368,11 @@ fn nord() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xeb, 0xcb, 0x8b),
             status_error_fg:                rgb(0xbf, 0x61, 0x6a),
             divider_fg:                     rgb(0x3b, 0x42, 0x52),
+            graph_branches: graph_palette(&[
+                "#bf616a", "#81a1c1", "#a3be8c", "#d08770",
+                "#b48ead", "#88c0d0", "#ebcb8b", "#8fbcbb",
+                "#5e81ac", "#e9c5a3", "#cf978c", "#7daea3",
+            ]),
         },
     }
 }
@@ -386,6 +423,11 @@ fn solarized_dark() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xb5, 0x89, 0x00),
             status_error_fg:                rgb(0xdc, 0x32, 0x2f),
             divider_fg:                     rgb(0x07, 0x36, 0x42),
+            graph_branches: graph_palette(&[
+                "#dc322f", "#268bd2", "#859900", "#cb4b16",
+                "#6c71c4", "#2aa198", "#b58900", "#d33682",
+                "#e07f4e", "#7facd5", "#a4c200", "#9b9bbd",
+            ]),
         },
     }
 }
@@ -436,6 +478,11 @@ fn solarized_light() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xb5, 0x89, 0x00),
             status_error_fg:                rgb(0xdc, 0x32, 0x2f),
             divider_fg:                     rgb(0xee, 0xe8, 0xd5),
+            graph_branches: graph_palette(&[
+                "#dc322f", "#268bd2", "#859900", "#cb4b16",
+                "#6c71c4", "#2aa198", "#b58900", "#d33682",
+                "#e07f4e", "#7facd5", "#a4c200", "#9b9bbd",
+            ]),
         },
     }
 }
@@ -486,6 +533,11 @@ fn one_dark() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xe5, 0xc0, 0x7b),
             status_error_fg:                rgb(0xe0, 0x6c, 0x75),
             divider_fg:                     rgb(0x3e, 0x44, 0x51),
+            graph_branches: graph_palette(&[
+                "#e06c75", "#61afef", "#98c379", "#d19a66",
+                "#c678dd", "#56b6c2", "#e5c07b", "#be5046",
+                "#7fa6f0", "#a8d189", "#ca8af0", "#76d4e1",
+            ]),
         },
     }
 }
@@ -536,6 +588,11 @@ fn monokai_pro() -> ThemeDefinition {
             status_warn_fg:                 rgb(0xff, 0xd8, 0x66),
             status_error_fg:                rgb(0xff, 0x61, 0x88),
             divider_fg:                     rgb(0x40, 0x3e, 0x41),
+            graph_branches: graph_palette(&[
+                "#ff6188", "#78dce8", "#a9dc76", "#fc9867",
+                "#ab9df2", "#ffd866", "#e07c91", "#56cfd9",
+                "#84b65f", "#c9785a", "#8979d0", "#dfb74a",
+            ]),
         },
     }
 }

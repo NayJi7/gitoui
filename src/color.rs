@@ -102,6 +102,15 @@ pub struct ColorTheme {
 
     #[default(RatatuiColor::DarkGray)]
     pub divider_fg: RatatuiColor,
+
+    /// Per-theme graph-branch palette. Empty means "no override" — the loader
+    /// then falls back to `core_config.graph.color.branches` from `[graph.color]`
+    /// in the user's TOML. Each shipped theme fills this with its own
+    /// 12-colour palette so the commit-graph visually matches its world
+    /// (Dracula greens/pinks, Gruvbox earth tones, etc.). Imported themes
+    /// can specify their own palette by listing hex strings here.
+    #[default(Vec::<String>::new())]
+    pub graph_branches: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +171,29 @@ impl GraphColorSet {
     pub fn get(&self, index: usize) -> GraphColor {
         self.colors[index % self.colors.len()]
     }
+}
+
+/// Build a `GraphColorSet` from the current theme + graph config in a single
+/// place — used both on initial load and every time a theme cycles. Centralises
+/// two pieces of logic that used to be inlined: (1) theme-provided
+/// `graph_branches` win over `[graph.color.branches]` from the user TOML, and
+/// (2) a transparent `[graph.color.background]` is filled with the theme's
+/// `bg` so kitty composites against the right colour instead of the terminal's
+/// native bg.
+pub fn build_graph_color_set(
+    theme: &ColorTheme,
+    config: &crate::config::GraphColorConfig,
+) -> GraphColorSet {
+    let mut effective = config.clone();
+    if !theme.graph_branches.is_empty() {
+        effective.branches = theme.graph_branches.clone();
+    }
+    if effective.background == "#00000000" {
+        if let RatatuiColor::Rgb(r, g, b) = theme.bg {
+            effective.background = format!("#{:02x}{:02x}{:02x}ff", r, g, b);
+        }
+    }
+    GraphColorSet::new(&effective)
 }
 
 fn parse_rgba_color(s: &str) -> Option<GraphColor> {

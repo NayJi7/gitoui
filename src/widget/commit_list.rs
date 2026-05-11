@@ -517,6 +517,20 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
+    /// Like `invalidate_image_caches` but also swaps the entire graph
+    /// palette (branch colours + circle edge + bg) — used by the live
+    /// theme-cycle path so the next render rebakes images with the new
+    /// theme's branch colours, not just its background.
+    pub fn invalidate_image_caches_with_palette(
+        &mut self,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        self.graph_image_manager.update_palette(graph_color_set);
+        self.graph_render_state = None;
+        self.avatar_stable_key = None;
+        self.avatars_fully_prepared = false;
+    }
+
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         let mut image_ids: Vec<u32> = self
             .graph_image_manager

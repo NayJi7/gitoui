@@ -543,6 +543,9 @@ pub enum UserEvent {
     FileHistory,
     // Open git blame for the file in the current context.
     Blame,
+    // Open the inline change-directory overlay (header turns into a text
+    // input with a recents + filesystem autocomplete dropdown).
+    ChangeDir,
     // Load more commits (extends the initial_load_count by load_more_count)
     LoadMore,
     // 2-commit comparison: Space / Ctrl+click toggles a "marked" commit
@@ -656,6 +659,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "amend_commit" => Ok(UserEvent::AmendCommit),
                         "file_history" => Ok(UserEvent::FileHistory),
                         "blame" => Ok(UserEvent::Blame),
+                        "change_dir" => Ok(UserEvent::ChangeDir),
                         _ => {
                             let msg = format!("Unknown user event: {value}");
                             Err(de::Error::custom(msg))

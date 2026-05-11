@@ -758,8 +758,13 @@ impl<'a> ConfigView<'a> {
                     .fg(self.ctx.color_theme.fg)
                     .bg(self.ctx.color_theme.list_selected_bg)
             } else if config_value_kind(i) == ConfigValueKind::Input && !is_grayed {
+                // Use the same fg that the commit list uses for messages —
+                // it's the theme's "default-readable on any background"
+                // token. Earlier this used `detail_label_fg`, which in
+                // Tokyo Night happens to equal `list_selected_bg`
+                // (#51597d ≈ #515c7e) and made placeholder values invisible.
                 Style::default()
-                    .fg(self.ctx.color_theme.detail_label_fg)
+                    .fg(self.ctx.color_theme.list_commit_message_fg)
                     .bg(self.ctx.color_theme.list_selected_bg)
                     .add_modifier(config_value_modifier(i))
             } else {
@@ -1121,6 +1126,12 @@ impl<'a> ConfigView<'a> {
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
         std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme.clone();
+        // Drop the cached graph preview: it was rendered with the previous
+        // theme's bg/branch colours, and `render_graph_style_preview` only
+        // rebuilds when the graph *style* changes. Clearing forces a
+        // rebuild on the next render with the fresh `ctx.graph_color_set`
+        // (which app.rs has just refreshed via `build_graph_color_set`).
+        self.graph_preview = None;
         self.before.update_color_theme(theme);
     }
 

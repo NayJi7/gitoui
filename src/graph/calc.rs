@@ -210,13 +210,19 @@ fn load_commits<'a>(commits: &[&'a Commit], _repository: &Repository) -> Vec<Lay
     vertices
 }
 
-fn get_available_colour(start_at: usize, available_colours: &[usize]) -> usize {
-    for (colour, &end) in available_colours.iter().enumerate() {
-        if end <= start_at {
-            return colour;
-        }
-    }
-    available_colours.len() // allocate new colour index
+fn get_available_colour(_start_at: usize, available_colours: &[usize]) -> usize {
+    // Always allocate a fresh sequential colour index. Earlier versions
+    // reused the lowest "ended" index for tightly packed colour usage, but
+    // that produced graphs where every new branch picked palette[0] the
+    // instant the previous lane ended — the user saw three red branches in
+    // a row even though the palette had 16 entries.
+    //
+    // Wrap-around is handled later by `ImageParams::edge_color`, which does
+    // `palette[index % palette.len()]`. With this change, distinct branches
+    // get distinct colours until we exceed the palette size; only then do
+    // colours repeat — and at that point the repeated branches are far
+    // apart in the graph history, where reuse is no longer visually noisy.
+    available_colours.len()
 }
 
 fn determine_path(

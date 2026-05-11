@@ -380,10 +380,11 @@ impl CommitDetail<'_> {
                 Style::default()
             };
             let key_style = style.add_modifier(Modifier::BOLD);
-            lines.push(Line::from(vec![
-                Span::styled(label.to_string(), style),
-                Span::styled(format!(" ({})", key), key_style),
-            ]));
+            let mut spans = vec![Span::styled(label.to_string(), style)];
+            if !key.is_empty() {
+                spans.push(Span::styled(format!(" ({})", key), key_style));
+            }
+            lines.push(Line::from(spans));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));

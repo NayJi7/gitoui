@@ -294,6 +294,47 @@ fn check_git_repository(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Public probe used by the dir-input overlay to reject paths that aren't
+/// the *root* of a git work tree (or aren't bare repos) *before* doing the
+/// cd. We deliberately reject subfolders of a repo — opening `~/proj/src/`
+/// when the repo lives at `~/proj/` should fail, since gitoui's whole UI
+/// is anchored at the repo root. Returns false on any I/O error.
+pub fn is_git_path(path: &Path) -> bool {
+    // Bare-repo case: accept anything `git rev-parse --is-bare-repository`
+    // says yes to (bare repos don't have a work tree, so we can't compare
+    // toplevels — the directory itself IS the repo).
+    let is_bare = Command::new("git")
+        .arg("rev-parse")
+        .arg("--is-bare-repository")
+        .current_dir(path)
+        .output()
+        .map(|out| out.status.success() && out.stdout == b"true\n")
+        .unwrap_or(false);
+    if is_bare {
+        return true;
+    }
+    // Work-tree case: compare the path to `git rev-parse --show-toplevel`.
+    // Equal → repo root, accept. Different → we're inside a subfolder of a
+    // larger repo, reject. Canonicalize both sides so symlinks and trailing
+    // slashes don't false-negative.
+    let toplevel_out = Command::new("git")
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .current_dir(path)
+        .output();
+    let Ok(out) = toplevel_out else { return false };
+    if !out.status.success() {
+        return false;
+    }
+    let toplevel = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if toplevel.is_empty() {
+        return false;
+    }
+    let toplevel_canon = std::fs::canonicalize(&toplevel).ok();
+    let target_canon = std::fs::canonicalize(path).ok();
+    toplevel_canon == target_canon
+}
+
 fn is_inside_work_tree(path: &Path) -> bool {
     let output = Command::new("git")
         .arg("rev-parse")

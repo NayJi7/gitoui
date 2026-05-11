@@ -68,6 +68,7 @@ pub enum Ret {
     LoadMore(RefreshRequest),
 }
 
+#[derive(Debug)]
 pub struct RefreshRequest {
     pub context: RefreshViewContext,
 }
@@ -87,6 +88,7 @@ impl Clone for AppContext {
             github_auth_state: self.github_auth_state.clone(),
             branch_color_map: self.branch_color_map.clone(),
             graph_color_set: self.graph_color_set.clone(),
+            graph_config: self.graph_config.clone(),
             current_branch_remote_state: self.current_branch_remote_state,
         }
     }
@@ -122,6 +124,11 @@ pub struct AppContext {
     pub github_auth_state: GithubAuthState,
     pub branch_color_map: FxHashMap<String, Color>,
     pub graph_color_set: GraphColorSet,
+    /// User's `[graph]` TOML section. Carried alongside `graph_color_set` so
+    /// the live theme-cycle path can rebuild the set against the user's
+    /// branches/edge/background after a theme change — without re-reading
+    /// the file. The set is derived; this is the source of truth.
+    pub graph_config: crate::config::GraphConfig,
     /// (ahead, behind) commit counts of the current branch vs its upstream.
     /// `None` if HEAD is detached or has no upstream configured. Computed
     /// once per `lib.rs::run` iteration; auto-refresh recreates the context
@@ -149,6 +156,7 @@ impl Default for AppContext {
             github_auth_state: GithubAuthState::default(),
             branch_color_map: FxHashMap::default(),
             graph_color_set: GraphColorSet::new(&crate::config::GraphColorConfig::default()),
+            graph_config: crate::config::GraphConfig::default(),
             current_branch_remote_state: None,
         }
     }
@@ -187,6 +195,30 @@ pub struct App<'a> {
     // id = None means static G logo; Some(fidx) means animation frame fidx.
     header_logo_last: Option<Option<usize>>,
     header_wordmark_rendered: bool,
+    /// Global `d`-overlay state — when active, the header pwd becomes a text
+    /// input and a dropdown appears below. Hijacks key input until Esc/Enter.
+    dir_input: crate::dir_input::DirInputState,
+    /// Persistent list of recently-visited directories (front = most recent).
+    /// Loaded on startup, updated on every successful `cd`.
+    dir_recents: Vec<std::path::PathBuf>,
+    /// Rectangle currently occupied by the dropdown so the run loop can
+    /// delete Kitty graphics rows underneath after the buffered draw.
+    /// Without this clear the commit-graph images bleed on top of the popup.
+    dir_dropdown_area: Option<ratatui::layout::Rect>,
+    /// `(x, y)` of the input line's left edge — recorded by `render_header`
+    /// when the overlay is open, consumed by `render()` at the very end to
+    /// place the terminal cursor (same pattern as the search input).
+    dir_input_cursor_anchor: Option<(u16, u16)>,
+    /// Set by handlers that can't return `Ret::Refresh` directly (mouse
+    /// click on a dir-input suggestion, etc.). The main `run()` loop drains
+    /// it after each handler returns and exits with `Ok(Ret::Refresh(req))`,
+    /// the same path the keyboard Enter takes.
+    pending_refresh: Option<RefreshRequest>,
+    /// Transient "this dir isn't a git repo" message shown in the footer
+    /// left (replacing "Changing directory…") for ~2 seconds when the user
+    /// tries to commit a non-git target. Auto-clears once `Instant::elapsed`
+    /// passes the 2 s threshold.
+    dir_error_message: Option<(String, std::time::Instant)>,
 }
 
 impl<'a> App<'a> {
@@ -359,6 +391,20 @@ impl<'a> App<'a> {
             spinner_pending_uploads,
             header_logo_last: None,
             header_wordmark_rendered: false,
+            dir_input: crate::dir_input::DirInputState::default(),
+            dir_dropdown_area: None,
+            dir_input_cursor_anchor: None,
+            pending_refresh: None,
+            dir_error_message: None,
+            dir_recents: {
+                // On startup: load the saved list and surface the current
+                // working dir at the top so reopening the same project a few
+                // minutes later is one keystroke away.
+                if let Ok(cwd) = std::env::current_dir() {
+                    crate::recents::push(&cwd);
+                }
+                crate::recents::load()
+            },
         };
 
         if let Some(context) = refresh_view_context {
@@ -398,10 +444,131 @@ impl App<'_> {
                         }
                     }
                 }
+                // Popup resize → graph re-sync. The Kitty Unicode-placeholder
+                // protocol creates a placement when a placeholder cell is
+                // first emitted and DOESN'T drop it when that cell is later
+                // overwritten — so we manually re-issue the cleanup whenever
+                // the dropdown's height changes:
+                //   GROW: new rows previously held graph placeholders that
+                //         became placements; those placements still display
+                //         on top of the popup until we delete the image ids.
+                //   SHRINK: rows that we cleared earlier now need their
+                //           graph back AND ratatui's diff might leave ghost
+                //           popup cells on screen — terminal.clear() forces
+                //           a full re-emit. The reset of `view.clear_graph_images`
+                //           triggers a fresh upload on the next frame so
+                //           placements regenerate everywhere outside the
+                //           current popup rectangle.
+                if self.dir_input.active {
+                    let height = self.dir_dropdown_area
+                        .map(|a| a.height)
+                        .unwrap_or(0);
+                    if height != self.dir_input.last_rendered_height {
+                        // Delete only graph image placements + reset their
+                        // manager state — avatars (placed past the popup's
+                        // right edge) keep their cache intact, so the full
+                        // window doesn't blink, only the graph column does.
+                        // We do NOT `continue` here — an extra immediate
+                        // redraw would re-run flush_pending_graph_uploads,
+                        // moving the terminal cursor around via Kitty image
+                        // placement escapes (the source of the caret-jump
+                        // bug). The natural next event tick will redraw.
+                        let graph_ids = self.view.graph_image_ids_sorted();
+                        let _ = self.ctx.image_protocol.delete_images(&graph_ids);
+                        self.view.clear_graph_images();
+                        self.dir_input.last_rendered_height = height;
+                    }
+                }
             }
             needs_draw = true;
             match self.ec.recv() {
                 AppEvent::Key(key) => {
+                    // The change-directory overlay hijacks every key while
+                    // open — typing extends the input, Esc cancels, Enter
+                    // commits. Handled before the keybind dispatch so the
+                    // user can freely type letters that are otherwise bound
+                    // to view actions (`d`, `b`, etc.).
+                    if self.dir_input.active {
+                        let was_active = true;
+                        let target_path = self.handle_dir_input_key(key);
+                        // If the user just cancelled (Esc closed the
+                        // overlay without committing) we force a full
+                        // terminal redraw so ratatui's diff doesn't leave
+                        // popup characters baked into the screen. The
+                        // re-uploaded images come back via the next
+                        // prepare_graph_uploads cycle.
+                        if was_active && !self.dir_input.active && target_path.is_none() {
+                            // Esc / cancel — force the graph re-render. The
+                            // popup-open path deleted the graph placements
+                            // from Kitty, so we need the manager to see
+                            // "nothing uploaded" and queue fresh uploads on
+                            // the next prepare_graph_uploads cycle.
+                            self.view.clear_graph_images();
+                            self.clear_terminal(terminal)?;
+                            continue;
+                        }
+                        if let Some(target) = target_path {
+                            // Reject non-git targets *before* doing the cd —
+                            // a transient footer message is friendlier than
+                            // tearing down the overlay and re-opening the
+                            // current repo. The overlay stays open so the
+                            // user can pick another path.
+                            if !crate::git::is_git_path(&target) {
+                                self.dir_error_message = Some((
+                                    "not a git directory".to_string(),
+                                    std::time::Instant::now(),
+                                ));
+                                continue;
+                            }
+                            match std::env::set_current_dir(&target) {
+                                Ok(_) => {
+                                    crate::recents::push(&target);
+                                    self.dir_recents = crate::recents::load();
+                                    self.dir_input.close();
+                                    self.app_status.spinner_active = false;
+                                    let _ = ratatui::crossterm::execute!(
+                                        std::io::stdout(),
+                                        ratatui::crossterm::cursor::Show
+                                    );
+                                    self.cleanup_graph_images()?;
+                                    return Ok(Ret::Refresh(RefreshRequest {
+                                        context: crate::view::RefreshViewContext::List {
+                                            list_context: crate::view::ListRefreshViewContext {
+                                                commit_hash: String::new(),
+                                                selected: 0,
+                                                height: 20,
+                                                scroll_to_top: true,
+                                            },
+                                            pending_notification: Some(format!(
+                                                "Switched to {}",
+                                                target.display()
+                                            )),
+                                        },
+                                    }));
+                                }
+                                Err(e) => {
+                                    self.ec.send(AppEvent::NotifyError(format!(
+                                        "cd failed: {}",
+                                        e
+                                    )));
+                                    self.dir_input.close();
+                                    self.dir_dropdown_area = None;
+                                    self.app_status.spinner_active = false;
+                                    self.header_logo_last = None;
+                                    let _ = ratatui::crossterm::execute!(
+                                        std::io::stdout(),
+                                        ratatui::crossterm::cursor::Show
+                                    );
+                                    // Same re-upload trigger as the Esc path
+                                    // so the graph reappears.
+                                    self.view.clear_graph_images();
+                                    self.clear_terminal(terminal)?;
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     match self.app_status.status_line {
                         StatusLine::None
                         | StatusLine::Input(_, _, _)
@@ -437,6 +604,49 @@ impl App<'_> {
                     match user_event {
                         Some(UserEvent::ForceQuit) | Some(UserEvent::Quit) => {
                             self.ec.send(AppEvent::Quit);
+                        }
+                        Some(UserEvent::Drop)
+                            if matches!(self.view, View::List(_))
+                                && !self.view.is_search_querying()
+                                && !self.view.is_input_active() =>
+                        {
+                            // `d` on the commit list doubles as "change
+                            // directory" — `drop_commit` is only ever
+                            // relevant in the Detail view anyway, where the
+                            // event falls through to the standard handler.
+                            // We additionally bail out when ANY input is
+                            // active (search bar, dialog text field, config
+                            // edit) so the user can freely type the letter
+                            // `d` while writing.
+                            self.dir_input.open(&self.dir_recents);
+                            // Only nuke the GRAPH placements — the popup
+                            // overlays the graph column at the left, so
+                            // those need to disappear. Avatars sit at the
+                            // far-right columns (well past the popup width)
+                            // so we leave both their Kitty placements AND
+                            // the avatar-manager cache untouched — that's
+                            // what makes the open instant; re-uploading
+                            // every avatar SVG would otherwise add ~1s of
+                            // latency on busy repos.
+                            let graph_ids = self.view.graph_image_ids_sorted();
+                            let _ = self.ctx.image_protocol.delete_images(&graph_ids);
+                            self.view.clear_graph_images();
+                            // Reuse the global spinner machinery so the
+                            // header G-logo animates and the footer braille
+                            // ticks at the same cadence as the Pull / Fetch
+                            // background tasks.
+                            self.app_status.spinner_active = true;
+                            self.app_status.spinner_frame = 0;
+                            self.header_logo_last = None;
+                            self.app_status.numeric_prefix.clear();
+                            // Hide the real terminal cursor — we draw a fake
+                            // one into the buffer so image-protocol writes
+                            // (avatars, graph) can't visibly teleport the
+                            // hardware caret around the screen.
+                            let _ = ratatui::crossterm::execute!(
+                                std::io::stdout(),
+                                ratatui::crossterm::cursor::Hide
+                            );
                         }
                         Some(ue) => {
                             // When a text input is active, treat Left/Right as cursor movement
@@ -504,6 +714,14 @@ impl App<'_> {
                 }
                 AppEvent::Mouse(mouse) => {
                     needs_draw = self.handle_mouse_event(mouse, terminal)?;
+                    if let Some(req) = self.pending_refresh.take() {
+                        // A handler (currently: dir-input dropdown 2nd-click)
+                        // asked for a full app rebuild. Mirror the keyboard
+                        // Enter path: drop graph images so kitty doesn't carry
+                        // them into the new repo, then bubble up Ret::Refresh.
+                        self.cleanup_graph_images()?;
+                        return Ok(Ret::Refresh(req));
+                    }
                 }
                 AppEvent::Quit => {
                     self.cleanup_graph_images()?;
@@ -857,6 +1075,118 @@ impl App<'_> {
         Ok(())
     }
 
+    /// Route a key to the dir-input overlay. Returns `Some(target)` when the
+    /// user pressed Enter on a valid resolution — the caller is responsible
+    /// for the actual `set_current_dir` + `Ret::Refresh`. `None` means "stay
+    /// in the overlay, redraw on next iteration".
+    fn handle_dir_input_key(&mut self, key: ratatui::crossterm::event::KeyEvent) -> Option<std::path::PathBuf> {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        match key.code {
+            KeyCode::Esc => {
+                self.dir_input.close();
+                self.dir_dropdown_area = None;
+                self.app_status.spinner_active = false;
+                self.header_logo_last = None;
+                let _ = ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::cursor::Show
+                );
+                None
+            }
+            KeyCode::Enter => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                self.dir_input.resolve(&cwd)
+            }
+            KeyCode::Down => {
+                self.dir_input.select_next();
+                None
+            }
+            KeyCode::Up => {
+                self.dir_input.select_prev();
+                None
+            }
+            KeyCode::Tab => {
+                // Tab = pick the currently focused suggestion as if the user
+                // had typed it, so they can keep refining (e.g. completing
+                // `~/work/` → `~/work/api/`).
+                if let Some(i) = self.dir_input.selected {
+                    if let Some(s) = self.dir_input.suggestions.get(i).cloned() {
+                        self.dir_input.text = s.display;
+                        self.dir_input.cursor = self.dir_input.text.len();
+                        self.dir_input.selected = None;
+                        let recents = self.dir_recents.clone();
+                        self.dir_input.refresh_suggestions_from(&recents);
+                    }
+                }
+                None
+            }
+            KeyCode::Left => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.move_cursor_word_left();
+                } else {
+                    self.dir_input.move_cursor_left();
+                }
+                None
+            }
+            KeyCode::Right => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.move_cursor_word_right();
+                } else {
+                    self.dir_input.move_cursor_right();
+                }
+                None
+            }
+            KeyCode::Backspace => {
+                let recents = self.dir_recents.clone();
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.delete_word_left(&recents);
+                } else {
+                    self.dir_input.backspace(&recents);
+                }
+                None
+            }
+            KeyCode::Delete => {
+                let recents = self.dir_recents.clone();
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.delete_word_right(&recents);
+                } else {
+                    self.dir_input.delete_right(&recents);
+                }
+                None
+            }
+            // Some terminals (xterm, alacritty…) emit Ctrl+Backspace as the
+            // BS (0x08) or DEL (0x7F) control char rather than as
+            // `KeyCode::Backspace` with the Ctrl modifier — catch them both
+            // explicitly before the generic Char arm so they trigger the
+            // word-delete instead of inserting a control character.
+            KeyCode::Char(c)
+                if (c == '\u{08}' || c == '\u{7f}')
+                    && key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let recents = self.dir_recents.clone();
+                self.dir_input.delete_word_left(&recents);
+                None
+            }
+            KeyCode::Char('h')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                // Ctrl+H is the legacy backspace mapping on a number of
+                // terminals (kitty in particular). Without this arm, the
+                // Char arm below would skip it (CONTROL filter) and the
+                // word-delete would never fire.
+                let recents = self.dir_recents.clone();
+                self.dir_input.delete_word_left(&recents);
+                None
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let recents = self.dir_recents.clone();
+                self.dir_input.insert_char(c, &recents);
+                None
+            }
+            _ => None,
+        }
+    }
+
     fn handle_view_event_clearing_detail_avatar(
         &mut self,
         event_with_count: UserEventWithCount,
@@ -868,7 +1198,17 @@ impl App<'_> {
         if let View::Config(ref view) = self.view {
             if let Some(def) = crate::themes::get_theme(&view.core_config().option.theme) {
                 let color_theme = def.color_theme;
-                Rc::make_mut(&mut self.ctx).color_theme = color_theme.clone();
+                // Rebuild the graph palette from the new theme + current
+                // `[graph.color]` config so the preview row in the config
+                // page and the underlying list view both re-render with
+                // the new background and branch colours. Without this the
+                // graph images stayed baked with the previous theme's bg.
+                let ctx = Rc::make_mut(&mut self.ctx);
+                ctx.color_theme = color_theme.clone();
+                ctx.graph_color_set = crate::color::build_graph_color_set(
+                    &color_theme,
+                    &ctx.graph_config.color,
+                );
                 self.view.update_color_theme(color_theme);
             }
         }
@@ -923,16 +1263,231 @@ impl App<'_> {
         self.render_header(f, header_area);
         self.view.render(f, view_area);
 
+        // Dir-input dropdown overlays the top of the view content while the
+        // overlay is active. Drawn AFTER the view so it paints on top.
+        if self.dir_input.active {
+            self.render_dir_dropdown(f, view_area);
+        } else {
+            // Make sure stale areas don't trigger Kitty-graphics clears on
+            // the next frame after the overlay closes.
+            self.dir_dropdown_area = None;
+        }
+
         // Dotted separator between view content and shortcuts bar
         let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
         let sep_span = Span::styled("╌".repeat(gap_area.width as usize), sep_style);
         f.render_widget(Paragraph::new(Line::from(sep_span)), gap_area);
 
         self.render_status_line(f, status_line_area);
+
+        // Dir-input caret: a "block" cursor painted directly into the
+        // buffer — we overwrite the char that sits at the insertion point
+        // with the SAME char in reversed colors (theme bg on the cursor's
+        // accent color) so the letter stays visible "through" the cursor.
+        // The real terminal caret is hidden on overlay-open so it can't be
+        // teleported around by graph/avatar image escapes — the block on
+        // screen is always exactly where we paint it.
+        //
+        // Blinking is driven manually off `spinner_frame` (Tick fires every
+        // ~100ms while idle). A 12-frame cycle (600 ms on / 600 ms off)
+        // feels closer to a relaxed hardware text-caret rate.
+        // `Modifier::SLOW_BLINK` is ignored by most modern terminals, so we
+        // don't rely on it.
+        if self.dir_input.active {
+            if let Some((anchor_x, anchor_y)) = self.dir_input_cursor_anchor.take() {
+                let before_count = self.dir_input.text[..self.dir_input.cursor]
+                    .chars()
+                    .count() as u16;
+                let cursor_x = anchor_x + 5 + before_count;
+                // Char to highlight: the one to the right of the cursor, or
+                // a space when the cursor is past the end of the input.
+                let cursor_char: String = self.dir_input.text[self.dir_input.cursor..]
+                    .chars()
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| " ".to_string());
+                let blink_on = (self.app_status.spinner_frame % 12) < 6;
+                if blink_on {
+                    // `virtual_cursor_fg` is `Color::Reset` in every shipped
+                    // theme — using it as bg produces a transparent block
+                    // (cursor invisible). Hard-code #f8f8f2 (the warm
+                    // off-white shared with the wordmark's "oui") — visible
+                    // across themes, matches the brand palette.
+                    let style = Style::default()
+                        .fg(self.ctx.color_theme.bg)
+                        .bg(ratatui::style::Color::Rgb(0xf8, 0xf8, 0xf2));
+                    f.buffer_mut()
+                        .set_string(cursor_x, anchor_y, &cursor_char, style);
+                }
+                // blink_on == false: paint nothing — the input-line render
+                // above already drew the underlying char with its normal
+                // style, so that's the "off" half of the blink.
+            }
+        }
     }
 }
 
 impl App<'_> {
+    /// Translate (col, row) into a suggestion index inside the dropdown.
+    /// Returns `None` for clicks outside the popup body (border, header
+    /// row, or outside the rectangle entirely).
+    fn dir_dropdown_hit(&self, col: u16, row: u16) -> Option<usize> {
+        let area = self.dir_dropdown_area?;
+        if col < area.x
+            || col >= area.x + area.width
+            || row < area.y
+            || row >= area.y + area.height
+        {
+            return None;
+        }
+        // Skip the top + bottom border rows.
+        if row == area.y || row == area.y + area.height - 1 {
+            return None;
+        }
+        let row_inside = (row - area.y - 1) as usize;
+        let idx = self.dir_input.scroll + row_inside;
+        if idx < self.dir_input.suggestions.len() {
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    /// Dropdown rendered below the header while the `d` overlay is open.
+    /// Anchored to the top-left of the view area, capped at `MAX_VISIBLE`
+    /// suggestion rows; scrolling kicks in beyond that.
+    fn render_dir_dropdown(&mut self, f: &mut Frame, view_area: Rect) {
+        use ratatui::{
+            layout::Rect,
+            style::Style,
+            text::{Line, Span},
+            widgets::{Block, Borders, Paragraph},
+        };
+
+        let suggestions = &self.dir_input.suggestions;
+        let theme = &self.ctx.color_theme;
+        let visible_count = suggestions.len().min(crate::dir_input::MAX_VISIBLE);
+        // Cap height: visible rows + 2 border rows (or 1+2 when empty so the
+        // placeholder hint still has room).
+        let inner_rows = visible_count.max(1);
+        let height = ((inner_rows + 2) as u16).min(view_area.height);
+        // Width: capped so the popup never bleeds past the commit-message
+        // column into the avatar / author / hash / date columns on the
+        // right. Their cells stay visible and the avatar Kitty placements
+        // stay alive (we never delete them on resize). 60% of the view
+        // width usually sits comfortably inside the commit-message column
+        // on any reasonable terminal size.
+        let width = ((view_area.width as f32 * 0.6) as u16).clamp(40, 80);
+        let width = width.min(view_area.width);
+        let area = Rect::new(view_area.x, view_area.y, width, height);
+
+        // Record the area so the run loop can react to popup growth (and
+        // re-clear the graph in the newly covered rows). The actual delete
+        // happens AFTER `terminal.draw` returns — doing it here would emit
+        // escape sequences in the middle of ratatui's flush, garbling the
+        // screen.
+        self.dir_dropdown_area = Some(area);
+
+        // Clear the cell buffer so we don't bleed terminal content through.
+        // `Cell::reset()` zeroes EVERY style component first — using
+        // `set_style` alone leaves `fg` untouched when the passed style only
+        // specifies `bg`, and Kitty's Unicode-placeholder protocol encodes
+        // the image ID in the foreground colour: a leftover fg is enough
+        // for Kitty to keep painting the commit-graph image on top of the
+        // popup. Explicit reset → set the bg → set the char.
+        let popup_bg = theme.bg;
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                let cell = f.buffer_mut().get_mut(x, y);
+                cell.reset();
+                cell.set_style(Style::default().bg(popup_bg));
+                cell.set_char(' ');
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.list_head_fg))
+            .style(Style::default().bg(theme.bg));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if suggestions.is_empty() {
+            let hint = Line::from(Span::styled(
+                "  type a path or pick from recents…",
+                Style::default()
+                    .fg(theme.divider_fg)
+                    .add_modifier(ratatui::style::Modifier::ITALIC),
+            ));
+            f.render_widget(Paragraph::new(hint), inner);
+            return;
+        }
+
+        let scroll = self.dir_input.scroll;
+        let end = (scroll + crate::dir_input::MAX_VISIBLE).min(suggestions.len());
+        let lines: Vec<Line> = (scroll..end)
+            .map(|i| {
+                let s = &suggestions[i];
+                let is_active = self.dir_input.selected == Some(i);
+                let bg = if is_active { theme.list_selected_bg } else { theme.bg };
+                // Icon column padded so both kinds line up before the `│`
+                // separator. The clock glyph renders as a single cell on most
+                // terminals while the folder emoji renders as two cells —
+                // without the extra trailing space the clock rows would sit
+                // one column to the left of the folder rows.
+                let kind_prefix = match s.kind {
+                    crate::dir_input::SuggestionKind::Recent => " ⏱  ",
+                    crate::dir_input::SuggestionKind::Filesystem => " 📁 ",
+                };
+                let kind_fg = match s.kind {
+                    crate::dir_input::SuggestionKind::Recent => theme.list_date_fg,
+                    crate::dir_input::SuggestionKind::Filesystem => theme.list_name_fg,
+                };
+                Line::from(vec![
+                    Span::styled(
+                        kind_prefix.to_string(),
+                        Style::default().fg(kind_fg).bg(bg),
+                    ),
+                    Span::styled(
+                        "│ ".to_string(),
+                        Style::default().fg(theme.divider_fg).bg(bg),
+                    ),
+                    Span::styled(
+                        s.display.clone(),
+                        Style::default().fg(theme.fg).bg(bg),
+                    ),
+                ])
+            })
+            .collect();
+
+        f.render_widget(Paragraph::new(lines), inner);
+
+        // Tiny scroll indicator in the right border when there's more to see.
+        if suggestions.len() > crate::dir_input::MAX_VISIBLE {
+            let total = suggestions.len();
+            let position_label = format!(" {}/{} ", end, total);
+            // Drop it on the top border so it doesn't compete with content rows.
+            if let Some(_) = position_label.chars().next() {
+                let label_x = area.x + area.width.saturating_sub(position_label.chars().count() as u16 + 2);
+                let label_y = area.y;
+                let mut x = label_x;
+                for c in position_label.chars() {
+                    if x >= area.x + area.width { break; }
+                    f.buffer_mut()
+                        .get_mut(x, label_y)
+                        .set_char(c)
+                        .set_style(
+                            Style::default()
+                                .fg(theme.list_head_fg)
+                                .bg(theme.bg)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        );
+                    x += 1;
+                }
+            }
+        }
+    }
+
     fn render_header(&mut self, f: &mut Frame, area: Rect) {
         use ratatui::{
             text::{Line, Span},
@@ -1009,33 +1564,59 @@ impl App<'_> {
         let white = ratatui::style::Color::White;
         let dim_white = ratatui::style::Color::Rgb(160, 160, 160);
 
-        // Path: dim prefix + bold repo name.
-        let mut path_spans = vec![];
-        if !path_prefix.is_empty() {
-            let prefix_truncated = if path_prefix.chars().count() > path_width as usize {
-                let skip = path_prefix.chars().count().saturating_sub(path_width as usize - 1);
-                format!("…{}", path_prefix.chars().skip(skip).collect::<String>())
-            } else {
-                path_prefix.clone()
-            };
-            path_spans.push(Span::styled(
-                format!(" {}", prefix_truncated),
-                ratatui::style::Style::default().fg(dim_white),
-            ));
+        // When the dir-input overlay is active, replace the pwd display with
+        // an editable text line. The real terminal cursor is positioned via
+        // `f.set_cursor_position` at the END of `render()` (after every
+        // other component has drawn) so neither the popup buffer overwrite
+        // nor the Kitty image placements moves it around mid-frame.
+        if self.dir_input.active {
+            let accent = self.ctx.color_theme.list_head_fg;
+            let input_line = Line::from(vec![
+                Span::styled(
+                    " cd ".to_string(),
+                    ratatui::style::Style::default()
+                        .fg(accent)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(" ".to_string(), ratatui::style::Style::default()),
+                Span::styled(
+                    self.dir_input.text.clone(),
+                    ratatui::style::Style::default().fg(white),
+                ),
+            ]);
+            f.render_widget(Paragraph::new(input_line), left_area);
+            // Remember the cursor anchor so the main `render()` method can
+            // place the cursor as the very last thing it does.
+            self.dir_input_cursor_anchor = Some((left_area.x, left_area.y));
         } else {
-            path_spans.push(Span::raw(" "));
-        }
-        path_spans.push(Span::styled(
-            repo_name,
-            ratatui::style::Style::default()
-                .fg(white)
-                .add_modifier(ratatui::style::Modifier::BOLD),
-        ));
+            // Path: dim prefix + bold repo name.
+            let mut path_spans = vec![];
+            if !path_prefix.is_empty() {
+                let prefix_truncated = if path_prefix.chars().count() > path_width as usize {
+                    let skip = path_prefix.chars().count().saturating_sub(path_width as usize - 1);
+                    format!("…{}", path_prefix.chars().skip(skip).collect::<String>())
+                } else {
+                    path_prefix.clone()
+                };
+                path_spans.push(Span::styled(
+                    format!(" {}", prefix_truncated),
+                    ratatui::style::Style::default().fg(dim_white),
+                ));
+            } else {
+                path_spans.push(Span::raw(" "));
+            }
+            path_spans.push(Span::styled(
+                repo_name,
+                ratatui::style::Style::default()
+                    .fg(white)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ));
 
-        f.render_widget(
-            Paragraph::new(Line::from(path_spans)),
-            left_area,
-        );
+            f.render_widget(
+                Paragraph::new(Line::from(path_spans)),
+                left_area,
+            );
+        }
 
         // Numeric prefix block: "<digits> │ " right before the logo. Rendered
         // here (not in the footer) so the user sees the count where their eye
@@ -1163,9 +1744,43 @@ impl App<'_> {
             StatusLine::None | StatusLine::NotificationInfo(_)
         ) && !is_search_active
             && !is_config_active
-            && compare_pending.is_none();
+            && compare_pending.is_none()
+            && !self.dir_input.active;
 
-        let mut spans = match &self.app_status.status_line {
+        let mut spans = if self.dir_input.active {
+            // Transient validation error (e.g. "not a git repository") wins
+            // over the regular "Changing directory…" idle text for ~2 s.
+            // After that we fall back to the spinner without closing the
+            // overlay so the user can pick a different target.
+            let show_error = self
+                .dir_error_message
+                .as_ref()
+                .filter(|(_, t)| t.elapsed() < std::time::Duration::from_secs(2))
+                .map(|(msg, _)| msg.clone());
+            if let Some(msg) = show_error {
+                vec![Span::styled(
+                    format!(" {}", msg),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_error_fg)
+                        .add_modifier(Modifier::BOLD),
+                )]
+            } else {
+                // Same braille spinner used by Pull / Fetch background jobs,
+                // ticked off `spinner_frame` so it matches the header G-logo
+                // animation cadence.
+                const FRAMES: [&str; 10] = [
+                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}",
+                    "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+                ];
+                let frame = FRAMES[self.app_status.spinner_frame % 10];
+                vec![Span::styled(
+                    format!("{frame} Changing directory…"),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_info_fg)
+                        .add_modifier(Modifier::BOLD),
+                )]
+            }
+        } else { match &self.app_status.status_line {
             // Numeric prefix is now rendered in the header (left of the logo),
             // so the footer's None branch is empty regardless of prefix state.
             StatusLine::None => vec![],
@@ -1236,7 +1851,7 @@ impl App<'_> {
                         .add_modifier(Modifier::BOLD),
                 )]
             }
-        };
+        }};
 
         let dim_separator = Style::default().fg(self.ctx.color_theme.divider_fg);
         let dim_text = Style::default().fg(self.ctx.color_theme.list_ref_paren_fg);
@@ -1247,8 +1862,13 @@ impl App<'_> {
             || is_config_active;
         let _is_diff = matches!(&self.view, View::Diff(_));
 
-        let status_area = if show_shortcuts {
-            let shortcut_text: String = if is_search_querying {
+        let status_area = if show_shortcuts || self.dir_input.active {
+            let shortcut_text: String = if self.dir_input.active {
+                // Dedicated cd-mode hints — only the keys that actually do
+                // something while the overlay is open. The animated label
+                // lives on the LEFT side (see the spans build above).
+                "⌘ ↑↓:navigate▕▏Tab:complete▕▏Enter:cd▕▏Esc:cancel".into()
+            } else if is_search_querying {
                 String::new()
             } else if is_search_active {
                 let (ignore_case, fuzzy, regex) = self
@@ -1274,7 +1894,10 @@ impl App<'_> {
             } else {
                 match &self.view {
                     View::List(_) => {
-                        "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏c:copy msg▕▏C:copy hash▕▏p:config▕▏?:help▕▏q:quit"
+                        // `c` / `C` (copy msg / hash) are deliberately kept
+                        // functional but omitted from the footer hint to
+                        // reduce clutter. They're discoverable via `?:help`.
+                        "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
                             .into()
                     }
                     View::Diff(_) => self
@@ -1818,9 +2441,19 @@ impl App<'_> {
     }
 
     fn open_file_history(&mut self, file_path: String) {
-        // Same pattern as open_blame — grab the commit list state from
-        // whichever surrounding view triggered the open so we can return to
-        // it on Esc.
+        // Load history FIRST — same rationale as `open_blame`: if git log
+        // errors (rare for valid paths, but possible for files outside the
+        // worktree), don't tear down the source view's state.
+        let repo_path = self.repository.path().to_path_buf();
+        let entries = match actions::file_history(&repo_path, &file_path) {
+            Ok(e) => e,
+            Err(msg) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("File history failed: {}", msg)));
+                return;
+            }
+        };
+
         let commit_list_state = match self.view {
             View::Diff(ref mut view) => view.take_list_state(),
             View::Detail(ref mut view) => Some(view.take_list_state()),
@@ -1828,22 +2461,13 @@ impl App<'_> {
             View::Uncommitted(ref mut view) => view.take_list_state(),
             _ => None,
         };
-        let repo_path = self.repository.path().to_path_buf();
-        match actions::file_history(&repo_path, &file_path) {
-            Ok(entries) => {
-                self.view = View::of_file_history(
-                    commit_list_state,
-                    file_path,
-                    entries,
-                    self.ctx.clone(),
-                    self.ec.sender(),
-                );
-            }
-            Err(msg) => {
-                self.ec
-                    .send(AppEvent::NotifyError(format!("File history failed: {}", msg)));
-            }
-        }
+        self.view = View::of_file_history(
+            commit_list_state,
+            file_path,
+            entries,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
     }
 
     fn close_file_history(&mut self) {
@@ -1856,9 +2480,21 @@ impl App<'_> {
     }
 
     fn open_blame(&mut self, file_path: String) {
-        // Pull the commit list state from whichever surrounding view the user
-        // was in (Diff / Detail / FileHistory / Uncommitted) so closing the
-        // blame returns to the same overall app state.
+        // Load the blame BEFORE we touch the source view's state. If git
+        // blame errors (e.g. file doesn't exist in the working tree, like a
+        // path that was renamed or deleted in a later commit), the source
+        // view stays intact — taking its list_state before would leave it in
+        // a half-broken state that panics on the next render.
+        let repo_path = self.repository.path().to_path_buf();
+        let lines = match crate::git::blame::load_blame(&repo_path, &file_path) {
+            Ok(l) => l,
+            Err(msg) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Blame failed: {}", msg)));
+                return;
+            }
+        };
+
         let commit_list_state = match self.view {
             View::Diff(ref mut view) => view.take_list_state(),
             View::Detail(ref mut view) => Some(view.take_list_state()),
@@ -1866,22 +2502,13 @@ impl App<'_> {
             View::Uncommitted(ref mut view) => view.take_list_state(),
             _ => None,
         };
-        let repo_path = self.repository.path().to_path_buf();
-        match crate::git::blame::load_blame(&repo_path, &file_path) {
-            Ok(lines) => {
-                self.view = View::of_blame(
-                    commit_list_state,
-                    file_path,
-                    lines,
-                    self.ctx.clone(),
-                    self.ec.sender(),
-                );
-            }
-            Err(msg) => {
-                self.ec
-                    .send(AppEvent::NotifyError(format!("Blame failed: {}", msg)));
-            }
-        }
+        self.view = View::of_blame(
+            commit_list_state,
+            file_path,
+            lines,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
     }
 
     fn close_blame(&mut self) {
@@ -2401,6 +3028,13 @@ impl App<'_> {
                 ctx.color_theme = def.color_theme;
                 ctx.core_config.option.syntax_theme = def.syntax_theme.to_owned();
             }
+            // Always rebuild the graph palette from the (possibly theme-
+            // overridden) color_theme + user's [graph] config so the
+            // returning list view paints with the right bg + branch colours.
+            ctx.graph_color_set = crate::color::build_graph_color_set(
+                &ctx.color_theme,
+                &ctx.graph_config.color,
+            );
             ctx.ui_config = ui.clone();
             ctx.github_auth_state = github_auth_state.clone();
             ctx.avatar_manager
@@ -2597,29 +3231,133 @@ impl App<'_> {
 
         let needs_draw = match mouse.kind {
             MouseEventKind::ScrollUp => {
-                self.handle_view_event_clearing_detail_avatar(
-                    crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollUp, 3),
-                    ratatui::crossterm::event::KeyEvent::new(
-                        ratatui::crossterm::event::KeyCode::Up,
-                        ratatui::crossterm::event::KeyModifiers::NONE,
-                    ),
-                    terminal,
-                )?;
+                if self.dir_input.active {
+                    self.dir_input.scroll_by(-3);
+                } else {
+                    self.handle_view_event_clearing_detail_avatar(
+                        crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollUp, 3),
+                        ratatui::crossterm::event::KeyEvent::new(
+                            ratatui::crossterm::event::KeyCode::Up,
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        ),
+                        terminal,
+                    )?;
+                }
                 true
             }
             MouseEventKind::ScrollDown => {
-                self.handle_view_event_clearing_detail_avatar(
-                    crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollDown, 3),
-                    ratatui::crossterm::event::KeyEvent::new(
-                        ratatui::crossterm::event::KeyCode::Down,
-                        ratatui::crossterm::event::KeyModifiers::NONE,
-                    ),
-                    terminal,
-                )?;
+                if self.dir_input.active {
+                    self.dir_input.scroll_by(3);
+                } else {
+                    self.handle_view_event_clearing_detail_avatar(
+                        crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollDown, 3),
+                        ratatui::crossterm::event::KeyEvent::new(
+                            ratatui::crossterm::event::KeyCode::Down,
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        ),
+                        terminal,
+                    )?;
+                }
                 true
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 use ratatui::crossterm::event::KeyModifiers;
+                // When the dir-input overlay is open it owns every mouse
+                // event — a click inside the dropdown completes the entry
+                // into the input (same as Tab) so the user can keep refining
+                // before pressing Enter. Clicks outside are swallowed so the
+                // underlying commit list can't be interacted with.
+                if self.dir_input.active {
+                    if let Some(idx) =
+                        self.dir_dropdown_hit(mouse.column, mouse.row)
+                    {
+                        if let Some(s) = self.dir_input.suggestions.get(idx).cloned() {
+                            // Two-step click: first click on a suggestion just
+                            // fills the input (Tab semantics). Clicking the
+                            // exact same suggestion a second time — i.e. the
+                            // input text already equals what we'd write —
+                            // commits the cd (Enter semantics). Lets the user
+                            // both refine and confirm with the mouse alone.
+                            if self.dir_input.text == s.display {
+                                self.dir_input.selected = Some(idx);
+                                let cwd = std::env::current_dir().unwrap_or_default();
+                                if let Some(target) = self.dir_input.resolve(&cwd) {
+                                    // Same git-repo gate as the keyboard
+                                    // Enter path — keep the overlay open and
+                                    // surface a 2 s footer error if the
+                                    // target isn't inside a git work tree.
+                                    if !crate::git::is_git_path(&target) {
+                                        self.dir_error_message = Some((
+                                            "not a git directory".to_string(),
+                                            std::time::Instant::now(),
+                                        ));
+                                        return Ok(true);
+                                    }
+                                    match std::env::set_current_dir(&target) {
+                                        Ok(_) => {
+                                            crate::recents::push(&target);
+                                            self.dir_recents = crate::recents::load();
+                                            self.dir_input.close();
+                                            self.dir_dropdown_area = None;
+                                            self.app_status.spinner_active = false;
+                                            let _ = ratatui::crossterm::execute!(
+                                                std::io::stdout(),
+                                                ratatui::crossterm::cursor::Show
+                                            );
+                                            // Bubble the rebuild up via the
+                                            // pending_refresh slot — the main
+                                            // loop will drain it right after
+                                            // handle_mouse_event returns and
+                                            // exit with Ret::Refresh, the same
+                                            // path the keyboard Enter takes.
+                                            self.pending_refresh = Some(RefreshRequest {
+                                                context: crate::view::RefreshViewContext::List {
+                                                    list_context:
+                                                        crate::view::ListRefreshViewContext {
+                                                            commit_hash: String::new(),
+                                                            selected: 0,
+                                                            height: 20,
+                                                            scroll_to_top: true,
+                                                        },
+                                                    pending_notification: Some(format!(
+                                                        "Switched to {}",
+                                                        target.display()
+                                                    )),
+                                                },
+                                            });
+                                            return Ok(true);
+                                        }
+                                        Err(e) => {
+                                            self.ec.send(AppEvent::NotifyError(format!(
+                                                "cd failed: {}",
+                                                e
+                                            )));
+                                            self.dir_input.close();
+                                            self.dir_dropdown_area = None;
+                                            self.app_status.spinner_active = false;
+                                            self.header_logo_last = None;
+                                            let _ = ratatui::crossterm::execute!(
+                                                std::io::stdout(),
+                                                ratatui::crossterm::cursor::Show
+                                            );
+                                            self.view.clear_graph_images();
+                                            let _ = self.clear_terminal(terminal);
+                                        }
+                                    }
+                                }
+                            } else {
+                                self.dir_input.text = s.display;
+                                self.dir_input.cursor = self.dir_input.text.len();
+                                self.dir_input.selected = None;
+                                let recents = self.dir_recents.clone();
+                                self.dir_input.refresh_suggestions_from(&recents);
+                            }
+                        }
+                    }
+                    // Click outside dropdown while overlay is active: do
+                    // nothing — explicitly NOT propagating to view.handle_click.
+                    return Ok(true);
+                }
                 if mouse.modifiers.contains(KeyModifiers::CONTROL) {
                     self.view.handle_shift_click(mouse.column, mouse.row);
                 } else {
@@ -2628,6 +3366,17 @@ impl App<'_> {
                 true
             }
             MouseEventKind::Moved => {
+                if self.dir_input.active {
+                    // Overlay owns hover: highlight the dropdown row under
+                    // the cursor, swallow events that fall outside so the
+                    // commit list doesn't react.
+                    if let Some(idx) =
+                        self.dir_dropdown_hit(mouse.column, mouse.row)
+                    {
+                        self.dir_input.selected = Some(idx);
+                    }
+                    return Ok(true);
+                }
                 self.view.handle_mouse_move(mouse.column, mouse.row)
             }
             _ => false,

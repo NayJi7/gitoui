@@ -339,9 +339,14 @@ impl<'a> ListView<'a> {
     }
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
-        let bg = theme.bg;
         std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
-        self.as_mut_list_state().invalidate_image_caches(bg);
+        // Use the freshly rebuilt graph_color_set (app.rs::handle_view_event
+        // updates it on the ctx before calling here) so the new theme's
+        // branch colours + bg get baked into the next-frame images. Falling
+        // back to just-bg-update would keep the previous branch palette.
+        let palette = self.ctx.graph_color_set.clone();
+        self.as_mut_list_state()
+            .invalidate_image_caches_with_palette(&palette);
         self.ctx.avatar_manager.lock().unwrap().clear_prepared_images();
     }
 
