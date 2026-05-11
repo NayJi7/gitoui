@@ -24,9 +24,9 @@ use crate::{
 //   0  Theme
 //   1  Graph Style
 //   2  Graph Width
-//   3  Initial Selection
-//   4  Diff Mode
-//   5  Resolve Mode      ← merge-conflict editor layout
+//   3  Diff Mode
+//   4  Resolve Mode      ← merge-conflict editor layout
+//   5  Initial Selection
 //   6  Mouse
 //   7  Date Format
 //   8  Image Protocol
@@ -88,9 +88,9 @@ impl<'a> ConfigView<'a> {
             self.core_config.option.theme.clone(),
             graph_style_display(self.core_config.graph_style()),
             graph_width_display(self.core_config.graph_width()),
-            initial_selection_display(self.core_config.initial_selection()),
             diff_mode_display(self.ui_config.common.diff_mode),
             conflict_view_display(self.ui_config.common.conflict_view),
+            initial_selection_display(self.core_config.initial_selection()),
             mouse_display(self.ui_config.common.mouse_enabled),
             self.core_config
                 .date_time_format()
@@ -120,9 +120,9 @@ impl<'a> ConfigView<'a> {
             "Theme",
             "Graph Style",
             "Graph Width",
-            "Initial Select",
             "Diff Mode",
             "Resolve Mode",
+            "Initial Select",
             "Mouse",
             "Date Format",
             "Image Protocol",
@@ -503,13 +503,6 @@ impl<'a> ConfigView<'a> {
                 self.graph_preview = None;
             }
             3 => {
-                let prev = match self.core_config.initial_selection() {
-                    InitialSelection::Latest => InitialSelection::Head,
-                    InitialSelection::Head => InitialSelection::Latest,
-                };
-                self.core_config.set_initial_selection(prev);
-            }
-            4 => {
                 let prev = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::SideBySideEnhanced,
                     DiffMode::Raw => DiffMode::Enhanced,
@@ -518,13 +511,20 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(prev);
             }
-            5 => {
+            4 => {
                 let prev = match self.ui_config.common.conflict_view {
                     ConflictViewMode::ThreePane => ConflictViewMode::Inline,
                     ConflictViewMode::TwoPane => ConflictViewMode::ThreePane,
                     ConflictViewMode::Inline => ConflictViewMode::TwoPane,
                 };
                 self.ui_config.common.set_conflict_view(prev);
+            }
+            5 => {
+                let prev = match self.core_config.initial_selection() {
+                    InitialSelection::Latest => InitialSelection::Head,
+                    InitialSelection::Head => InitialSelection::Latest,
+                };
+                self.core_config.set_initial_selection(prev);
             }
             6 => {
                 self.ui_config
@@ -594,13 +594,6 @@ impl<'a> ConfigView<'a> {
                 self.graph_preview = None;
             }
             3 => {
-                let next = match self.core_config.initial_selection() {
-                    InitialSelection::Latest => InitialSelection::Head,
-                    InitialSelection::Head => InitialSelection::Latest,
-                };
-                self.core_config.set_initial_selection(next);
-            }
-            4 => {
                 let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::SideBySide,
@@ -609,13 +602,20 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(next);
             }
-            5 => {
+            4 => {
                 let next = match self.ui_config.common.conflict_view {
                     ConflictViewMode::ThreePane => ConflictViewMode::TwoPane,
                     ConflictViewMode::TwoPane => ConflictViewMode::Inline,
                     ConflictViewMode::Inline => ConflictViewMode::ThreePane,
                 };
                 self.ui_config.common.set_conflict_view(next);
+            }
+            5 => {
+                let next = match self.core_config.initial_selection() {
+                    InitialSelection::Latest => InitialSelection::Head,
+                    InitialSelection::Head => InitialSelection::Latest,
+                };
+                self.core_config.set_initial_selection(next);
             }
             6 => {
                 self.ui_config
@@ -740,11 +740,6 @@ impl<'a> ConfigView<'a> {
                 false,
             ),
             (
-                "Initial Select",
-                initial_selection_display(self.core_config.initial_selection()),
-                false,
-            ),
-            (
                 "Diff Mode",
                 diff_mode_display(self.ui_config.common.diff_mode),
                 false,
@@ -752,6 +747,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Resolve Mode",
                 conflict_view_display(self.ui_config.common.conflict_view),
+                false,
+            ),
+            (
+                "Initial Select",
+                initial_selection_display(self.core_config.initial_selection()),
                 false,
             ),
             (
@@ -895,9 +895,9 @@ impl<'a> ConfigView<'a> {
             "Color theme applied to the entire interface, including diff syntax highlighting.".into(),
             "Controls how commit connection lines are rendered in the graph.".into(),
             "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
-            "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
-            "Enhanced shows contextual line numbers; Raw shows plain git diff output.".into(),
+            diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
+            "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
             "Terminal image protocol used for rendering commit graph images.".into(),
@@ -1345,6 +1345,53 @@ fn diff_mode_display(mode: DiffMode) -> String {
         DiffMode::SideBySide => "Side by side".to_string(),
         DiffMode::SideBySideEnhanced => "Side by side (enhanced)".to_string(),
     }
+}
+
+/// Adaptive description + ASCII preview for the Diff Mode option. The
+/// intro stays the same across modes; only the mock at the bottom
+/// switches to reflect the picked layout.
+fn diff_mode_description(mode: DiffMode) -> String {
+    let intro = "How file diffs are rendered in the Diff and Uncommitted views.\n\n\
+  • Enhanced  = single column, line numbers, expandable gaps\n\
+  • Raw       = plain `git diff` output, no decoration\n\
+  • Side by side  = old | new in two columns\n\
+  • SBS (enhanced) = side by side + line numbers + row bg\n\n";
+    let preview = match mode {
+        DiffMode::Enhanced => {
+            "┌─ src/foo.rs ──────────────────┐\n\
+             │ 12   pub fn foo() {           │\n\
+             │▌13- let x = 1;                │\n\
+             │▌14+ let x = 42;               │\n\
+             │ 15   println!(\"{}\", x);       │\n\
+             │  …                            │\n\
+             └───────────────────────────────┘"
+        }
+        DiffMode::Raw => {
+            "@@ -12,4 +12,4 @@\n\
+             pub fn foo() {\n\
+             -    let x = 1;\n\
+             +    let x = 42;\n\
+                 println!(\"{}\", x);\n\
+             …"
+        }
+        DiffMode::SideBySide => {
+            "┌─ before ──────┬─ after ───────┐\n\
+             │  pub fn foo() │  pub fn foo() │\n\
+             │- let x = 1;   │+ let x = 42;  │\n\
+             │  println!(…)  │  println!(…)  │\n\
+             │  …            │  …            │\n\
+             └───────────────┴───────────────┘"
+        }
+        DiffMode::SideBySideEnhanced => {
+            "┌─ before ──────────┬─ after ───────────┐\n\
+             │ 12  pub fn foo()  │ 12  pub fn foo()  │\n\
+             │▌13- let x = 1;    │▌13+ let x = 42;   │\n\
+             │ 14  println!(…)   │ 14  println!(…)   │\n\
+             │  …                │  …                │\n\
+             └───────────────────┴───────────────────┘"
+        }
+    };
+    format!("{}{}", intro, preview)
 }
 
 fn conflict_view_display(mode: ConflictViewMode) -> String {
