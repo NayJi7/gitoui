@@ -224,6 +224,16 @@ impl<'a> DialogView<'a> {
         self.focused == element || self.hovered == Some(element)
     }
 
+    /// Returns true when the `▸` cursor indicator should point at this
+    /// element. The cursor follows the mouse hover when one exists,
+    /// otherwise it follows the keyboard focus — never both at once.
+    fn is_pointed_at(&self, element: DialogElement) -> bool {
+        match self.hovered {
+            Some(h) => h == element,
+            None => self.focused == element,
+        }
+    }
+
     /// Returns `(line_index, col_in_line)` for `byte_offset` within `s`.
     fn cursor_line_col(s: &str, byte_offset: usize) -> (usize, usize) {
         let clamped = byte_offset.min(s.len());
@@ -1353,15 +1363,17 @@ impl<'a> DialogView<'a> {
     fn checkbox_line(&self, index: usize, label: &str) -> Line<'static> {
         let theme = &self.ctx.color_theme;
         let checked = self.checkboxes.get(index).copied().unwrap_or(false);
-        let highlighted = self.is_highlighted(DialogElement::Checkbox(index));
+        let pointed = self.is_pointed_at(DialogElement::Checkbox(index));
 
-        let indicator = if highlighted { "▸ " } else { "  " };
+        // Cursor arrow follows hover-or-focus, not both.
+        let indicator = if pointed { "▸ " } else { "  " };
+        // Render the toggle as a filled/unfilled circle (same look as radios).
         let check_span = if checked {
-            Span::styled("[✓] ", Style::default().fg(theme.status_success_fg))
+            Span::styled("● ", Style::default().fg(theme.status_info_fg))
         } else {
-            Span::styled("[ ] ", Style::default().fg(theme.divider_fg))
+            Span::styled("○ ", Style::default().fg(theme.divider_fg))
         };
-        let label_style = if highlighted {
+        let label_style = if pointed {
             Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.fg)
@@ -1377,15 +1389,15 @@ impl<'a> DialogView<'a> {
     fn radio_line(&self, index: usize, label: &str) -> Line<'static> {
         let theme = &self.ctx.color_theme;
         let selected = self.dropdown_selected == index;
-        let highlighted = self.is_highlighted(DialogElement::Radio(index));
+        let pointed = self.is_pointed_at(DialogElement::Radio(index));
 
-        let indicator = if highlighted { "▸ " } else { "  " };
+        let indicator = if pointed { "▸ " } else { "  " };
         let bullet_span = if selected {
             Span::styled("● ", Style::default().fg(theme.status_info_fg))
         } else {
             Span::styled("○ ", Style::default().fg(theme.divider_fg))
         };
-        let label_style = if highlighted {
+        let label_style = if pointed {
             Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
         } else if selected {
             Style::default().fg(theme.fg)
