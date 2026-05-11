@@ -496,8 +496,63 @@ impl App<'_> {
                     }
                 }
             }
-            needs_draw = true;
-            match self.ec.recv() {
+            // When an animation is in flight (spinner, notification countdown,
+            // file streaming, or debounce window) we need to wake up on a
+            // regular cadence even with no user input. Otherwise we block
+            // indefinitely — no spurious 50 ms wakeups while browsing.
+            let animated = self.app_status.spinner_active
+                || self.app_status.notification_timestamp.is_some()
+                || !self.file_stream.is_empty()
+                || (self.dir_input.active && self.dir_input.text_dirty_since.is_some());
+
+            let event = if animated {
+                match self.ec.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(ev) => {
+                        needs_draw = true;
+                        Some(ev)
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // Animation tick — advance time-based state.
+                        let notif_expiring = self
+                            .app_status
+                            .notification_timestamp
+                            .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
+                            .unwrap_or(false);
+                        let streaming = if !self.file_stream.is_empty() {
+                            let chunk_size = 100.min(self.file_stream.len());
+                            let chunk: Vec<_> = self.file_stream.drain(..chunk_size).collect();
+                            if let View::Diff(ref mut view) = self.view {
+                                view.append_addition_lines(chunk);
+                            }
+                            true
+                        } else {
+                            false
+                        };
+                        if self.app_status.spinner_active {
+                            let total = if self.spinner_frames.is_empty() {
+                                10
+                            } else {
+                                crate::brand::SPINNER_FRAME_COUNT
+                            };
+                            self.app_status.spinner_frame =
+                                (self.app_status.spinner_frame + 1) % total;
+                            needs_draw = true;
+                        } else {
+                            needs_draw = notif_expiring || streaming;
+                        }
+                        None
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        panic!("event channel disconnected");
+                    }
+                }
+            } else {
+                needs_draw = true;
+                Some(self.ec.recv())
+            };
+
+            let Some(event) = event else { continue };
+            match event {
                 AppEvent::Key(key) => {
                     // The change-directory overlay hijacks every key while
                     // open — typing extends the input, Esc cancels, Enter

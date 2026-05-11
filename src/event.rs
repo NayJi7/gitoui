@@ -320,6 +320,10 @@ impl Receiver {
     fn recv(&self) -> AppEvent {
         self.rx.recv().unwrap()
     }
+
+    fn recv_timeout(&self, timeout: std::time::Duration) -> Result<AppEvent, mpsc::RecvTimeoutError> {
+        self.rx.recv_timeout(timeout)
+    }
 }
 
 impl Debug for Receiver {
@@ -358,14 +362,12 @@ impl EventController {
         let stop = self.stop.clone();
         let tx = self.tx.clone();
         let handle = thread::spawn(move || {
-            let mut tick_counter = 0u8;
             loop {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
-                match ratatui::crossterm::event::poll(std::time::Duration::from_millis(100)) {
+                match ratatui::crossterm::event::poll(std::time::Duration::from_millis(50)) {
                     Ok(true) => {
-                        tick_counter = 0;
                         match ratatui::crossterm::event::read() {
                             Ok(e) => match e {
                                 ratatui::crossterm::event::Event::Key(key) => {
@@ -384,14 +386,7 @@ impl EventController {
                             }
                         }
                     }
-                    Ok(false) => {
-                        tick_counter += 1;
-                        if tick_counter >= 1 {
-                            tick_counter = 0;
-                            tx.send(AppEvent::Tick);
-                        }
-                        continue;
-                    }
+                    Ok(false) => {}
                     Err(e) => {
                         panic!("Failed to poll event: {e}");
                     }
@@ -447,6 +442,13 @@ impl EventController {
 
     pub fn recv(&self) -> AppEvent {
         self.rx.recv()
+    }
+
+    pub fn recv_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<AppEvent, mpsc::RecvTimeoutError> {
+        self.rx.recv_timeout(timeout)
     }
 }
 
