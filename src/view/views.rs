@@ -10,8 +10,8 @@ use crate::{
         blame::BlameView, branch_detail::BranchDetailView, compare::CompareView,
         config::ConfigView, conflict::ConflictView, detail::DetailView, dialog::DialogView,
         diff::DiffView, file_history::FileHistoryView, help::HelpView, list::ListView,
-        refs::RefsView, tag_detail::TagDetailView, uncommitted::UncommittedView,
-        user_command::UserCommandView,
+        rebase::InteractiveRebaseView, refs::RefsView, tag_detail::TagDetailView,
+        uncommitted::UncommittedView, user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -35,6 +35,7 @@ pub enum View<'a> {
     Blame(Box<BlameView<'a>>),
     Compare(Box<CompareView<'a>>),
     Conflict(Box<ConflictView<'a>>),
+    InteractiveRebase(Box<InteractiveRebaseView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -56,6 +57,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.handle_event(event_with_count, key_event),
             View::Compare(view) => view.handle_event(event_with_count, key_event),
             View::Conflict(view) => view.handle_event(event_with_count, key_event),
+            View::InteractiveRebase(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -77,6 +79,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.render(f, area),
             View::Compare(view) => view.render(f, area),
             View::Conflict(view) => view.render(f, area),
+            View::InteractiveRebase(view) => view.render(f, area),
         }
     }
 
@@ -98,6 +101,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.update_layout(area),
             View::Compare(view) => view.update_layout(area),
             View::Conflict(view) => view.update_layout(area),
+            View::InteractiveRebase(view) => view.update_layout(area),
         }
     }
 
@@ -119,6 +123,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.prepare_graph_uploads(),
             View::Compare(view) => view.prepare_graph_uploads(),
             View::Conflict(view) => view.prepare_graph_uploads(),
+            View::InteractiveRebase(view) => view.prepare_graph_uploads(),
         }
     }
 
@@ -136,6 +141,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.clear_graph_images(),
             View::Compare(view) => view.clear_graph_images(),
             View::Conflict(view) => view.clear_graph_images(),
+            View::InteractiveRebase(view) => view.clear_graph_images(),
             _ => {}
         }
     }
@@ -174,6 +180,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.drain_pending_graph_uploads(),
             View::Compare(view) => view.drain_pending_graph_uploads(),
             View::Conflict(view) => view.drain_pending_graph_uploads(),
+            View::InteractiveRebase(view) => view.drain_pending_graph_uploads(),
         }
     }
 
@@ -195,6 +202,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.graph_image_ids_sorted(),
             View::Compare(view) => view.graph_image_ids_sorted(),
             View::Conflict(view) => view.graph_image_ids_sorted(),
+            View::InteractiveRebase(view) => view.graph_image_ids_sorted(),
         }
     }
 
@@ -218,6 +226,7 @@ impl<'a> View<'a> {
             View::Blame(_) => false,
             View::Compare(_) => false,
             View::Conflict(_) => false,
+            View::InteractiveRebase(_) => false,
         }
     }
 
@@ -241,6 +250,7 @@ impl<'a> View<'a> {
             View::Blame(_) => false,
             View::Compare(_) => false,
             View::Conflict(_) => false,
+            View::InteractiveRebase(_) => false,
         }
     }
 
@@ -265,6 +275,7 @@ impl<'a> View<'a> {
             View::Blame(_) => None,
             View::Compare(_) => None,
             View::Conflict(_) => None,
+            View::InteractiveRebase(_) => None,
         }
     }
 
@@ -459,6 +470,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.handle_click(col, row),
             View::Compare(view) => view.handle_click(col, row),
             View::Conflict(view) => view.handle_click(col, row),
+            View::InteractiveRebase(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -521,6 +533,10 @@ impl<'a> View<'a> {
                 view.handle_mouse_move(col, row);
                 true
             }
+            View::InteractiveRebase(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
             _ => false,
         }
     }
@@ -543,6 +559,7 @@ impl<'a> View<'a> {
             View::Blame(view) => view.refresh(),
             View::Compare(view) => view.refresh(),
             View::Conflict(view) => view.refresh(),
+            View::InteractiveRebase(view) => view.refresh(),
         }
     }
 
@@ -554,6 +571,7 @@ impl<'a> View<'a> {
             // so that keys with no UserEvent mapping (Backspace, Delete) still flow
             // to the view instead of being dropped by the app key router.
             View::Diff(view) => view.is_search_input_active(),
+            View::InteractiveRebase(view) => view.is_input_active(),
             _ => false,
         }
     }
@@ -576,6 +594,7 @@ impl<'a> View<'a> {
             View::Blame(v) => v.update_color_theme(theme),
             View::Compare(v) => v.update_color_theme(theme),
             View::Conflict(v) => v.update_color_theme(theme),
+            View::InteractiveRebase(v) => v.update_color_theme(theme),
         }
     }
 
@@ -635,6 +654,31 @@ impl<'a> View<'a> {
     pub fn conflict_footer_hint(&self) -> Option<String> {
         match self {
             View::Conflict(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn of_interactive_rebase(
+        commit_list_state: Option<CommitListState<'a>>,
+        repo_path: std::path::PathBuf,
+        base_hash: String,
+        items: Vec<crate::git::rebase::RebaseItem>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::InteractiveRebase(Box::new(InteractiveRebaseView::new(
+            commit_list_state,
+            repo_path,
+            base_hash,
+            items,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn interactive_rebase_footer_hint(&self) -> Option<String> {
+        match self {
+            View::InteractiveRebase(view) => Some(view.footer_hint()),
             _ => None,
         }
     }

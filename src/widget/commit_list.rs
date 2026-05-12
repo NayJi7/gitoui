@@ -1868,6 +1868,18 @@ impl CommitList<'_> {
                     .add_modifier(Modifier::BOLD),
             );
         }
+        // Rebase badge — same anchor as the conflicts marker but yellow,
+        // so the user spots a paused rebase even when there are no current
+        // unmerged paths (e.g. paused at an Edit step).
+        if !self.ctx.repo_path.as_os_str().is_empty()
+            && crate::git::rebase::rebase_in_progress(&self.ctx.repo_path)
+        {
+            spans.push(
+                Span::raw("  ↻ REBASING")
+                    .fg(self.ctx.color_theme.status_warn_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
         self.to_commit_list_item(i, spans, state)
     }
 

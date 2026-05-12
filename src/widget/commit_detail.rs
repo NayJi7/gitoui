@@ -370,17 +370,32 @@ impl CommitDetail<'_> {
         } else {
             commit_actions(self.is_head_commit)
         };
+        let rebasing = !self.ctx.repo_path.as_os_str().is_empty()
+            && crate::git::rebase::rebase_in_progress(&self.ctx.repo_path);
 
         let mut lines = Vec::new();
         for (i, (label, key)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
-            let style = if is_hovered {
+            // While a rebase is in progress, the "Rebase current on" slot
+            // re-labels to "Resume rebase" (yellow) and dispatches into the
+            // resume view. Same `e` key — the action just means something
+            // different in this state.
+            let (effective_label, label_color) =
+                if rebasing && *label == "Rebase current on" {
+                    ("Resume rebase", Some(self.ctx.color_theme.status_warn_fg))
+                } else {
+                    (*label, None)
+                };
+            let mut style = if is_hovered {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
                 Style::default()
             };
+            if let Some(c) = label_color {
+                style = style.fg(c).add_modifier(Modifier::BOLD);
+            }
             let key_style = style.add_modifier(Modifier::BOLD);
-            let mut spans = vec![Span::styled(label.to_string(), style)];
+            let mut spans = vec![Span::styled(effective_label.to_string(), style)];
             if !key.is_empty() {
                 spans.push(Span::styled(format!(" ({})", key), key_style));
             }

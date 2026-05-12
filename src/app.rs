@@ -90,6 +90,7 @@ impl Clone for AppContext {
             graph_color_set: self.graph_color_set.clone(),
             graph_config: self.graph_config.clone(),
             current_branch_remote_state: self.current_branch_remote_state,
+            repo_path: self.repo_path.clone(),
         }
     }
 }
@@ -134,6 +135,11 @@ pub struct AppContext {
     /// once per `lib.rs::run` iteration; auto-refresh recreates the context
     /// so this stays current as remote refs change.
     pub current_branch_remote_state: Option<(usize, usize)>,
+    /// Repository working-directory path. Filled once after the repo is
+    /// loaded; widgets reach for this to check `.git/rebase-merge` (and
+    /// any other repo-state probes) without having to thread the path
+    /// through every render call.
+    pub repo_path: std::path::PathBuf,
 }
 
 impl Default for AppContext {
@@ -158,6 +164,7 @@ impl Default for AppContext {
             graph_color_set: GraphColorSet::new(&crate::config::GraphColorConfig::default()),
             graph_config: crate::config::GraphConfig::default(),
             current_branch_remote_state: None,
+            repo_path: std::path::PathBuf::new(),
         }
     }
 }
@@ -1160,6 +1167,17 @@ impl App<'_> {
                     // commit list twice on every save.
                     self.close_conflict_editor();
                 }
+                AppEvent::OpenInteractiveRebase { base_hash } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_interactive_rebase(base_hash);
+                }
+                AppEvent::CloseInteractiveRebase => {
+                    // Same pattern as CloseConflictEditor: close + enqueue
+                    // a full Refresh so the commit list reflects the new
+                    // history (or surfaces a `rebase in progress` state).
+                    self.close_interactive_rebase();
+                }
                 AppEvent::OpenDetailByHash { hash } => {
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
@@ -2075,6 +2093,13 @@ impl App<'_> {
                         .view
                         .conflict_footer_hint()
                         .unwrap_or_else(|| "⌘ o/t/b/B:pick▕▏n/p:nav▕▏↵:save▕▏esc:cancel".into()),
+                    View::InteractiveRebase(_) => self
+                        .view
+                        .interactive_rebase_footer_hint()
+                        .unwrap_or_else(|| {
+                            "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏esc:cancel"
+                                .into()
+                        }),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -2726,6 +2751,88 @@ impl App<'_> {
                 self.ec.send(AppEvent::Refresh(
                     crate::view::RefreshViewContext::List {
                         list_context,
+                        pending_notification: None,
+                    },
+                ));
+            }
+        }
+    }
+
+    fn open_interactive_rebase(&mut self, base_hash: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        // Resume mode: caller passes an empty base when we already know a
+        // rebase is in progress (open_dialog short-circuits to this path).
+        // We skip the `base..HEAD` load entirely; the view reads
+        // .git/rebase-merge itself to render its Continue/Skip/Abort UI.
+        let resume_mode = base_hash.is_empty()
+            && crate::git::rebase::rebase_in_progress(&repo_path);
+        let items = if resume_mode {
+            Vec::new()
+        } else {
+            match crate::git::rebase::load_rebase_items(&repo_path, &base_hash) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.ec
+                        .send(AppEvent::NotifyError(format!("Cannot list commits: {}", e)));
+                    return;
+                }
+            }
+        };
+        if !resume_mode && items.is_empty() {
+            self.ec.send(AppEvent::NotifyWarn(
+                "Nothing to rebase — branch is already at the picked commit".into(),
+            ));
+            return;
+        }
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            View::Dialog(ref mut view) => {
+                // Came in through the Rebase dialog — `take_before_view`
+                // gives us the underlying View, but for now we just lose
+                // its list state. Acceptable.
+                let _ = view;
+                None
+            }
+            _ => None,
+        };
+        self.view = View::of_interactive_rebase(
+            commit_list_state,
+            repo_path,
+            base_hash,
+            items,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_interactive_rebase(&mut self) {
+        if let View::InteractiveRebase(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                let list_context = crate::view::ListRefreshViewContext::from(&state);
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+                // FULL refresh so the new history shows up in the commit
+                // list and any leftover rebase-in-progress state surfaces
+                // via the existing in-progress detection.
+                self.ec.send(AppEvent::Refresh(
+                    crate::view::RefreshViewContext::List {
+                        list_context,
+                        pending_notification: None,
+                    },
+                ));
+            } else {
+                // No list state to restore — just trigger a refresh from a
+                // blank list context.
+                self.ec.send(AppEvent::Refresh(
+                    crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
                         pending_notification: None,
                     },
                 ));
@@ -3673,6 +3780,18 @@ impl App<'_> {
 
     // Phase 2 - Dialog management
     fn open_dialog(&mut self, kind: DialogKind) {
+        // Short-circuit the Rebase dialog when a previous rebase is still
+        // paused — the user can't sensibly plan a NEW rebase until they
+        // resolve / abort the running one. Route straight to the editor
+        // so its resume panel takes over.
+        if matches!(&kind, DialogKind::Rebase { .. })
+            && crate::git::rebase::rebase_in_progress(self.repository.path())
+        {
+            self.ec.send(AppEvent::OpenInteractiveRebase {
+                base_hash: String::new(),
+            });
+            return;
+        }
         let before = std::mem::take(&mut self.view);
         self.view = View::Dialog(Box::new(crate::view::dialog::DialogView::new(
             before,
@@ -3856,7 +3975,11 @@ impl App<'_> {
         } else {
             None
         };
-        if matches!(&action, GitAction::Rebase { .. }) {
+        // Skip the "Rebasing…" spinner when the user picked Interactive —
+        // the action handler will hand off to InteractiveRebaseView via an
+        // early-return, and the spinner would otherwise replace the footer
+        // shortcuts with the spinner text for the entire editor session.
+        if matches!(&action, GitAction::Rebase { interactive: false, .. }) {
             self.start_spinner("Rebasing\u{2026}");
         }
         if matches!(&action, GitAction::Merge { .. }) {
@@ -3917,10 +4040,23 @@ impl App<'_> {
             GitAction::Rebase {
                 ignore_date,
                 interactive,
-            } => (
-                actions::rebase_onto(repo_path, &target, ignore_date, interactive),
-                None,
-            ),
+            } => {
+                // Interactive rebase hijacks the action: instead of running
+                // `git rebase -i` (which would open the user's $EDITOR),
+                // hand off to the dedicated InteractiveRebaseView so the
+                // todo is edited inside gitoui. The non-interactive path
+                // still runs the plain `git rebase` underneath.
+                if interactive {
+                    self.ec
+                        .send(AppEvent::OpenInteractiveRebase { base_hash: target.clone() });
+                    self.close_dialog();
+                    return;
+                }
+                (
+                    actions::rebase_onto(repo_path, &target, ignore_date, interactive),
+                    None,
+                )
+            }
             GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),
             GitAction::DeleteBranch { force } => {
                 (actions::delete_branch(repo_path, &target, force), None)

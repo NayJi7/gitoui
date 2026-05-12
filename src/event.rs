@@ -131,6 +131,12 @@ pub enum AppEvent {
         file_path: String,
     },
     CloseConflictEditor,
+    OpenInteractiveRebase {
+        /// Commit the user is rebasing ONTO — `base..HEAD` commits get
+        /// loaded into the editor.
+        base_hash: String,
+    },
+    CloseInteractiveRebase,
     OpenDetailByHash {
         hash: String,
     },

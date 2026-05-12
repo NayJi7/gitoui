@@ -437,6 +437,22 @@ pub enum ConflictViewMode {
     Inline,
 }
 
+/// Layout for the interactive-rebase editor opened from the Rebase dialog
+/// when "Interactive (-i)" is checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum RebaseViewMode {
+    /// Single dense list — closest to the CLI experience.
+    Compact,
+    /// GitKraken-style: each row followed by an italic explanation of what
+    /// the picked action will do, with inline reword editor.
+    #[default]
+    Inline,
+    /// Compact list on top, live "Result preview" pane below — mirrors
+    /// the conflict editor layout.
+    Split,
+}
+
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct UiCommonConfig {
@@ -448,6 +464,8 @@ pub struct UiCommonConfig {
     pub diff_mode: DiffMode,
     #[default(ConflictViewMode::TwoPane)]
     pub conflict_view: ConflictViewMode,
+    #[default(RebaseViewMode::Inline)]
+    pub rebase_view: RebaseViewMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -681,6 +699,12 @@ impl UiCommonConfig {
     pub fn set_conflict_view(&mut self, mode: ConflictViewMode) {
         self.conflict_view = mode;
     }
+    pub fn rebase_view(&self) -> RebaseViewMode {
+        self.rebase_view
+    }
+    pub fn set_rebase_view(&mut self, mode: RebaseViewMode) {
+        self.rebase_view = mode;
+    }
 }
 
 pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
@@ -767,6 +791,16 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
             ConflictViewMode::ThreePane => "three-pane",
             ConflictViewMode::TwoPane => "two-pane",
             ConflictViewMode::Inline => "inline",
+        },
+    );
+
+    set_nested_string(
+        &mut doc,
+        &["ui", "common", "rebase_view"],
+        match ui.common.rebase_view {
+            RebaseViewMode::Compact => "compact",
+            RebaseViewMode::Inline => "inline",
+            RebaseViewMode::Split => "split",
         },
     );
 

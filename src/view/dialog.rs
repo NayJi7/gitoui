@@ -60,7 +60,9 @@ impl<'a> DialogView<'a> {
             DialogKind::CreateBranch { .. } => (vec![false], 0),
             DialogKind::CherryPick { .. } => (vec![false, false], 0),
             DialogKind::Merge { .. } => (vec![true, false, false], 0),
-            DialogKind::Rebase { .. } => (vec![false, true], 0),
+            // Both checkboxes default to false — matches git's native
+            // behaviour (no -i, preserves author dates).
+            DialogKind::Rebase { .. } => (vec![false, false], 0),
             DialogKind::Reset { .. } => (vec![], 1),
             DialogKind::PushBranch { .. } => (vec![false], 0),
             DialogKind::Checkout { .. } => (vec![false], 0),
@@ -1539,7 +1541,7 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::Rebase { target } => {
                 let interactive = self.checkboxes.get(0).copied().unwrap_or(false);
-                let ignore_date = self.checkboxes.get(1).copied().unwrap_or(true);
+                let ignore_date = self.checkboxes.get(1).copied().unwrap_or(false);
                 (
                     target.clone(),
                     GitAction::Rebase {

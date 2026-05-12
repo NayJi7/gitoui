@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::{
     app::AppContext,
-    config::{save, ConflictViewMode, CoreConfig, DiffMode, UiConfig},
+    config::{save, ConflictViewMode, CoreConfig, DiffMode, RebaseViewMode, UiConfig},
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
@@ -26,19 +26,20 @@ use crate::{
 //   2  Graph Width
 //   3  Diff Mode
 //   4  Resolve Mode      ← merge-conflict editor layout
-//   5  Initial Selection
-//   6  Mouse
-//   7  Date Format
-//   8  Image Protocol
-//   9  Git Name          ← TEXT_EDIT_START_INDEX
-//  10  Git Email
-//  11  Default Branch
-//  12  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  13  Github Avatars    ← GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 14;
-const TEXT_EDIT_START_INDEX: usize = 9;
-const GITHUB_AUTH_INDEX: usize = 12;
-const GITHUB_AVATARS_INDEX: usize = 13;
+//   5  Rebase Mode       ← interactive-rebase editor layout
+//   6  Initial Selection
+//   7  Mouse
+//   8  Date Format
+//   9  Image Protocol
+//  10  Git Name          ← TEXT_EDIT_START_INDEX
+//  11  Git Email
+//  12  Default Branch
+//  13  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  14  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 15;
+const TEXT_EDIT_START_INDEX: usize = 10;
+const GITHUB_AUTH_INDEX: usize = 13;
+const GITHUB_AVATARS_INDEX: usize = 14;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -90,6 +91,7 @@ impl<'a> ConfigView<'a> {
             graph_width_display(self.core_config.graph_width()),
             diff_mode_display(self.ui_config.common.diff_mode),
             conflict_view_display(self.ui_config.common.conflict_view),
+            rebase_view_display(self.ui_config.common.rebase_view),
             initial_selection_display(self.core_config.initial_selection()),
             mouse_display(self.ui_config.common.mouse_enabled),
             self.core_config
@@ -122,6 +124,7 @@ impl<'a> ConfigView<'a> {
             "Graph Width",
             "Diff Mode",
             "Resolve Mode",
+            "Rebase Mode",
             "Initial Select",
             "Mouse",
             "Date Format",
@@ -317,9 +320,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            9 => self.core_config.user_name().unwrap_or("").to_string(),
-            10 => self.core_config.user_email().unwrap_or("").to_string(),
-            11 => self.core_config.default_branch().unwrap_or("").to_string(),
+            10 => self.core_config.user_name().unwrap_or("").to_string(),
+            11 => self.core_config.user_email().unwrap_or("").to_string(),
+            12 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -454,9 +457,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            9 => self.core_config.set_user_name(value),
-            10 => self.core_config.set_user_email(value),
-            11 => self.core_config.set_default_branch(value),
+            10 => self.core_config.set_user_name(value),
+            11 => self.core_config.set_user_email(value),
+            12 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -520,22 +523,30 @@ impl<'a> ConfigView<'a> {
                 self.ui_config.common.set_conflict_view(prev);
             }
             5 => {
+                let prev = match self.ui_config.common.rebase_view {
+                    RebaseViewMode::Compact => RebaseViewMode::Split,
+                    RebaseViewMode::Inline => RebaseViewMode::Compact,
+                    RebaseViewMode::Split => RebaseViewMode::Inline,
+                };
+                self.ui_config.common.set_rebase_view(prev);
+            }
+            6 => {
                 let prev = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            6 => {
+            7 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            7 => {
+            8 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            8 => {
+            9 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -611,22 +622,30 @@ impl<'a> ConfigView<'a> {
                 self.ui_config.common.set_conflict_view(next);
             }
             5 => {
+                let next = match self.ui_config.common.rebase_view {
+                    RebaseViewMode::Compact => RebaseViewMode::Inline,
+                    RebaseViewMode::Inline => RebaseViewMode::Split,
+                    RebaseViewMode::Split => RebaseViewMode::Compact,
+                };
+                self.ui_config.common.set_rebase_view(next);
+            }
+            6 => {
                 let next = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
                 };
                 self.core_config.set_initial_selection(next);
             }
-            6 => {
+            7 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            7 => {
+            8 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            8 => {
+            9 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -747,6 +766,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Resolve Mode",
                 conflict_view_display(self.ui_config.common.conflict_view),
+                false,
+            ),
+            (
+                "Rebase Mode",
+                rebase_view_display(self.ui_config.common.rebase_view),
                 false,
             ),
             (
@@ -897,6 +921,7 @@ impl<'a> ConfigView<'a> {
             "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
             diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
+            rebase_view_description(self.ui_config.common.rebase_view),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
@@ -1444,6 +1469,109 @@ A Result preview is always shown so you see the file as it will be saved.\n\n";
         }
     };
     format!("{}{}", intro, preview)
+}
+
+fn rebase_view_display(mode: RebaseViewMode) -> String {
+    match mode {
+        RebaseViewMode::Compact => "Compact".to_string(),
+        RebaseViewMode::Inline => "Inline".to_string(),
+        RebaseViewMode::Split => "Split".to_string(),
+    }
+}
+
+/// Adaptive ASCII preview for the interactive-rebase editor.
+/// Compact = bare list, Inline = each row + italic description
+/// (GitKraken-style), Split = list on top + Result preview block.
+///
+/// Each preview is framed by a box rendered at runtime with `frame_lines`
+/// so every line is padded to the same width — no fragile alignment
+/// of static strings across the three layouts.
+fn rebase_view_description(mode: RebaseViewMode) -> String {
+    let intro = "Layout used by the interactive-rebase editor (opened \
+from the Rebase dialog with `Interactive (-i)` checked).\n\n\
+  • Pick / Reword / Edit / Squash / Fixup / Drop per commit\n\
+  • Space grabs a row, ↑↓ reorder while grabbed\n\
+  • Enter applies, Esc cancels\n\n";
+    let preview = match mode {
+        RebaseViewMode::Compact => frame_lines(
+            "Compact",
+            &[
+                "▶ [Pick]    abc1234  feat: add login",
+                "  [Squash]  def5678  wip",
+                "  [Reword]  9abcdef  fix typo",
+                "  [Drop]    2222222  oops println",
+                "  …",
+            ],
+        ),
+        RebaseViewMode::Inline => frame_lines(
+            "Inline",
+            &[
+                "▶ [Pick]    abc1234  feat: add login",
+                "     └─ keeps this commit as-is",
+                "  [Squash]  def5678  wip",
+                "     └─ ↑ merges into previous commit",
+                "  [Reword]  9abcdef  fix typo",
+                "     ✎ fix: typo in form _",
+            ],
+        ),
+        RebaseViewMode::Split => {
+            let todo = frame_lines(
+                "Todo",
+                &[
+                    "▶ [Pick]    abc1234  feat: add login",
+                    "  [Squash]  def5678  wip",
+                    "  [Drop]    2222222  oops println",
+                ],
+            );
+            let result = frame_lines(
+                "Result preview",
+                &[
+                    "● feat: add login  (+ wip squashed)",
+                    "✗ oops println  (dropped)",
+                ],
+            );
+            format!("{}\n{}", todo, result)
+        }
+    };
+    format!("{}{}", intro, preview)
+}
+
+/// Build a box-drawn frame around the given lines. Every line is padded
+/// to the same width (longest line + 2) so the right border lines up no
+/// matter what content is passed in.
+fn frame_lines(title: &str, lines: &[&str]) -> String {
+    let content_w = lines
+        .iter()
+        .map(|l| console::measure_text_width(l))
+        .max()
+        .unwrap_or(0)
+        .max(title.len() + 4);
+    let inner_w = content_w + 2; // 1 col padding on each side
+    let mut out = String::new();
+    // Top: ┌─ Title ─...─┐
+    out.push('┌');
+    out.push_str("─ ");
+    out.push_str(title);
+    out.push(' ');
+    let used = 2 + title.len() + 1; // "─ " + title + " "
+    out.push_str(&"─".repeat(inner_w.saturating_sub(used)));
+    out.push('┐');
+    out.push('\n');
+    // Body lines, padded to inner_w
+    for line in lines {
+        out.push('│');
+        out.push(' ');
+        out.push_str(line);
+        let w = console::measure_text_width(line);
+        out.push_str(&" ".repeat(inner_w.saturating_sub(w + 1)));
+        out.push('│');
+        out.push('\n');
+    }
+    // Bottom
+    out.push('└');
+    out.push_str(&"─".repeat(inner_w));
+    out.push('┘');
+    out
 }
 
 fn mouse_display(enabled: bool) -> String {

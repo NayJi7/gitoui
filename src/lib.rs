@@ -354,6 +354,7 @@ pub fn run() -> Result<()> {
             graph_config: graph_config.clone(),
             // Filled after the repository is loaded — see below.
             current_branch_remote_state: None,
+            repo_path: std::path::PathBuf::new(),
         });
 
         let repository = match git::Repository::load(Path::new("."), order, max_count) {
@@ -437,6 +438,7 @@ pub fn run() -> Result<()> {
         };
         if let Some(ctx_mut) = Rc::get_mut(&mut ctx) {
             ctx_mut.current_branch_remote_state = remote_state;
+            ctx_mut.repo_path = repository.path().to_path_buf();
         }
 
         let graph = graph::calc_graph(&repository);

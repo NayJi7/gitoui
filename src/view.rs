@@ -6,6 +6,7 @@ mod compare;
 mod config;
 pub mod conflict;
 mod detail;
+pub mod rebase;
 mod graph_preview;
 pub mod dialog;
 mod diff;
