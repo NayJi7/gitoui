@@ -705,12 +705,14 @@ impl<'a> DetailView<'a> {
             count += 1; // Refs
         }
         count += 1; // divider
-        count += 1; // commit message
+        count += 1; // commit message (subject)
+        // Body lines come straight after the subject — no separator row
+        // since commit_message_lines() stopped pushing one. Counting an
+        // empty line here used to push hover detection 1 row off.
         if !self.commit.body.is_empty() {
-            count += 1; // empty line
             count += self.commit.body.lines().count();
         }
-        count += 1; // divider
+        count += 1; // divider before changes
         count
     }
 }
