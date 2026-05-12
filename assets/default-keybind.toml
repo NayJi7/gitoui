@@ -60,6 +60,7 @@ drop = ["d"]
 merge = ["m"]
 rebase = ["e"]
 reset = ["shift-s"]
+squash = ["ctrl-s"]
 
 # Phase 2 - Branch detail actions
 rename_branch = ["ctrl-r"]

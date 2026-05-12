@@ -236,6 +236,11 @@ impl<'a> DetailView<'a> {
                     target: self.commit.commit_hash.as_str().into(),
                 }));
             }
+            UserEvent::Squash => {
+                self.tx.send(AppEvent::OpenDialog(DialogKind::Squash {
+                    target: self.commit.commit_hash.as_str().into(),
+                }));
+            }
             UserEvent::ApplyStash => {
                 self.tx.send(AppEvent::ExecuteGitAction {
                     target: self.commit.commit_hash.as_str().into(),
@@ -611,7 +616,10 @@ impl<'a> DetailView<'a> {
                 9 => self
                     .tx
                     .send(AppEvent::OpenDialog(DialogKind::Reset { target: hash })),
-                10 => {
+                10 => self
+                    .tx
+                    .send(AppEvent::OpenDialog(DialogKind::Squash { target: hash })),
+                11 => {
                     if self.is_head_commit() {
                         self.tx.send(AppEvent::OpenDialog(DialogKind::AmendMessage {
                             current_message: self.commit.commit_message.clone(),

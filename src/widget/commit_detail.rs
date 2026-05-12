@@ -149,15 +149,18 @@ pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
     ("Merge into current", "m"),
     ("Rebase current on", "e"),
     ("Reset current to", "S"),
+    ("Squash with parent", "Ctrl+S"),
     ("Amend", "Ctrl+M"),
 ];
 
 /// Actions slice to use: HEAD commit gets Amend, others don't.
+/// Squash is available for every non-initial commit (parent existence
+/// checked at apply-time), so it's part of the shared prefix.
 pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, &'static str)] {
     if is_head_commit {
         COMMIT_ACTIONS
     } else {
-        &COMMIT_ACTIONS[..10]
+        &COMMIT_ACTIONS[..11]
     }
 }
 

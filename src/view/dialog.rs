@@ -64,6 +64,7 @@ impl<'a> DialogView<'a> {
             // behaviour (no -i, preserves author dates).
             DialogKind::Rebase { .. } => (vec![false, false], 0),
             DialogKind::Reset { .. } => (vec![], 1),
+            DialogKind::Squash { .. } => (vec![], 0),
             DialogKind::PushBranch { .. } => (vec![false], 0),
             DialogKind::Checkout { .. } => (vec![false], 0),
             DialogKind::RenameBranch { .. } => (vec![], 0),
@@ -864,6 +865,26 @@ impl<'a> DialogView<'a> {
                     warn_fg,
                 ));
             }
+            DialogKind::Squash { target } => {
+                // Centered layout — the squash dialog has no fields/options,
+                // so visually anchoring the text in the middle reads cleaner
+                // than left-aligned with the standard 2-space gutter.
+                lines.push(
+                    Line::from(vec![
+                        Span::styled("Commit: ", Style::default().fg(dim_fg)),
+                        Span::styled(target.clone(), Style::default().fg(yellow)),
+                    ])
+                    .alignment(ratatui::layout::Alignment::Center),
+                );
+                lines.push(Line::from(""));
+                lines.push(
+                    Line::from(Span::styled(
+                        "This will fuse the commit with its parent and rewrite history.",
+                        Style::default().fg(warn_fg),
+                    ))
+                    .alignment(ratatui::layout::Alignment::Center),
+                );
+            }
             DialogKind::Merge { target, is_branch } => {
                 let kind_str = if *is_branch { "branch" } else { "commit" };
                 lines.push(info_line(
@@ -1195,6 +1216,7 @@ impl<'a> DialogView<'a> {
             DialogKind::CherryPick { .. } => " Cherry Pick ",
             DialogKind::Revert { .. } => " Revert ",
             DialogKind::Drop { .. } => " Drop Commit ",
+            DialogKind::Squash { .. } => " Squash with Parent ",
             DialogKind::Merge { .. } => " Merge ",
             DialogKind::Rebase { .. } => " Rebase ",
             DialogKind::Reset { .. } => " Reset ",
@@ -1526,6 +1548,7 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::Revert { target } => (target.clone(), GitAction::Revert),
             DialogKind::Drop { target } => (target.clone(), GitAction::Drop),
+            DialogKind::Squash { target } => (target.clone(), GitAction::SquashWithParent),
             DialogKind::Merge { target, .. } => {
                 let no_ff = self.checkboxes.get(0).copied().unwrap_or(true);
                 let squash = self.checkboxes.get(1).copied().unwrap_or(false);

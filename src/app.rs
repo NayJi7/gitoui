@@ -2758,6 +2758,56 @@ impl App<'_> {
         }
     }
 
+    /// Non-interactive squash: combine the target commit with its parent
+    /// via the existing rebase machinery. Single notify on completion —
+    /// no dialog, no editor. Refuses gracefully for initial commits,
+    /// merge commits, and when a previous rebase is unfinished (in
+    /// which case we surface the same "press A to abort" guidance the
+    /// interactive view shows).
+    fn squash_with_parent(&mut self, target: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        let short = target.chars().take(7).collect::<String>();
+        match crate::git::rebase::squash_with_parent(&repo_path, &target) {
+            Ok(crate::git::rebase::RebaseOutcome::Clean) => {
+                self.ec.send(AppEvent::NotifySuccess(format!(
+                    "Squashed {} into its parent",
+                    short
+                )));
+                // Repository state changed — force a full list refresh so
+                // the collapsed history is rendered. We re-anchor at the
+                // top: the original SHA no longer exists, no point trying
+                // to preserve selection.
+                self.ec.send(AppEvent::Refresh(
+                    crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    },
+                ));
+            }
+            Ok(crate::git::rebase::RebaseOutcome::Paused(msg)) => {
+                let head = msg.lines().next().unwrap_or("rebase stopped");
+                self.ec.send(AppEvent::NotifyWarn(format!(
+                    "Squash hit a conflict — {}. Open the rebase view (e) to recover.",
+                    head
+                )));
+            }
+            Ok(crate::git::rebase::RebaseOutcome::AlreadyInProgress) => {
+                self.ec.send(AppEvent::NotifyError(
+                    "A previous rebase is still in progress — abort it first.".into(),
+                ));
+            }
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Squash failed: {}", e)));
+            }
+        }
+    }
+
     fn open_interactive_rebase(&mut self, base_hash: String) {
         let repo_path = self.repository.path().to_path_buf();
         // Resume mode: caller passes an empty base when we already know a
@@ -4056,6 +4106,14 @@ impl App<'_> {
                     actions::rebase_onto(repo_path, &target, ignore_date, interactive),
                     None,
                 )
+            }
+            GitAction::SquashWithParent => {
+                // Like the interactive rebase hijack above — squash uses
+                // its own machinery and reports via notifications, not
+                // through the standard GitResult path.
+                self.close_dialog();
+                self.squash_with_parent(target);
+                return;
             }
             GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),
             GitAction::DeleteBranch { force } => {

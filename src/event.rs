@@ -160,6 +160,9 @@ pub enum DialogKind {
     Merge { target: String, is_branch: bool },
     Rebase { target: String },
     Reset { target: String },
+    /// Confirm squashing a commit into its parent. No options — just a
+    /// confirmation prompt before we run the rebase under the hood.
+    Squash { target: String },
     // Branch actions
     RenameBranch { branch: String },
     DeleteBranch { branch: String, is_remote: bool },
@@ -232,6 +235,8 @@ pub enum GitAction {
         ignore_date: bool,
         interactive: bool,
     },
+    /// Squash with parent — non-interactive, no options.
+    SquashWithParent,
     Reset {
         mode: String,
     },
@@ -519,6 +524,11 @@ pub enum UserEvent {
     Merge,
     Rebase,
     Reset,
+    /// Squash the selected commit with its parent — runs an interactive
+    /// rebase under the hood with a `[pick parent, fixup target]` plan.
+    /// Faster than opening the rebase editor for the common "combine the
+    /// last few wip/fix commits" case.
+    Squash,
     // Phase 2 - Uncommitted actions
     Stage,
     StageAll,
@@ -645,6 +655,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "merge" => Ok(UserEvent::Merge),
                         "rebase" => Ok(UserEvent::Rebase),
                         "reset" => Ok(UserEvent::Reset),
+                        "squash" => Ok(UserEvent::Squash),
                         "stage" => Ok(UserEvent::Stage),
                         "stage_all" => Ok(UserEvent::StageAll),
                         "unstage" => Ok(UserEvent::Unstage),

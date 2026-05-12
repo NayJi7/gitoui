@@ -226,6 +226,88 @@ pub fn rebase_in_progress(repo: &Path) -> bool {
     git_dir.join("rebase-merge").is_dir() || git_dir.join("rebase-apply").is_dir()
 }
 
+/// Resolve a revision expression like `HEAD^^` to a full SHA. Returns
+/// `Err` when git can't resolve the ref (e.g. the commit has no
+/// grandparent because its parent is the repo root).
+fn rev_parse(repo: &Path, rev: &str) -> Result<String, String> {
+    let out = Command::new("git")
+        .current_dir(repo)
+        .args(["rev-parse", "--verify", "--end-of-options", rev])
+        .output()
+        .map_err(|e| format!("git rev-parse failed: {}", e))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Squash `target` into its parent — non-interactive shortcut that runs
+/// the same rebase machinery as the interactive editor, but with a
+/// pre-built `[pick parent, fixup target, pick …rest]` plan. Faster
+/// than opening the editor when the user just wants to combine adjacent
+/// commits (the 90% case).
+///
+/// Refuses gracefully if:
+/// - target is the initial commit (no parent),
+/// - target's parent IS the initial commit (rebase --root needed; not
+///   wired up here yet),
+/// - target is a merge commit (multiple parents — ambiguous semantics),
+/// - another rebase is already in progress.
+pub fn squash_with_parent(repo: &Path, target_hash: &str) -> Result<RebaseOutcome, String> {
+    if rebase_in_progress(repo) {
+        return Ok(RebaseOutcome::AlreadyInProgress);
+    }
+    // Reject merge commits — a fixup on a merge produces surprising
+    // history; better to make the user use the interactive editor.
+    let parents = Command::new("git")
+        .current_dir(repo)
+        .args(["rev-list", "--parents", "-n", "1", target_hash])
+        .output()
+        .map_err(|e| format!("git rev-list failed: {}", e))?;
+    if !parents.status.success() {
+        return Err(String::from_utf8_lossy(&parents.stderr).trim().to_string());
+    }
+    let parent_count = String::from_utf8_lossy(&parents.stdout)
+        .trim()
+        .split_whitespace()
+        .count()
+        .saturating_sub(1);
+    if parent_count == 0 {
+        return Err("Cannot squash the initial commit — it has no parent.".into());
+    }
+    if parent_count > 1 {
+        return Err("Cannot squash a merge commit — use the interactive rebase instead.".into());
+    }
+
+    let grandparent = match rev_parse(repo, &format!("{}^^", target_hash)) {
+        Ok(h) => h,
+        Err(_) => {
+            return Err(
+                "Cannot squash into the root commit yet — \
+                 use the interactive rebase editor for this case."
+                    .into(),
+            );
+        }
+    };
+    let mut items = load_rebase_items(repo, &grandparent)?;
+    let mut found = false;
+    for it in &mut items {
+        let hash = &it.commit_hash;
+        if hash.starts_with(target_hash) || target_hash.starts_with(hash.as_str()) {
+            it.action = RebaseAction::Fixup;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return Err(format!(
+            "Target {} not found in rebase range — refusing to squash.",
+            target_hash.chars().take(7).collect::<String>()
+        ));
+    }
+    apply_rebase(repo, &grandparent, &items)
+}
+
 /// `git rebase --abort` — caller verifies state first.
 pub fn abort_rebase(repo: &Path) -> Result<(), String> {
     let out = Command::new("git")
