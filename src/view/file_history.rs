@@ -263,7 +263,8 @@ impl<'a> FileHistoryView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        let [sep_area, title_area, _spacer, content_area] = Layout::vertical([
+        // Unified header layout matching the rest of the full-page views.
+        let [title_area, sep_area, _spacer, content_area] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -274,31 +275,34 @@ impl<'a> FileHistoryView<'a> {
         self.view_height = content_area.height as usize;
         self.content_area = Some(content_area);
 
-        // ── Separator ──────────────────────────────────────────────────
-        let separator = Line::from(
-            "─".repeat(area.width as usize)
-                .fg(self.ctx.color_theme.divider_fg),
-        );
-        f.render_widget(Paragraph::new(separator), sep_area);
-
-        // ── Title ──────────────────────────────────────────────────────
+        let theme = &self.ctx.color_theme;
+        let commits_word = if self.entries.len() == 1 { "commit" } else { "commits" };
         let title = Line::from(vec![
+            Span::raw("  "),
             Span::styled(
-                format!("─── File History: {} ", self.file_path),
+                "≡ ",
                 Style::default()
-                    .fg(self.ctx.color_theme.fg)
+                    .fg(theme.list_date_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!(
-                    "({} {})",
-                    self.entries.len(),
-                    if self.entries.len() == 1 { "commit" } else { "commits" }
-                ),
-                Style::default().fg(self.ctx.color_theme.list_hash_fg),
+                "File history ",
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(self.file_path.clone(), Style::default().fg(theme.list_hash_fg)),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} {}", self.entries.len(), commits_word),
+                Style::default().fg(theme.detail_label_fg),
             ),
         ]);
         f.render_widget(Paragraph::new(title), title_area);
+
+        let separator = Line::from(
+            "─".repeat(area.width as usize)
+                .fg(theme.divider_fg),
+        );
+        f.render_widget(Paragraph::new(separator), sep_area);
 
         self.scroll_to_selected();
 

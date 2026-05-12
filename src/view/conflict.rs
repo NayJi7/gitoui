@@ -460,6 +460,12 @@ impl<'a> ConflictView<'a> {
         let title = Line::from(vec![
             Span::raw("  "),
             Span::styled(
+                "⚠ ",
+                Style::default()
+                    .fg(theme.status_error_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
                 "Resolve: ",
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),

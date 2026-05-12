@@ -1024,9 +1024,16 @@ impl<'a> InteractiveRebaseView<'a> {
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let theme = &self.ctx.color_theme;
+        let icon = Span::styled(
+            "↻ ",
+            Style::default()
+                .fg(theme.status_warn_fg)
+                .add_modifier(Modifier::BOLD),
+        );
         let title = if self.resume.is_some() {
             Line::from(vec![
                 Span::raw("  "),
+                icon,
                 Span::styled(
                     "Interactive rebase ",
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
@@ -1040,6 +1047,7 @@ impl<'a> InteractiveRebaseView<'a> {
             let short_base = &self.base_hash[..self.base_hash.len().min(7)];
             Line::from(vec![
                 Span::raw("  "),
+                icon,
                 Span::styled(
                     "Interactive rebase ",
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),

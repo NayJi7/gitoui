@@ -363,7 +363,9 @@ impl<'a> BlameView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        let [sep, title, _spacer, content] = Layout::vertical([
+        // Unified header layout: title line (2-space indent + bold name +
+        // semantic-coloured badges), divider line on the next row.
+        let [title, sep, _spacer, content] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -371,28 +373,33 @@ impl<'a> BlameView<'a> {
         ])
         .areas(area);
 
-        // Separator
-        let sep_line = Line::from(
-            "─"
-                .repeat(area.width as usize)
-                .fg(self.ctx.color_theme.divider_fg),
-        );
-        f.render_widget(Paragraph::new(sep_line), sep);
-
-        // Title
+        let theme = &self.ctx.color_theme;
         let title_line = Line::from(vec![
+            Span::raw("  "),
             Span::styled(
-                format!("─── Blame: {} ", self.file_path),
+                "◎ ",
                 Style::default()
-                    .fg(self.ctx.color_theme.fg)
+                    .fg(theme.list_hash_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("({} lines)", self.lines.len()),
-                Style::default().fg(self.ctx.color_theme.list_hash_fg),
+                "Blame ",
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(self.file_path.clone(), Style::default().fg(theme.list_hash_fg)),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} lines", self.lines.len()),
+                Style::default().fg(theme.detail_label_fg),
             ),
         ]);
         f.render_widget(Paragraph::new(title_line), title);
+
+        let sep_line = Line::from(
+            "─".repeat(area.width as usize)
+                .fg(theme.divider_fg),
+        );
+        f.render_widget(Paragraph::new(sep_line), sep);
 
         self.view_height = content.height as usize;
         self.content_area = Some(content);

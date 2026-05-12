@@ -347,9 +347,9 @@ impl<'a> CompareView<'a> {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        // Header (full width, 1 row) + body (rest).
+        // Unified header (title + divider) above the body.
         let [header_area, body_area] = Layout::vertical([
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Min(0),
         ])
         .areas(area);
@@ -384,8 +384,15 @@ impl<'a> CompareView<'a> {
         let n_files = self.file_summaries.len();
 
         let mut spans: Vec<Span<'static>> = vec![
+            Span::raw("  "),
             Span::styled(
-                "── Compare ".to_string(),
+                "⇄ ",
+                Style::default()
+                    .fg(theme.list_ref_branch_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Compare ",
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -394,42 +401,47 @@ impl<'a> CompareView<'a> {
                     .fg(theme.detail_file_change_delete_fg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " → ".to_string(),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(" → ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(
                 short(&self.newer_hash),
                 Style::default()
                     .fg(theme.detail_file_change_add_fg)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::raw("  "),
             Span::styled(
-                format!(" ─ {} file{} ", n_files, if n_files == 1 { "" } else { "s" }),
-                Style::default().fg(theme.fg),
+                format!("{} file{}", n_files, if n_files == 1 { "" } else { "s" }),
+                Style::default().fg(theme.detail_label_fg),
             ),
         ];
+        if total_add > 0 || total_del > 0 {
+            spans.push(Span::raw("  "));
+        }
         if total_add > 0 {
             spans.push(Span::styled(
-                format!("+{total_add} "),
+                format!("+{total_add}"),
                 Style::default()
                     .fg(theme.detail_file_change_add_fg)
                     .add_modifier(Modifier::BOLD),
             ));
         }
+        if total_add > 0 && total_del > 0 {
+            spans.push(Span::raw(" "));
+        }
         if total_del > 0 {
             spans.push(Span::styled(
-                format!("-{total_del} "),
+                format!("-{total_del}"),
                 Style::default()
                     .fg(theme.detail_file_change_delete_fg)
                     .add_modifier(Modifier::BOLD),
             ));
         }
-        spans.push(Span::styled(
-            "──".to_string(),
-            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        let title_line = Line::from(spans);
+        let divider = Line::from(Span::styled(
+            "─".repeat(area.width as usize),
+            Style::default().fg(theme.divider_fg),
         ));
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        f.render_widget(Paragraph::new(vec![title_line, divider]), area);
     }
 
     fn render_files(&mut self, f: &mut Frame, area: Rect) {
