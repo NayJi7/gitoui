@@ -137,6 +137,18 @@ pub enum AppEvent {
         base_hash: String,
     },
     CloseInteractiveRebase,
+    /// Open the GitHub Pull Requests view. App resolves auth + remote
+    /// and surfaces an error notification if either is missing.
+    OpenPullRequests,
+    /// Close the PR view, returning to the previous list state.
+    ClosePullRequests,
+    /// Background fetch of a PR's full detail completed — pushed by the
+    /// worker thread the PR view spawned. The view updates its cache and
+    /// re-renders.
+    PullRequestDetailFetched {
+        number: u64,
+        result: Result<crate::github::pr::PullRequestDetail, String>,
+    },
     OpenDetailByHash {
         hash: String,
     },
@@ -529,6 +541,9 @@ pub enum UserEvent {
     /// Faster than opening the rebase editor for the common "combine the
     /// last few wip/fix commits" case.
     Squash,
+    /// Open the GitHub Pull Requests view — gated behind an authenticated
+    /// GitHub session.
+    PullRequests,
     // Phase 2 - Uncommitted actions
     Stage,
     StageAll,
@@ -656,6 +671,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "rebase" => Ok(UserEvent::Rebase),
                         "reset" => Ok(UserEvent::Reset),
                         "squash" => Ok(UserEvent::Squash),
+                        "pull_requests" => Ok(UserEvent::PullRequests),
                         "stage" => Ok(UserEvent::Stage),
                         "stage_all" => Ok(UserEvent::StageAll),
                         "unstage" => Ok(UserEvent::Unstage),

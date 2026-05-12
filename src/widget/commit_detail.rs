@@ -144,7 +144,7 @@ pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
     ("Create Branch", "B"),
     ("Checkout", "o"),
     ("Cherry Pick", "P"),
-    ("Revert", "R"),
+    ("Revert", "v"),
     ("Drop", "d"),
     ("Merge into current", "m"),
     ("Rebase current on", "e"),

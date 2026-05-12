@@ -2,6 +2,7 @@ pub mod avatar;
 pub mod color;
 pub mod config;
 pub mod git;
+pub mod github;
 pub mod github_auth;
 pub mod graph;
 pub mod highlight;

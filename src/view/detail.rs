@@ -78,9 +78,21 @@ impl<'a> DetailView<'a> {
         }
     }
 
-    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         let event = event_with_count.event;
         let count = event_with_count.count;
+
+        // Per-view shortcut: `v` triggers Revert from commit details only.
+        // Globally `v` fires UserEvent::CleanUntracked (handled in the
+        // uncommitted view), so this raw-key intercept is how we get a
+        // per-view binding without breaking the global keymap.
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        if key.code == KeyCode::Char('v') && key.modifiers == KeyModifiers::NONE {
+            self.tx.send(AppEvent::OpenDialog(DialogKind::Revert {
+                target: self.commit.commit_hash.as_str().into(),
+            }));
+            return;
+        }
 
         match event {
             UserEvent::NavigateDown => {

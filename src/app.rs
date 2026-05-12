@@ -712,6 +712,13 @@ impl App<'_> {
                         Some(UserEvent::Quit) if !text_input_active => {
                             self.ec.send(AppEvent::Quit);
                         }
+                        Some(UserEvent::PullRequests) if !text_input_active => {
+                            // Global shortcut — open the PR view from anywhere.
+                            // The handler itself checks auth / remote and
+                            // surfaces a notification if either is missing,
+                            // so we can fire unconditionally here.
+                            self.ec.send(AppEvent::OpenPullRequests);
+                        }
                         Some(UserEvent::Drop)
                             if matches!(self.view, View::List(_))
                                 && !self.view.is_search_querying()
@@ -1171,6 +1178,19 @@ impl App<'_> {
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
                     self.open_interactive_rebase(base_hash);
+                }
+                AppEvent::OpenPullRequests => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_pull_requests();
+                }
+                AppEvent::ClosePullRequests => {
+                    self.close_pull_requests();
+                }
+                AppEvent::PullRequestDetailFetched { number, result } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_detail_fetched(number, result);
+                    }
                 }
                 AppEvent::CloseInteractiveRebase => {
                     // Same pattern as CloseConflictEditor: close + enqueue
@@ -2100,6 +2120,12 @@ impl App<'_> {
                             "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏esc:cancel"
                                 .into()
                         }),
+                    View::PullRequests(_) => self
+                        .view
+                        .pull_requests_footer_hint()
+                        .unwrap_or_else(|| {
+                            "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏esc:close".into()
+                        }),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -2804,6 +2830,76 @@ impl App<'_> {
             Err(e) => {
                 self.ec
                     .send(AppEvent::NotifyError(format!("Squash failed: {}", e)));
+            }
+        }
+    }
+
+    /// Open the GitHub Pull Requests view. Bails with a notification if
+    /// the user isn't authenticated, the repo has no GitHub remote, or
+    /// the initial `list_pull_requests` call fails. We do the network
+    /// call up-front (blocking) and pass the result to the view; on
+    /// success the view itself drives further fetches lazily.
+    fn open_pull_requests(&mut self) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required — connect via the config view first.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let items = match crate::github::pr::list_pull_requests(&token, &coords) {
+            Ok(v) => v,
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("List PRs: {}", e)));
+                return;
+            }
+        };
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
+        self.view = View::of_pull_requests(
+            commit_list_state,
+            coords,
+            token,
+            items,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_pull_requests(&mut self) {
+        if let View::PullRequests(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            if let Some(state) = list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            } else {
+                // No prior list state — force a fresh refresh.
+                self.ec.send(AppEvent::Refresh(
+                    crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    },
+                ));
             }
         }
     }
