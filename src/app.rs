@@ -2352,9 +2352,10 @@ impl App<'_> {
                         // `c` / `C` (copy msg / hash) are deliberately kept
                         // functional but omitted from the footer hint to
                         // reduce clutter. They're discoverable via `?:help`.
-                        // `R:PRs` only appears when the user is logged in
-                        // to GitHub — otherwise the shortcut would just
-                        // surface a "auth required" toast.
+                        // `R:PRs` and `I:Issues` only appear when the
+                        // user is logged in to GitHub — otherwise the
+                        // shortcut would just surface a toast asking
+                        // them to auth.
                         let has_github_auth = self
                             .ctx
                             .github_auth_state
@@ -2362,7 +2363,7 @@ impl App<'_> {
                             .as_ref()
                             .map_or(false, |t| !t.is_empty());
                         if has_github_auth {
-                            "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏R:PRs▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
+                            "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏R:PRs▕▏I:Issues▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
                                 .into()
                         } else {
                             "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
