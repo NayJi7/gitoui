@@ -1503,6 +1503,65 @@ struct ApiCommitStats {
     deletions: u64,
 }
 
+// ─── PR creation ─────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct CreatePrBody<'a> {
+    title: &'a str,
+    head: &'a str,
+    base: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    body: &'a str,
+    draft: bool,
+}
+
+/// `POST /repos/{owner}/{repo}/pulls`. Returns the new PR's number
+/// on success — the caller can then open its detail view.
+pub fn create_pull_request(
+    token: &str,
+    coords: &RepoCoords,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<u64, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls",
+        coords.owner, coords.repo
+    );
+    let client = http_client()?;
+    let json = serde_json::to_string(&CreatePrBody {
+        title,
+        head,
+        base,
+        body,
+        draft,
+    })
+    .map_err(|e| format!("encode body: {}", e))?;
+    let resp = client
+        .post(&url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .body(json)
+        .send()
+        .map_err(|e| format!("GitHub create PR: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let raw = resp.text().unwrap_or_default();
+        return Err(humanize_github_error(status, &raw));
+    }
+    let raw = resp.text().map_err(|e| format!("create PR read: {}", e))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("create PR JSON: {}", e))?;
+    let number = parsed
+        .get("number")
+        .and_then(|n| n.as_u64())
+        .ok_or_else(|| "GitHub response missing PR number".to_string())?;
+    Ok(number)
+}
+
 // ─── State-changing actions (close / reopen / draft toggle / labels / reviewers) ───
 
 #[derive(Serialize)]

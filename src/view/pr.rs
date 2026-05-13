@@ -132,6 +132,16 @@ pub struct PullRequestsView<'a> {
     commit_detail_loading: rustc_hash::FxHashSet<String>,
     /// Vertical scroll within the drilled-down commit's diff.
     commits_drilldown_scroll: usize,
+    /// Active draft when `mode == Mode::Compose`. Lazily built on
+    /// `start_compose_pr` from the current local HEAD; cleared on
+    /// cancel or successful submission.
+    compose: Option<ComposeState>,
+    /// Click hit-test rects for the compose-form fields — populated
+    /// during render, consumed by `handle_click`.
+    compose_field_rects: Vec<(ComposeField, Rect)>,
+    /// Active branch-picker overlay (drawn on top of the compose
+    /// form). When `Some`, all key + click events route to it.
+    branch_picker: Option<BranchPicker>,
     last_error: Option<String>,
     /// Rects captured each frame for mouse hit-testing — `None` until the
     /// first render. Cleared at the top of each render pass.
@@ -159,6 +169,112 @@ enum Mode {
     List,
     /// Single-PR detail view with the 4-tab layout.
     Detail,
+    /// Full-screen "compose a new pull request" form with a live
+    /// preview of the commits / files that will land on creation.
+    /// Entered with `n` from the list, exited via `Esc` (cancel) or
+    /// `Ctrl+S` (submit).
+    Compose,
+}
+
+/// One field of the compose form — drives `↑↓` cycling, the cursor
+/// indicator, and which key handler runs for typing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComposeField {
+    Head,
+    Base,
+    Title,
+    Body,
+    Labels,
+    Draft,
+}
+
+impl ComposeField {
+    fn all() -> &'static [ComposeField] {
+        &[
+            ComposeField::Head,
+            ComposeField::Base,
+            ComposeField::Title,
+            ComposeField::Body,
+            ComposeField::Labels,
+            ComposeField::Draft,
+        ]
+    }
+
+    fn next(self) -> ComposeField {
+        let all = Self::all();
+        let i = all.iter().position(|f| *f == self).unwrap_or(0);
+        all[(i + 1) % all.len()]
+    }
+
+    fn prev(self) -> ComposeField {
+        let all = Self::all();
+        let i = all.iter().position(|f| *f == self).unwrap_or(0);
+        all[(i + all.len() - 1) % all.len()]
+    }
+}
+
+/// Scrollable single-select branch picker — opens as an overlay
+/// when the user activates `Head:` or `Base:` in the compose form,
+/// closes back to the form on Enter (selects) or Esc (cancels).
+#[derive(Debug, Clone)]
+struct BranchPicker {
+    target_field: ComposeField,
+    branches: Vec<BranchPickerEntry>,
+    hovered: usize,
+    scroll: usize,
+    overlay_rect: Option<Rect>,
+    row_rects: Vec<Rect>,
+    /// Inner height captured at the last render — used by keyboard
+    /// nav to keep the hovered row inside the viewport.
+    visible_height: usize,
+}
+
+#[derive(Debug, Clone)]
+struct BranchPickerEntry {
+    name: String,
+    kind: BranchKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BranchKind {
+    Local,
+    Remote,
+}
+
+/// In-progress draft for `Mode::Compose` — every field is editable,
+/// the preview pane is refreshed in the background each time `head`
+/// or `base` change so the user sees what will land on submit.
+#[derive(Debug, Clone)]
+struct ComposeState {
+    head: String,
+    base: String,
+    title: String,
+    body: String,
+    draft: bool,
+    focused: ComposeField,
+    /// Byte cursor inside the field currently being edited (we re-
+    /// use the same field for whichever of head/base/title/body has
+    /// focus — they're never edited simultaneously).
+    cursor: usize,
+    body_scroll: u16,
+    /// Labels the user picked in the compose form — applied right
+    /// after the PR is created (REST has no `labels` field on the
+    /// create endpoint).
+    labels: Vec<crate::github::pr::Label>,
+    /// Reviewers the user picked in the compose form — applied
+    /// right after the PR is created (same reason as labels).
+    reviewers: Vec<String>,
+    /// Preview metadata fetched from `git log base..head` — `None`
+    /// until the first computation finishes.
+    preview: Option<ComposePreview>,
+    preview_loading: bool,
+    submitting: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ComposePreview {
+    commits: Vec<crate::github::pr::PullCommit>,
+    files: Vec<crate::github::pr::PullFile>,
 }
 
 /// Which subset of fetched PRs the list view currently shows. The view
@@ -519,6 +635,9 @@ impl<'a> PullRequestsView<'a> {
             commit_detail_cache: FxHashMap::default(),
             commit_detail_loading: rustc_hash::FxHashSet::default(),
             commits_drilldown_scroll: 0,
+            compose: None,
+            compose_field_rects: Vec::new(),
+            branch_picker: None,
             last_error: None,
             list_area: None,
             tab_content_area: None,
@@ -595,8 +714,32 @@ impl<'a> PullRequestsView<'a> {
         // selected comment's top border — that way the footer stays
         // calm and the available actions are visually attached to the
         // card they target.
+        // Compose owns its own footer hints — `↑↓` nav + submit +
+        // cancel. The branch picker, when open, narrows it further
+        // to just nav + select + cancel.
+        if matches!(self.mode, Mode::Compose) {
+            let submitting = self
+                .compose
+                .as_ref()
+                .map_or(false, |c| c.submitting);
+            if submitting {
+                return format!("⌘ {}", ["Submitting…", "Esc:cancel"].join("▕▏"));
+            }
+            if self.branch_picker.is_some() {
+                return format!(
+                    "⌘ {}",
+                    ["↑↓:select", "Enter:pick", "Esc:close"].join("▕▏")
+                );
+            }
+            return format!(
+                "⌘ {}",
+                ["↑↓:field", "Enter:edit/toggle", "Ctrl+S:create", "Esc:cancel"]
+                    .join("▕▏")
+            );
+        }
         let parts: Vec<&str> = match self.mode {
-            Mode::List => vec!["r:reload"],
+            Mode::List => vec!["n:new PR", "r:reload"],
+            Mode::Compose => vec![],
             Mode::Detail => {
                 // Inside a drill-down the footer collapses to just
                 // Esc — every other shortcut belongs to the list view.
@@ -650,7 +793,10 @@ impl<'a> PullRequestsView<'a> {
     /// router to deliver raw key events (Backspace, Delete, etc.) here
     /// instead of treating them as UserEvent shortcuts.
     pub fn is_input_active(&self) -> bool {
-        self.comment_editor.is_some()
+        // The compose form has real text inputs (title, body) and a
+        // picker that swallows arrow keys — both need raw key events
+        // instead of UserEvent shortcut translations.
+        self.comment_editor.is_some() || matches!(self.mode, Mode::Compose)
     }
 
     // ---------- data ----------
@@ -748,11 +894,20 @@ impl<'a> PullRequestsView<'a> {
             match self.mode {
                 Mode::List => self.handle_event_list(event_with_count, key),
                 Mode::Detail => self.handle_event_detail(event_with_count, key),
+                Mode::Compose => self.handle_event_compose(event_with_count, key),
             }
             return;
         }
 
-        // `r` reloads — works in both modes when no input is active.
+        // Compose mode owns every key — the form has its own text
+        // inputs, including `r`, so the view-level reload shortcut
+        // must not steal it.
+        if matches!(self.mode, Mode::Compose) {
+            self.handle_event_compose(event_with_count, key);
+            return;
+        }
+
+        // `r` reloads — works in list / detail modes when no input is active.
         if key.code == KeyCode::Char('r') && key.modifiers == KeyModifiers::NONE {
             self.reload();
             return;
@@ -761,6 +916,7 @@ impl<'a> PullRequestsView<'a> {
         match self.mode {
             Mode::List => self.handle_event_list(event_with_count, key),
             Mode::Detail => self.handle_event_detail(event_with_count, key),
+            Mode::Compose => self.handle_event_compose(event_with_count, key),
         }
         let _ = KeyModifiers::NONE;
     }
@@ -768,8 +924,16 @@ impl<'a> PullRequestsView<'a> {
     fn handle_event_list(
         &mut self,
         event_with_count: UserEventWithCount,
-        _key: KeyEvent,
+        key: KeyEvent,
     ) {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        // `n` opens the compose-new-PR view — keep it before the
+        // UserEvent dispatch since `n` doesn't map to any standard
+        // `UserEvent`.
+        if key.code == KeyCode::Char('n') && key.modifiers == KeyModifiers::NONE {
+            self.start_compose_pr();
+            return;
+        }
         match event_with_count.event {
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::ClosePullRequests);
@@ -1670,6 +1834,458 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
+    /// Enter the compose-PR mode. Pre-populates `head` from the
+    /// current local HEAD branch, `base` from the most common GitHub
+    /// default (`main`), and `title` from the latest commit subject
+    /// on the head branch. Body starts empty; the preview pane
+    /// renders lazily once `head` and `base` differ.
+    fn start_compose_pr(&mut self) {
+        let repo_path = self.coords_repo_path();
+        let head = current_head_branch(&repo_path).unwrap_or_default();
+        let title = latest_commit_subject(&repo_path, &head).unwrap_or_default();
+        self.compose = Some(ComposeState {
+            head,
+            base: "main".to_string(),
+            title,
+            body: String::new(),
+            draft: false,
+            focused: ComposeField::Title,
+            cursor: 0,
+            body_scroll: 0,
+            labels: Vec::new(),
+            reviewers: Vec::new(),
+            preview: None,
+            preview_loading: false,
+            submitting: false,
+        });
+        self.mode = Mode::Compose;
+        self.refresh_compose_preview();
+    }
+
+    fn coords_repo_path(&self) -> std::path::PathBuf {
+        // The view doesn't carry the local repo path directly — but
+        // every action that touches local git already passes it
+        // through `ctx`. We grab it via the context's accessor.
+        self.ctx.repo_path.clone()
+    }
+
+    /// Re-run `git log` + `git diff` between the compose form's
+    /// current `base..head` and feed the result into the preview
+    /// pane. Cheap enough to run synchronously on each field edit
+    /// for typical PR sizes; spawn it off if it ever feels slow.
+    fn handle_event_compose(
+        &mut self,
+        event_with_count: UserEventWithCount,
+        key: KeyEvent,
+    ) {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        // ── Mouse wheel: dedicated channel so the picker can pan
+        // its viewport without dragging the selected row along with
+        // it. Both compose-form scroll and picker scroll route here.
+        if matches!(event_with_count.event, UserEvent::ScrollUp) {
+            self.compose_handle_scroll(-3);
+            return;
+        }
+        if matches!(event_with_count.event, UserEvent::ScrollDown) {
+            self.compose_handle_scroll(3);
+            return;
+        }
+
+        // ── Branch picker takes over every key while open ──────────
+        if self.branch_picker.is_some() {
+            self.handle_event_branch_picker(key);
+            return;
+        }
+
+        // Submission spinner: only Esc cancels, everything else
+        // is swallowed.
+        let submitting = self
+            .compose
+            .as_ref()
+            .map_or(false, |c| c.submitting);
+        if submitting {
+            if matches!(key.code, KeyCode::Esc) {
+                self.compose = None;
+                self.mode = Mode::List;
+            }
+            return;
+        }
+
+        // ── Global compose keys ────────────────────────────────────
+        match key.code {
+            KeyCode::Esc => {
+                self.compose = None;
+                self.mode = Mode::List;
+                return;
+            }
+            KeyCode::Char('s') if ctrl => {
+                self.submit_compose_pr();
+                return;
+            }
+            _ => {}
+        }
+
+        // ── Vertical navigation between fields ─────────────────────
+        // Up/Down walk the form. Body is multi-line: only switch
+        // when the caret is at the first / last line of its buffer,
+        // otherwise stay in body and move the cursor within.
+        if matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            let move_to_next_field = {
+                let Some(state) = self.compose.as_ref() else {
+                    return;
+                };
+                if matches!(state.focused, ComposeField::Body) {
+                    let going_up = matches!(key.code, KeyCode::Up);
+                    let at_first =
+                        state.body[..state.cursor.min(state.body.len())].find('\n').is_none();
+                    let at_last = state.body[state.cursor.min(state.body.len())..]
+                        .find('\n')
+                        .is_none();
+                    (going_up && at_first) || (!going_up && at_last)
+                } else {
+                    true
+                }
+            };
+            if move_to_next_field {
+                if let Some(c) = self.compose.as_mut() {
+                    c.focused = if matches!(key.code, KeyCode::Up) {
+                        c.focused.prev()
+                    } else {
+                        c.focused.next()
+                    };
+                    c.cursor = compose_field_text(c).map_or(0, |t| t.len());
+                }
+                return;
+            }
+            // In body, navigate cursor vertically within text.
+            if let Some(s) = self.compose.as_mut() {
+                compose_body_cursor_vertical(s, key.code);
+            }
+            return;
+        }
+
+        // ── Field-specific editing ─────────────────────────────────
+        let focused = self
+            .compose
+            .as_ref()
+            .map(|c| c.focused)
+            .unwrap_or(ComposeField::Title);
+        match focused {
+            // Head / Base aren't text inputs — they open the picker
+            // overlay. Click + Enter both trigger.
+            ComposeField::Head | ComposeField::Base => {
+                if matches!(key.code, KeyCode::Enter) {
+                    self.open_branch_picker(focused);
+                }
+            }
+            ComposeField::Labels => {
+                if matches!(key.code, KeyCode::Enter) {
+                    self.open_compose_labels_picker();
+                }
+            }
+            ComposeField::Draft => {
+                if matches!(key.code, KeyCode::Char(' ') | KeyCode::Enter) {
+                    if let Some(s) = self.compose.as_mut() {
+                        s.draft = !s.draft;
+                    }
+                }
+            }
+            ComposeField::Title => {
+                let Some(state) = self.compose.as_mut() else {
+                    return;
+                };
+                match key.code {
+                    KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
+                    KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
+                    KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
+                    KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
+                    KeyCode::Backspace => compose_field_delete_left(state),
+                    KeyCode::Left if ctrl => {
+                        let new = word_left_boundary(&state.title, state.cursor);
+                        state.cursor = new;
+                    }
+                    KeyCode::Right if ctrl => {
+                        let new = word_right_boundary(&state.title, state.cursor);
+                        state.cursor = new;
+                    }
+                    KeyCode::Left => compose_field_cursor_left(state),
+                    KeyCode::Right => compose_field_cursor_right(state),
+                    KeyCode::Home => compose_field_cursor_home(state),
+                    KeyCode::End => compose_field_cursor_end(state),
+                    _ => {}
+                }
+            }
+            ComposeField::Body => {
+                let Some(state) = self.compose.as_mut() else {
+                    return;
+                };
+                match key.code {
+                    KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
+                    KeyCode::Enter => compose_field_insert_char(state, '\n'),
+                    KeyCode::Tab => {
+                        // 4-space indent inside the body — same
+                        // convention as the comment editor.
+                        for _ in 0..4 {
+                            compose_field_insert_char(state, ' ');
+                        }
+                    }
+                    KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
+                    KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
+                    KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
+                    KeyCode::Backspace => compose_field_delete_left(state),
+                    KeyCode::Left if ctrl => {
+                        let new = word_left_boundary(&state.body, state.cursor);
+                        state.cursor = new;
+                    }
+                    KeyCode::Right if ctrl => {
+                        let new = word_right_boundary(&state.body, state.cursor);
+                        state.cursor = new;
+                    }
+                    KeyCode::Left => compose_field_cursor_left(state),
+                    KeyCode::Right => compose_field_cursor_right(state),
+                    KeyCode::Home => compose_field_cursor_home(state),
+                    KeyCode::End => compose_field_cursor_end(state),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn handle_event_branch_picker(&mut self, key: ratatui::crossterm::event::KeyEvent) {
+        use ratatui::crossterm::event::KeyCode;
+        // Mouse wheel events arrive as raw KeyCode::Null on most
+        // terminals — handle them in `handle_scroll` instead.
+        let Some(picker) = self.branch_picker.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.branch_picker = None;
+            }
+            KeyCode::Up => {
+                if picker.hovered > 0 {
+                    picker.hovered -= 1;
+                }
+                picker_anchor_scroll_to_hovered(picker);
+            }
+            KeyCode::Down => {
+                if picker.hovered + 1 < picker.branches.len() {
+                    picker.hovered += 1;
+                }
+                picker_anchor_scroll_to_hovered(picker);
+            }
+            KeyCode::PageUp => {
+                picker.hovered = picker.hovered.saturating_sub(10);
+                picker_anchor_scroll_to_hovered(picker);
+            }
+            KeyCode::PageDown => {
+                picker.hovered = (picker.hovered + 10).min(picker.branches.len().saturating_sub(1));
+                picker_anchor_scroll_to_hovered(picker);
+            }
+            KeyCode::Home => {
+                picker.hovered = 0;
+                picker_anchor_scroll_to_hovered(picker);
+            }
+            KeyCode::End => {
+                picker.hovered = picker.branches.len().saturating_sub(1);
+                picker_anchor_scroll_to_hovered(picker);
+            }
+            KeyCode::Enter => {
+                let (target, name) = {
+                    let p = picker; // freshen borrow
+                    let entry = p.branches.get(p.hovered).cloned();
+                    let target = p.target_field;
+                    (target, entry.map(|e| e.name))
+                };
+                if let (Some(name), Some(state)) = (name, self.compose.as_mut()) {
+                    match target {
+                        ComposeField::Head => state.head = name,
+                        ComposeField::Base => state.base = name,
+                        _ => {}
+                    }
+                }
+                self.branch_picker = None;
+                self.refresh_compose_preview();
+            }
+            _ => {}
+        }
+    }
+
+    /// Mouse-wheel scroll in compose mode. When the picker is open
+    /// we pan its viewport without moving the highlighted row — the
+    /// user can still arrow up/down to change the selection.
+    fn compose_handle_scroll(&mut self, delta: i32) {
+        if let Some(picker) = self.branch_picker.as_mut() {
+            let max = picker.branches.len().saturating_sub(1);
+            let new = (picker.scroll as i32 + delta).clamp(0, max as i32);
+            picker.scroll = new as usize;
+        }
+    }
+
+    /// Open a multi-select overlay for the compose-form's Labels
+    /// field. Fetches the repo's labels in the background then
+    /// pipes them back through `ComposeLabelsPicked` for the form
+    /// to render.
+    fn open_compose_labels_picker(&mut self) {
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        let initial: Vec<String> = self
+            .compose
+            .as_ref()
+            .map(|c| c.labels.iter().map(|l| l.name.clone()).collect())
+            .unwrap_or_default();
+        std::thread::spawn(move || {
+            match crate::github::pr::list_repo_labels(&token, &coords) {
+                Ok(labels) => tx.send(AppEvent::OpenComposeLabelsPicker {
+                    all_labels: labels,
+                    currently_selected: initial,
+                }),
+                Err(e) => tx.send(AppEvent::NotifyError(format!("Labels: {}", e))),
+            }
+        });
+    }
+
+    /// Handler called from the app when the user confirms the
+    /// compose-labels picker — stores the chosen subset on the
+    /// compose state so the next render shows them, and so the
+    /// submit step can apply them after PR creation.
+    pub fn on_compose_labels_picked(
+        &mut self,
+        labels: Vec<crate::github::pr::Label>,
+    ) {
+        if let Some(s) = self.compose.as_mut() {
+            s.labels = labels;
+        }
+    }
+
+    fn open_branch_picker(&mut self, target: ComposeField) {
+        if !matches!(target, ComposeField::Head | ComposeField::Base) {
+            return;
+        }
+        let repo_path = self.coords_repo_path();
+        let branches = load_local_and_remote_branches(&repo_path);
+        let current = self.compose.as_ref().map(|c| match target {
+            ComposeField::Head => c.head.clone(),
+            ComposeField::Base => c.base.clone(),
+            _ => String::new(),
+        });
+        let hovered = current
+            .and_then(|name| branches.iter().position(|b| b.name == name))
+            .unwrap_or(0);
+        self.branch_picker = Some(BranchPicker {
+            target_field: target,
+            branches,
+            hovered,
+            scroll: 0,
+            overlay_rect: None,
+            row_rects: Vec::new(),
+            visible_height: 0,
+        });
+    }
+
+    /// Push the head branch (if needed) then `POST /pulls`. Result
+    /// is funnelled through `PullRequestActionDone` so the PR list
+    /// re-fetches and we transition into the new PR's detail.
+    fn submit_compose_pr(&mut self) {
+        let Some(state) = self.compose.as_ref() else {
+            return;
+        };
+        if state.head.trim().is_empty() || state.base.trim().is_empty() {
+            self.tx.send(AppEvent::NotifyWarn(
+                "Head and base branches are required.".into(),
+            ));
+            return;
+        }
+        if state.title.trim().is_empty() {
+            self.tx.send(AppEvent::NotifyWarn(
+                "Title cannot be empty.".into(),
+            ));
+            return;
+        }
+        let head = state.head.clone();
+        let base = state.base.clone();
+        let title = state.title.clone();
+        let body = state.body.clone();
+        let draft = state.draft;
+        let labels: Vec<String> = state.labels.iter().map(|l| l.name.clone()).collect();
+        if let Some(c) = self.compose.as_mut() {
+            c.submitting = true;
+        }
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let repo_path = self.coords_repo_path();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            // Push the branch first so GitHub knows what `head` ref
+            // points to. We try `git push -u origin <head>` and
+            // tolerate a failure (the branch may already be
+            // tracking + up to date).
+            let _ = std::process::Command::new("git")
+                .args(["push", "-u", "origin", &head])
+                .current_dir(&repo_path)
+                .output();
+            let result = crate::github::pr::create_pull_request(
+                &token, &coords, &head, &base, &title, &body, draft,
+            );
+            match result {
+                Ok(number) => {
+                    // Apply labels best-effort — failure is non-fatal
+                    // (the PR was created successfully, the user can
+                    // re-pick labels via the regular flow).
+                    if !labels.is_empty() {
+                        let _ = crate::github::pr::set_pull_request_labels(
+                            &token, &coords, number, &labels,
+                        );
+                    }
+                    tx.send(AppEvent::PrCreated { number });
+                }
+                Err(e) => tx.send(AppEvent::PullRequestActionDone {
+                    number: 0,
+                    action: "Create PR".into(),
+                    result: Err(e),
+                }),
+            }
+        });
+    }
+
+    /// Hook called from the app when `PrCreated` fires — clears the
+    /// compose draft, reloads the PR list, and opens the new PR.
+    pub fn on_pr_created(&mut self, number: u64) {
+        self.compose = None;
+        self.mode = Mode::List;
+        self.reload();
+        self.opened_pr_number = Some(number);
+        self.mode = Mode::Detail;
+        if !self.detail_cache.contains_key(&number) {
+            self.spawn_detail_fetch(number);
+        }
+        self.tx.send(AppEvent::NotifySuccess(format!(
+            "Pull request #{} created.",
+            number
+        )));
+    }
+
+    fn refresh_compose_preview(&mut self) {
+        let Some(state) = self.compose.as_ref() else {
+            return;
+        };
+        if state.head.is_empty() || state.base.is_empty() || state.head == state.base {
+            if let Some(ref mut s) = self.compose {
+                s.preview = None;
+            }
+            return;
+        }
+        let repo_path = self.coords_repo_path();
+        let commits = compose_preview_commits(&repo_path, &state.base, &state.head);
+        let files = compose_preview_files(&repo_path, &state.base, &state.head);
+        if let Some(ref mut s) = self.compose {
+            s.preview = Some(ComposePreview { commits, files });
+        }
+    }
+
     fn open_in_browser(&mut self) {
         let Some(number) = self.opened_number() else {
             return;
@@ -2134,6 +2750,73 @@ impl<'a> PullRequestsView<'a> {
                     }
                 }
             }
+            Mode::Compose => {
+                // Picker overlay swallows clicks while open.
+                if let Some(picker) = self.branch_picker.as_mut() {
+                    if let Some(idx) = picker
+                        .row_rects
+                        .iter()
+                        .position(|r| rect_contains(Some(*r), col, row))
+                    {
+                        picker.hovered = picker.scroll + idx;
+                        let (target, name) = {
+                            let entry = picker.branches.get(picker.hovered).cloned();
+                            (picker.target_field, entry.map(|e| e.name))
+                        };
+                        if let (Some(name), Some(s)) = (name, self.compose.as_mut()) {
+                            match target {
+                                ComposeField::Head => s.head = name,
+                                ComposeField::Base => s.base = name,
+                                _ => {}
+                            }
+                        }
+                        self.branch_picker = None;
+                        self.refresh_compose_preview();
+                    } else if !rect_contains(
+                        self.branch_picker.as_ref().and_then(|p| p.overlay_rect),
+                        col,
+                        row,
+                    ) {
+                        // Click outside the overlay cancels.
+                        self.branch_picker = None;
+                    }
+                    return;
+                }
+                // Click on a compose-form field row. Draft toggles;
+                // Head/Base open the picker; Title/Body focus +
+                // position cursor at end (no per-column placement
+                // yet — would need to remember each field's start x).
+                let hit = self
+                    .compose_field_rects
+                    .iter()
+                    .find(|(_, rect)| rect_contains(Some(*rect), col, row))
+                    .map(|(f, _)| *f);
+                let Some(field) = hit else {
+                    return;
+                };
+                if let Some(state) = self.compose.as_mut() {
+                    state.focused = field;
+                    state.cursor = match field {
+                        ComposeField::Title => state.title.len(),
+                        ComposeField::Body => state.body.len(),
+                        _ => 0,
+                    };
+                }
+                match field {
+                    ComposeField::Head | ComposeField::Base => {
+                        self.open_branch_picker(field);
+                    }
+                    ComposeField::Labels => {
+                        self.open_compose_labels_picker();
+                    }
+                    ComposeField::Draft => {
+                        if let Some(s) = self.compose.as_mut() {
+                            s.draft = !s.draft;
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -2179,6 +2862,36 @@ impl<'a> PullRequestsView<'a> {
                         if let Some(idx) = self.row_at_tab(row, area) {
                             self.set_tab_hovered(idx);
                         }
+                    }
+                }
+            }
+            Mode::Compose => {
+                // Picker overlay: hover highlights a row.
+                if let Some(picker) = self.branch_picker.as_mut() {
+                    if let Some(idx) = picker
+                        .row_rects
+                        .iter()
+                        .position(|r| rect_contains(Some(*r), col, row))
+                    {
+                        picker.hovered = picker.scroll + idx;
+                    }
+                    return;
+                }
+                // Hover on a form-field row focuses it — same model
+                // as the comment-card hover in Detail mode.
+                let hit = self
+                    .compose_field_rects
+                    .iter()
+                    .find(|(_, rect)| rect_contains(Some(*rect), col, row))
+                    .map(|(f, _)| *f);
+                if let (Some(field), Some(state)) = (hit, self.compose.as_mut()) {
+                    if state.focused != field {
+                        state.focused = field;
+                        state.cursor = match field {
+                            ComposeField::Title => state.title.len(),
+                            ComposeField::Body => state.body.len(),
+                            _ => 0,
+                        };
                     }
                 }
             }
@@ -2324,6 +3037,7 @@ impl<'a> PullRequestsView<'a> {
         match self.mode {
             Mode::List => self.render_list(f, body_area),
             Mode::Detail => self.render_detail_mode(f, body_area),
+            Mode::Compose => self.render_compose_mode(f, body_area),
         }
 
         // Place the terminal cursor on the inline comment editor when
@@ -2740,6 +3454,579 @@ impl<'a> PullRequestsView<'a> {
             Tab::Checks => self.render_tab_checks(f, tab_content_area, detail),
             Tab::Files => self.render_tab_files(f, tab_content_area, detail),
         }
+    }
+
+    /// Full-screen compose-new-PR view — borrows the Detail layout:
+    /// a one-row sub-header, a divider, then a side-by-side form /
+    /// preview split. Designed to feel like a sibling of the Detail
+    /// page so the user never wonders where they are.
+    fn render_compose_mode(&mut self, f: &mut Frame, area: Rect) {
+        let theme = &self.ctx.color_theme;
+        self.compose_field_rects.clear();
+        // Sub-header (1 row) + divider (1) + body (rest).
+        let [sub_header_area, divider_area, body_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .areas(area);
+
+        // ── Sub-header: `Create New Pull Request · branch → main` ──
+        let (head, base, draft) = self
+            .compose
+            .as_ref()
+            .map(|c| (c.head.clone(), c.base.clone(), c.draft))
+            .unwrap_or_default();
+        let mut header_spans: Vec<Span<'static>> = vec![
+            Span::raw("  "),
+            Span::styled(
+                if draft { "DRAFT" } else { "NEW" },
+                Style::default()
+                    .fg(if draft {
+                        theme.detail_label_fg
+                    } else {
+                        theme.status_success_fg
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                "Create new Pull Request".to_string(),
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+            ),
+        ];
+        if !head.is_empty() && !base.is_empty() {
+            header_spans.push(Span::styled(
+                " · ",
+                Style::default().fg(theme.detail_label_fg),
+            ));
+            header_spans.push(Span::styled(
+                head,
+                Style::default()
+                    .fg(theme.list_ref_branch_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            header_spans.push(Span::styled(
+                " → ",
+                Style::default().fg(theme.detail_label_fg),
+            ));
+            header_spans.push(Span::styled(
+                base,
+                Style::default()
+                    .fg(theme.list_ref_remote_branch_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        f.render_widget(
+            Paragraph::new(Line::from(header_spans)),
+            sub_header_area,
+        );
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "─".repeat(divider_area.width as usize),
+                Style::default().fg(theme.divider_fg),
+            ))),
+            divider_area,
+        );
+
+        // ── Body: left = form (50%), right = preview (50%) ──
+        let [form_area, preview_area] = Layout::horizontal([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ])
+        .areas(body_area);
+        self.render_compose_form(f, form_area);
+        self.render_compose_preview(f, preview_area);
+
+        // Branch picker overlay on top — drawn last so it covers
+        // the form when open.
+        if self.branch_picker.is_some() {
+            self.render_branch_picker_overlay(f, area);
+        }
+    }
+
+    /// Branch-picker overlay — drawn on top of the compose layout
+    /// when `self.branch_picker.is_some()`. Centered list with
+    /// per-row colour by `BranchKind`.
+    fn render_branch_picker_overlay(&mut self, f: &mut Frame, area: Rect) {
+        let Some(picker) = self.branch_picker.as_mut() else {
+            return;
+        };
+        let theme = &self.ctx.color_theme;
+        let width = area.width.saturating_mul(2) / 5;
+        let width = width.max(40).min(area.width.saturating_sub(4));
+        let height = (picker.branches.len() as u16 + 4).min(area.height.saturating_sub(4));
+        let height = height.max(8);
+        let x = area.x + (area.width.saturating_sub(width)) / 2;
+        let y = area.y + (area.height.saturating_sub(height)) / 2;
+        let rect = Rect::new(x, y, width, height);
+        picker.overlay_rect = Some(rect);
+
+        // Wipe the area underneath so the form text doesn't bleed.
+        f.render_widget(ratatui::widgets::Clear, rect);
+
+        let title_text = match picker.target_field {
+            ComposeField::Head => " Choose head branch ",
+            ComposeField::Base => " Choose base branch ",
+            _ => " Pick branch ",
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.divider_fg))
+            .title(Line::from(Span::styled(
+                title_text.to_string(),
+                Style::default()
+                    .fg(theme.list_head_fg)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+
+        // Render clamps scroll within bounds but doesn't force the
+        // hovered row back into view — manual wheel scrolling can
+        // legitimately move the viewport away from the selection.
+        let visible = inner.height as usize;
+        picker.visible_height = visible;
+        let max_scroll = picker.branches.len().saturating_sub(visible);
+        if picker.scroll > max_scroll {
+            picker.scroll = max_scroll;
+        }
+        picker.row_rects.clear();
+        for (i, entry) in picker
+            .branches
+            .iter()
+            .enumerate()
+            .skip(picker.scroll)
+            .take(visible)
+        {
+            let row_y = inner.y + (i - picker.scroll) as u16;
+            let row_rect = Rect::new(inner.x, row_y, inner.width, 1);
+            picker.row_rects.push(row_rect);
+            let is_selected = i == picker.hovered;
+            let marker = if is_selected {
+                Span::styled(
+                    "● ".to_string(),
+                    Style::default()
+                        .fg(theme.status_info_fg)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("○ ".to_string(), Style::default().fg(theme.divider_fg))
+            };
+            let name_color = match entry.kind {
+                BranchKind::Local => branch_color_from_graph_palette(
+                    theme,
+                    &self.ctx.graph_color_set,
+                    &entry.name,
+                ),
+                BranchKind::Remote => theme.list_ref_remote_branch_fg,
+            };
+            let name_style = Style::default().fg(name_color).add_modifier(Modifier::BOLD);
+            // Selected row is signalled by the filled `●` marker +
+            // bold name (no row-level bg fill — keeps the chip-like
+            // branch colours intact).
+            let line = Line::from(vec![
+                Span::raw(" "),
+                marker,
+                Span::styled(entry.name.clone(), name_style),
+            ]);
+            f.render_widget(Paragraph::new(line), row_rect);
+        }
+    }
+
+    fn render_compose_form(&mut self, f: &mut Frame, area: Rect) {
+        let theme = &self.ctx.color_theme;
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.divider_fg))
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "Compose".to_string(),
+                    Style::default()
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+            ]));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let Some(state) = self.compose.as_ref().cloned() else {
+            return;
+        };
+
+        // Label column width + leading indent constants.
+        const INDENT: u16 = 2;
+        const LABEL_WIDTH: u16 = 8; // "Title:  " etc.
+
+        let label_style = Style::default().fg(theme.detail_label_fg);
+        let focus_indicator = |focused: bool| {
+            if focused {
+                Span::styled(
+                    "▸ ".to_string(),
+                    Style::default()
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::raw("  ".to_string())
+            }
+        };
+
+        // ── Branch field row (Head or Base) — looks like a button
+        //    rather than a text input. Shows the current branch in
+        //    its branch colour. Enter or click opens the picker.
+        let render_branch_row = |f: &mut Frame,
+                                 y_pos: u16,
+                                 field: ComposeField,
+                                 label: &'static str,
+                                 value: &str,
+                                 color: ratatui::style::Color|
+         -> Rect {
+            let focused = state.focused == field;
+            let rect = Rect::new(inner.x, y_pos, inner.width.saturating_sub(2), 1);
+            let placeholder_style = Style::default().fg(theme.detail_label_fg);
+            let value_span = if value.is_empty() {
+                Span::styled("(select…)".to_string(), placeholder_style)
+            } else {
+                Span::styled(
+                    value.to_string(),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )
+            };
+            let line = Line::from(vec![
+                Span::raw(" ".repeat(INDENT as usize)),
+                focus_indicator(focused),
+                Span::styled(format!("{:<w$}", label, w = LABEL_WIDTH as usize), label_style),
+                Span::raw(" "),
+                value_span,
+                Span::styled(
+                    "  (Enter to choose)".to_string(),
+                    if focused {
+                        Style::default().fg(theme.detail_label_fg)
+                    } else {
+                        Style::default().fg(theme.bg)
+                    },
+                ),
+            ]);
+            f.render_widget(Paragraph::new(line), rect);
+            rect
+        };
+
+        // ── Text-input row (Title) — flat text, no bg fill. Visual
+        //    cue is the focus arrow + a thin underline below the
+        //    typed value, like a vintage form field.
+        let render_text_input_row = |f: &mut Frame,
+                                     y_pos: u16,
+                                     field: ComposeField,
+                                     label: &'static str,
+                                     value: &str|
+         -> (Rect, u16) {
+            let focused = state.focused == field;
+            let row = Rect::new(inner.x, y_pos, inner.width, 1);
+            let value_start_x = inner.x + INDENT + 2 + LABEL_WIDTH + 1;
+            let value_width = inner
+                .width
+                .saturating_sub(INDENT + 2 + LABEL_WIDTH + 1 + 2);
+            let mut spans = vec![
+                Span::raw(" ".repeat(INDENT as usize)),
+                focus_indicator(focused),
+                Span::styled(format!("{:<w$}", label, w = LABEL_WIDTH as usize), label_style),
+                Span::raw(" "),
+            ];
+            if value.is_empty() {
+                spans.push(Span::styled(
+                    "(type a title)".to_string(),
+                    Style::default().fg(theme.detail_label_fg),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    value.to_string(),
+                    Style::default().fg(theme.fg),
+                ));
+            }
+            f.render_widget(Paragraph::new(Line::from(spans)), row);
+            // Underline below the row when focused (1-row strip).
+            if focused {
+                let underline_y = y_pos.saturating_add(1).min(inner.y + inner.height - 1);
+                let underline = Line::from(Span::styled(
+                    "─".repeat(value_width as usize),
+                    Style::default().fg(theme.list_head_fg),
+                ));
+                f.render_widget(
+                    Paragraph::new(underline),
+                    Rect::new(value_start_x, underline_y, value_width, 1),
+                );
+            }
+            (row, value_start_x)
+        };
+
+        // Layout walker.
+        let mut y = inner.y;
+
+        // Head row — colour from the graph palette so each branch
+        // gets the same hue as in the commit graph view.
+        let head_color = branch_color_from_graph_palette(
+            theme,
+            &self.ctx.graph_color_set,
+            &state.head,
+        );
+        let head_rect = render_branch_row(
+            f,
+            y,
+            ComposeField::Head,
+            "Head:",
+            &state.head,
+            head_color,
+        );
+        self.compose_field_rects.push((ComposeField::Head, head_rect));
+        y += 2;
+
+        // Base row
+        let base_color = branch_color_from_graph_palette(
+            theme,
+            &self.ctx.graph_color_set,
+            &state.base,
+        );
+        let base_rect = render_branch_row(
+            f,
+            y,
+            ComposeField::Base,
+            "Base:",
+            &state.base,
+            base_color,
+        );
+        self.compose_field_rects.push((ComposeField::Base, base_rect));
+        y += 2;
+
+        // Title row
+        let (title_rect, title_value_x) =
+            render_text_input_row(f, y, ComposeField::Title, "Title:", &state.title);
+        self.compose_field_rects.push((ComposeField::Title, title_rect));
+        y += 2;
+
+        // Body block — uses a Block with a tinted bg so it reads as
+        // a real multi-line text area.
+        let body_focused = state.focused == ComposeField::Body;
+        let body_label_line = Line::from(vec![
+            Span::raw(" ".repeat(INDENT as usize)),
+            focus_indicator(body_focused),
+            Span::styled("Body:".to_string(), label_style),
+        ]);
+        f.render_widget(
+            Paragraph::new(body_label_line),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+        y += 1;
+        // Body block fills remaining vertical space, minus a 2-row
+        // tail for the Draft row.
+        let body_block_height = inner
+            .y
+            .saturating_add(inner.height)
+            .saturating_sub(y)
+            .saturating_sub(2)
+            .max(3);
+        let body_block_rect = Rect::new(
+            inner.x + INDENT + 2,
+            y,
+            inner.width.saturating_sub(INDENT + 2 + 2),
+            body_block_height,
+        );
+        // Body: bordered Block — accent border when focused, no bg
+        // fill (which read as gross yellow on some themes).
+        let body_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(if body_focused {
+                theme.list_head_fg
+            } else {
+                theme.divider_fg
+            }));
+        let body_inner = body_block.inner(body_block_rect);
+        f.render_widget(body_block, body_block_rect);
+        self.compose_field_rects
+            .push((ComposeField::Body, body_block_rect));
+        let body_lines: Vec<Line<'static>> = if state.body.is_empty() {
+            vec![Line::from(Span::styled(
+                "(type a description — supports markdown)".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            ))]
+        } else {
+            state
+                .body
+                .split('\n')
+                .map(|l| {
+                    Line::from(Span::styled(l.to_string(), Style::default().fg(theme.fg)))
+                })
+                .collect()
+        };
+        f.render_widget(Paragraph::new(body_lines), body_inner);
+        y = body_block_rect.y + body_block_rect.height;
+
+        // Labels row — shows the currently-picked chips inline. The
+        // overlay opens on Enter / click.
+        let labels_focused = state.focused == ComposeField::Labels;
+        let labels_rect = Rect::new(inner.x, y, inner.width, 1);
+        let mut labels_line_spans = vec![
+            Span::raw(" ".repeat(INDENT as usize)),
+            focus_indicator(labels_focused),
+            Span::styled(format!("{:<w$}", "Labels:", w = LABEL_WIDTH as usize), label_style),
+            Span::raw(" "),
+        ];
+        if state.labels.is_empty() {
+            labels_line_spans.push(Span::styled(
+                "(none — Enter to pick)".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            ));
+        } else {
+            for (i, lab) in state.labels.iter().enumerate() {
+                if i > 0 {
+                    labels_line_spans.push(Span::raw(" "));
+                }
+                labels_line_spans.extend(label_chip_spans_local(lab));
+            }
+        }
+        f.render_widget(Paragraph::new(Line::from(labels_line_spans)), labels_rect);
+        self.compose_field_rects
+            .push((ComposeField::Labels, labels_rect));
+        y += 2;
+
+        // Draft toggle row
+        let draft_focused = state.focused == ComposeField::Draft;
+        let draft_rect = Rect::new(inner.x, y, inner.width, 1);
+        let check_glyph = if state.draft { "● " } else { "○ " };
+        let draft_line = Line::from(vec![
+            Span::raw(" ".repeat(INDENT as usize)),
+            focus_indicator(draft_focused),
+            Span::styled(
+                check_glyph.to_string(),
+                Style::default()
+                    .fg(if state.draft {
+                        theme.status_info_fg
+                    } else {
+                        theme.divider_fg
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Create as draft".to_string(),
+                if draft_focused {
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.fg)
+                },
+            ),
+        ]);
+        f.render_widget(Paragraph::new(draft_line), draft_rect);
+        self.compose_field_rects
+            .push((ComposeField::Draft, draft_rect));
+
+        // ── Cursor on the active text field ────────────────────────
+        match state.focused {
+            ComposeField::Title => {
+                let cx = title_value_x + state.cursor as u16;
+                if cx < inner.x + inner.width {
+                    self.comment_editor_cursor_pos = Some((cx, title_rect.y));
+                }
+            }
+            ComposeField::Body => {
+                let (col, row) = cursor_screen_pos(&state.body, state.cursor);
+                let cx = body_inner.x + col;
+                let cy = body_inner.y + row;
+                if cx < body_inner.x + body_inner.width && cy < body_inner.y + body_inner.height {
+                    self.comment_editor_cursor_pos = Some((cx, cy));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn render_compose_preview(&mut self, f: &mut Frame, area: Rect) {
+        let theme = &self.ctx.color_theme;
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.divider_fg))
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "Preview".to_string(),
+                    Style::default()
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+            ]));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let Some(state) = self.compose.as_ref() else {
+            return;
+        };
+        let Some(preview) = state.preview.as_ref() else {
+            let p = Paragraph::new(Span::styled(
+                "  (set head + base to see the preview)".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            ));
+            f.render_widget(p, inner);
+            return;
+        };
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{} commit{} · {} file{}",
+                preview.commits.len(),
+                if preview.commits.len() == 1 { "" } else { "s" },
+                preview.files.len(),
+                if preview.files.len() == 1 { "" } else { "s" },
+            ),
+            Style::default()
+                .fg(theme.fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        if preview.commits.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  No commits between base and head.".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "Commits".to_string(),
+                Style::default()
+                    .fg(theme.list_head_fg)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            for c in &preview.commits {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(
+                        c.short_sha.clone(),
+                        Style::default()
+                            .fg(theme.list_hash_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        truncate(&c.subject, 60),
+                        Style::default().fg(theme.list_commit_message_fg),
+                    ),
+                ]));
+            }
+        }
+        lines.push(Line::from(""));
+        if !preview.files.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Files".to_string(),
+                Style::default()
+                    .fg(theme.list_head_fg)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            let cols = FileColumns::compute(&preview.files, inner.width as usize);
+            for file in &preview.files {
+                lines.push(file_line(theme, file, &cols));
+            }
+        }
+        f.render_widget(Paragraph::new(lines), inner);
     }
 
     /// Sub-header below the global header — PR number, title, state chip,
@@ -5585,6 +6872,435 @@ fn split_into_tokens(s: &str) -> Vec<String> {
         out.push(current);
     }
     out
+}
+
+// ─── Compose-form editor helpers ──────────────────────────────────
+
+/// Return a mutable reference to the text buffer for the focused
+/// compose field — None when the focused field isn't text (Draft).
+fn compose_field_text_mut(state: &mut ComposeState) -> Option<&mut String> {
+    match state.focused {
+        ComposeField::Head => Some(&mut state.head),
+        ComposeField::Base => Some(&mut state.base),
+        ComposeField::Title => Some(&mut state.title),
+        ComposeField::Body => Some(&mut state.body),
+        ComposeField::Labels | ComposeField::Draft => None,
+    }
+}
+
+fn compose_field_text(state: &ComposeState) -> Option<&str> {
+    Some(match state.focused {
+        ComposeField::Head => state.head.as_str(),
+        ComposeField::Base => state.base.as_str(),
+        ComposeField::Title => state.title.as_str(),
+        ComposeField::Body => state.body.as_str(),
+        ComposeField::Labels | ComposeField::Draft => return None,
+    })
+}
+
+fn compose_field_insert_char(state: &mut ComposeState, c: char) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text_mut(state) else {
+        return;
+    };
+    let safe = cursor.min(buf.len());
+    buf.insert(safe, c);
+    state.cursor = safe + c.len_utf8();
+}
+
+fn compose_field_delete_left(state: &mut ComposeState) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text_mut(state) else {
+        return;
+    };
+    if cursor == 0 {
+        return;
+    }
+    let mut new_cursor = cursor - 1;
+    while new_cursor > 0 && !buf.is_char_boundary(new_cursor) {
+        new_cursor -= 1;
+    }
+    buf.replace_range(new_cursor..cursor, "");
+    state.cursor = new_cursor;
+}
+
+fn compose_field_delete_word_left(state: &mut ComposeState) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text_mut(state) else {
+        return;
+    };
+    let new_cursor = word_left_boundary(buf, cursor);
+    buf.replace_range(new_cursor..cursor, "");
+    state.cursor = new_cursor;
+}
+
+fn compose_field_cursor_left(state: &mut ComposeState) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text(state) else {
+        return;
+    };
+    if cursor == 0 {
+        return;
+    }
+    let mut c = cursor - 1;
+    while c > 0 && !buf.is_char_boundary(c) {
+        c -= 1;
+    }
+    state.cursor = c;
+}
+
+fn compose_field_cursor_right(state: &mut ComposeState) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text(state) else {
+        return;
+    };
+    if cursor >= buf.len() {
+        return;
+    }
+    let mut c = cursor + 1;
+    while c < buf.len() && !buf.is_char_boundary(c) {
+        c += 1;
+    }
+    state.cursor = c;
+}
+
+fn compose_field_cursor_home(state: &mut ComposeState) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text(state) else {
+        return;
+    };
+    // For multi-line body: jump to start of current line.
+    let prefix = &buf[..cursor.min(buf.len())];
+    state.cursor = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+}
+
+fn compose_field_cursor_end(state: &mut ComposeState) {
+    let cursor = state.cursor;
+    let Some(buf) = compose_field_text(state) else {
+        return;
+    };
+    state.cursor = buf[cursor.min(buf.len())..]
+        .find('\n')
+        .map(|i| cursor + i)
+        .unwrap_or(buf.len());
+}
+
+fn compose_body_cursor_vertical(
+    state: &mut ComposeState,
+    key: ratatui::crossterm::event::KeyCode,
+) {
+    use ratatui::crossterm::event::KeyCode;
+    if !matches!(state.focused, ComposeField::Body) {
+        return;
+    }
+    let cursor = state.cursor;
+    let buf = state.body.clone();
+    let line_start = buf[..cursor.min(buf.len())]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let col = cursor - line_start;
+    match key {
+        KeyCode::Up => {
+            if line_start == 0 {
+                state.cursor = 0;
+                return;
+            }
+            let prev_end = line_start - 1;
+            let prev_start = buf[..prev_end]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            let prev_line_len = prev_end - prev_start;
+            state.cursor = prev_start + col.min(prev_line_len);
+        }
+        KeyCode::Down => {
+            let line_end = buf[line_start..]
+                .find('\n')
+                .map(|i| line_start + i)
+                .unwrap_or(buf.len());
+            if line_end >= buf.len() {
+                state.cursor = buf.len();
+                return;
+            }
+            let next_start = line_end + 1;
+            let next_end = buf[next_start..]
+                .find('\n')
+                .map(|i| next_start + i)
+                .unwrap_or(buf.len());
+            let next_line_len = next_end - next_start;
+            state.cursor = next_start + col.min(next_line_len);
+        }
+        _ => {}
+    }
+}
+
+/// Re-anchor the picker's scroll so its currently-hovered row sits
+/// inside the visible window. Called after keyboard nav; mouse-wheel
+/// scrolls deliberately don't touch hovered, so they bypass this.
+fn picker_anchor_scroll_to_hovered(picker: &mut BranchPicker) {
+    if picker.visible_height == 0 {
+        return;
+    }
+    if picker.hovered < picker.scroll {
+        picker.scroll = picker.hovered;
+    } else if picker.hovered >= picker.scroll + picker.visible_height {
+        picker.scroll = picker.hovered + 1 - picker.visible_height;
+    }
+}
+
+/// Pick a stable colour for a branch name out of the user's graph
+/// palette so the picker rows feel cohesive with the commit-graph
+/// view. Falls back to the theme's `list_ref_branch_fg` when the
+/// palette is empty.
+fn branch_color_from_graph_palette(
+    theme: &crate::color::ColorTheme,
+    graph_color_set: &crate::color::GraphColorSet,
+    name: &str,
+) -> Color {
+    if graph_color_set.colors.is_empty() {
+        return theme.list_ref_branch_fg;
+    }
+    let mut hash: u32 = 5381;
+    for b in name.as_bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(u32::from(*b));
+    }
+    let idx = (hash as usize) % graph_color_set.colors.len();
+    graph_color_set.colors[idx].to_ratatui_color()
+}
+
+/// Enumerate every local + remote branch in the repo. Used to
+/// populate the compose-PR branch picker — local branches come
+/// first, then remotes, each tagged with a `BranchKind` so the UI
+/// can colour them accordingly.
+fn load_local_and_remote_branches(repo_path: &std::path::Path) -> Vec<BranchPickerEntry> {
+    let mut out: Vec<BranchPickerEntry> = Vec::new();
+    let _ = std::process::Command::new("git")
+        .args([
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ])
+        .current_dir(repo_path)
+        .output()
+        .map(|o| {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                let name = line.trim();
+                if !name.is_empty() {
+                    out.push(BranchPickerEntry {
+                        name: name.to_string(),
+                        kind: BranchKind::Local,
+                    });
+                }
+            }
+        });
+    let _ = std::process::Command::new("git")
+        .args([
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/remotes",
+        ])
+        .current_dir(repo_path)
+        .output()
+        .map(|o| {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                let name = line.trim();
+                if name.is_empty() || name.ends_with("/HEAD") {
+                    continue;
+                }
+                out.push(BranchPickerEntry {
+                    name: name.to_string(),
+                    kind: BranchKind::Remote,
+                });
+            }
+        });
+    out
+}
+
+/// Resolve the local repo's current HEAD branch name. Returns
+/// `None` when HEAD is detached (or the call to `git symbolic-ref`
+/// otherwise fails) — the compose form just falls back to an empty
+/// `head` field in that case.
+fn current_head_branch(repo_path: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Pull the subject (`%s`) of the most recent commit on `branch`.
+/// Used to pre-fill the compose form's title field — the same
+/// convention the GitHub web UI follows.
+fn latest_commit_subject(repo_path: &std::path::Path, branch: &str) -> Option<String> {
+    if branch.is_empty() {
+        return None;
+    }
+    let output = std::process::Command::new("git")
+        .args(["log", "-1", "--pretty=%s", branch])
+        .current_dir(repo_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Commits unique to `head` vs `base` (the set the PR would
+/// introduce). Returns an empty list when the call fails, since the
+/// preview pane just shows "(no commits)" in that case.
+fn compose_preview_commits(
+    repo_path: &std::path::Path,
+    base: &str,
+    head: &str,
+) -> Vec<crate::github::pr::PullCommit> {
+    let range = format!("{}..{}", base, head);
+    let output = match std::process::Command::new("git")
+        .args(["log", "--reverse", "--pretty=%H%x1f%h%x1f%an%x1f%aI%x1f%s", &range])
+        .current_dir(repo_path)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split('\x1f').collect();
+            if parts.len() < 5 {
+                return None;
+            }
+            Some(crate::github::pr::PullCommit {
+                sha: parts[0].to_string(),
+                short_sha: parts[1].to_string(),
+                author: parts[2].to_string(),
+                date: short_relative_iso(parts[3]),
+                subject: parts[4].to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Files changed between `base` and `head` (the set the PR would
+/// touch). Parsed from `git diff --numstat` so we can fill the
+/// preview pane's file list with the same shape as the GitHub
+/// `/files` endpoint.
+fn compose_preview_files(
+    repo_path: &std::path::Path,
+    base: &str,
+    head: &str,
+) -> Vec<crate::github::pr::PullFile> {
+    let range = format!("{}..{}", base, head);
+    let output = match std::process::Command::new("git")
+        .args(["diff", "--numstat", &range])
+        .current_dir(repo_path)
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let status_map = compose_preview_file_statuses(repo_path, &range);
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(3, '\t').collect();
+            if parts.len() < 3 {
+                return None;
+            }
+            let additions: u64 = parts[0].parse().unwrap_or(0);
+            let deletions: u64 = parts[1].parse().unwrap_or(0);
+            let filename = parts[2].to_string();
+            let status = status_map
+                .get(&filename)
+                .copied()
+                .unwrap_or(crate::github::pr::FileStatus::Other);
+            Some(crate::github::pr::PullFile {
+                filename,
+                status,
+                additions,
+                deletions,
+                patch: None,
+            })
+        })
+        .collect()
+}
+
+fn compose_preview_file_statuses(
+    repo_path: &std::path::Path,
+    range: &str,
+) -> rustc_hash::FxHashMap<String, crate::github::pr::FileStatus> {
+    let mut map = rustc_hash::FxHashMap::default();
+    let Ok(output) = std::process::Command::new("git")
+        .args(["diff", "--name-status", range])
+        .current_dir(repo_path)
+        .output()
+    else {
+        return map;
+    };
+    if !output.status.success() {
+        return map;
+    }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut parts = line.splitn(2, '\t');
+        let Some(tag) = parts.next() else { continue };
+        let Some(name) = parts.next() else { continue };
+        let status = match tag.chars().next() {
+            Some('A') => crate::github::pr::FileStatus::Added,
+            Some('M') => crate::github::pr::FileStatus::Modified,
+            Some('D') => crate::github::pr::FileStatus::Removed,
+            Some('R') => crate::github::pr::FileStatus::Renamed,
+            _ => crate::github::pr::FileStatus::Other,
+        };
+        // For renames, the format is `R100\told\tnew` — strip to the
+        // final path.
+        let name = name.split('\t').last().unwrap_or(name);
+        map.insert(name.to_string(), status);
+    }
+    map
+}
+
+fn short_relative_iso(iso: &str) -> String {
+    use chrono::DateTime;
+    let Ok(dt) = DateTime::parse_from_rfc3339(iso) else {
+        return iso.to_string();
+    };
+    let now = chrono::Utc::now();
+    let secs = (now.timestamp() - dt.timestamp()).max(0);
+    if secs < 60 {
+        return format!("{}s ago", secs);
+    }
+    let mins = secs / 60;
+    if mins < 60 {
+        return format!("{}m ago", mins);
+    }
+    let hours = mins / 60;
+    if hours < 24 {
+        return format!("{}h ago", hours);
+    }
+    let days = hours / 24;
+    if days < 30 {
+        return format!("{}d ago", days);
+    }
+    let months = days / 30;
+    if months < 12 {
+        return format!("{}mo ago", months);
+    }
+    format!("{}y ago", months / 12)
 }
 
 fn truncate(s: &str, max: usize) -> String {

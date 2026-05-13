@@ -1239,6 +1239,7 @@ impl App<'_> {
                             pr_title,
                             all_labels,
                             selected,
+                            for_compose: false,
                         },
                     ));
                 }
@@ -1266,6 +1267,34 @@ impl App<'_> {
                 AppEvent::PrCommitDetailFetched { sha, result } => {
                     if let View::PullRequests(ref mut view) = self.view {
                         view.on_commit_detail_fetched(sha, result);
+                    }
+                }
+                AppEvent::PrCreated { number } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_pr_created(number);
+                    }
+                }
+                AppEvent::OpenComposeLabelsPicker {
+                    all_labels,
+                    currently_selected,
+                } => {
+                    let selected: Vec<bool> = all_labels
+                        .iter()
+                        .map(|l| currently_selected.contains(&l.name))
+                        .collect();
+                    self.ec.send(AppEvent::OpenDialog(
+                        crate::event::DialogKind::PullRequestLabels {
+                            pr_number: 0,
+                            pr_title: "New Pull Request".to_string(),
+                            all_labels,
+                            selected,
+                            for_compose: true,
+                        },
+                    ));
+                }
+                AppEvent::ComposeLabelsPicked { labels } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_compose_labels_picked(labels);
                     }
                 }
                 AppEvent::OpenPrCommitDetail { pr_number, sha } => {

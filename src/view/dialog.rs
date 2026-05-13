@@ -1943,8 +1943,26 @@ impl<'a> DialogView<'a> {
             DialogKind::PullRequestLabels {
                 pr_number,
                 all_labels,
+                for_compose,
                 ..
             } => {
+                // Compose-PR uses the same dialog as the existing-PR
+                // labels picker, but on confirm it shouldn't dispatch
+                // a GitAction — the PR doesn't exist yet. Send the
+                // picked labels to the view to store on the compose
+                // state instead.
+                if *for_compose {
+                    let picked: Vec<crate::github::pr::Label> = all_labels
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                        .map(|(_, l)| l.clone())
+                        .collect();
+                    self.tx
+                        .send(AppEvent::ComposeLabelsPicked { labels: picked });
+                    self.tx.send(AppEvent::CloseDialog);
+                    return;
+                }
                 let labels: Vec<String> = all_labels
                     .iter()
                     .enumerate()

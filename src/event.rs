@@ -195,6 +195,20 @@ pub enum AppEvent {
         sha: String,
         file_path: String,
     },
+    /// A newly-created PR landed on GitHub — the PR view clears its
+    /// compose draft, reloads the list, and opens the freshly
+    /// created PR in Detail mode.
+    PrCreated { number: u64 },
+    /// Compose form's labels-picker fetch finished — app opens the
+    /// multi-select dialog with this payload, and on confirm
+    /// dispatches `ComposeLabelsPicked` back to the view.
+    OpenComposeLabelsPicker {
+        all_labels: Vec<crate::github::pr::Label>,
+        currently_selected: Vec<String>,
+    },
+    /// Labels the user chose in the compose-form picker — pushed
+    /// back into the active `ComposeState`.
+    ComposeLabelsPicked { labels: Vec<crate::github::pr::Label> },
     OpenDetailByHash {
         hash: String,
     },
@@ -261,6 +275,10 @@ pub enum DialogKind {
         pr_title: String,
         all_labels: Vec<crate::github::pr::Label>,
         selected: Vec<bool>,
+        /// When `true`, the dialog is being used by the compose-PR
+        /// form: confirm sends `ComposeLabelsPicked` back to the
+        /// view instead of dispatching `SetPullRequestLabels`.
+        for_compose: bool,
     },
     /// Multi-select picker for the PR's reviewers. Same shape as
     /// labels — `selected` starts at currently-requested reviewers.
