@@ -28,9 +28,10 @@ use crate::{
     github::RepoCoords,
     view::pr::{
         build_body_prefix, build_junction_prefix, cursor_screen_pos, fit_cell,
-        label_chip_spans_local, parse_hex_color, push_comment_card, render_markdown_body,
-        short_label_chip_spans, word_left_boundary, word_right_boundary, wrap_styled_spans,
-        CommentAction, CommentCardInput, MERGED_PURPLE, TREE_LEVEL_WIDTH,
+        label_chip_spans_local, paint_login_avatar, parse_hex_color, push_comment_card,
+        render_markdown_body, short_label_chip_spans, word_left_boundary, word_right_boundary,
+        wrap_styled_spans, AvatarSlot, CommentAction, CommentCardInput, MERGED_PURPLE,
+        TREE_LEVEL_WIDTH,
     },
 };
 
@@ -66,6 +67,11 @@ pub struct IssuesView<'a> {
     comment_editor: Option<CommentEditor>,
     comment_editor_cursor_pos: Option<(u16, u16)>,
     editor_body_area: Option<Rect>,
+    /// Pending avatars to paint after the Conversation tab Paragraph
+    /// renders. Drained at the end of the frame.
+    conversation_avatar_slots: Vec<AvatarSlot>,
+    /// Same idea for the issue list rows.
+    list_avatar_slots: Vec<AvatarSlot>,
     /// Reaction picker overlay; takes key+mouse focus when present.
     reaction_picker: Option<ReactionPicker>,
     /// Compose-new-issue draft. `Some` only when `mode == Compose`.
@@ -275,6 +281,8 @@ impl<'a> IssuesView<'a> {
             comment_editor: None,
             comment_editor_cursor_pos: None,
             editor_body_area: None,
+            conversation_avatar_slots: Vec::new(),
+            list_avatar_slots: Vec::new(),
             reaction_picker: None,
             compose: None,
             compose_field_rects: Vec::new(),
@@ -2241,19 +2249,24 @@ impl<'a> IssuesView<'a> {
 
         // Reserve column budgets so long titles get truncated with
         // ellipsis instead of wrapping or overflowing into chips.
-        // Layout:  ▶_ ● _ #N __ TITLE __ [chips] __ 💬 N
-        // fixed: caret(2) + icon(1) + sp(1) + #N(W+1) + sp(2) + sp(2) + comments(~6) = ~14 + W
+        // Layout:  ▶_ ● _ #N __ TITLE __ [chips] _[AV_]AUTHOR __ 💬 N
+        // The avatar pad collapses to 0 cells when avatars are off.
+        const AUTHOR_BUDGET: usize = 16;
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let avatar_pad = if avatars_on { 3 } else { 0 };
         let avail = area.width as usize;
         let chips_cells: usize = filtered
             .iter()
             .map(|i| i.labels.iter().count() * 5) // 4-col chip + 1 space
             .max()
             .unwrap_or(0);
-        let fixed = 2 + 1 + 1 + (max_num_width + 1) + 2 + 2 + 8;
+        let fixed =
+            2 + 1 + 1 + (max_num_width + 1) + 2 + 2 + avatar_pad + AUTHOR_BUDGET + 2 + 6;
         let title_budget = avail
             .saturating_sub(fixed + chips_cells)
             .max(20);
 
+        self.list_avatar_slots.clear();
         let mut lines: Vec<Line<'static>> = Vec::new();
         for (i, issue) in filtered.iter().enumerate().skip(self.list_scroll_offset) {
             if lines.len() >= area.height as usize {
@@ -2287,6 +2300,28 @@ impl<'a> IssuesView<'a> {
                     spans.push(s);
                 }
             }
+            // Author column. When avatars are on, reserve 3 cells
+            // (avatar + breathing) and track the col so we can paint
+            // it after the Paragraph; otherwise the row stays tight.
+            spans.push(Span::raw("  "));
+            if avatars_on {
+                let avatar_col: u16 = spans
+                    .iter()
+                    .map(|s| s.content.chars().count() as u16)
+                    .sum();
+                spans.push(Span::raw("   "));
+                let row_in_area = i - self.list_scroll_offset;
+                self.list_avatar_slots.push(AvatarSlot {
+                    login: issue.author.clone(),
+                    line: row_in_area,
+                    col: avatar_col,
+                    is_selected: is_hovered,
+                });
+            }
+            spans.push(Span::styled(
+                fit_cell(&issue.author, AUTHOR_BUDGET),
+                Style::default().fg(theme.list_name_fg),
+            ));
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
                 format!("💬 {}", issue.comments_count),
@@ -2295,6 +2330,29 @@ impl<'a> IssuesView<'a> {
             lines.push(Line::from(spans));
         }
         f.render_widget(Paragraph::new(lines), area);
+
+        // Overlay avatars over the reserved slot in each visible row.
+        // Issue list doesn't paint a row-wide selection bg (only the
+        // caret + bold title change on hover), so the avatar always
+        // blends over `theme.bg`.
+        let slots = std::mem::take(&mut self.list_avatar_slots);
+        let theme_bg = self.ctx.color_theme.bg;
+        for slot in &slots {
+            let screen_y = area.y + slot.line as u16;
+            if screen_y >= area.y + area.height {
+                continue;
+            }
+            let screen_x = area.x + slot.col;
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &slot.login,
+                screen_x,
+                screen_y,
+                false,
+                theme_bg,
+            );
+        }
     }
 
     fn render_detail(&mut self, f: &mut Frame, area: Rect) {
@@ -2391,8 +2449,12 @@ impl<'a> IssuesView<'a> {
         detail: Option<&IssueDetail>,
     ) {
         let theme = &self.ctx.color_theme;
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut spans: Vec<Span<'static>> = Vec::new();
         spans.push(Span::raw(" "));
+        // Avatars captured as we go; painted after the Paragraph
+        // renders. `(login, col_within_area)` pairs.
+        let mut avatar_paints: Vec<(String, u16)> = Vec::new();
         if let Some(d) = detail {
             spans.push(state_chip(theme, d.state, d.state_reason));
             spans.push(Span::raw("  "));
@@ -2403,34 +2465,83 @@ impl<'a> IssuesView<'a> {
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw("  "));
-            // Compute the budget left for the title once the trailing
-            // metadata is reserved — keeps long titles from squashing
-            // " opened by … · assigned: … · milestone: …" off-screen.
-            let mut meta_text = format!("opened by {} · {}", d.author, d.opened_when);
-            if !d.assignees.is_empty() {
-                meta_text.push_str(&format!("  ·  assigned: {}", d.assignees.join(", ")));
-            }
-            if let Some(ms) = &d.milestone {
-                meta_text.push_str(&format!("  ·  milestone: {}", ms));
-            }
+            // Conservative title budget — we don't know exact meta
+            // width here without measuring, so estimate generously.
+            // `avatar_pad_each` is 3 cells per author/assignee when
+            // avatars are enabled, 0 otherwise; matches the actual
+            // pad we'll push below.
+            let pad: usize = if avatars_on { 3 } else { 0 };
+            let meta_estimate = "opened by ".len()
+                + d.author.chars().count()
+                + " · ".len()
+                + d.opened_when.chars().count()
+                + pad
+                + if d.assignees.is_empty() {
+                    0
+                } else {
+                    "  ·  assigned: ".len()
+                        + d.assignees.iter().map(|a| a.chars().count() + pad).sum::<usize>()
+                        + (d.assignees.len().saturating_sub(1)) * 2
+                }
+                + d.milestone
+                    .as_ref()
+                    .map(|m| "  ·  milestone: ".len() + m.chars().count())
+                    .unwrap_or(0);
             let fixed = spans
                 .iter()
                 .map(|s| s.content.chars().count())
                 .sum::<usize>();
-            let meta_cells = meta_text.chars().count();
             let avail = area.width as usize;
             let title_budget = avail
-                .saturating_sub(fixed + meta_cells + 4)
+                .saturating_sub(fixed + meta_estimate + 4)
                 .max(10);
             spans.push(Span::styled(
                 fit_cell(&d.title, title_budget),
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw("    "));
+
+            let dim = Style::default().fg(theme.detail_label_fg);
+            spans.push(Span::styled("opened by ".to_string(), dim));
+            if avatars_on {
+                let author_col: u16 = spans
+                    .iter()
+                    .map(|s| s.content.chars().count() as u16)
+                    .sum();
+                spans.push(Span::raw("   "));
+                avatar_paints.push((d.author.clone(), author_col));
+            }
             spans.push(Span::styled(
-                meta_text,
-                Style::default().fg(theme.detail_label_fg),
+                d.author.clone(),
+                Style::default().fg(theme.list_name_fg),
             ));
+            spans.push(Span::styled(" · ".to_string(), dim));
+            spans.push(Span::styled(d.opened_when.clone(), dim));
+
+            if !d.assignees.is_empty() {
+                spans.push(Span::styled("  ·  assigned: ".to_string(), dim));
+                for (i, a) in d.assignees.iter().enumerate() {
+                    if i > 0 {
+                        spans.push(Span::styled(", ".to_string(), dim));
+                    }
+                    if avatars_on {
+                        let col: u16 = spans
+                            .iter()
+                            .map(|s| s.content.chars().count() as u16)
+                            .sum();
+                        spans.push(Span::raw("   "));
+                        avatar_paints.push((a.clone(), col));
+                    }
+                    spans.push(Span::styled(
+                        a.clone(),
+                        Style::default().fg(theme.list_name_fg),
+                    ));
+                }
+            }
+            if let Some(ms) = &d.milestone {
+                spans.push(Span::styled("  ·  milestone: ".to_string(), dim));
+                spans.push(Span::styled(ms.clone(), dim));
+            }
         } else {
             spans.push(Span::styled(
                 format!("#{}", self.opened_issue_number.unwrap_or(0)),
@@ -2438,6 +2549,18 @@ impl<'a> IssuesView<'a> {
             ));
         }
         f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let theme_bg = self.ctx.color_theme.bg;
+        for (login, col) in avatar_paints {
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &login,
+                area.x + col,
+                area.y,
+                false,
+                theme_bg,
+            );
+        }
     }
 
     fn render_issue_labels_row(
@@ -2515,8 +2638,13 @@ impl<'a> IssuesView<'a> {
 
     fn render_tab_conversation(&mut self, f: &mut Frame, area: Rect, detail: &IssueDetail) {
         let theme = &self.ctx.color_theme;
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut lines: Vec<Line<'static>> = Vec::new();
         self.conversation_comment_spans.clear();
+        // Avatar slots are populated as we push cards; cleared each
+        // frame so stale entries from a previous detail don't paint
+        // over the new layout.
+        self.conversation_avatar_slots.clear();
         let me_login = self.me_login.clone();
 
         let is_me_top = me_login
@@ -2527,7 +2655,7 @@ impl<'a> IssuesView<'a> {
         if self.conversation_selected == 0 {
             top_shortcuts.push("+:react");
         }
-        push_comment_card(
+        let top_layout = push_comment_card(
             &mut lines,
             theme,
             area.width,
@@ -2542,8 +2670,21 @@ impl<'a> IssuesView<'a> {
                 is_me: is_me_top,
                 inline_shortcuts: top_shortcuts,
                 reactions: detail.reactions.clone(),
+                avatar_login: if avatars_on {
+                    Some(&detail.author)
+                } else {
+                    None
+                },
             },
         );
+        if let Some(col) = top_layout.avatar_slot {
+            self.conversation_avatar_slots.push(AvatarSlot {
+                login: detail.author.clone(),
+                line: top_layout.top_line,
+                col,
+                is_selected: self.conversation_selected == 0,
+            });
+        }
         self.conversation_comment_spans
             .push((0, idx0_first, lines.len().saturating_sub(1)));
 
@@ -2574,7 +2715,7 @@ impl<'a> IssuesView<'a> {
                         shortcuts.push("d:delete");
                     }
                 }
-                push_comment_card(
+                let layout = push_comment_card(
                     &mut lines,
                     theme,
                     area.width,
@@ -2589,8 +2730,21 @@ impl<'a> IssuesView<'a> {
                         is_me,
                         inline_shortcuts: shortcuts,
                         reactions: c.reactions.clone(),
+                        avatar_login: if avatars_on {
+                            Some(&c.author)
+                        } else {
+                            None
+                        },
                     },
                 );
+                if let Some(col) = layout.avatar_slot {
+                    self.conversation_avatar_slots.push(AvatarSlot {
+                        login: c.author.clone(),
+                        line: layout.top_line,
+                        col,
+                        is_selected: selected,
+                    });
+                }
                 self.conversation_comment_spans
                     .push((idx, first, lines.len().saturating_sub(1)));
                 idx += 1;
@@ -2607,6 +2761,32 @@ impl<'a> IssuesView<'a> {
         let scroll = self.conversation_scroll.min(lines.len().saturating_sub(1));
         let para = Paragraph::new(lines).scroll((scroll as u16, 0));
         f.render_widget(para, area);
+
+        // Overlay avatars after the Paragraph paints — they sit on
+        // top of the reserved slot inside the top border. Skip cards
+        // scrolled out of the viewport so we don't waste image cells.
+        let slots = std::mem::take(&mut self.conversation_avatar_slots);
+        let theme_bg = self.ctx.color_theme.bg;
+        for slot in &slots {
+            if slot.line < scroll {
+                continue;
+            }
+            let row_in_area = (slot.line - scroll) as u16;
+            if row_in_area >= area.height {
+                continue;
+            }
+            let screen_y = area.y + row_in_area;
+            let screen_x = area.x + slot.col;
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &slot.login,
+                screen_x,
+                screen_y,
+                false,
+                theme_bg,
+            );
+        }
     }
 
     fn render_tab_timeline(&mut self, f: &mut Frame, area: Rect, number: u64) {
@@ -2637,10 +2817,35 @@ impl<'a> IssuesView<'a> {
             return;
         }
         let mut lines: Vec<Line<'static>> = Vec::new();
-        for ev in events {
-            lines.push(timeline_event_line(theme, &ev));
+        // `(login, col, row)` triples — the timeline lays out events
+        // top-down, one per row, so row == index into `events`.
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let mut paints: Vec<(String, u16, u16)> = Vec::new();
+        for (row, ev) in events.iter().enumerate() {
+            let (line, actor_col) = timeline_event_line(theme, ev, avatars_on);
+            if let (Some(col), Some(actor)) = (actor_col, &ev.actor) {
+                if !actor.is_empty() {
+                    paints.push((actor.clone(), col, row as u16));
+                }
+            }
+            lines.push(line);
         }
         f.render_widget(Paragraph::new(lines), area);
+        let theme_bg = self.ctx.color_theme.bg;
+        for (login, col, row) in paints {
+            if row >= area.height {
+                continue;
+            }
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &login,
+                area.x + col,
+                area.y + row,
+                false,
+                theme_bg,
+            );
+        }
     }
 
     fn render_tab_linked(&mut self, f: &mut Frame, area: Rect, number: u64) {
@@ -2671,16 +2876,20 @@ impl<'a> IssuesView<'a> {
             return;
         }
         let max_num_w = prs.iter().map(|p| digits_count(p.number)).max().unwrap_or(1);
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let pad_width = if avatars_on { 3 } else { 0 };
         let mut lines: Vec<Line<'static>> = Vec::new();
-        for pr in prs {
+        let mut paints: Vec<(String, u16, u16)> = Vec::new();
+        for (row, pr) in prs.iter().enumerate() {
             let state_color = match pr.state.as_str() {
                 "open" => theme.status_success_fg,
                 _ => theme.detail_label_fg,
             };
-            // Reserve room: state(2) + #N(W+1) + sp(2) + sp(2) + by(~12)
-            let fixed = 2 + (max_num_w + 1) + 2 + 2 + 3 + pr.author.chars().count();
+            // Reserve room: state(2) + #N(W+1) + sp(2) + sp(2) + "by " (3)
+            //   + [avatar pad (3) when on] + author width.
+            let fixed = 2 + (max_num_w + 1) + 2 + 2 + 3 + pad_width + pr.author.chars().count();
             let title_budget = (area.width as usize).saturating_sub(fixed).max(10);
-            lines.push(Line::from(vec![
+            let mut spans: Vec<Span<'static>> = vec![
                 Span::styled("● ", Style::default().fg(state_color)),
                 Span::styled(
                     format!("#{:width$}", pr.number, width = max_num_w),
@@ -2693,12 +2902,37 @@ impl<'a> IssuesView<'a> {
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("by {}", pr.author),
+                    "by ".to_string(),
                     Style::default().fg(theme.detail_label_fg),
                 ),
-            ]));
+            ];
+            if avatars_on {
+                let col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
+                spans.push(Span::raw("   "));
+                paints.push((pr.author.clone(), col, row as u16));
+            }
+            spans.push(Span::styled(
+                pr.author.clone(),
+                Style::default().fg(theme.list_name_fg),
+            ));
+            lines.push(Line::from(spans));
         }
         f.render_widget(Paragraph::new(lines), area);
+        let theme_bg = self.ctx.color_theme.bg;
+        for (login, col, row) in paints {
+            if row >= area.height {
+                continue;
+            }
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &login,
+                area.x + col,
+                area.y + row,
+                false,
+                theme_bg,
+            );
+        }
     }
 
     fn render_comment_editor(&mut self, f: &mut Frame, area: Rect) {
@@ -2986,21 +3220,58 @@ impl<'a> IssuesView<'a> {
         } else {
             Style::default().fg(theme.detail_label_fg)
         };
-        let assignees_value = if c.assignees.is_empty() {
-            "Enter to pick…".to_string()
+        let avatars_on_compose = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let mut assignees_paints: Vec<(String, u16)> = Vec::new();
+        let value_line: Line<'static> = if c.assignees.is_empty() {
+            Line::from(Span::styled(
+                "Enter to pick…".to_string(),
+                Style::default().fg(theme.fg),
+            ))
         } else {
-            c.assignees.join(", ")
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            for (i, a) in c.assignees.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(
+                        ", ".to_string(),
+                        Style::default().fg(theme.detail_label_fg),
+                    ));
+                }
+                if avatars_on_compose {
+                    let col: u16 = spans
+                        .iter()
+                        .map(|s| s.content.chars().count() as u16)
+                        .sum();
+                    spans.push(Span::raw("   "));
+                    assignees_paints.push((a.clone(), col));
+                }
+                spans.push(Span::styled(
+                    a.clone(),
+                    Style::default().fg(theme.fg),
+                ));
+            }
+            Line::from(spans)
         };
         f.render_widget(
             Paragraph::new(vec![
                 Line::from(Span::styled("Assignees", assignees_label_style)),
-                Line::from(Span::styled(
-                    assignees_value,
-                    Style::default().fg(theme.fg),
-                )),
+                value_line,
             ]),
             assignees_rect,
         );
+        // Avatars sit on the SECOND row of the field rect (the value
+        // row), which is `assignees_rect.y + 1`.
+        let theme_bg_compose = self.ctx.color_theme.bg;
+        for (login, col) in &assignees_paints {
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                login,
+                assignees_rect.x + col,
+                assignees_rect.y + 1,
+                false,
+                theme_bg_compose,
+            );
+        }
 
         // Milestone row (single line — label + value inline).
         let milestone_focused = matches!(c.field, ComposeField::Milestone);
@@ -3178,10 +3449,14 @@ fn state_chip(
     )
 }
 
+/// Returns `(line, actor_col)` — `Some(col)` when the 3-cell pad
+/// was reserved (avatars enabled), `None` otherwise so the row
+/// stays tight.
 fn timeline_event_line(
     theme: &crate::color::ColorTheme,
     ev: &TimelineEvent,
-) -> Line<'static> {
+    avatars_on: bool,
+) -> (Line<'static>, Option<u16>) {
     let actor = ev.actor.clone().unwrap_or_else(|| "?".into());
     let mut spans: Vec<Span<'static>> = Vec::new();
     let (icon, fg) = match &ev.kind {
@@ -3207,6 +3482,15 @@ fn timeline_event_line(
         format!(" {} ", icon),
         Style::default().fg(fg),
     ));
+    // Reserve 3 cells (2 avatar + 1 sp) only when avatars are on —
+    // `actor_col` points at the first of those 3 cells.
+    let actor_col: Option<u16> = if avatars_on {
+        let c: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
+        spans.push(Span::raw("   "));
+        Some(c)
+    } else {
+        None
+    };
     spans.push(Span::styled(
         actor,
         Style::default()
@@ -3245,15 +3529,18 @@ fn timeline_event_line(
                     .bg(bg)
                     .add_modifier(Modifier::BOLD),
             ));
-            return Line::from({
-                let mut s = spans;
-                s.push(Span::raw("  "));
-                s.push(Span::styled(
-                    ev.when.clone(),
-                    Style::default().fg(theme.list_date_fg),
-                ));
-                s
-            });
+            return (
+                Line::from({
+                    let mut s = spans;
+                    s.push(Span::raw("  "));
+                    s.push(Span::styled(
+                        ev.when.clone(),
+                        Style::default().fg(theme.list_date_fg),
+                    ));
+                    s
+                }),
+                actor_col,
+            );
         }
         TimelineKind::Unlabeled { name, .. } => format!("removed label {}", name),
         TimelineKind::Assigned { who } => format!("assigned {}", who),
@@ -3288,7 +3575,7 @@ fn timeline_event_line(
         ev.when.clone(),
         Style::default().fg(theme.list_date_fg),
     ));
-    Line::from(spans)
+    (Line::from(spans), actor_col)
 }
 
 // Reserved imports for future polish — keeps the slice lean while

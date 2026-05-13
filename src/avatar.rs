@@ -253,6 +253,133 @@ impl AvatarManager {
         ids
     }
 
+    // ─── Login-keyed API ────────────────────────────────────────
+    //
+    // The email/commit-hash path roundtrips through GitHub's commit
+    // endpoint to resolve an avatar URL. For PRs and Issues we
+    // already know the GitHub login, so we can short-circuit to
+    // `https://github.com/{login}.png` — a single redirect to the
+    // canonical avatar CDN, no auth needed, no rate limit relevant.
+    //
+    // All three helpers (`prefetch_login`, `ensure_uploaded_login`,
+    // `prepared_image_login`, `cached_avatar_exists_login`) share the
+    // existing on-disk cache + in-flight bookkeeping by namespacing
+    // the lookup key under `@login/`. That keeps email-keyed entries
+    // and login-keyed entries strictly disjoint (so a coincidental
+    // hash collision is impossible) while reusing every bit of the
+    // existing prepared-image / upload machinery.
+
+    /// Cache key under which a login lives — guaranteed disjoint
+    /// from any real email since `@login/` cannot appear in a
+    /// well-formed email local-part.
+    fn login_storage_key(login: &str) -> String {
+        format!("@login/{}", login.trim().to_lowercase())
+    }
+
+    pub fn ensure_uploaded_login(
+        &mut self,
+        login: &str,
+        height_cells: u16,
+        selected: bool,
+        bg: Color,
+    ) -> bool {
+        let key = Self::login_storage_key(login);
+        self.ensure_uploaded(&key, height_cells, selected, bg)
+    }
+
+    pub fn prepared_image_login(
+        &self,
+        login: &str,
+        height_cells: u16,
+        selected: bool,
+    ) -> Option<&PreparedImage> {
+        let key = Self::login_storage_key(login);
+        self.prepared_image(&key, height_cells, selected)
+    }
+
+    pub fn cached_avatar_exists_login(&self, login: &str) -> bool {
+        let key = Self::login_storage_key(login);
+        self.cached_avatar_exists(&key)
+    }
+
+    /// Fire a background fetch of the user's GitHub avatar. No-op
+    /// when avatars are disabled, the login is empty, the avatar is
+    /// already on disk, or another fetch for this login is in
+    /// flight. Bounded by the same `MAX_CONCURRENT_FETCHES` budget
+    /// as the email-keyed path.
+    pub fn prefetch_login(&self, login: &str) {
+        if !self.is_enabled() {
+            return;
+        }
+        let trimmed = login.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let storage_key = Self::login_storage_key(login);
+        let in_flight_key = storage_key.clone();
+
+        {
+            let mut state = self.fetch_state.lock().unwrap();
+            if state.missing.contains(&in_flight_key) {
+                return;
+            }
+            if self.active_fetches.load(Ordering::Relaxed) >= MAX_CONCURRENT_FETCHES {
+                return;
+            }
+            if !state.in_flight.insert(in_flight_key.clone()) {
+                return;
+            }
+        }
+
+        let path = self.email_to_path(&storage_key);
+        if let Ok(metadata) = path.metadata() {
+            if metadata.len() > 0 {
+                self.fetch_state
+                    .lock()
+                    .unwrap()
+                    .in_flight
+                    .remove(&in_flight_key);
+                return;
+            }
+            let _ = fs::remove_file(&path);
+        }
+
+        self.active_fetches.fetch_add(1, Ordering::Relaxed);
+
+        let path_clone = path.clone();
+        let fetch_state = self.fetch_state.clone();
+        let active_fetches = self.active_fetches.clone();
+        let event_sender = self.event_sender.clone();
+        let client = self.http_client.clone();
+        // GitHub redirects `github.com/{login}.png` to the canonical
+        // CDN. `?size=128` asks for a small image to keep the fetch
+        // bounded.
+        let url = format!(
+            "https://github.com/{}.png?size=128",
+            trimmed.replace(' ', "")
+        );
+        thread::spawn(move || {
+            let mut found_avatar = false;
+            if let Ok(resp) = client.get(&url).header("User-Agent", "gitoui").send() {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes() {
+                        if bytes.len() > 100 && image::load_from_memory(&bytes).is_ok() {
+                            write_avatar_atomic(&path_clone, bytes.to_vec());
+                            found_avatar = true;
+                        }
+                    }
+                }
+            }
+            active_fetches.fetch_sub(1, Ordering::Relaxed);
+            finish_avatar_fetch(&fetch_state, &in_flight_key, found_avatar);
+            if found_avatar {
+                if let Some(sender) = event_sender {
+                    sender.try_send(AppEvent::AvatarsUpdated);
+                }
+            }
+        });
+    }
+
     pub fn prefetch(&self, commit_hashes: Vec<String>, email: &str) {
         let Some(token) = self.github_token.clone() else {
             return;

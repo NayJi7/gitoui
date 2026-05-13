@@ -92,6 +92,11 @@ pub struct PullCommit {
     pub sha: String,
     pub short_sha: String,
     pub author: String,
+    /// GitHub login for the commit author when the email is linked
+    /// to a GitHub account. Empty when GitHub couldn't resolve it
+    /// (e.g., the commit was authored with an unverified email).
+    /// Drives the avatar overlay on the Commits tab.
+    pub author_login: String,
     pub date: String,
     pub subject: String,
 }
@@ -497,6 +502,17 @@ struct ApiCommitItem {
     #[serde(default)]
     sha: String,
     commit: ApiCommitInner,
+    /// Top-level `author` is the GitHub *user* (login) — distinct
+    /// from `commit.author` which is the git author (name + email).
+    /// May be null when the commit's email isn't linked to a GitHub
+    /// account.
+    author: Option<ApiAuthor>,
+}
+
+#[derive(Deserialize)]
+struct ApiAuthor {
+    #[serde(default)]
+    login: String,
 }
 
 #[derive(Deserialize)]
@@ -1049,10 +1065,12 @@ fn fetch_pull_commits(
                 Some(a) => (a.name, short_relative(&a.date)),
                 None => ("?".to_string(), String::new()),
             };
+            let author_login = c.author.map(|a| a.login).unwrap_or_default();
             PullCommit {
                 short_sha: c.sha.chars().take(7).collect(),
                 sha: c.sha,
                 author,
+                author_login,
                 date,
                 subject,
             }

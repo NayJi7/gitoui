@@ -99,6 +99,11 @@ pub struct PullRequestsView<'a> {
     /// captured each render so we can place the terminal cursor on top
     /// of the editor surface.
     comment_editor_cursor_pos: Option<(u16, u16)>,
+    /// GitHub avatars to paint after the Conversation tab Paragraph
+    /// renders. Populated during render, drained at end of frame.
+    conversation_avatar_slots: Vec<AvatarSlot>,
+    /// Same as `conversation_avatar_slots` but for the PR list rows.
+    list_avatar_slots: Vec<AvatarSlot>,
     /// Body rect of the inline editor captured during render — used
     /// to translate clicks inside it into buffer cursor positions.
     editor_body_area: Option<Rect>,
@@ -640,6 +645,8 @@ impl<'a> PullRequestsView<'a> {
             conversation_comment_count: 1,
             comment_editor: None,
             comment_editor_cursor_pos: None,
+            conversation_avatar_slots: Vec::new(),
+            list_avatar_slots: Vec::new(),
             editor_body_area: None,
             commits_scroll: 0,
             commits_hovered: 0,
@@ -3320,17 +3327,36 @@ impl<'a> PullRequestsView<'a> {
             filtered.iter().map(|pr| (*pr).clone()).collect();
         let cols = PrListColumns::compute(&owned_filtered, col_budget);
         let row_width = body_area.width as usize;
+        self.list_avatar_slots.clear();
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let mut local_slots: Vec<AvatarSlot> = Vec::new();
         let items: Vec<ListItem<'static>> = filtered
             .iter()
             .enumerate()
             .map(|(i, pr)| {
-                // Triangle marker follows the keyboard / mouse cursor
-                // (hovered) so the user can see at a glance which row
-                // will open on Enter / click.
                 let is_marked = self.hovered == i;
-                ListItem::new(self.format_pr_row(pr, is_marked, &cols, row_width))
+                let (line, avatar_col) =
+                    self.format_pr_row(pr, is_marked, &cols, row_width, avatars_on);
+                // Track only rows currently inside the visible window —
+                // the List widget itself clips, so painting an avatar
+                // off-screen would waste a buffer write.
+                if let Some(col) = avatar_col {
+                    if i >= self.list_scroll_offset
+                        && visible > 0
+                        && i < self.list_scroll_offset + visible
+                    {
+                        local_slots.push(AvatarSlot {
+                            login: pr.author.clone(),
+                            line: i - self.list_scroll_offset,
+                            col,
+                            is_selected: is_marked,
+                        });
+                    }
+                }
+                ListItem::new(line)
             })
             .collect();
+        self.list_avatar_slots = local_slots;
         let mut state = ListState::default();
         state.select(Some(self.hovered));
         *state.offset_mut() = self.list_scroll_offset;
@@ -3342,6 +3368,36 @@ impl<'a> PullRequestsView<'a> {
             Style::default().add_modifier(Modifier::BOLD),
         );
         f.render_stateful_widget(list, body_area, &mut state);
+
+        // Paint avatars over the row-local pad reserved in
+        // format_pr_row. Each slot is positioned by its row index
+        // within the visible window plus the column offset captured
+        // when the row was formatted.
+        let slots = std::mem::take(&mut self.list_avatar_slots);
+        for slot in &slots {
+            let screen_y = body_area.y + slot.line as u16;
+            if screen_y >= body_area.y + body_area.height {
+                continue;
+            }
+            let screen_x = body_area.x + slot.col;
+            // PR list paints a row-wide selection bg only on opened
+            // PRs (see format_pr_row); the avatar's rounded edges
+            // need to blend over that exact colour.
+            let bg = if slot.is_selected {
+                self.ctx.color_theme.list_selected_bg
+            } else {
+                self.ctx.color_theme.bg
+            };
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &slot.login,
+                screen_x,
+                screen_y,
+                slot.is_selected,
+                bg,
+            );
+        }
     }
 
     /// Build the filter-tabs title row that sits on the top border of
@@ -3394,13 +3450,19 @@ impl<'a> PullRequestsView<'a> {
         (spans, rects)
     }
 
+    /// Returns the formatted row + the column offset (from the start
+    /// of the row's enclosing area) where the avatar should land —
+    /// just to the left of the author column. `Some(col)` when the
+    /// 3-cell pad was reserved (avatars enabled); `None` when avatars
+    /// are off so the row layout stays tight.
     fn format_pr_row(
         &self,
         pr: &PullRequest,
         is_opened: bool,
         cols: &PrListColumns,
         row_width: usize,
-    ) -> Line<'static> {
+        avatars_on: bool,
+    ) -> (Line<'static>, Option<u16>) {
         let theme = &self.ctx.color_theme;
         // Each cell is pre-padded to its column width so rows align
         // tabularly across the list, regardless of value length.
@@ -3458,8 +3520,24 @@ impl<'a> PullRequestsView<'a> {
                 row.push(Span::raw(" ".repeat(cols.labels - chips_width)));
             }
         }
+        // Capture the row-relative column where the avatar will be
+        // painted. `row` so far ends just before the gap that
+        // precedes the author column; we land the avatar inside that
+        // gap, then add an extra space to keep the author legible.
+        let avatar_col: Option<u16> = if avatars_on {
+            Some(
+                row.iter()
+                    .map(|s| console::measure_text_width(s.content.as_ref()) as u16)
+                    .sum(),
+            )
+        } else {
+            None
+        };
+        // Reserve 3 cells (avatar + breathing space) only when avatars
+        // are enabled; otherwise the row keeps a tight 2-cell gap.
+        let pre_author = if avatars_on { "   " } else { "  " };
         row.extend([
-            Span::raw("  "),
+            Span::raw(pre_author),
             Span::styled(
                 fit_cell(&pr.author, cols.author),
                 Style::default().fg(theme.list_name_fg),
@@ -3510,7 +3588,7 @@ impl<'a> PullRequestsView<'a> {
                 ));
             }
         }
-        Line::from(row)
+        (Line::from(row), avatar_col)
     }
 
 
@@ -4383,9 +4461,13 @@ impl<'a> PullRequestsView<'a> {
         number: Option<u64>,
     ) {
         let theme = &self.ctx.color_theme;
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut spans: Vec<Span<'static>> = Vec::new();
         spans.push(Span::raw("  "));
         let mut badge_spans: Vec<Span<'static>> = Vec::new();
+        // Captured during span construction so we can paint the
+        // avatar after `f.render_widget` without re-measuring.
+        let mut avatar_paint: Option<(String, u16)> = None;
         if let Some(detail) = detail {
             // Compute the badge first so we can reserve room for it on
             // the right and let the title flex/ellipsis to fit. Without
@@ -4437,6 +4519,11 @@ impl<'a> PullRequestsView<'a> {
             let trailing_pad = 2;
             let min_gap = 2;
             let measure = |s: &Span<'_>| console::measure_text_width(s.content.as_ref());
+            // +3 cells reserved between `by ` and the author for the
+            // GitHub avatar (2 cells image + 1 cell breathing space) —
+            // only when avatars are enabled, otherwise the line stays
+            // tight and no empty gap appears.
+            let avatar_pad: usize = if avatars_on { 3 } else { 0 };
             let fixed_overhead = 2
                 + measure(&state_span)
                 + 2
@@ -4444,6 +4531,7 @@ impl<'a> PullRequestsView<'a> {
                 + 2
                 + 3
                 + measure(&by_span)
+                + avatar_pad
                 + measure(&author_span)
                 + 3
                 + measure(&head_span)
@@ -4469,6 +4557,17 @@ impl<'a> PullRequestsView<'a> {
             ));
             spans.push(dot_sep());
             spans.push(by_span);
+            if avatars_on {
+                // Capture the col offset where the 2-cell avatar will
+                // be painted — i.e., right after `by `, before the
+                // author name. Reserve 3 cells (avatar + breathing).
+                let avatar_col: u16 = spans
+                    .iter()
+                    .map(|s| console::measure_text_width(s.content.as_ref()) as u16)
+                    .sum();
+                spans.push(Span::raw("   "));
+                avatar_paint = Some((detail.author.clone(), avatar_col));
+            }
             spans.push(author_span);
             spans.push(dot_sep());
             spans.push(head_span);
@@ -4510,6 +4609,17 @@ impl<'a> PullRequestsView<'a> {
             Paragraph::new(Line::from(spans)),
             area,
         );
+        if let Some((login, col)) = avatar_paint {
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &login,
+                area.x + col,
+                area.y,
+                false,
+                self.ctx.color_theme.bg,
+            );
+        }
     }
 
     /// One-row strip showing the PR's currently-attached labels as
@@ -4682,6 +4792,9 @@ impl<'a> PullRequestsView<'a> {
         area: Rect,
         detail: &PullRequestDetail,
     ) {
+        // Snapshot once so every card uses the same decision — and
+        // we don't churn the mutex per push.
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         // Reserve the bottom rows for the inline editor when it's open.
         self.comment_editor_cursor_pos = None;
         let editor_height: u16 = if self.comment_editor.is_some() {
@@ -4719,6 +4832,7 @@ impl<'a> PullRequestsView<'a> {
         // Reset per-frame span tracking so mouse hits use the layout
         // we're about to lay down, not a stale one.
         self.conversation_comment_spans.clear();
+        self.conversation_avatar_slots.clear();
 
         let pr_idx = 0usize;
         let pr_first = lines.len();
@@ -4729,7 +4843,7 @@ impl<'a> PullRequestsView<'a> {
         // 1. PR description rendered as the first "card" (top-level, no
         //    parent → empty ancestor gutters, and no descending line
         //    since the conversation feed is not its "child" tree).
-        push_comment_card(
+        let pr_card_layout = push_comment_card(
             &mut lines,
             theme,
             area.width,
@@ -4749,8 +4863,21 @@ impl<'a> PullRequestsView<'a> {
                 // — they'd need a separate `GET /reactions` call
                 // (the PR endpoint doesn't inline them on the body).
                 reactions: crate::github::pr::ReactionCounts::default(),
+                avatar_login: if avatars_on {
+                    Some(&detail.author)
+                } else {
+                    None
+                },
             },
         );
+        if let Some(col) = pr_card_layout.avatar_slot {
+            self.conversation_avatar_slots.push(AvatarSlot {
+                login: detail.author.clone(),
+                line: pr_card_layout.top_line,
+                col,
+                is_selected: self.conversation_selected == pr_idx,
+            });
+        }
         self.conversation_comment_spans
             .push((pr_idx, pr_first, lines.len().saturating_sub(1)));
 
@@ -4805,6 +4932,7 @@ impl<'a> PullRequestsView<'a> {
                     &children_of,
                     &[],
                     &mut next_idx,
+                    avatars_on,
                 );
             }
             self.conversation_comment_count = next_idx;
@@ -4826,6 +4954,33 @@ impl<'a> PullRequestsView<'a> {
         let scroll = self.conversation_scroll.min(lines.len().saturating_sub(1));
         let para = Paragraph::new(lines).scroll((scroll as u16, 0));
         f.render_widget(para, area);
+
+        // Overlay queued avatars after the Paragraph paints. Skip any
+        // card scrolled outside the viewport. Conversation cards
+        // don't paint a row bg on selection — only the box border
+        // changes colour — so the avatar's rounded edges always
+        // blend over `theme.bg`, regardless of selection state.
+        let slots = std::mem::take(&mut self.conversation_avatar_slots);
+        for slot in &slots {
+            if slot.line < scroll {
+                continue;
+            }
+            let row_in_area = (slot.line - scroll) as u16;
+            if row_in_area >= area.height {
+                continue;
+            }
+            let screen_y = area.y + row_in_area;
+            let screen_x = area.x + slot.col;
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &slot.login,
+                screen_x,
+                screen_y,
+                false,
+                self.ctx.color_theme.bg,
+            );
+        }
     }
 
     /// Recursively render a comment and its replies. Replies indent one
@@ -4842,6 +4997,7 @@ impl<'a> PullRequestsView<'a> {
         children_of: &FxHashMap<u64, Vec<&ConversationEntry>>,
         ancestor_gutters: &[bool],
         next_idx: &mut usize,
+        avatars_on: bool,
     ) {
         let action = match &entry.kind {
             ConversationKind::Comment => CommentAction::Commented,
@@ -4896,7 +5052,7 @@ impl<'a> PullRequestsView<'a> {
         if entry.id.is_some() {
             shortcuts.push("+:react");
         }
-        push_comment_card(
+        let card_layout = push_comment_card(
             lines,
             theme,
             width,
@@ -4911,8 +5067,21 @@ impl<'a> PullRequestsView<'a> {
                 is_me,
                 inline_shortcuts: shortcuts,
                 reactions: entry.reactions.clone(),
+                avatar_login: if avatars_on {
+                    Some(&entry.author)
+                } else {
+                    None
+                },
             },
         );
+        if let Some(col) = card_layout.avatar_slot {
+            self.conversation_avatar_slots.push(AvatarSlot {
+                login: entry.author.clone(),
+                line: card_layout.top_line,
+                col,
+                is_selected: self.conversation_selected == my_idx,
+            });
+        }
         self.conversation_comment_spans
             .push((my_idx, first_line, lines.len().saturating_sub(1)));
 
@@ -4936,6 +5105,7 @@ impl<'a> PullRequestsView<'a> {
                     children_of,
                     &new_gutters,
                     next_idx,
+                    avatars_on,
                 );
             }
         }
@@ -4998,24 +5168,66 @@ impl<'a> PullRequestsView<'a> {
         }
 
         let cols = CommitColumns::compute(&detail.commit_list, area.width as usize);
+        // Build rows + collect avatar paints for visible commits.
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let mut paints: Vec<(String, u16, u16)> = Vec::new();
         let items: Vec<ListItem<'static>> = detail
             .commit_list
             .iter()
-            .map(|c| ListItem::new(commit_row(theme, c, &cols)))
+            .enumerate()
+            .map(|(i, c)| {
+                let (line, avatar_col) = commit_row(theme, c, &cols, avatars_on);
+                if let Some(col) = avatar_col {
+                    if i >= self.commits_scroll
+                        && visible > 0
+                        && i < self.commits_scroll + visible
+                    {
+                        paints.push((
+                            c.author_login.clone(),
+                            col,
+                            (i - self.commits_scroll) as u16,
+                        ));
+                    }
+                }
+                ListItem::new(line)
+            })
             .collect();
         let mut state = ListState::default();
         state.select(Some(self.commits_hovered));
         *state.offset_mut() = self.commits_scroll;
-        // Only paint the background on the selected row — the per-span
-        // foregrounds (sha → list_hash_fg, author → list_name_fg, date →
-        // list_date_fg, etc.) stay intact instead of being squashed into
-        // a single list_selected_fg. Bold modifier still helps it pop.
         let list = List::new(items).highlight_style(
             Style::default()
                 .bg(theme.list_selected_bg)
                 .add_modifier(Modifier::BOLD),
         );
         f.render_stateful_widget(list, area, &mut state);
+
+        // Overlay avatars — selected row uses the highlighted bg so
+        // the rounded edges blend correctly. We can't ask the List
+        // widget which row is selected after render, but we know it
+        // from `self.commits_hovered`.
+        let selected = self.commits_hovered;
+        for (login, col, row) in paints {
+            if row as usize >= area.height as usize {
+                continue;
+            }
+            let abs_row = self.commits_scroll + row as usize;
+            let is_sel = abs_row == selected;
+            let bg = if is_sel {
+                self.ctx.color_theme.list_selected_bg
+            } else {
+                self.ctx.color_theme.bg
+            };
+            paint_login_avatar(
+                f,
+                &self.ctx,
+                &login,
+                area.x + col,
+                area.y + row,
+                is_sel,
+                bg,
+            );
+        }
     }
 
     fn render_tab_checks(
@@ -5388,6 +5600,13 @@ pub(crate) struct CommentCardInput<'a> {
     pub(crate) action: CommentAction,
     pub(crate) when: &'a str,
     pub(crate) body: &'a str,
+    /// When `Some`, push_comment_card reserves a 2-cell wide slot
+    /// just after `┌─ ` in the top border. The caller is expected
+    /// to paint the avatar there itself (after the Paragraph
+    /// containing this card has been rendered) using the
+    /// `CommentCardLayout::avatar_slot` returned from this call.
+    /// Empty / `None` keeps the original PR layout intact.
+    pub(crate) avatar_login: Option<&'a str>,
     /// `ancestor_gutters[i] == true` means the gutter at depth i still
     /// has children coming below; we draw `│` there. `false` means the
     /// gutter is closed (we draw spaces). The LAST entry is the parent's
@@ -5494,12 +5713,102 @@ pub(crate) fn build_junction_prefix(
         .collect()
 }
 
+/// One pending avatar paint. Carries the `login` directly (instead
+/// of a borrow) so the slot can outlive the iteration that produced
+/// it — important because the rendering loop borrows `self.detail`
+/// while pushing slots, and the paint pass borrows `self` mutably.
+#[derive(Debug, Clone)]
+pub(crate) struct AvatarSlot {
+    pub(crate) login: String,
+    /// Logical line index inside the Paragraph buffer (pre-scroll).
+    pub(crate) line: usize,
+    /// Column offset inside that line where the avatar's first
+    /// cell lands.
+    pub(crate) col: u16,
+    /// Selection state — affects the background blending of the
+    /// rendered avatar (selected cards have a different bg).
+    pub(crate) is_selected: bool,
+}
+
+/// Paint a single login's avatar at `(screen_x, screen_y)`. No-op
+/// when avatars are disabled, the login is empty, or the avatar
+/// isn't yet on disk (a background prefetch may have been fired but
+/// hasn't completed). Triggers a prefetch on miss so the next render
+/// has it.
+///
+/// `bg` is the rounded-edge blend colour — must match the cell
+/// background visible BEHIND the slot, otherwise the alpha-blended
+/// circle reads as a misaligned chip. Callers in a list with a row
+/// highlight pass `list_selected_bg` for selected rows and
+/// `theme.bg` otherwise; callers with no row bg change always pass
+/// `theme.bg`. The `is_selected` flag keys a separate cached variant
+/// of the prepared image so a row toggling selected/unselected
+/// doesn't churn the cache.
+pub(crate) fn paint_login_avatar(
+    f: &mut Frame,
+    ctx: &AppContext,
+    login: &str,
+    screen_x: u16,
+    screen_y: u16,
+    is_selected: bool,
+    bg: Color,
+) {
+    if login.is_empty() {
+        return;
+    }
+    let mut manager = ctx.avatar_manager.lock().unwrap();
+    if !manager.is_enabled() {
+        return;
+    }
+    // Try to bring the avatar online — `ensure_uploaded_login` is
+    // idempotent and cheap when the image is already prepared.
+    let on_disk = manager.cached_avatar_exists_login(login);
+    if on_disk {
+        manager.ensure_uploaded_login(login, 1, is_selected, bg);
+    } else {
+        // Fire-and-forget background fetch; the AvatarsUpdated event
+        // triggers a redraw once the image lands.
+        manager.prefetch_login(login);
+        return;
+    }
+    let Some(prepared) = manager.prepared_image_login(login, 1, is_selected) else {
+        return;
+    };
+    let buf = f.buffer_mut();
+    for (dx, cell) in prepared.cells().iter().take(2).enumerate() {
+        let x = screen_x + dx as u16;
+        if x >= buf.area().right() || screen_y >= buf.area().bottom() {
+            break;
+        }
+        let bc = &mut buf[(x, screen_y)];
+        bc.set_symbol(cell.symbol());
+        bc.set_style(cell.style().bg(bg));
+        bc.set_skip(cell.skip());
+    }
+}
+
+/// Layout coordinates a caller needs after `push_comment_card` to
+/// paint overlays (currently: the GitHub avatar). All positions are
+/// relative to the start of the card's enclosing Paragraph area; the
+/// caller adds `area.x` and `area.y - scroll_offset` to get screen
+/// coordinates.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CommentCardLayout {
+    /// Logical line index of the top-border row (the row where the
+    /// author name appears).
+    pub(crate) top_line: usize,
+    /// `Some((x_offset, login_token_width))` when an avatar slot was
+    /// reserved — `x_offset` is the column offset inside the line
+    /// where the avatar's first cell lands; `width` is always 2.
+    pub(crate) avatar_slot: Option<u16>,
+}
+
 pub(crate) fn push_comment_card(
     lines: &mut Vec<Line<'static>>,
     theme: &crate::color::ColorTheme,
     available_width: u16,
     input: CommentCardInput<'_>,
-) {
+) -> CommentCardLayout {
     let label = Style::default().fg(theme.detail_label_fg);
     let value = Style::default().fg(theme.fg);
     let name_style = Style::default()
@@ -5573,9 +5882,41 @@ pub(crate) fn push_comment_card(
     if let Some(last) = top_gutters.last_mut() {
         *last = true;
     }
+    // The top border lands on the line at `lines.len()` right now.
+    // Capture it BEFORE the push so the caller can paint overlays
+    // at the same row.
+    let top_line = lines.len();
     let mut top: Vec<Span<'static>> = build_body_prefix(theme, &top_gutters);
-    top.push(Span::styled("┌─ ".to_string(), border_style));
+    // Track where the avatar slot lives so the caller can paint it
+    // after this Paragraph renders. The slot sits between the
+    // leading `┌─` and the author name, replacing the single space
+    // that already separated them — so layout shifts by exactly 2
+    // cells (avatar width) plus an extra space we add for breathing
+    // room.
+    let prefix_cells: u16 = top
+        .iter()
+        .map(|s| console::measure_text_width(s.content.as_ref()) as u16)
+        .sum();
+    let want_avatar = input
+        .avatar_login
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    let (border_open_str, avatar_slot_x): (&str, Option<u16>) = if want_avatar {
+        // `"┌─ "` + 2 reserved cells + extra space → `┌─ AV `
+        // where AV is the painted avatar. Total prefix width = 6.
+        ("┌─ ", Some(prefix_cells + 3))
+    } else {
+        ("┌─ ", None)
+    };
+    top.push(Span::styled(border_open_str.to_string(), border_style));
     let mut consumed = 3; // "┌─ "
+    if avatar_slot_x.is_some() {
+        // Reserve 2 cells worth of placeholder + 1 trailing space.
+        // Painted with the border style so an empty slot (avatar
+        // not yet on disk) reads as continuation of the border.
+        top.push(Span::styled("   ".to_string(), border_style));
+        consumed += 3;
+    }
     consumed += console::measure_text_width(input.author);
     top.push(Span::styled(input.author.to_string(), name_style));
     if input.is_me {
@@ -5695,6 +6036,11 @@ pub(crate) fn push_comment_card(
     let mut bot = build_body_prefix(theme, input.ancestor_gutters);
     bot.push(Span::styled(format!("└{}┘", bottom_dashes), border_style));
     lines.push(Line::from(bot));
+
+    CommentCardLayout {
+        top_line,
+        avatar_slot: avatar_slot_x,
+    }
 }
 
 /// Compact "ready to merge" / "conflicts" / etc. badge rendered at the
@@ -5810,12 +6156,16 @@ impl CommitColumns {
     }
 }
 
+/// Returns `(line, avatar_col)` — `Some(col)` when the 3-cell pad
+/// was reserved for an avatar (avatars enabled + login known),
+/// `None` when the row layout stays tight without a pad.
 fn commit_row(
     theme: &crate::color::ColorTheme,
     c: &PullCommit,
     cols: &CommitColumns,
-) -> Line<'static> {
-    Line::from(vec![
+    avatars_on: bool,
+) -> (Line<'static>, Option<u16>) {
+    let mut spans: Vec<Span<'static>> = vec![
         Span::raw("  "),
         Span::styled(
             fit_cell(&c.short_sha, cols.sha),
@@ -5828,17 +6178,28 @@ fn commit_row(
             fit_cell(&c.subject, cols.subject),
             Style::default().fg(theme.list_commit_message_fg),
         ),
-        Span::raw("  "),
-        Span::styled(
-            fit_cell(&c.author, cols.author),
-            Style::default().fg(theme.list_name_fg),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            fit_cell(&c.date, cols.date),
-            Style::default().fg(theme.list_date_fg),
-        ),
-    ])
+    ];
+    // Only reserve the 3-cell pad when avatars are enabled AND the
+    // commit has a resolved GitHub login (otherwise paint would
+    // skip and the pad would just be a gap).
+    let avatar_col = if avatars_on && !c.author_login.is_empty() {
+        let col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
+        spans.push(Span::raw("   "));
+        Some(col)
+    } else {
+        spans.push(Span::raw("  "));
+        None
+    };
+    spans.push(Span::styled(
+        fit_cell(&c.author, cols.author),
+        Style::default().fg(theme.list_name_fg),
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        fit_cell(&c.date, cols.date),
+        Style::default().fg(theme.list_date_fg),
+    ));
+    (Line::from(spans), avatar_col)
 }
 
 fn check_row(theme: &crate::color::ColorTheme, c: &crate::github::pr::CheckRunDetail) -> Line<'static> {
@@ -7432,6 +7793,9 @@ fn compose_preview_commits(
                 sha: parts[0].to_string(),
                 short_sha: parts[1].to_string(),
                 author: parts[2].to_string(),
+                // Local git log fallback — no GitHub login resolution
+                // here; avatar overlay will simply skip these rows.
+                author_login: String::new(),
                 date: short_relative_iso(parts[3]),
                 subject: parts[4].to_string(),
             })
