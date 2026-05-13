@@ -157,6 +157,28 @@ pub enum AppEvent {
         action: String,
         result: Result<(), String>,
     },
+    /// Repo labels finished fetching for the picker — payload carries
+    /// the full label set, plus which ones are currently attached to
+    /// the PR. The handler opens the multi-select dialog.
+    OpenPrLabelsPicker {
+        pr_number: u64,
+        all_labels: Vec<String>,
+        currently_on_pr: Vec<String>,
+    },
+    /// Same shape as `OpenPrLabelsPicker` but for reviewers — uses the
+    /// `/assignees` endpoint as the user pool.
+    OpenPrReviewersPicker {
+        pr_number: u64,
+        all_users: Vec<String>,
+        currently_requested: Vec<String>,
+    },
+    /// A background fetch of a single commit's full detail completed.
+    /// The PR view stores it under its SHA and renders the drill-down
+    /// page if the user is still pointed at it.
+    PrCommitDetailFetched {
+        sha: String,
+        result: Result<crate::github::pr::CommitDetail, String>,
+    },
     OpenDetailByHash {
         hash: String,
     },
@@ -198,6 +220,37 @@ pub enum DialogKind {
         is_review: bool,
         author: String,
         body_preview: String,
+    },
+    /// Confirm closing or reopening a PR. `closing == true` closes a
+    /// currently-open PR; `false` reopens a closed one.
+    ConfirmPullRequestStateChange {
+        pr_number: u64,
+        pr_title: String,
+        closing: bool,
+    },
+    /// Confirm flipping draft ↔ ready. `to_draft == true` converts
+    /// a ready PR back to draft; `false` marks a draft as ready.
+    ConfirmPullRequestDraftToggle {
+        pr_number: u64,
+        pr_title: String,
+        node_id: String,
+        to_draft: bool,
+    },
+    /// Multi-select picker for the PR's labels. `selected` is the
+    /// set currently checked (mutated as the user toggles); on confirm
+    /// it becomes the new label set on the PR.
+    PullRequestLabels {
+        pr_number: u64,
+        all_labels: Vec<String>,
+        selected: Vec<bool>,
+    },
+    /// Multi-select picker for the PR's reviewers. Same shape as
+    /// labels — `selected` starts at currently-requested reviewers.
+    PullRequestReviewers {
+        pr_number: u64,
+        all_users: Vec<String>,
+        selected: Vec<bool>,
+        initial: Vec<bool>,
     },
     // Branch actions
     RenameBranch { branch: String },
@@ -280,6 +333,18 @@ pub enum GitAction {
     /// the comment id; `is_review` picks between the issue-comments
     /// and pulls-comments endpoint.
     DeletePrComment { pr_number: u64, is_review: bool },
+    /// Close (without merge) or reopen a PR via REST PATCH.
+    SetPullRequestState { pr_number: u64, state: String },
+    /// Flip the draft flag on a PR. Uses GraphQL.
+    SetPullRequestDraft { pr_number: u64, node_id: String, draft: bool },
+    /// Replace the PR's full label set.
+    SetPullRequestLabels { pr_number: u64, labels: Vec<String> },
+    /// Add and/or remove reviewers on the PR.
+    SetPullRequestReviewers {
+        pr_number: u64,
+        to_add: Vec<String>,
+        to_remove: Vec<String>,
+    },
     Reset {
         mode: String,
     },

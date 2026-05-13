@@ -114,6 +114,24 @@ pub struct PullRequestsView<'a> {
     checks_hovered: usize,
     files_scroll: usize,
     files_hovered: usize,
+    /// Index of the file the user drilled into within the Files tab.
+    /// `Some(i)` swaps the file list for a full diff view of that
+    /// entry; Esc clears it.
+    files_drilldown: Option<usize>,
+    /// Vertical scroll within the drilled-down file's patch.
+    files_drilldown_scroll: usize,
+    /// SHA of the commit the user drilled into within the Commits
+    /// tab. `Some` swaps the commit list for the commit's full
+    /// message + per-file diff; Esc clears it.
+    commits_drilldown: Option<String>,
+    /// Per-commit detail cache (SHA → fetched payload). First click
+    /// spawns a background fetch; subsequent ones are instant.
+    commit_detail_cache: FxHashMap<String, crate::github::pr::CommitDetail>,
+    /// Set of commit SHAs whose detail fetch is currently in flight
+    /// — drives the "Loading…" placeholder.
+    commit_detail_loading: rustc_hash::FxHashSet<String>,
+    /// Vertical scroll within the drilled-down commit's diff.
+    commits_drilldown_scroll: usize,
     last_error: Option<String>,
     /// Rects captured each frame for mouse hit-testing — `None` until the
     /// first render. Cleared at the top of each render pass.
@@ -467,6 +485,12 @@ impl<'a> PullRequestsView<'a> {
             checks_hovered: 0,
             files_scroll: 0,
             files_hovered: 0,
+            files_drilldown: None,
+            files_drilldown_scroll: 0,
+            commits_drilldown: None,
+            commit_detail_cache: FxHashMap::default(),
+            commit_detail_loading: rustc_hash::FxHashSet::default(),
+            commits_drilldown_scroll: 0,
             last_error: None,
             list_area: None,
             tab_content_area: None,
@@ -532,10 +556,44 @@ impl<'a> PullRequestsView<'a> {
         let parts: Vec<&str> = match self.mode {
             Mode::List => vec!["r:reload"],
             Mode::Detail => {
+                // Inside a drill-down the footer collapses to just
+                // Esc — every other shortcut belongs to the list view.
+                if self.files_drilldown.is_some()
+                    || self.commits_drilldown.is_some()
+                {
+                    return format!("⌘ {}", "Esc:back");
+                }
                 let mut p = vec!["c:comment"];
+                // Enter drills into the focused row on tabs where it
+                // makes sense.
+                if matches!(self.active_tab, Tab::Commits | Tab::Files) {
+                    p.push("Enter:view diff");
+                }
                 p.push("a:approve");
                 p.push("x:request changes");
                 p.push("m:merge");
+                // State management — shortcuts adapt to the PR's
+                // current state so we don't surface no-ops.
+                let detail = self.opened_detail();
+                let is_open = detail
+                    .map(|d| matches!(d.state, PullState::Open))
+                    .unwrap_or(false);
+                let is_closed = detail
+                    .map(|d| matches!(d.state, PullState::Closed))
+                    .unwrap_or(false);
+                let is_draft = detail.map(|d| d.draft).unwrap_or(false);
+                if is_open {
+                    p.push("Ctrl+X:close");
+                    p.push(if is_draft {
+                        "Ctrl+D:mark ready"
+                    } else {
+                        "Ctrl+D:to draft"
+                    });
+                } else if is_closed {
+                    p.push("Ctrl+O:reopen");
+                }
+                p.push("l:labels");
+                p.push("v:reviewers");
                 p.push("o:open in web");
                 p.push("r:reload");
                 p
@@ -877,6 +935,7 @@ impl<'a> PullRequestsView<'a> {
         // ── PR-level action shortcuts (work on any tab once a PR is opened).
         //    a:approve  x:request changes  m:merge  o:open in browser
         let plain = key.modifiers == KeyModifiers::NONE;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('a') if plain => {
                 self.start_approve();
@@ -892,6 +951,26 @@ impl<'a> PullRequestsView<'a> {
             }
             KeyCode::Char('o') if plain => {
                 self.open_in_browser();
+                return;
+            }
+            KeyCode::Char('l') if plain => {
+                self.start_labels_picker();
+                return;
+            }
+            KeyCode::Char('v') if plain => {
+                self.start_reviewers_picker();
+                return;
+            }
+            KeyCode::Char('x') if ctrl => {
+                self.confirm_close_pr();
+                return;
+            }
+            KeyCode::Char('o') if ctrl => {
+                self.confirm_reopen_pr();
+                return;
+            }
+            KeyCode::Char('d') if ctrl => {
+                self.confirm_toggle_draft();
                 return;
             }
             _ => {}
@@ -927,7 +1006,22 @@ impl<'a> PullRequestsView<'a> {
         }
 
         match event_with_count.event {
-            UserEvent::Cancel | UserEvent::Close => self.back_to_list(),
+            UserEvent::Cancel | UserEvent::Close => {
+                // Esc inside a drill-down goes back to the file /
+                // commit list first. Only a second Esc exits to the
+                // PR list.
+                if self.files_drilldown.is_some() {
+                    self.files_drilldown = None;
+                    self.files_drilldown_scroll = 0;
+                } else if self.commits_drilldown.is_some() {
+                    self.commits_drilldown = None;
+                    self.commits_drilldown_scroll = 0;
+                } else {
+                    self.back_to_list();
+                }
+            }
+            // Enter on a file or commit row drills into its diff.
+            UserEvent::Confirm => self.enter_drilldown(),
             // Left/Right move between tabs (in addition to 1-4 hotkeys).
             UserEvent::NavigateLeft => {
                 let prev =
@@ -954,8 +1048,34 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
+    fn enter_drilldown(&mut self) {
+        match self.active_tab {
+            Tab::Files => {
+                let idx = self.files_hovered;
+                if self.opened_detail().map_or(false, |d| idx < d.files.len()) {
+                    self.files_drilldown = Some(idx);
+                    self.files_drilldown_scroll = 0;
+                }
+            }
+            Tab::Commits => self.open_commit_drilldown(),
+            _ => {}
+        }
+    }
+
     /// Move the per-tab hovered cursor / scroll. Used by ↑↓ + PgUp/Dn.
     fn tab_nav(&mut self, delta: i32) {
+        // While drilled in on a file or commit, ↑↓/PgUp/Dn scroll the
+        // diff content directly — there's no row cursor to track.
+        if self.active_tab == Tab::Files && self.files_drilldown.is_some() {
+            self.files_drilldown_scroll =
+                adjust_scroll(self.files_drilldown_scroll, delta);
+            return;
+        }
+        if self.active_tab == Tab::Commits && self.commits_drilldown.is_some() {
+            self.commits_drilldown_scroll =
+                adjust_scroll(self.commits_drilldown_scroll, delta);
+            return;
+        }
         match self.active_tab {
             Tab::Conversation => {
                 let max = self.conversation_comment_count.saturating_sub(1);
@@ -982,6 +1102,16 @@ impl<'a> PullRequestsView<'a> {
         // Mouse wheel — doesn't move the per-tab cursor, just pans the
         // visible window (or scrolls the body for the Conversation tab
         // which has no hovered cursor).
+        if self.active_tab == Tab::Files && self.files_drilldown.is_some() {
+            self.files_drilldown_scroll =
+                adjust_scroll(self.files_drilldown_scroll, delta);
+            return;
+        }
+        if self.active_tab == Tab::Commits && self.commits_drilldown.is_some() {
+            self.commits_drilldown_scroll =
+                adjust_scroll(self.commits_drilldown_scroll, delta);
+            return;
+        }
         match self.active_tab {
             Tab::Conversation => {
                 self.conversation_scroll = adjust_scroll(self.conversation_scroll, delta)
@@ -1314,6 +1444,173 @@ impl<'a> PullRequestsView<'a> {
                 pr_body: body,
             },
         ));
+    }
+
+    fn confirm_close_pr(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        // Only meaningful when the PR is currently open — closing a
+        // merged or already-closed PR isn't a thing.
+        if !matches!(detail.state, PullState::Open) {
+            return;
+        }
+        self.tx
+            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmPullRequestStateChange {
+                pr_number: detail.number,
+                pr_title: detail.title.clone(),
+                closing: true,
+            }));
+    }
+
+    fn confirm_reopen_pr(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        if !matches!(detail.state, PullState::Closed) {
+            return;
+        }
+        self.tx
+            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmPullRequestStateChange {
+                pr_number: detail.number,
+                pr_title: detail.title.clone(),
+                closing: false,
+            }));
+    }
+
+    fn confirm_toggle_draft(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        if !matches!(detail.state, PullState::Open) {
+            return;
+        }
+        let to_draft = !detail.draft;
+        self.tx
+            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmPullRequestDraftToggle {
+                pr_number: detail.number,
+                pr_title: detail.title.clone(),
+                node_id: detail.node_id.clone(),
+                to_draft,
+            }));
+    }
+
+    fn start_labels_picker(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        let pr_number = detail.number;
+        let currently_on_pr: Vec<String> =
+            detail.labels.iter().map(|l| l.name.clone()).collect();
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        // Fetch the repo's full label set in the background — when it
+        // returns we re-enter the main loop with the picker open.
+        std::thread::spawn(move || {
+            match crate::github::pr::list_repo_labels(&token, &coords) {
+                Ok(labels) => {
+                    let all: Vec<String> = labels.into_iter().map(|l| l.name).collect();
+                    tx.send(AppEvent::OpenPrLabelsPicker {
+                        pr_number,
+                        all_labels: all,
+                        currently_on_pr,
+                    });
+                }
+                Err(e) => tx.send(AppEvent::NotifyError(format!("Labels: {}", e))),
+            }
+        });
+    }
+
+    fn start_reviewers_picker(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        let pr_number = detail.number;
+        let currently_requested = detail.reviewers.clone();
+        // The PR author can never be a reviewer — bake that into the
+        // pool we send to the picker so the user can't tick themselves
+        // and get a 422 on confirm.
+        let pr_author = detail.author.clone();
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            match crate::github::pr::list_repo_assignees(&token, &coords) {
+                Ok(users) => {
+                    let mut filtered: Vec<String> =
+                        users.into_iter().filter(|u| *u != pr_author).collect();
+                    // Make sure currently-requested reviewers show up
+                    // even if `/assignees` didn't list them (they may
+                    // not be repo collaborators yet).
+                    for r in &currently_requested {
+                        if !filtered.contains(r) {
+                            filtered.push(r.clone());
+                        }
+                    }
+                    filtered.sort();
+                    tx.send(AppEvent::OpenPrReviewersPicker {
+                        pr_number,
+                        all_users: filtered,
+                        currently_requested,
+                    });
+                }
+                Err(e) => tx.send(AppEvent::NotifyError(format!("Reviewers: {}", e))),
+            }
+        });
+    }
+
+    /// Drill from the Commits tab into a single commit's detail view.
+    /// Cache hit → instant; miss → background fetch with a loading
+    /// placeholder until `on_commit_detail_fetched` swaps it in.
+    fn open_commit_drilldown(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        let Some(commit) = detail.commit_list.get(self.commits_hovered) else {
+            return;
+        };
+        let sha = commit.sha.clone();
+        self.commits_drilldown = Some(sha.clone());
+        self.commits_drilldown_scroll = 0;
+        if self.commit_detail_cache.contains_key(&sha)
+            || self.commit_detail_loading.contains(&sha)
+        {
+            return;
+        }
+        self.commit_detail_loading.insert(sha.clone());
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        let fetch_sha = sha.clone();
+        std::thread::spawn(move || {
+            let result = crate::github::pr::fetch_commit_detail(&token, &coords, &fetch_sha);
+            tx.send(AppEvent::PrCommitDetailFetched {
+                sha: fetch_sha,
+                result,
+            });
+        });
+    }
+
+    pub fn on_commit_detail_fetched(
+        &mut self,
+        sha: String,
+        result: Result<crate::github::pr::CommitDetail, String>,
+    ) {
+        self.commit_detail_loading.remove(&sha);
+        match result {
+            Ok(detail) => {
+                self.commit_detail_cache.insert(sha, detail);
+            }
+            Err(e) => {
+                self.tx
+                    .send(AppEvent::NotifyError(format!("Commit detail: {}", e)));
+                // Drop the drill-down so the user goes back to the list.
+                if self.commits_drilldown.as_deref() == Some(&sha) {
+                    self.commits_drilldown = None;
+                }
+            }
+        }
     }
 
     fn open_in_browser(&mut self) {
@@ -2951,6 +3248,13 @@ impl<'a> PullRequestsView<'a> {
         detail: &PullRequestDetail,
     ) {
         let theme = &self.ctx.color_theme;
+        // Drill-down: render the commit's full message + per-file diff
+        // instead of the list. Esc clears `commits_drilldown` and
+        // brings the list back.
+        if let Some(sha) = self.commits_drilldown.clone() {
+            self.render_commit_drilldown(f, area, &sha);
+            return;
+        }
         if detail.commit_list.is_empty() {
             let p = Paragraph::new(Span::styled(
                 "  No commits in this PR.",
@@ -3040,6 +3344,11 @@ impl<'a> PullRequestsView<'a> {
         detail: &PullRequestDetail,
     ) {
         let theme = &self.ctx.color_theme;
+        // Drill-down — replace the list with the file's patch.
+        if let Some(idx) = self.files_drilldown {
+            self.render_file_drilldown(f, area, detail, idx);
+            return;
+        }
         if detail.files.is_empty() {
             let p = Paragraph::new(Span::styled(
                 "  No file changes.",
@@ -3073,6 +3382,134 @@ impl<'a> PullRequestsView<'a> {
                 .add_modifier(Modifier::BOLD),
         );
         f.render_stateful_widget(list, area, &mut state);
+    }
+
+    /// Render the commit drill-down: header (sha + author + date),
+    /// commit message, per-file diff. Esc clears the drill-down.
+    fn render_commit_drilldown(&mut self, f: &mut Frame, area: Rect, sha: &str) {
+        let theme = &self.ctx.color_theme;
+        // Loading placeholder if the fetch is still in flight.
+        let Some(commit) = self.commit_detail_cache.get(sha).cloned() else {
+            let p = Paragraph::new(Span::styled(
+                "  Loading commit detail…".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            ));
+            f.render_widget(p, area);
+            return;
+        };
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        // Header row — short SHA + author + date + Esc hint.
+        let short_sha: String = commit.sha.chars().take(7).collect();
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                short_sha,
+                Style::default()
+                    .fg(theme.list_hash_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("by ", Style::default().fg(theme.detail_label_fg)),
+            Span::styled(commit.author.clone(), Style::default().fg(theme.list_name_fg)),
+            Span::raw("  "),
+            Span::styled(commit.date.clone(), Style::default().fg(theme.list_date_fg)),
+            Span::raw("   "),
+            Span::styled(
+                format!("+{} -{}", commit.additions, commit.deletions),
+                Style::default().fg(theme.detail_label_fg),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                "Esc:back".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            ),
+        ]));
+        lines.push(Line::from(""));
+        // Commit message — full body, no markdown rendering (we want
+        // verbatim git-log content).
+        for line in commit.message.lines() {
+            lines.push(Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(theme.fg),
+            )));
+        }
+        if !commit.message.is_empty() {
+            lines.push(Line::from(""));
+        }
+        // Files + patches.
+        for file in &commit.files {
+            lines.push(Line::from(diff_file_header_spans(theme, file)));
+            if let Some(patch) = &file.patch {
+                for line in patch.lines() {
+                    lines.push(Line::from(Span::styled(
+                        line.to_string(),
+                        diff_line_style(theme, line),
+                    )));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "    (no patch — binary or too large)".to_string(),
+                    Style::default().fg(theme.detail_label_fg),
+                )));
+            }
+            lines.push(Line::from(""));
+        }
+        let total = lines.len();
+        let visible = area.height as usize;
+        let max_scroll = total.saturating_sub(visible);
+        if self.commits_drilldown_scroll > max_scroll {
+            self.commits_drilldown_scroll = max_scroll;
+        }
+        let para = Paragraph::new(lines)
+            .scroll((self.commits_drilldown_scroll as u16, 0));
+        f.render_widget(para, area);
+    }
+
+    /// Render the file drill-down: file header + its raw patch with
+    /// diff syntax colouring.
+    fn render_file_drilldown(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        detail: &PullRequestDetail,
+        idx: usize,
+    ) {
+        let theme = &self.ctx.color_theme;
+        let Some(file) = detail.files.get(idx) else {
+            self.files_drilldown = None;
+            return;
+        };
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut header = diff_file_header_spans(theme, file);
+        header.push(Span::raw("   "));
+        header.push(Span::styled(
+            "Esc:back".to_string(),
+            Style::default().fg(theme.detail_label_fg),
+        ));
+        lines.push(Line::from(header));
+        lines.push(Line::from(""));
+        if let Some(patch) = &file.patch {
+            for line in patch.lines() {
+                lines.push(Line::from(Span::styled(
+                    line.to_string(),
+                    diff_line_style(theme, line),
+                )));
+            }
+        } else {
+            lines.push(Line::from(Span::styled(
+                "    (no patch — binary or too large)".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            )));
+        }
+        let total = lines.len();
+        let visible = area.height as usize;
+        let max_scroll = total.saturating_sub(visible);
+        if self.files_drilldown_scroll > max_scroll {
+            self.files_drilldown_scroll = max_scroll;
+        }
+        let para = Paragraph::new(lines)
+            .scroll((self.files_drilldown_scroll as u16, 0));
+        f.render_widget(para, area);
     }
 }
 
@@ -3623,6 +4060,65 @@ fn file_line(
             Style::default().fg(theme.detail_file_change_delete_fg),
         ),
     ])
+}
+
+/// Inline file header for the drill-down view — tag + filename +
+/// `+N -M`, sharing the colour palette of the list rows so they read
+/// the same.
+fn diff_file_header_spans(
+    theme: &crate::color::ColorTheme,
+    f: &crate::github::pr::PullFile,
+) -> Vec<Span<'static>> {
+    let (tag, tag_color) = match f.status {
+        FileStatus::Added => ("A", theme.detail_file_change_add_fg),
+        FileStatus::Modified => ("M", theme.detail_file_change_modify_fg),
+        FileStatus::Removed => ("D", theme.detail_file_change_delete_fg),
+        FileStatus::Renamed => ("R", theme.detail_file_change_move_fg),
+        FileStatus::Other => ("?", theme.detail_label_fg),
+    };
+    vec![
+        Span::raw("  "),
+        Span::styled(
+            tag.to_string(),
+            Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            f.filename.clone(),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("+{}", f.additions),
+            Style::default().fg(theme.detail_file_change_add_fg),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("-{}", f.deletions),
+            Style::default().fg(theme.detail_file_change_delete_fg),
+        ),
+    ]
+}
+
+/// Choose a colour for one row of a unified-diff hunk based on its
+/// leading character — green for additions, red for deletions, muted
+/// for hunk headers, fg for context.
+fn diff_line_style(
+    theme: &crate::color::ColorTheme,
+    line: &str,
+) -> Style {
+    match line.chars().next() {
+        Some('+') if !line.starts_with("+++") => {
+            Style::default().fg(theme.detail_file_change_add_fg)
+        }
+        Some('-') if !line.starts_with("---") => {
+            Style::default().fg(theme.detail_file_change_delete_fg)
+        }
+        Some('@') => Style::default()
+            .fg(theme.list_head_fg)
+            .add_modifier(Modifier::BOLD),
+        _ => Style::default().fg(theme.fg),
+    }
 }
 
 /// Compute (column, row) within the editor body for a buffer cursor at

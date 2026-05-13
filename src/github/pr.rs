@@ -43,6 +43,10 @@ pub enum PullState {
 #[derive(Debug, Clone)]
 pub struct PullRequestDetail {
     pub number: u64,
+    /// GitHub's GraphQL node ID — needed for the `convertPullRequest
+    /// ToDraft` / `markPullRequestReadyForReview` mutations, which
+    /// the REST API doesn't expose.
+    pub node_id: String,
     pub title: String,
     pub author: String,
     pub state: PullState,
@@ -58,6 +62,8 @@ pub struct PullRequestDetail {
     pub reviews: ReviewsSummary,
     pub ci: CiSummary,
     pub files: Vec<PullFile>,
+    /// Labels currently attached to the PR.
+    pub labels: Vec<Label>,
     /// Aggregate merge readiness — drives the badge shown alongside
     /// the PR title (Ready to merge / Conflicts / Blocked / etc).
     pub mergeability: Mergeability,
@@ -198,6 +204,32 @@ pub struct PullFile {
     pub status: FileStatus,
     pub additions: u64,
     pub deletions: u64,
+    /// Raw unified diff for the file as returned by GitHub. `None`
+    /// for binary files (where GitHub omits the field) or when the
+    /// diff exceeds GitHub's per-file size limit.
+    pub patch: Option<String>,
+}
+
+/// Repo-level label (colour as a `#rrggbb` hex string when present).
+#[derive(Debug, Clone)]
+pub struct Label {
+    pub name: String,
+    pub color: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Full commit detail with files + patches, returned by `GET
+/// /repos/{owner}/{repo}/commits/{sha}`. Used when the user drills
+/// into a commit from the Commits tab.
+#[derive(Debug, Clone)]
+pub struct CommitDetail {
+    pub sha: String,
+    pub author: String,
+    pub date: String,
+    pub message: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub files: Vec<PullFile>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,6 +278,10 @@ struct ApiPullSummary {
 #[derive(Deserialize)]
 struct ApiPullDetail {
     number: u64,
+    /// GraphQL node ID — required for draft toggle mutations (REST
+    /// can't flip the draft flag).
+    #[serde(default)]
+    node_id: String,
     #[serde(default)]
     title: String,
     user: Option<ApiUser>,
@@ -269,6 +305,8 @@ struct ApiPullDetail {
     base: ApiRef,
     #[serde(default)]
     requested_reviewers: Vec<ApiUser>,
+    #[serde(default)]
+    labels: Vec<ApiLabel>,
     /// `true` / `false` / `null` (still computing). GitHub takes a few
     /// seconds after a push to compute this.
     #[serde(default)]
@@ -281,6 +319,26 @@ struct ApiPullDetail {
     /// ISO-8601 timestamp of when the PR was opened.
     #[serde(default)]
     created_at: String,
+}
+
+#[derive(Deserialize)]
+struct ApiLabel {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+impl From<ApiLabel> for Label {
+    fn from(l: ApiLabel) -> Self {
+        Label {
+            name: l.name,
+            color: l.color,
+            description: l.description,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -313,6 +371,10 @@ struct ApiPullFile {
     additions: u64,
     #[serde(default)]
     deletions: u64,
+    /// Unified-diff text. Missing on binary files and on diffs
+    /// exceeding GitHub's per-file size limit.
+    #[serde(default)]
+    patch: Option<String>,
 }
 
 // Raw shapes for the additional Phase-2A endpoints.
@@ -614,8 +676,11 @@ pub fn fetch_pull_request_detail(
         &ci,
     );
 
+    let labels: Vec<Label> = pr.labels.into_iter().map(Into::into).collect();
+
     Ok(PullRequestDetail {
         number: pr.number,
+        node_id: pr.node_id,
         title: pr.title,
         author: pr.user.map(|u| u.login).unwrap_or_else(|| "?".into()),
         state,
@@ -639,6 +704,7 @@ pub fn fetch_pull_request_detail(
         reviews,
         ci,
         files,
+        labels,
         commit_list,
         conversation,
         check_runs,
@@ -1078,6 +1144,7 @@ fn map_file(raw: ApiPullFile) -> PullFile {
         },
         additions: raw.additions,
         deletions: raw.deletions,
+        patch: raw.patch,
     }
 }
 
@@ -1350,6 +1417,284 @@ fn delete_request(token: &str, url: &str) -> Result<(), String> {
         .header("Accept", "application/vnd.github+json")
         .send()
         .map_err(|e| format!("GitHub delete: {}", e))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        Err(humanize_github_error(status, &body))
+    }
+}
+
+/// Fetch one commit's full data (message body, author, files +
+/// patches). Used by the Commits-tab drill-down — gives us per-file
+/// diffs without going through the PR-files endpoint.
+pub fn fetch_commit_detail(
+    token: &str,
+    coords: &RepoCoords,
+    sha: &str,
+) -> Result<CommitDetail, String> {
+    let client = http_client()?;
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/commits/{}",
+        coords.owner, coords.repo, sha
+    );
+    let resp = client
+        .get(&url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("GitHub /commits: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(humanize_github_error(status, &body));
+    }
+    let body = resp.text().map_err(|e| format!("/commits read: {}", e))?;
+    let raw: ApiCommitFull =
+        serde_json::from_str(&body).map_err(|e| format!("/commits JSON: {}", e))?;
+    Ok(CommitDetail {
+        sha: raw.sha,
+        author: raw
+            .commit
+            .author
+            .as_ref()
+            .map(|a| a.name.clone())
+            .unwrap_or_default(),
+        date: raw
+            .commit
+            .author
+            .as_ref()
+            .map(|a| short_relative(&a.date))
+            .unwrap_or_default(),
+        message: raw.commit.message,
+        additions: raw.stats.as_ref().map(|s| s.additions).unwrap_or(0),
+        deletions: raw.stats.as_ref().map(|s| s.deletions).unwrap_or(0),
+        files: raw.files.into_iter().map(map_file).collect(),
+    })
+}
+
+#[derive(Deserialize)]
+struct ApiCommitFull {
+    #[serde(default)]
+    sha: String,
+    commit: ApiCommitInner,
+    #[serde(default)]
+    stats: Option<ApiCommitStats>,
+    #[serde(default)]
+    files: Vec<ApiPullFile>,
+}
+
+#[derive(Deserialize)]
+struct ApiCommitStats {
+    #[serde(default)]
+    additions: u64,
+    #[serde(default)]
+    deletions: u64,
+}
+
+// ─── State-changing actions (close / reopen / draft toggle / labels / reviewers) ───
+
+#[derive(Serialize)]
+struct StatePatch<'a> {
+    state: &'a str,
+}
+
+/// Close (without merge) or reopen a PR via `PATCH /pulls/{n}`.
+/// `state` must be `"open"` or `"closed"`.
+pub fn set_pull_request_state(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    state: &str,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}",
+        coords.owner, coords.repo, pr_number
+    );
+    write_json(token, &url, reqwest::Method::PATCH, &StatePatch { state })
+}
+
+/// Toggle a PR's draft flag. GitHub's REST API does not expose this
+/// — only the GraphQL `convertPullRequestToDraft` / `markPullRequest
+/// ReadyForReview` mutations work, so we POST to `/graphql` directly.
+pub fn set_pull_request_draft(
+    token: &str,
+    node_id: &str,
+    draft: bool,
+) -> Result<(), String> {
+    let mutation = if draft {
+        "convertPullRequestToDraft"
+    } else {
+        "markPullRequestReadyForReview"
+    };
+    // GraphQL escaping — node ids are opaque base64-ish strings, no
+    // double quotes or backslashes, so plain interpolation is safe.
+    let query = format!(
+        r#"mutation {{ {mutation}(input: {{ pullRequestId: "{node_id}" }}) {{ pullRequest {{ id }} }} }}"#,
+        mutation = mutation,
+        node_id = node_id,
+    );
+    #[derive(Serialize)]
+    struct GqlBody<'a> {
+        query: &'a str,
+    }
+    let client = http_client()?;
+    let body_json = serde_json::to_string(&GqlBody { query: &query })
+        .map_err(|e| format!("encode GraphQL body: {}", e))?;
+    let resp = client
+        .post("https://api.github.com/graphql")
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .body(body_json)
+        .send()
+        .map_err(|e| format!("GitHub GraphQL: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(humanize_github_error(status, &body));
+    }
+    // GraphQL returns 200 even on logical errors — they show up in
+    // a top-level `errors` array. Parse and surface the first one.
+    let body = resp.text().map_err(|e| format!("GraphQL read: {}", e))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+    if let Some(errs) = parsed.get("errors").and_then(|v| v.as_array()) {
+        if let Some(first) = errs.first() {
+            let msg = first
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("GraphQL error");
+            return Err(msg.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Fetch all labels available on a repo (the picker source). Paginated
+/// at 100 per page — for any sane repo size, one page is enough.
+pub fn list_repo_labels(
+    token: &str,
+    coords: &RepoCoords,
+) -> Result<Vec<Label>, String> {
+    let client = http_client()?;
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/labels?per_page=100",
+        coords.owner, coords.repo
+    );
+    let resp = client
+        .get(&url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("GitHub /labels: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(humanize_github_error(status, &body));
+    }
+    let body = resp.text().map_err(|e| format!("/labels read: {}", e))?;
+    let raw: Vec<ApiLabel> =
+        serde_json::from_str(&body).map_err(|e| format!("/labels JSON: {}", e))?;
+    Ok(raw.into_iter().map(Into::into).collect())
+}
+
+#[derive(Serialize)]
+struct LabelsBody<'a> {
+    labels: &'a [String],
+}
+
+/// Replace the full set of labels on a PR (treated as an issue by GH).
+pub fn set_pull_request_labels(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    labels: &[String],
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/{}/labels",
+        coords.owner, coords.repo, pr_number
+    );
+    write_json(token, &url, reqwest::Method::PUT, &LabelsBody { labels })
+}
+
+/// Fetch the list of users that can be assigned / requested as
+/// reviewers on this repo. GitHub's `/assignees` endpoint is the
+/// canonical source for the picker.
+pub fn list_repo_assignees(
+    token: &str,
+    coords: &RepoCoords,
+) -> Result<Vec<String>, String> {
+    let client = http_client()?;
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/assignees?per_page=100",
+        coords.owner, coords.repo
+    );
+    let resp = client
+        .get(&url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("GitHub /assignees: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(humanize_github_error(status, &body));
+    }
+    let body = resp.text().map_err(|e| format!("/assignees read: {}", e))?;
+    let raw: Vec<ApiUser> = serde_json::from_str(&body)
+        .map_err(|e| format!("/assignees JSON: {}", e))?;
+    Ok(raw.into_iter().map(|u| u.login).filter(|l| !l.is_empty()).collect())
+}
+
+#[derive(Serialize)]
+struct ReviewersBody<'a> {
+    reviewers: &'a [String],
+}
+
+/// Request one or more reviewers on a PR. Users already requested or
+/// who are the PR author cause a 422 — caller should filter beforehand.
+pub fn request_pull_request_reviewers(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    users: &[String],
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}/requested_reviewers",
+        coords.owner, coords.repo, pr_number
+    );
+    write_json(
+        token,
+        &url,
+        reqwest::Method::POST,
+        &ReviewersBody { reviewers: users },
+    )
+}
+
+/// Withdraw a reviewer request from a PR.
+pub fn remove_pull_request_reviewers(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    users: &[String],
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}/requested_reviewers",
+        coords.owner, coords.repo, pr_number
+    );
+    let client = http_client()?;
+    let body_json = serde_json::to_string(&ReviewersBody { reviewers: users })
+        .map_err(|e| format!("encode reviewers body: {}", e))?;
+    let resp = client
+        .delete(&url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .body(body_json)
+        .send()
+        .map_err(|e| format!("GitHub delete reviewers: {}", e))?;
     if resp.status().is_success() {
         Ok(())
     } else {

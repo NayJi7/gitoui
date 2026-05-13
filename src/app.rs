@@ -1201,6 +1201,47 @@ impl App<'_> {
                         view.on_action_done(number, action, result);
                     }
                 }
+                AppEvent::OpenPrLabelsPicker {
+                    pr_number,
+                    all_labels,
+                    currently_on_pr,
+                } => {
+                    let selected: Vec<bool> = all_labels
+                        .iter()
+                        .map(|name| currently_on_pr.contains(name))
+                        .collect();
+                    self.ec.send(AppEvent::OpenDialog(
+                        crate::event::DialogKind::PullRequestLabels {
+                            pr_number,
+                            all_labels,
+                            selected,
+                        },
+                    ));
+                }
+                AppEvent::OpenPrReviewersPicker {
+                    pr_number,
+                    all_users,
+                    currently_requested,
+                } => {
+                    let selected: Vec<bool> = all_users
+                        .iter()
+                        .map(|name| currently_requested.contains(name))
+                        .collect();
+                    let initial = selected.clone();
+                    self.ec.send(AppEvent::OpenDialog(
+                        crate::event::DialogKind::PullRequestReviewers {
+                            pr_number,
+                            all_users,
+                            selected,
+                            initial,
+                        },
+                    ));
+                }
+                AppEvent::PrCommitDetailFetched { sha, result } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_commit_detail_fetched(sha, result);
+                    }
+                }
                 AppEvent::CloseInteractiveRebase => {
                     // Same pattern as CloseConflictEditor: close + enqueue
                     // a full Refresh so the commit list reflects the new
@@ -2911,6 +2952,124 @@ impl App<'_> {
     /// Merge a PR via GitHub REST API. Method is one of "merge",
     /// "squash", "rebase". Runs in a worker thread; result surfaced
     /// via `PullRequestActionDone` so the PR view picks it up.
+    /// Resolve the GitHub auth + repo coordinates needed for any PR-
+    /// level API write. Returns `Some((token, coords))` when both are
+    /// configured, or `None` after sending the appropriate footer warn.
+    fn pr_action_context(&mut self) -> Option<(String, crate::github::RepoCoords)> {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return None;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return None;
+            }
+        };
+        Some((token, coords))
+    }
+
+    fn set_pull_request_state(&mut self, pr_number: u64, state: String) {
+        let Some((token, coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        let label = if state == "closed" { "Closed" } else { "Reopened" };
+        let action_label = label.to_string();
+        std::thread::spawn(move || {
+            let result = crate::github::pr::set_pull_request_state(
+                &token, &coords, pr_number, &state,
+            );
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
+    fn set_pull_request_draft(
+        &mut self,
+        pr_number: u64,
+        node_id: String,
+        draft: bool,
+    ) {
+        let Some((token, _coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        let action_label = if draft {
+            "Converted to draft".to_string()
+        } else {
+            "Marked ready".to_string()
+        };
+        std::thread::spawn(move || {
+            let result = crate::github::pr::set_pull_request_draft(&token, &node_id, draft);
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
+    fn set_pull_request_labels(&mut self, pr_number: u64, labels: Vec<String>) {
+        let Some((token, coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            let result = crate::github::pr::set_pull_request_labels(
+                &token, &coords, pr_number, &labels,
+            );
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: "Labels updated".to_string(),
+                result,
+            });
+        });
+    }
+
+    fn set_pull_request_reviewers(
+        &mut self,
+        pr_number: u64,
+        to_add: Vec<String>,
+        to_remove: Vec<String>,
+    ) {
+        let Some((token, coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            // Run the two calls sequentially — most PRs only need one
+            // of them, and chaining keeps error reporting simple.
+            let mut result: Result<(), String> = Ok(());
+            if !to_remove.is_empty() {
+                result = crate::github::pr::remove_pull_request_reviewers(
+                    &token, &coords, pr_number, &to_remove,
+                );
+            }
+            if result.is_ok() && !to_add.is_empty() {
+                result = crate::github::pr::request_pull_request_reviewers(
+                    &token, &coords, pr_number, &to_add,
+                );
+            }
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: "Reviewers updated".to_string(),
+                result,
+            });
+        });
+    }
+
     fn merge_pull_request(&mut self, pr_number_str: String, method: String) {
         let token = match &self.ctx.github_auth_state.token {
             Some(t) if !t.is_empty() => t.clone(),
@@ -4342,6 +4501,34 @@ impl App<'_> {
             GitAction::DeletePrComment { pr_number, is_review } => {
                 self.close_dialog();
                 self.delete_pr_comment(target, pr_number, is_review);
+                return;
+            }
+            GitAction::SetPullRequestState { pr_number, state } => {
+                self.close_dialog();
+                self.set_pull_request_state(pr_number, state);
+                return;
+            }
+            GitAction::SetPullRequestDraft {
+                pr_number,
+                node_id,
+                draft,
+            } => {
+                self.close_dialog();
+                self.set_pull_request_draft(pr_number, node_id, draft);
+                return;
+            }
+            GitAction::SetPullRequestLabels { pr_number, labels } => {
+                self.close_dialog();
+                self.set_pull_request_labels(pr_number, labels);
+                return;
+            }
+            GitAction::SetPullRequestReviewers {
+                pr_number,
+                to_add,
+                to_remove,
+            } => {
+                self.close_dialog();
+                self.set_pull_request_reviewers(pr_number, to_add, to_remove);
                 return;
             }
             GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),

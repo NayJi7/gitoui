@@ -80,6 +80,13 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
             DialogKind::ConfirmDeleteComment { .. } => (vec![], 0),
+            DialogKind::ConfirmPullRequestStateChange { .. } => (vec![], 0),
+            DialogKind::ConfirmPullRequestDraftToggle { .. } => (vec![], 0),
+            // Multi-select pickers — seed `checkboxes` from the
+            // caller's selection so the dialog opens reflecting the
+            // PR's current state.
+            DialogKind::PullRequestLabels { selected, .. } => (selected.clone(), 0),
+            DialogKind::PullRequestReviewers { selected, .. } => (selected.clone(), 0),
             DialogKind::AddWorktree => (vec![false], 0),
             // Two radio options: 0=Stash, 1=Discard. Default to Stash (safer).
             DialogKind::CheckoutHasLocalChanges { .. } => (vec![], 0),
@@ -1109,6 +1116,101 @@ impl<'a> DialogView<'a> {
                     warn_fg,
                 ));
             }
+            DialogKind::ConfirmPullRequestStateChange {
+                pr_number,
+                pr_title,
+                closing,
+            } => {
+                lines.push(info_line(
+                    "PR:",
+                    &format!("#{} {}", pr_number, pr_title),
+                    dim_fg,
+                    yellow,
+                ));
+                lines.push(Line::from(""));
+                let msg = if *closing {
+                    "Close this PR without merging?"
+                } else {
+                    "Reopen this PR?"
+                };
+                lines.push(Line::from(Span::styled(
+                    msg.to_string(),
+                    Style::default().fg(fg),
+                )));
+            }
+            DialogKind::ConfirmPullRequestDraftToggle {
+                pr_number,
+                pr_title,
+                to_draft,
+                ..
+            } => {
+                lines.push(info_line(
+                    "PR:",
+                    &format!("#{} {}", pr_number, pr_title),
+                    dim_fg,
+                    yellow,
+                ));
+                lines.push(Line::from(""));
+                let msg = if *to_draft {
+                    "Convert this PR back to a draft? Reviewers will be notified."
+                } else {
+                    "Mark this draft as ready for review?"
+                };
+                lines.push(Line::from(Span::styled(
+                    msg.to_string(),
+                    Style::default().fg(fg),
+                )));
+            }
+            DialogKind::PullRequestLabels {
+                pr_number,
+                all_labels,
+                ..
+            } => {
+                lines.push(info_line(
+                    "PR:",
+                    &format!("#{}", pr_number),
+                    dim_fg,
+                    yellow,
+                ));
+                lines.push(Line::from(""));
+                if all_labels.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "No labels defined on this repo.".to_string(),
+                        Style::default().fg(dim_fg),
+                    )));
+                } else {
+                    lines.push(label_line("Toggle with Space:", dim_fg));
+                    for (i, name) in all_labels.iter().enumerate() {
+                        self.checkbox_rows.push(lines.len());
+                        lines.push(self.checkbox_line(i, name));
+                    }
+                }
+            }
+            DialogKind::PullRequestReviewers {
+                pr_number,
+                all_users,
+                ..
+            } => {
+                lines.push(info_line(
+                    "PR:",
+                    &format!("#{}", pr_number),
+                    dim_fg,
+                    yellow,
+                ));
+                lines.push(Line::from(""));
+                if all_users.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "No assignable users found.".to_string(),
+                        Style::default().fg(dim_fg),
+                    )));
+                } else {
+                    lines.push(label_line("Toggle with Space:", dim_fg));
+                    for (i, name) in all_users.iter().enumerate() {
+                        self.checkbox_rows.push(lines.len());
+                        lines.push(self.checkbox_line(i, name));
+                    }
+                }
+            }
             DialogKind::AddRemote => {
                 lines.push(label_line("Name:", dim_fg));
                 self.input_row = Some(lines.len());
@@ -1307,6 +1409,20 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmPopStash { .. } => " Pop Stash ",
             DialogKind::ConfirmDropStash { .. } => " Drop Stash ",
             DialogKind::ConfirmDeleteComment { .. } => " Delete Comment ",
+            DialogKind::ConfirmPullRequestStateChange { closing: true, .. } => {
+                " Close Pull Request "
+            }
+            DialogKind::ConfirmPullRequestStateChange { closing: false, .. } => {
+                " Reopen Pull Request "
+            }
+            DialogKind::ConfirmPullRequestDraftToggle { to_draft: true, .. } => {
+                " Convert to Draft "
+            }
+            DialogKind::ConfirmPullRequestDraftToggle { to_draft: false, .. } => {
+                " Mark Ready for Review "
+            }
+            DialogKind::PullRequestLabels { .. } => " Labels ",
+            DialogKind::PullRequestReviewers { .. } => " Reviewers ",
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
             DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
@@ -1673,6 +1789,80 @@ impl<'a> DialogView<'a> {
                     number.to_string(),
                     GitAction::MergePullRequest {
                         method: method.to_string(),
+                    },
+                )
+            }
+            DialogKind::ConfirmPullRequestStateChange {
+                pr_number,
+                closing,
+                ..
+            } => {
+                let state = if *closing { "closed" } else { "open" };
+                (
+                    pr_number.to_string(),
+                    GitAction::SetPullRequestState {
+                        pr_number: *pr_number,
+                        state: state.to_string(),
+                    },
+                )
+            }
+            DialogKind::ConfirmPullRequestDraftToggle {
+                pr_number,
+                node_id,
+                to_draft,
+                ..
+            } => (
+                pr_number.to_string(),
+                GitAction::SetPullRequestDraft {
+                    pr_number: *pr_number,
+                    node_id: node_id.clone(),
+                    draft: *to_draft,
+                },
+            ),
+            DialogKind::PullRequestLabels {
+                pr_number,
+                all_labels,
+                ..
+            } => {
+                let labels: Vec<String> = all_labels
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                    .map(|(_, name)| name.clone())
+                    .collect();
+                (
+                    pr_number.to_string(),
+                    GitAction::SetPullRequestLabels {
+                        pr_number: *pr_number,
+                        labels,
+                    },
+                )
+            }
+            DialogKind::PullRequestReviewers {
+                pr_number,
+                all_users,
+                initial,
+                ..
+            } => {
+                // Diff the picker's final state against the initial
+                // state so we only POST additions and DELETE removals.
+                let mut to_add = Vec::new();
+                let mut to_remove = Vec::new();
+                for (i, name) in all_users.iter().enumerate() {
+                    let was = initial.get(i).copied().unwrap_or(false);
+                    let now = self.checkboxes.get(i).copied().unwrap_or(false);
+                    if !was && now {
+                        to_add.push(name.clone());
+                    } else if was && !now {
+                        to_remove.push(name.clone());
+                    }
+                }
+                (
+                    pr_number.to_string(),
+                    GitAction::SetPullRequestReviewers {
+                        pr_number: *pr_number,
+                        to_add,
+                        to_remove,
                     },
                 )
             }
