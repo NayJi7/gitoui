@@ -146,7 +146,7 @@ impl<'a> InteractiveRebaseView<'a> {
     pub fn footer_hint(&self) -> String {
         // Resume mode has its own minimal hint — only 4 actions matter.
         if self.resume.is_some() {
-            let parts = ["C:continue", "S:skip", "A:abort", "esc:exit"];
+            let parts = ["C:continue", "S:skip", "A:abort", "Esc:exit"];
             return format!("⌘ {}", parts.join("▕▏"));
         }
         // Footer adapts: when a row is grabbed, arrows move it; otherwise
@@ -155,7 +155,7 @@ impl<'a> InteractiveRebaseView<'a> {
             let parts = [
                 "↑↓:move commit",
                 "Space:release",
-                "esc:cancel",
+                "Esc:cancel",
             ];
             format!("⌘ {}", parts.join("▕▏"))
         } else {

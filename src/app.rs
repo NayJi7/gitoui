@@ -2075,8 +2075,22 @@ impl App<'_> {
                         // `c` / `C` (copy msg / hash) are deliberately kept
                         // functional but omitted from the footer hint to
                         // reduce clutter. They're discoverable via `?:help`.
-                        "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
-                            .into()
+                        // `R:PRs` only appears when the user is logged in
+                        // to GitHub — otherwise the shortcut would just
+                        // surface a "auth required" toast.
+                        let has_github_auth = self
+                            .ctx
+                            .github_auth_state
+                            .token
+                            .as_ref()
+                            .map_or(false, |t| !t.is_empty());
+                        if has_github_auth {
+                            "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏R:PRs▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
+                                .into()
+                        } else {
+                            "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
+                                .into()
+                        }
                     }
                     View::Diff(_) => self
                         .view
@@ -2112,19 +2126,19 @@ impl App<'_> {
                     View::Conflict(_) => self
                         .view
                         .conflict_footer_hint()
-                        .unwrap_or_else(|| "⌘ o/t/b/B:pick▕▏n/p:nav▕▏↵:save▕▏esc:cancel".into()),
+                        .unwrap_or_else(|| "⌘ o/t/b/B:pick▕▏n/p:nav▕▏↵:save▕▏Esc:cancel".into()),
                     View::InteractiveRebase(_) => self
                         .view
                         .interactive_rebase_footer_hint()
                         .unwrap_or_else(|| {
-                            "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏esc:cancel"
+                            "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏Esc:cancel"
                                 .into()
                         }),
                     View::PullRequests(_) => self
                         .view
                         .pull_requests_footer_hint()
                         .unwrap_or_else(|| {
-                            "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏esc:close".into()
+                            "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏Esc:close".into()
                         }),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
