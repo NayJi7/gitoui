@@ -6,6 +6,7 @@
 //! mutating actions (approve / merge / comment) live in dedicated
 //! follow-up modules.
 
+pub mod issue;
 pub mod pr;
 
 use std::time::Duration;

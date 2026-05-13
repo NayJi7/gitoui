@@ -745,6 +745,14 @@ impl App<'_> {
                             // to the view's own handle_event.
                             self.ec.send(AppEvent::OpenPullRequests);
                         }
+                        Some(UserEvent::Issues)
+                            if !text_input_active
+                                && !matches!(self.view, View::Issues(_))
+                                // BranchDetail uses Shift+I as set_upstream — let it fall through.
+                                && !matches!(self.view, View::BranchDetail(_)) =>
+                        {
+                            self.ec.send(AppEvent::OpenIssues);
+                        }
                         Some(UserEvent::Drop)
                             if matches!(self.view, View::List(_))
                                 && !self.view.is_search_querying()
@@ -1212,6 +1220,162 @@ impl App<'_> {
                 }
                 AppEvent::ClosePullRequests => {
                     self.close_pull_requests();
+                }
+                AppEvent::OpenIssues => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_issues();
+                }
+                AppEvent::CloseIssues => {
+                    self.close_issues();
+                }
+                AppEvent::IssueDetailFetched { number, result } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_detail_fetched(number, result);
+                    }
+                }
+                AppEvent::IssueActionDone { number, action, result } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_action_done(number, action, result);
+                    }
+                }
+                AppEvent::IssueTimelineFetched { number, result } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_timeline_fetched(number, result);
+                    }
+                }
+                AppEvent::IssueLinkedFetched { number, result } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_linked_fetched(number, result);
+                    }
+                }
+                AppEvent::OpenIssueLabelsPicker {
+                    issue_number,
+                    issue_title,
+                    all_labels,
+                    currently_on_issue,
+                } => {
+                    let selected: Vec<bool> = all_labels
+                        .iter()
+                        .map(|l| currently_on_issue.contains(&l.name))
+                        .collect();
+                    self.ec.send(AppEvent::OpenDialog(
+                        crate::event::DialogKind::IssueLabels {
+                            issue_number,
+                            issue_title,
+                            all_labels,
+                            selected,
+                            for_compose: false,
+                        },
+                    ));
+                }
+                AppEvent::OpenIssueAssigneesPicker {
+                    issue_number,
+                    issue_title,
+                    all_users,
+                    currently_assigned,
+                } => {
+                    let selected: Vec<bool> = all_users
+                        .iter()
+                        .map(|u| currently_assigned.contains(u))
+                        .collect();
+                    let initial = selected.clone();
+                    self.ec.send(AppEvent::OpenDialog(
+                        crate::event::DialogKind::IssueAssignees {
+                            issue_number,
+                            issue_title,
+                            all_users,
+                            selected,
+                            initial,
+                            for_compose: false,
+                        },
+                    ));
+                }
+                AppEvent::OpenIssueMilestonePicker {
+                    issue_number,
+                    issue_title,
+                    all_milestones,
+                    currently_set,
+                } => {
+                    self.ec.send(AppEvent::OpenDialog(
+                        crate::event::DialogKind::IssueMilestone {
+                            issue_number,
+                            issue_title,
+                            all_milestones,
+                            selected: currently_set,
+                            for_compose: false,
+                        },
+                    ));
+                }
+                AppEvent::IssueCreated { number } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_issue_created(number);
+                    }
+                }
+                AppEvent::ComposeIssueLabelsPicked { labels } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_compose_labels_picked(labels);
+                    }
+                }
+                AppEvent::ComposeIssueAssigneesPicked { assignees } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_compose_assignees_picked(assignees);
+                    }
+                }
+                AppEvent::ComposeIssueMilestonePicked { milestone } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_compose_milestone_picked(milestone);
+                    }
+                }
+                AppEvent::SetIssueLabels { issue_number, labels } => {
+                    self.spawn_issue_write(
+                        issue_number,
+                        "Labels updated".into(),
+                        move |t, c| crate::github::issue::set_issue_labels(t, c, issue_number, &labels),
+                    );
+                }
+                AppEvent::SetIssueAssignees { issue_number, assignees } => {
+                    self.spawn_issue_write(
+                        issue_number,
+                        "Assignees updated".into(),
+                        move |t, c| {
+                            crate::github::issue::set_issue_assignees(t, c, issue_number, &assignees)
+                        },
+                    );
+                }
+                AppEvent::SetIssueMilestone { issue_number, milestone } => {
+                    self.spawn_issue_write(
+                        issue_number,
+                        "Milestone updated".into(),
+                        move |t, c| {
+                            crate::github::issue::set_issue_milestone(
+                                t, c, issue_number, milestone,
+                            )
+                        },
+                    );
+                }
+                AppEvent::CloseIssueWithReason { issue_number, reason } => {
+                    self.spawn_issue_write(
+                        issue_number,
+                        "Issue closed".into(),
+                        move |t, c| crate::github::issue::close_issue(t, c, issue_number, reason),
+                    );
+                }
+                AppEvent::ReopenIssue { issue_number } => {
+                    self.spawn_issue_write(
+                        issue_number,
+                        "Issue reopened".into(),
+                        move |t, c| crate::github::issue::reopen_issue(t, c, issue_number),
+                    );
+                }
+                AppEvent::DeleteIssueComment { issue_number, comment_id } => {
+                    self.spawn_issue_write(
+                        issue_number,
+                        "Comment deleted".into(),
+                        move |t, c| {
+                            crate::github::issue::delete_issue_comment(t, c, comment_id)
+                        },
+                    );
                 }
                 AppEvent::PullRequestDetailFetched { number, result } => {
                     if let View::PullRequests(ref mut view) = self.view {
@@ -2254,6 +2418,12 @@ impl App<'_> {
                         .pull_requests_footer_hint()
                         .unwrap_or_else(|| {
                             "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏Esc:close".into()
+                        }),
+                    View::Issues(_) => self
+                        .view
+                        .issues_footer_hint()
+                        .unwrap_or_else(|| {
+                            "⌘ ↑↓:nav▕▏Enter:open▕▏Tab:filter▕▏Esc:close".into()
                         }),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
@@ -3614,6 +3784,107 @@ impl<'a> App<'a> {
                 ));
             }
         }
+    }
+
+    fn open_issues(&mut self) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required — connect via the config view first.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let items = match crate::github::issue::list_issues(&token, &coords) {
+            Ok(v) => v,
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("List issues: {}", e)));
+                return;
+            }
+        };
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
+        self.view = View::of_issues(
+            commit_list_state,
+            coords,
+            token,
+            items,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_issues(&mut self) {
+        if let View::Issues(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            if let Some(state) = list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            } else {
+                self.ec.send(AppEvent::Refresh(
+                    crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    },
+                ));
+            }
+        }
+    }
+
+    /// Generic background runner for any issue write action. The
+    /// closure executes the API call (already capturing the action's
+    /// parameters); on completion we ship an `IssueActionDone` event
+    /// back to the view so it can refresh + toast.
+    fn spawn_issue_write<F>(&self, issue_number: u64, action: String, f: F)
+    where
+        F: FnOnce(&str, &crate::github::RepoCoords) -> Result<(), String> + Send + 'static,
+    {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured.".into(),
+                ));
+                return;
+            }
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            let result = f(&token, &coords);
+            tx.send(AppEvent::IssueActionDone {
+                number: issue_number,
+                action,
+                result,
+            });
+        });
     }
 
     fn open_interactive_rebase(&mut self, base_hash: String) {

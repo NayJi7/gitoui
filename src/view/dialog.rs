@@ -87,6 +87,24 @@ impl<'a> DialogView<'a> {
             // PR's current state.
             DialogKind::PullRequestLabels { selected, .. } => (selected.clone(), 0),
             DialogKind::PullRequestReviewers { selected, .. } => (selected.clone(), 0),
+            DialogKind::IssueLabels { selected, .. } => (selected.clone(), 0),
+            DialogKind::IssueAssignees { selected, .. } => (selected.clone(), 0),
+            DialogKind::IssueMilestone { selected, all_milestones, .. } => {
+                // Radio-style: one bool per option + "None" at the end.
+                let mut boxes = vec![false; all_milestones.len() + 1];
+                let chosen = match selected {
+                    Some(n) => all_milestones
+                        .iter()
+                        .position(|m| m.number == *n)
+                        .unwrap_or(all_milestones.len()),
+                    None => all_milestones.len(),
+                };
+                if chosen < boxes.len() {
+                    boxes[chosen] = true;
+                }
+                (boxes, chosen)
+            }
+            DialogKind::ConfirmCloseIssue { .. } => (vec![true, false], 0),
             DialogKind::AddWorktree => (vec![false], 0),
             // Two radio options: 0=Stash, 1=Discard. Default to Stash (safer).
             DialogKind::CheckoutHasLocalChanges { .. } => (vec![], 0),
@@ -1273,6 +1291,144 @@ impl<'a> DialogView<'a> {
                     }
                 }
             }
+            DialogKind::IssueLabels {
+                issue_number,
+                issue_title,
+                all_labels,
+                ..
+            } => {
+                lines.push(issue_header_line(
+                    *issue_number,
+                    issue_title,
+                    &self.ctx.color_theme,
+                ));
+                lines.push(Line::from(""));
+                if all_labels.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "No labels defined on this repo.".to_string(),
+                        Style::default().fg(dim_fg),
+                    )));
+                } else {
+                    let attached: Vec<&crate::github::pr::Label> = all_labels
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                        .map(|(_, l)| l)
+                        .collect();
+                    let mut chip_row: Vec<Span<'static>> = vec![Span::raw("  ".to_string())];
+                    if attached.is_empty() {
+                        chip_row.push(Span::styled(
+                            "(no labels)".to_string(),
+                            Style::default().fg(dim_fg),
+                        ));
+                    } else {
+                        for (i, lab) in attached.iter().enumerate() {
+                            if i > 0 {
+                                chip_row.push(Span::raw(" ".to_string()));
+                            }
+                            chip_row.extend(label_chip_spans(lab, dim_fg));
+                        }
+                    }
+                    lines.push(Line::from(chip_row));
+                    lines.push(Line::from(""));
+                    for (i, lab) in all_labels.iter().enumerate() {
+                        let rendered = self.checkbox_line_labelled(i, lab, inner_width);
+                        self.checkbox_rows.push(lines.len());
+                        for ln in rendered {
+                            lines.push(ln);
+                        }
+                    }
+                }
+            }
+            DialogKind::IssueAssignees {
+                issue_number,
+                issue_title,
+                all_users,
+                ..
+            } => {
+                lines.push(issue_header_line(
+                    *issue_number,
+                    issue_title,
+                    &self.ctx.color_theme,
+                ));
+                lines.push(Line::from(""));
+                if all_users.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "No assignable users found.".to_string(),
+                        Style::default().fg(dim_fg),
+                    )));
+                } else {
+                    for (i, name) in all_users.iter().enumerate() {
+                        self.checkbox_rows.push(lines.len());
+                        lines.push(self.checkbox_line(i, name));
+                    }
+                }
+            }
+            DialogKind::IssueMilestone {
+                issue_number,
+                issue_title,
+                all_milestones,
+                ..
+            } => {
+                lines.push(issue_header_line(
+                    *issue_number,
+                    issue_title,
+                    &self.ctx.color_theme,
+                ));
+                lines.push(Line::from(""));
+                for (i, m) in all_milestones.iter().enumerate() {
+                    self.radio_rows.push(lines.len());
+                    let glyph = if self.checkboxes.get(i).copied().unwrap_or(false) {
+                        "●"
+                    } else {
+                        "○"
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} ", glyph), Style::default().fg(fg)),
+                        Span::styled(m.title.clone(), Style::default().fg(fg)),
+                    ]));
+                }
+                let none_i = all_milestones.len();
+                self.radio_rows.push(lines.len());
+                let glyph = if self.checkboxes.get(none_i).copied().unwrap_or(false) {
+                    "●"
+                } else {
+                    "○"
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {} ", glyph), Style::default().fg(fg)),
+                    Span::styled("(no milestone)".to_string(), Style::default().fg(dim_fg)),
+                ]));
+            }
+            DialogKind::ConfirmCloseIssue {
+                issue_number,
+                issue_title,
+            } => {
+                lines.push(issue_header_line(
+                    *issue_number,
+                    issue_title,
+                    &self.ctx.color_theme,
+                ));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Close as:".to_string(),
+                    Style::default().fg(dim_fg),
+                )));
+                for (i, label) in
+                    ["Completed", "Not planned (won't fix)"].iter().enumerate()
+                {
+                    self.radio_rows.push(lines.len());
+                    let glyph = if self.checkboxes.get(i).copied().unwrap_or(false) {
+                        "●"
+                    } else {
+                        "○"
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} ", glyph), Style::default().fg(fg)),
+                        Span::styled(label.to_string(), Style::default().fg(fg)),
+                    ]));
+                }
+            }
             DialogKind::AddRemote => {
                 lines.push(label_line("Name:", dim_fg));
                 self.input_row = Some(lines.len());
@@ -1485,6 +1641,10 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::PullRequestLabels { .. } => " Labels ",
             DialogKind::PullRequestReviewers { .. } => " Reviewers ",
+            DialogKind::IssueLabels { .. } => " Labels ",
+            DialogKind::IssueAssignees { .. } => " Assignees ",
+            DialogKind::IssueMilestone { .. } => " Milestone ",
+            DialogKind::ConfirmCloseIssue { .. } => " Close Issue ",
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
             DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
@@ -1807,6 +1967,102 @@ impl<'a> DialogView<'a> {
             self.tx.send(AppEvent::CloseDialog);
             self.tx.send(AppEvent::SwitchWorktree { path });
             return;
+        }
+        // Issue picker confirmations don't go through GitAction — they
+        // dispatch directly back to the view via AppEvent. Handle them
+        // up-front and return.
+        match &self.kind {
+            DialogKind::IssueLabels {
+                issue_number,
+                all_labels,
+                for_compose,
+                ..
+            } => {
+                let picked_names: Vec<String> = all_labels
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                    .map(|(_, l)| l.name.clone())
+                    .collect();
+                if *for_compose {
+                    self.tx.send(AppEvent::ComposeIssueLabelsPicked {
+                        labels: picked_names,
+                    });
+                } else {
+                    self.tx.send(AppEvent::SetIssueLabels {
+                        issue_number: *issue_number,
+                        labels: picked_names,
+                    });
+                }
+                self.tx.send(AppEvent::CloseDialog);
+                return;
+            }
+            DialogKind::IssueAssignees {
+                issue_number,
+                all_users,
+                for_compose,
+                ..
+            } => {
+                let picked: Vec<String> = all_users
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                    .map(|(_, u)| u.clone())
+                    .collect();
+                if *for_compose {
+                    self.tx.send(AppEvent::ComposeIssueAssigneesPicked {
+                        assignees: picked,
+                    });
+                } else {
+                    self.tx.send(AppEvent::SetIssueAssignees {
+                        issue_number: *issue_number,
+                        assignees: picked,
+                    });
+                }
+                self.tx.send(AppEvent::CloseDialog);
+                return;
+            }
+            DialogKind::IssueMilestone {
+                issue_number,
+                all_milestones,
+                for_compose,
+                ..
+            } => {
+                // Radio: find which slot is true. The "None" slot sits
+                // at `all_milestones.len()`.
+                let chosen_idx = self
+                    .checkboxes
+                    .iter()
+                    .position(|b| *b)
+                    .unwrap_or(all_milestones.len());
+                let picked: Option<u64> = all_milestones.get(chosen_idx).map(|m| m.number);
+                if *for_compose {
+                    self.tx
+                        .send(AppEvent::ComposeIssueMilestonePicked { milestone: picked });
+                } else {
+                    self.tx.send(AppEvent::SetIssueMilestone {
+                        issue_number: *issue_number,
+                        milestone: picked,
+                    });
+                }
+                self.tx.send(AppEvent::CloseDialog);
+                return;
+            }
+            DialogKind::ConfirmCloseIssue { issue_number, .. } => {
+                let chosen_idx = self.checkboxes.iter().position(|b| *b).unwrap_or(0);
+                let reason = if chosen_idx == 1 {
+                    crate::github::issue::IssueStateReason::NotPlanned
+                } else {
+                    crate::github::issue::IssueStateReason::Completed
+                };
+                self.tx.send(AppEvent::CloseIssueWithReason {
+                    issue_number: *issue_number,
+                    reason,
+                });
+                self.tx.send(AppEvent::CloseDialog);
+                return;
+            }
+            _ => {}
         }
         let (target, action) = match &self.kind {
             DialogKind::AddTag { target } => {
@@ -2174,6 +2430,10 @@ impl<'a> DialogView<'a> {
             // Handled by early-return above; these arms are unreachable at runtime.
             DialogKind::ConfirmSwitchWorktree { .. } => unreachable!(),
             DialogKind::ConfirmDeleteWorktree { .. } => unreachable!(),
+            DialogKind::IssueLabels { .. }
+            | DialogKind::IssueAssignees { .. }
+            | DialogKind::IssueMilestone { .. }
+            | DialogKind::ConfirmCloseIssue { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }
@@ -2248,6 +2508,28 @@ fn info_line(label: &str, value: &str, label_fg: Color, value_fg: Color) -> Line
     Line::from(vec![
         Span::styled(format!("  {} ", label), Style::default().fg(label_fg)),
         Span::styled(value.to_string(), Style::default().fg(value_fg)),
+    ])
+}
+
+/// Same shape as `pr_header_line` but for issues — `#NUM · title`.
+fn issue_header_line(
+    issue_number: u64,
+    issue_title: &str,
+    theme: &crate::color::ColorTheme,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::raw("  ".to_string()),
+        Span::styled(
+            format!("#{}", issue_number),
+            Style::default()
+                .fg(theme.list_hash_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
+        Span::styled(
+            issue_title.to_string(),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        ),
     ])
 }
 

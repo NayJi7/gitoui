@@ -13,6 +13,7 @@ pub mod dialog;
 mod diff;
 pub mod file_history;
 mod help;
+pub mod issue;
 mod list;
 mod refs;
 pub mod tag_detail;

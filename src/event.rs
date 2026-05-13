@@ -142,6 +142,76 @@ pub enum AppEvent {
     OpenPullRequests,
     /// Close the PR view, returning to the previous list state.
     ClosePullRequests,
+    /// Open the GitHub Issues view (Shift+I from the commit list).
+    /// App resolves auth + remote and notifies on failure.
+    OpenIssues,
+    /// Close the Issues view, returning to the previous list state.
+    CloseIssues,
+    /// Background fetch of an issue's full detail completed.
+    IssueDetailFetched {
+        number: u64,
+        result: Result<crate::github::issue::IssueDetail, String>,
+    },
+    /// Result of a background write on an issue (comment / close /
+    /// labels / etc.) — sent by the worker thread that ran the
+    /// PATCH/POST/DELETE.
+    IssueActionDone {
+        number: u64,
+        action: String,
+        result: Result<(), String>,
+    },
+    /// Issue's Timeline tab finished loading.
+    IssueTimelineFetched {
+        number: u64,
+        result: Result<Vec<crate::github::issue::TimelineEvent>, String>,
+    },
+    /// Issue's Linked-PRs tab finished loading.
+    IssueLinkedFetched {
+        number: u64,
+        result: Result<Vec<crate::github::issue::LinkedPr>, String>,
+    },
+    /// User asked to open the issue labels picker. The handler fetches
+    /// repo labels in the background and opens the dialog.
+    OpenIssueLabelsPicker {
+        issue_number: u64,
+        issue_title: String,
+        all_labels: Vec<crate::github::pr::Label>,
+        currently_on_issue: Vec<String>,
+    },
+    /// Same as labels but for assignees.
+    OpenIssueAssigneesPicker {
+        issue_number: u64,
+        issue_title: String,
+        all_users: Vec<String>,
+        currently_assigned: Vec<String>,
+    },
+    /// Milestone picker — single-select.
+    OpenIssueMilestonePicker {
+        issue_number: u64,
+        issue_title: String,
+        all_milestones: Vec<crate::github::issue::Milestone>,
+        currently_set: Option<u64>,
+    },
+    /// Issue created — view jumps straight into the new issue's detail.
+    IssueCreated {
+        number: u64,
+    },
+    /// Compose-issue picker dialogs return their selections via these
+    /// events — the view captures them into ComposeState rather than
+    /// firing a SetIssueX write (no issue exists yet).
+    ComposeIssueLabelsPicked { labels: Vec<String> },
+    ComposeIssueAssigneesPicked { assignees: Vec<String> },
+    ComposeIssueMilestonePicked { milestone: Option<u64> },
+    /// Issue write actions dispatched from the issue view / dialogs.
+    SetIssueLabels { issue_number: u64, labels: Vec<String> },
+    SetIssueAssignees { issue_number: u64, assignees: Vec<String> },
+    SetIssueMilestone { issue_number: u64, milestone: Option<u64> },
+    CloseIssueWithReason {
+        issue_number: u64,
+        reason: crate::github::issue::IssueStateReason,
+    },
+    ReopenIssue { issue_number: u64 },
+    DeleteIssueComment { issue_number: u64, comment_id: u64 },
     /// Background fetch of a PR's full detail completed — pushed by the
     /// worker thread the PR view spawned. The view updates its cache and
     /// re-renders.
@@ -288,6 +358,44 @@ pub enum DialogKind {
         all_users: Vec<String>,
         selected: Vec<bool>,
         initial: Vec<bool>,
+    },
+    /// Issue labels multi-select. Mirror of `PullRequestLabels` —
+    /// kept distinct so the dialog confirm dispatches to the issue
+    /// view rather than the PR view.
+    IssueLabels {
+        issue_number: u64,
+        issue_title: String,
+        all_labels: Vec<crate::github::pr::Label>,
+        selected: Vec<bool>,
+        /// When `true`, this is the Compose-new-issue picker — the
+        /// dialog stays in-memory rather than firing the SetIssueLabels
+        /// write (the compose state collects the picked labels for the
+        /// eventual POST /issues).
+        for_compose: bool,
+    },
+    /// Issue assignees multi-select. Same shape as reviewers.
+    IssueAssignees {
+        issue_number: u64,
+        issue_title: String,
+        all_users: Vec<String>,
+        selected: Vec<bool>,
+        initial: Vec<bool>,
+        for_compose: bool,
+    },
+    /// Issue milestone single-select. `selected` tracks the picked
+    /// milestone number, or `None` for "no milestone".
+    IssueMilestone {
+        issue_number: u64,
+        issue_title: String,
+        all_milestones: Vec<crate::github::issue::Milestone>,
+        selected: Option<u64>,
+        for_compose: bool,
+    },
+    /// Confirmation dialog when closing an issue — lets the user pick
+    /// "Completed" vs "Not planned" before firing the write.
+    ConfirmCloseIssue {
+        issue_number: u64,
+        issue_title: String,
     },
     // Branch actions
     RenameBranch { branch: String },
@@ -677,6 +785,9 @@ pub enum UserEvent {
     /// Open the GitHub Pull Requests view — gated behind an authenticated
     /// GitHub session.
     PullRequests,
+    /// Open the GitHub Issues view — gated behind an authenticated
+    /// GitHub session. Default keybind: Shift+I.
+    Issues,
     // Phase 2 - Uncommitted actions
     Stage,
     StageAll,
@@ -805,6 +916,7 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "reset" => Ok(UserEvent::Reset),
                         "squash" => Ok(UserEvent::Squash),
                         "pull_requests" => Ok(UserEvent::PullRequests),
+                        "issues" => Ok(UserEvent::Issues),
                         "stage" => Ok(UserEvent::Stage),
                         "stage_all" => Ok(UserEvent::StageAll),
                         "unstage" => Ok(UserEvent::Unstage),

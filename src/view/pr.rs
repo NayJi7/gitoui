@@ -19,9 +19,10 @@ use ratatui::{
 };
 use rustc_hash::FxHashMap;
 
-/// GitHub's purple for merged PRs — matches the badge color on
+/// GitHub's purple for merged PRs + closed-as-completed issues —
+/// matches the badge color on
 /// github.com so the visual cue is instantly recognizable.
-const MERGED_PURPLE: Color = Color::Rgb(0x89, 0x57, 0xe5);
+pub(crate) const MERGED_PURPLE: Color = Color::Rgb(0x89, 0x57, 0xe5);
 
 use crate::{
     app::AppContext,
@@ -580,7 +581,7 @@ fn strip_head_owner(label: &str) -> &str {
 
 /// Left-align `s` into a cell of exactly `width` columns. Truncates
 /// with `…` if it overflows; right-pads with spaces otherwise.
-fn fit_cell(s: &str, width: usize) -> String {
+pub(crate) fn fit_cell(s: &str, width: usize) -> String {
     let count = s.chars().count();
     if count == width {
         s.to_string()
@@ -5382,46 +5383,52 @@ impl<'a> PullRequestsView<'a> {
 /// connector is a real T-shaped dashed line (`┊╌╌╌`) that descends from
 /// the parent's bottom and bends right to dock at each reply's top-left.
 /// A card with no replies emits no descending line at all.
-struct CommentCardInput<'a> {
-    author: &'a str,
-    action: CommentAction,
-    when: &'a str,
-    body: &'a str,
+pub(crate) struct CommentCardInput<'a> {
+    pub(crate) author: &'a str,
+    pub(crate) action: CommentAction,
+    pub(crate) when: &'a str,
+    pub(crate) body: &'a str,
     /// `ancestor_gutters[i] == true` means the gutter at depth i still
     /// has children coming below; we draw `│` there. `false` means the
     /// gutter is closed (we draw spaces). The LAST entry is the parent's
     /// gutter and dictates the bend on the junction row.
-    ancestor_gutters: &'a [bool],
+    pub(crate) ancestor_gutters: &'a [bool],
     /// True when at least one reply will be rendered directly under this
     /// card. Drives the bottom-left corner of the box: `├` (attaches the
     /// descending line) vs the standard `└` (closes the box cleanly).
-    has_children: bool,
+    pub(crate) has_children: bool,
     /// When `true`, this card is the currently-selected comment in the
     /// Conversation tab — the box border switches to the head accent so
     /// the user can see which card has focus.
-    is_selected: bool,
+    pub(crate) is_selected: bool,
     /// `true` when `author` matches the authenticated GitHub login —
     /// we append a small `(me)` chip after the name.
-    is_me: bool,
+    pub(crate) is_me: bool,
     /// Action shortcuts to surface inline in the top border when this
     /// card is selected (e.g. ["R:reply", "e:edit", "d:delete"]).
     /// Empty for cards that have no card-scoped actions (PR description,
     /// reviews) or when not selected.
-    inline_shortcuts: Vec<&'static str>,
+    pub(crate) inline_shortcuts: Vec<&'static str>,
     /// Reaction totals to render as an `emoji N` chip row below the
     /// comment body. Empty / zero-count = no row drawn.
-    reactions: crate::github::pr::ReactionCounts,
+    pub(crate) reactions: crate::github::pr::ReactionCounts,
 }
 
-enum CommentAction {
+pub(crate) enum CommentAction {
     Opened,
+    /// Issue-context variant of `Opened` — renders "opened this issue"
+    /// in the top border instead of "opened this PR". Lets the Issues
+    /// view reuse `push_comment_card` without dragging in PR semantics.
+    OpenedIssue,
     Commented,
+    #[allow(dead_code)]
     Review(ReviewState),
+    #[allow(dead_code)]
     ReviewComment { file: String, line: Option<u64> },
 }
 
 /// Column width of one tree level (`┊   `): dashed gutter + 3-space pad.
-const TREE_LEVEL_WIDTH: u16 = 4;
+pub(crate) const TREE_LEVEL_WIDTH: u16 = 4;
 
 // Tree-level slot is 4 cols wide. We offset the vertical line by 1 col
 // to the right within that slot so the connector floats next to the
@@ -5445,7 +5452,7 @@ fn gutter_segment_bend(more_siblings_below: bool) -> &'static str {
     }
 }
 
-fn build_body_prefix(
+pub(crate) fn build_body_prefix(
     theme: &crate::color::ColorTheme,
     ancestor_gutters: &[bool],
 ) -> Vec<Span<'static>> {
@@ -5465,7 +5472,7 @@ fn build_body_prefix(
         .collect()
 }
 
-fn build_junction_prefix(
+pub(crate) fn build_junction_prefix(
     theme: &crate::color::ColorTheme,
     ancestor_gutters: &[bool],
 ) -> Vec<Span<'static>> {
@@ -5487,7 +5494,7 @@ fn build_junction_prefix(
         .collect()
 }
 
-fn push_comment_card(
+pub(crate) fn push_comment_card(
     lines: &mut Vec<Line<'static>>,
     theme: &crate::color::ColorTheme,
     available_width: u16,
@@ -5521,6 +5528,7 @@ fn push_comment_card(
     // Action span baked into the top border.
     let action_span: Span<'static> = match &input.action {
         CommentAction::Opened => Span::styled(" opened this PR", label),
+        CommentAction::OpenedIssue => Span::styled(" opened this issue", label),
         CommentAction::Commented => Span::styled(" commented", label),
         CommentAction::Review(state) => match state {
             ReviewState::Approved => Span::styled(
@@ -5967,7 +5975,7 @@ fn file_line(
 /// flipping foreground between black and white based on the label
 /// colour's perceived luminance. Falls back to plain dim text when
 /// the API didn't return a hex colour.
-fn label_chip_spans_local(
+pub(crate) fn label_chip_spans_local(
     label: &crate::github::pr::Label,
 ) -> Vec<Span<'static>> {
     if let Some((r, g, b)) = label
@@ -5998,7 +6006,7 @@ fn label_chip_spans_local(
 /// painted in the label's background colour. Two letters are picked
 /// from the start of the label name, uppercased so it reads as a
 /// badge rather than a word fragment.
-fn short_label_chip_spans(
+pub(crate) fn short_label_chip_spans(
     label: &crate::github::pr::Label,
 ) -> Vec<Span<'static>> {
     let abbr: String = label
@@ -6034,7 +6042,7 @@ fn short_label_chip_spans(
     }
 }
 
-fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
+pub(crate) fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     let h = hex.trim_start_matches('#');
     if h.len() != 6 {
         return None;
@@ -6508,7 +6516,7 @@ fn split_row(
 /// Compute (column, row) within the editor body for a buffer cursor at
 /// the given byte offset. Lines are split on `\n`; `col` is the
 /// visible-width count of the prefix in the current logical line.
-fn cursor_screen_pos(buf: &str, byte_cursor: usize) -> (u16, u16) {
+pub(crate) fn cursor_screen_pos(buf: &str, byte_cursor: usize) -> (u16, u16) {
     let safe_cursor = byte_cursor.min(buf.len());
     let prefix = &buf[..safe_cursor];
     let row = prefix.chars().filter(|c| *c == '\n').count() as u16;
@@ -6546,7 +6554,7 @@ fn walk_for_index<'a>(
 /// Byte index of the next word-boundary to the LEFT of `cursor` —
 /// skips trailing whitespace then alphanumerics. Mirrors Ctrl+Backspace
 /// in modern editors.
-fn word_left_boundary(buf: &str, mut cursor: usize) -> usize {
+pub(crate) fn word_left_boundary(buf: &str, mut cursor: usize) -> usize {
     let bytes = buf.as_bytes();
     while cursor > 0 {
         let prev = prev_char_boundary(buf, cursor);
@@ -6565,7 +6573,7 @@ fn word_left_boundary(buf: &str, mut cursor: usize) -> usize {
     cursor
 }
 
-fn word_right_boundary(buf: &str, mut cursor: usize) -> usize {
+pub(crate) fn word_right_boundary(buf: &str, mut cursor: usize) -> usize {
     let bytes = buf.as_bytes();
     let len = buf.len();
     while cursor < len {
