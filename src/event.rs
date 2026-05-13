@@ -149,6 +149,14 @@ pub enum AppEvent {
         number: u64,
         result: Result<crate::github::pr::PullRequestDetail, String>,
     },
+    /// Result of a background write action on a PR — sent by the worker
+    /// thread that ran the POST/PATCH/DELETE. The view shows a toast,
+    /// invalidates its cache for `number`, and triggers a re-fetch.
+    PullRequestActionDone {
+        number: u64,
+        action: String,
+        result: Result<(), String>,
+    },
     OpenDetailByHash {
         hash: String,
     },

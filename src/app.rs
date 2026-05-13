@@ -712,11 +712,15 @@ impl App<'_> {
                         Some(UserEvent::Quit) if !text_input_active => {
                             self.ec.send(AppEvent::Quit);
                         }
-                        Some(UserEvent::PullRequests) if !text_input_active => {
-                            // Global shortcut — open the PR view from anywhere.
-                            // The handler itself checks auth / remote and
-                            // surfaces a notification if either is missing,
-                            // so we can fire unconditionally here.
+                        Some(UserEvent::PullRequests)
+                            if !text_input_active
+                                && !matches!(self.view, View::PullRequests(_)) =>
+                        {
+                            // Global shortcut — open the PR view from
+                            // anywhere EXCEPT when we're already inside
+                            // it. Inside the PR view, `R` is reserved
+                            // for the reply action and must fall through
+                            // to the view's own handle_event.
                             self.ec.send(AppEvent::OpenPullRequests);
                         }
                         Some(UserEvent::Drop)
@@ -1190,6 +1194,11 @@ impl App<'_> {
                 AppEvent::PullRequestDetailFetched { number, result } => {
                     if let View::PullRequests(ref mut view) = self.view {
                         view.on_detail_fetched(number, result);
+                    }
+                }
+                AppEvent::PullRequestActionDone { number, action, result } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_action_done(number, action, result);
                     }
                 }
                 AppEvent::CloseInteractiveRebase => {

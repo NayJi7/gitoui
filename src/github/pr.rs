@@ -10,7 +10,7 @@
 //! All fetches block; callers should run them off the UI tick if they
 //! care about responsiveness on slow networks.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{http_client, RepoCoords};
 
@@ -972,5 +972,181 @@ fn derive_state(state: &str, merged_at: Option<&str>) -> PullState {
         "open" => PullState::Open,
         _ if merged_at.is_some() => PullState::Merged,
         _ => PullState::Closed,
+    }
+}
+
+// ---------- Write actions on PR comments ----------
+//
+// The GitHub API splits comment endpoints by where the comment lives:
+//
+// - Top-level "conversation" comments → `/repos/{o}/{r}/issues/{n}/comments`
+//   (PRs are also issues internally, so they share this endpoint)
+// - Inline review comments on files   → `/repos/{o}/{r}/pulls/{n}/comments`
+//
+// Edit + delete use the same split but go through:
+// `/repos/{o}/{r}/issues/comments/{id}` and
+// `/repos/{o}/{r}/pulls/comments/{id}` respectively.
+
+#[derive(Serialize)]
+struct CommentBody<'a> {
+    body: &'a str,
+}
+
+#[derive(Serialize)]
+struct ReplyBody<'a> {
+    body: &'a str,
+    in_reply_to: u64,
+    // Optional, but GitHub recommends including the commit_id+path the
+    // parent is anchored on. We let the API fall back when these are
+    // omitted — replies to existing threads inherit the parent's anchor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commit_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+}
+
+/// Post a new top-level conversation comment on a PR.
+pub fn post_issue_comment(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    body: &str,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/{}/comments",
+        coords.owner, coords.repo, pr_number
+    );
+    write_json(token, &url, reqwest::Method::POST, &CommentBody { body })
+}
+
+/// Reply to an existing review comment thread (file-level inline thread).
+/// `parent_id` is the comment we're replying to (GitHub flattens the
+/// thread so this can be any comment in the chain — the API normalises
+/// `in_reply_to` to the thread root anyway).
+pub fn post_review_comment_reply(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    body: &str,
+    parent_id: u64,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}/comments",
+        coords.owner, coords.repo, pr_number
+    );
+    write_json(
+        token,
+        &url,
+        reqwest::Method::POST,
+        &ReplyBody {
+            body,
+            in_reply_to: parent_id,
+            commit_id: None,
+            path: None,
+        },
+    )
+}
+
+/// Edit an existing top-level conversation comment.
+pub fn patch_issue_comment(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    body: &str,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/comments/{}",
+        coords.owner, coords.repo, comment_id
+    );
+    write_json(token, &url, reqwest::Method::PATCH, &CommentBody { body })
+}
+
+/// Edit an existing inline review comment.
+pub fn patch_review_comment(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    body: &str,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/comments/{}",
+        coords.owner, coords.repo, comment_id
+    );
+    write_json(token, &url, reqwest::Method::PATCH, &CommentBody { body })
+}
+
+/// Delete a top-level conversation comment.
+pub fn delete_issue_comment(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/comments/{}",
+        coords.owner, coords.repo, comment_id
+    );
+    delete_request(token, &url)
+}
+
+/// Delete an inline review comment.
+pub fn delete_review_comment(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/comments/{}",
+        coords.owner, coords.repo, comment_id
+    );
+    delete_request(token, &url)
+}
+
+fn write_json<T: Serialize>(
+    token: &str,
+    url: &str,
+    method: reqwest::Method,
+    body: &T,
+) -> Result<(), String> {
+    let client = http_client()?;
+    let json = serde_json::to_string(body).map_err(|e| format!("encode body: {}", e))?;
+    let resp = client
+        .request(method, url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .body(json)
+        .send()
+        .map_err(|e| format!("GitHub write: {}", e))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        Err(format!(
+            "HTTP {} — {}",
+            status,
+            body.lines().next().unwrap_or("")
+        ))
+    }
+}
+
+fn delete_request(token: &str, url: &str) -> Result<(), String> {
+    let client = http_client()?;
+    let resp = client
+        .delete(url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("GitHub delete: {}", e))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        Err(format!(
+            "HTTP {} — {}",
+            status,
+            body.lines().next().unwrap_or("")
+        ))
     }
 }

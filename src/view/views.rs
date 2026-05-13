@@ -589,6 +589,7 @@ impl<'a> View<'a> {
             // to the view instead of being dropped by the app key router.
             View::Diff(view) => view.is_search_input_active(),
             View::InteractiveRebase(view) => view.is_input_active(),
+            View::PullRequests(view) => view.is_input_active(),
             _ => false,
         }
     }

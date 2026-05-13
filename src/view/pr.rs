@@ -75,6 +75,14 @@ pub struct PullRequestsView<'a> {
     /// hover deliberately does NOT set this — the viewport stays still
     /// while the cursor moves around.
     conversation_scroll_to_selected: bool,
+    /// Active inline comment editor — opened by `c` (new comment), `r`
+    /// (reply), or `e` (edit). When `Some`, all keypresses route to it
+    /// until Ctrl+Enter (submit) or Esc (cancel).
+    comment_editor: Option<CommentEditor>,
+    /// Screen position where the editor's cursor was last drawn —
+    /// captured each render so we can place the terminal cursor on top
+    /// of the editor surface.
+    comment_editor_cursor_pos: Option<(u16, u16)>,
     /// Logical line range of each comment in the conversation render —
     /// `(comment_idx, first_line, last_line)` — captured at render time
     /// so mouse hits and auto-scroll can resolve which card sits where.
@@ -123,6 +131,60 @@ enum Tab {
     Commits,
     Checks,
     Files,
+}
+
+/// State of an inline comment composer (new top-level comment, reply
+/// to a review thread, or edit of an existing own comment). Active
+/// when `comment_editor.is_some()` — the conversation reserves a few
+/// rows at the bottom of the tab content area to render it, and all
+/// keypresses route to the editor until Ctrl+Enter or Esc.
+#[derive(Debug, Clone)]
+struct CommentEditor {
+    kind: CommentEditorKind,
+    /// UTF-8 byte buffer of the message. Empty on a fresh new-comment;
+    /// pre-loaded with the original body on edit.
+    buffer: String,
+    /// Cursor as a byte offset into `buffer`. Always lies on a char
+    /// boundary; helpers maintain that invariant.
+    cursor: usize,
+    /// `true` while a POST/PATCH/DELETE is in flight — disables
+    /// further keypresses and shows a "Sending…" footer.
+    submitting: bool,
+}
+
+#[derive(Debug, Clone)]
+enum CommentEditorKind {
+    /// New top-level conversation comment (issues endpoint).
+    NewTopLevel,
+    /// New top-level comment pre-filled with a markdown blockquote of
+    /// another comment's body — what GitHub's "Quote reply" does when
+    /// the original isn't an inline review comment (which is the only
+    /// kind it lets you natively thread).
+    QuoteReply { quoted_author: String },
+    /// Reply to an existing review-comment thread (pulls endpoint).
+    Reply { parent_id: u64 },
+    /// Edit of an own top-level conversation comment.
+    EditIssue { comment_id: u64 },
+    /// Edit of an own inline review comment.
+    EditReview { comment_id: u64 },
+}
+
+impl CommentEditorKind {
+    fn header(&self, parent_author: Option<&str>) -> String {
+        match self {
+            CommentEditorKind::NewTopLevel => "Add a comment".to_string(),
+            CommentEditorKind::QuoteReply { quoted_author } => {
+                format!("Quote reply to @{}", quoted_author)
+            }
+            CommentEditorKind::Reply { .. } => match parent_author {
+                Some(a) => format!("Reply to @{}", a),
+                None => "Reply".to_string(),
+            },
+            CommentEditorKind::EditIssue { .. } | CommentEditorKind::EditReview { .. } => {
+                "Edit comment".to_string()
+            }
+        }
+    }
 }
 
 impl Tab {
@@ -184,6 +246,8 @@ impl<'a> PullRequestsView<'a> {
             conversation_scroll_to_selected: true,
             conversation_comment_spans: Vec::new(),
             conversation_comment_count: 1,
+            comment_editor: None,
+            comment_editor_cursor_pos: None,
             commits_scroll: 0,
             commits_hovered: 0,
             checks_scroll: 0,
@@ -234,13 +298,72 @@ impl<'a> PullRequestsView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
+        // When the inline editor is open, the footer is owned by it.
+        if self.comment_editor.is_some() {
+            let parts = if self
+                .comment_editor
+                .as_ref()
+                .map_or(false, |e| e.submitting)
+            {
+                vec!["Sending…", "Esc:cancel"]
+            } else {
+                vec!["Ctrl+S:send", "Esc:cancel"]
+            };
+            return format!("⌘ {}", parts.join("▕▏"));
+        }
+        // On the Conversation tab the footer is dynamic — `R:reply` only
+        // appears when the selected card is an inline review comment
+        // (GitHub doesn't allow replying to anything else), and
+        // `e:edit` / `d:delete` only appear when the user owns the
+        // selected comment. The shortcuts that don't apply stay
+        // physically blocked in `handle_event_detail` too.
+        if matches!(self.mode, Mode::Detail)
+            && matches!(self.active_tab, Tab::Conversation)
+        {
+            let (reply_kind, can_modify_own) = match self.selected_conversation_entry() {
+                Some(e) => {
+                    let is_review = matches!(e.kind, ConversationKind::ReviewComment { .. });
+                    let is_own = self
+                        .me_login
+                        .as_deref()
+                        .map_or(false, |me| me == e.author);
+                    let editable_kind = matches!(
+                        e.kind,
+                        ConversationKind::Comment
+                            | ConversationKind::ReviewComment { .. }
+                    );
+                    let reply_kind = if is_review {
+                        Some("R:reply")
+                    } else {
+                        // Any other selected card (PR description,
+                        // top-level comment, review) gets a "quote
+                        // reply" — a new top-level comment pre-filled
+                        // with `> @author wrote: …`.
+                        Some("R:quote reply")
+                    };
+                    (reply_kind, is_own && editable_kind)
+                }
+                None => (None, false),
+            };
+            let mut parts: Vec<&str> = vec!["c:comment"];
+            if let Some(r) = reply_kind {
+                parts.push(r);
+            }
+            if can_modify_own {
+                parts.push("e:edit");
+                parts.push("d:delete");
+            }
+            parts.push("r:reload");
+            return format!("⌘ {}", parts.join("▕▏"));
+        }
+
         let parts: Vec<&str> = match self.mode {
             Mode::List => vec!["r:reload"],
-            Mode::Detail => vec![
-                "⇆:switch tab",
-                "↑↓:nav",
-                "Esc:back to PRs",
-            ],
+            // Non-Conversation tabs (Commits / Checks / Files) currently
+            // have no view-level actions beyond the basics — leave the
+            // footer empty so we don't clutter it with universal hints
+            // (⇆ / ↑↓ / Esc) that already live in muscle memory.
+            Mode::Detail => vec!["r:reload"],
         };
         format!("⌘ {}", parts.join("▕▏"))
     }
@@ -258,6 +381,13 @@ impl<'a> PullRequestsView<'a> {
         self.reload();
     }
     pub fn update_color_theme(&mut self, _theme: crate::color::ColorTheme) {}
+
+    /// True when the inline comment editor is open. Tells the app key
+    /// router to deliver raw key events (Backspace, Delete, etc.) here
+    /// instead of treating them as UserEvent shortcuts.
+    pub fn is_input_active(&self) -> bool {
+        self.comment_editor.is_some()
+    }
 
     // ---------- data ----------
 
@@ -307,17 +437,30 @@ impl<'a> PullRequestsView<'a> {
         });
     }
 
-    /// Reload the list — list fetch stays synchronous (fast, single call).
-    /// Drops the cache, clears the "opened" marker so the user has to
-    /// re-pick a PR after a refresh.
+    /// Reload the PR list AND, when we're sitting in Detail mode, refresh
+    /// the currently-opened PR's detail. We preserve `opened` by PR
+    /// NUMBER (not by list index, which may have shifted) so the view
+    /// stays anchored on the same PR after the list re-orders.
     fn reload(&mut self) {
+        let prev_number = self.opened_number();
         match crate::github::pr::list_pull_requests(&self.token, &self.coords) {
             Ok(items) => {
                 self.items = items;
                 self.hovered = self.hovered.min(self.items.len().saturating_sub(1));
-                self.opened = None;
+                self.opened = prev_number
+                    .and_then(|n| self.items.iter().position(|p| p.number == n));
                 self.detail_cache.clear();
                 self.loading_for = None;
+                // Detail mode: re-fetch the opened PR's payload. If the
+                // PR no longer exists (merged / closed by someone else),
+                // bounce back to the list.
+                if matches!(self.mode, Mode::Detail) {
+                    if let Some(number) = self.opened_number() {
+                        self.spawn_detail_fetch(number);
+                    } else {
+                        self.mode = Mode::List;
+                    }
+                }
                 self.last_error = None;
             }
             Err(e) => {
@@ -331,8 +474,19 @@ impl<'a> PullRequestsView<'a> {
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
-        // `r` reloads — works in both modes. Independent of global
-        // revert/refresh bindings since this view has no per-commit actions.
+        // While the inline editor is open, EVERY key must route to it —
+        // no view-level shortcuts (`r` reload, `c` comment, etc.) may
+        // hijack the keystroke. Otherwise the user can't type `r`/`c`
+        // in their message.
+        if self.comment_editor.is_some() {
+            match self.mode {
+                Mode::List => self.handle_event_list(event_with_count, key),
+                Mode::Detail => self.handle_event_detail(event_with_count, key),
+            }
+            return;
+        }
+
+        // `r` reloads — works in both modes when no input is active.
         if key.code == KeyCode::Char('r') && key.modifiers == KeyModifiers::NONE {
             self.reload();
             return;
@@ -370,8 +524,98 @@ impl<'a> PullRequestsView<'a> {
     fn handle_event_detail(
         &mut self,
         event_with_count: UserEventWithCount,
-        _key: KeyEvent,
+        key: KeyEvent,
     ) {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+        // ── Inline comment editor takes all input until Ctrl+Enter / Esc.
+        if self.comment_editor.is_some() {
+            // While a submission is in flight, only Esc cancels — every
+            // other key is swallowed.
+            if self
+                .comment_editor
+                .as_ref()
+                .map_or(false, |e| e.submitting)
+            {
+                if matches!(key.code, KeyCode::Esc) {
+                    self.comment_editor = None;
+                }
+                return;
+            }
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            match key.code {
+                KeyCode::Esc => {
+                    self.comment_editor = None;
+                }
+                // Ctrl+Enter is the canonical "send" combo but many
+                // terminals don't propagate the modifier with Enter
+                // (they send a plain `\r`). Ctrl+S is the reliable
+                // fallback that always reaches us.
+                KeyCode::Char('s') if ctrl => self.submit_comment_editor(),
+                KeyCode::Enter if ctrl => {
+                    self.submit_comment_editor();
+                }
+                KeyCode::Enter => self.editor_insert_char('\n'),
+                // Tab inserts indentation. We can't bind Tab to "send"
+                // because users genuinely need it in code/text blocks.
+                KeyCode::Tab => {
+                    for _ in 0..4 {
+                        self.editor_insert_char(' ');
+                    }
+                }
+                // Ctrl+Backspace AND Ctrl+H (the legacy ASCII alias many
+                // terminals send instead of Ctrl+Backspace) AND Ctrl+W
+                // (readline convention) all delete the word to the left.
+                KeyCode::Backspace if ctrl => self.editor_delete_word_left(),
+                KeyCode::Char('h') if ctrl => self.editor_delete_word_left(),
+                KeyCode::Char('w') if ctrl => self.editor_delete_word_left(),
+                KeyCode::Backspace => self.editor_delete_left(),
+                KeyCode::Delete if ctrl => self.editor_delete_word_right(),
+                KeyCode::Delete => self.editor_delete_right(),
+                KeyCode::Left if ctrl => self.editor_word_left(),
+                KeyCode::Right if ctrl => self.editor_word_right(),
+                KeyCode::Left => self.editor_cursor_left(),
+                KeyCode::Right => self.editor_cursor_right(),
+                KeyCode::Up => self.editor_cursor_up(),
+                KeyCode::Down => self.editor_cursor_down(),
+                KeyCode::Home => self.editor_cursor_home(),
+                KeyCode::End => self.editor_cursor_end(),
+                KeyCode::Char(c) if !ctrl => self.editor_insert_char(c),
+                _ => {}
+            }
+            return;
+        }
+
+        // ── Conversation-tab action shortcuts (no editor open).
+        //    Lowercase `r` is reserved for view-level `reload` (handled
+        //    above in handle_event); reply moves to uppercase `R` so
+        //    both stay accessible.
+        //    For `R` we match the uppercase glyph regardless of modifier
+        //    — different terminals attach SHIFT, NONE, or even both to
+        //    uppercase letters, so we just trust the produced char.
+        if matches!(self.active_tab, Tab::Conversation) {
+            let plain = key.modifiers == KeyModifiers::NONE;
+            match key.code {
+                KeyCode::Char('c') if plain => {
+                    self.start_new_comment();
+                    return;
+                }
+                KeyCode::Char('R') => {
+                    self.start_reply();
+                    return;
+                }
+                KeyCode::Char('e') if plain => {
+                    self.start_edit();
+                    return;
+                }
+                KeyCode::Char('d') if plain => {
+                    self.confirm_delete_comment();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match event_with_count.event {
             UserEvent::Cancel | UserEvent::Close => self.back_to_list(),
             // Left/Right move between tabs (in addition to 1-4 hotkeys).
@@ -490,6 +734,446 @@ impl<'a> PullRequestsView<'a> {
         self.opened.and_then(|i| self.items.get(i)).map(|p| p.number)
     }
 
+    /// Look up the conversation entry at `conversation_selected`. Index 0
+    /// is the PR description (no `ConversationEntry`); subsequent indices
+    /// walk through the conversation feed in render order so we can map
+    /// the selected card back to its underlying data.
+    fn selected_conversation_entry(&self) -> Option<&ConversationEntry> {
+        let idx = self.conversation_selected;
+        if idx == 0 {
+            return None; // PR description, no entry
+        }
+        let detail = self.opened_detail()?;
+        let mut counter = 1usize;
+        // Re-walk the same render order push_thread uses (top-level
+        // first, then DFS into children) — must match exactly.
+        let by_id: FxHashMap<u64, &ConversationEntry> = detail
+            .conversation
+            .iter()
+            .filter_map(|e| e.id.map(|id| (id, e)))
+            .collect();
+        let mut children_of: FxHashMap<u64, Vec<&ConversationEntry>> = FxHashMap::default();
+        for entry in &detail.conversation {
+            if let Some(p) = entry.parent_id {
+                children_of.entry(p).or_default().push(entry);
+            }
+        }
+        let top_level: Vec<&ConversationEntry> = detail
+            .conversation
+            .iter()
+            .filter(|e| match e.parent_id {
+                None => true,
+                Some(p) => !by_id.contains_key(&p),
+            })
+            .collect();
+        for entry in top_level {
+            if let Some(found) = walk_for_index(entry, &children_of, &mut counter, idx) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    // ────────────────────── Comment authoring ──────────────────────
+
+    fn start_new_comment(&mut self) {
+        if self.opened_number().is_none() {
+            return;
+        }
+        self.comment_editor = Some(CommentEditor {
+            kind: CommentEditorKind::NewTopLevel,
+            buffer: String::new(),
+            cursor: 0,
+            submitting: false,
+        });
+        // The conversation pane shrinks to make room for the editor;
+        // we DON'T want any pending "scroll to selected" flag to fire
+        // and re-anchor the view away from where the user was reading.
+        self.conversation_scroll_to_selected = false;
+    }
+
+    fn start_reply(&mut self) {
+        let Some(entry) = self.selected_conversation_entry() else {
+            self.tx.send(AppEvent::NotifyInfo(
+                "Select a comment to reply to.".into(),
+            ));
+            return;
+        };
+        // Two flavours:
+        //   - Inline review comment → direct reply via /pulls/{n}/comments
+        //     (GitHub natively threads it under the parent).
+        //   - Anything else → "quote reply": new top-level comment
+        //     pre-filled with a markdown blockquote of the original.
+        match (&entry.kind, entry.id) {
+            (ConversationKind::ReviewComment { .. }, Some(parent_id)) => {
+                self.comment_editor = Some(CommentEditor {
+                    kind: CommentEditorKind::Reply { parent_id },
+                    buffer: String::new(),
+                    cursor: 0,
+                    submitting: false,
+                });
+            }
+            _ => {
+                // GitHub-style quote reply: each line of the original
+                // becomes `> <line>` (blank lines stay as `> ` so the
+                // quote keeps its paragraph breaks), no `@author wrote:`
+                // attribution, two blank lines after the quote so the
+                // cursor lands on a fresh paragraph below it.
+                let author = entry.author.clone();
+                let body = entry.body.clone();
+                let mut quoted = String::new();
+                if body.is_empty() {
+                    quoted.push_str("> \n");
+                } else {
+                    for line in body.lines() {
+                        if line.is_empty() {
+                            quoted.push_str("> \n");
+                        } else {
+                            quoted.push_str("> ");
+                            quoted.push_str(line);
+                            quoted.push('\n');
+                        }
+                    }
+                }
+                quoted.push_str("\n\n");
+                let cursor = quoted.len();
+                self.comment_editor = Some(CommentEditor {
+                    kind: CommentEditorKind::QuoteReply {
+                        quoted_author: author,
+                    },
+                    buffer: quoted,
+                    cursor,
+                    submitting: false,
+                });
+            }
+        }
+        self.conversation_scroll_to_selected = false;
+    }
+
+    fn start_edit(&mut self) {
+        let Some(entry) = self.selected_conversation_entry() else {
+            return;
+        };
+        // Edit is only available on own comments — flagged on the
+        // entry's author against the cached `me_login`.
+        let is_me = self
+            .me_login
+            .as_deref()
+            .map_or(false, |me| me == entry.author);
+        if !is_me {
+            self.tx.send(AppEvent::NotifyInfo(
+                "You can only edit comments you wrote.".into(),
+            ));
+            return;
+        }
+        let kind = match (&entry.kind, entry.id) {
+            (ConversationKind::Comment, Some(id)) => CommentEditorKind::EditIssue {
+                comment_id: id,
+            },
+            (ConversationKind::ReviewComment { .. }, Some(id)) => {
+                CommentEditorKind::EditReview { comment_id: id }
+            }
+            _ => {
+                self.tx.send(AppEvent::NotifyInfo(
+                    "This comment is not editable here.".into(),
+                ));
+                return;
+            }
+        };
+        let buffer = entry.body.clone();
+        let cursor = buffer.len();
+        self.comment_editor = Some(CommentEditor {
+            kind,
+            buffer,
+            cursor,
+            submitting: false,
+        });
+        self.conversation_scroll_to_selected = false;
+    }
+
+    fn confirm_delete_comment(&mut self) {
+        let Some(entry) = self.selected_conversation_entry() else {
+            return;
+        };
+        let is_me = self
+            .me_login
+            .as_deref()
+            .map_or(false, |me| me == entry.author);
+        if !is_me {
+            self.tx.send(AppEvent::NotifyInfo(
+                "You can only delete comments you wrote.".into(),
+            ));
+            return;
+        }
+        let (id, is_review) = match (&entry.kind, entry.id) {
+            (ConversationKind::Comment, Some(id)) => (id, false),
+            (ConversationKind::ReviewComment { .. }, Some(id)) => (id, true),
+            _ => {
+                self.tx.send(AppEvent::NotifyInfo(
+                    "This comment is not deletable.".into(),
+                ));
+                return;
+            }
+        };
+        // Fire the delete without an additional confirm prompt — the
+        // toast on completion + the destructive nature of the key (`d`)
+        // are the explicit signal. We re-fetch on success to refresh
+        // the thread.
+        let Some(number) = self.opened_number() else {
+            return;
+        };
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = if is_review {
+                crate::github::pr::delete_review_comment(&token, &coords, id)
+            } else {
+                crate::github::pr::delete_issue_comment(&token, &coords, id)
+            };
+            tx.send(AppEvent::PullRequestActionDone {
+                number,
+                action: "Comment deleted".into(),
+                result,
+            });
+        });
+    }
+
+    fn submit_comment_editor(&mut self) {
+        let Some(editor) = self.comment_editor.as_ref() else {
+            return;
+        };
+        let body = editor.buffer.trim().to_string();
+        if body.is_empty() {
+            self.tx.send(AppEvent::NotifyWarn(
+                "Comment body is empty — nothing to send.".into(),
+            ));
+            return;
+        }
+        let Some(number) = self.opened_number() else {
+            return;
+        };
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        let kind = editor.kind.clone();
+        let action_label: String = match &kind {
+            CommentEditorKind::NewTopLevel => "Comment posted".into(),
+            CommentEditorKind::QuoteReply { .. } => "Quote reply posted".into(),
+            CommentEditorKind::Reply { .. } => "Reply posted".into(),
+            CommentEditorKind::EditIssue { .. } | CommentEditorKind::EditReview { .. } => {
+                "Comment updated".into()
+            }
+        };
+        // Flip into "sending" state so the editor renders a spinner
+        // and discards further input until the result arrives.
+        if let Some(e) = self.comment_editor.as_mut() {
+            e.submitting = true;
+        }
+        std::thread::spawn(move || {
+            let result = match kind {
+                // Both new-comment and quote-reply post to the same
+                // issue-comments endpoint — quote reply is just a
+                // pre-filled body convenience.
+                CommentEditorKind::NewTopLevel
+                | CommentEditorKind::QuoteReply { .. } => {
+                    crate::github::pr::post_issue_comment(&token, &coords, number, &body)
+                }
+                CommentEditorKind::Reply { parent_id } => {
+                    crate::github::pr::post_review_comment_reply(
+                        &token, &coords, number, &body, parent_id,
+                    )
+                }
+                CommentEditorKind::EditIssue { comment_id } => {
+                    crate::github::pr::patch_issue_comment(&token, &coords, comment_id, &body)
+                }
+                CommentEditorKind::EditReview { comment_id } => {
+                    crate::github::pr::patch_review_comment(&token, &coords, comment_id, &body)
+                }
+            };
+            tx.send(AppEvent::PullRequestActionDone {
+                number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
+    /// Called when a background write action returns. Closes the editor
+    /// on success, surfaces the message via toast, and invalidates the
+    /// per-PR detail cache so a refresh picks up the new state.
+    pub fn on_action_done(
+        &mut self,
+        number: u64,
+        action: String,
+        result: Result<(), String>,
+    ) {
+        match result {
+            Ok(()) => {
+                self.tx.send(AppEvent::NotifySuccess(action));
+                self.comment_editor = None;
+                self.detail_cache.remove(&number);
+                self.loading_for = None;
+                if self.opened_number() == Some(number) {
+                    self.spawn_detail_fetch(number);
+                }
+            }
+            Err(e) => {
+                self.tx
+                    .send(AppEvent::NotifyError(format!("{}: {}", action, e)));
+                if let Some(ed) = self.comment_editor.as_mut() {
+                    ed.submitting = false;
+                }
+            }
+        }
+    }
+
+    // ────────────────────── Inline-editor key handlers ──────────────────────
+
+    fn editor_insert_char(&mut self, c: char) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            let cursor = ed.cursor;
+            ed.buffer.insert(cursor, c);
+            ed.cursor += c.len_utf8();
+        }
+    }
+
+    fn editor_delete_left(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            if ed.cursor == 0 {
+                return;
+            }
+            // Walk back one char boundary.
+            let mut new_cursor = ed.cursor - 1;
+            while new_cursor > 0 && !ed.buffer.is_char_boundary(new_cursor) {
+                new_cursor -= 1;
+            }
+            ed.buffer.replace_range(new_cursor..ed.cursor, "");
+            ed.cursor = new_cursor;
+        }
+    }
+
+    fn editor_delete_right(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            if ed.cursor >= ed.buffer.len() {
+                return;
+            }
+            let mut new_end = ed.cursor + 1;
+            while new_end < ed.buffer.len() && !ed.buffer.is_char_boundary(new_end) {
+                new_end += 1;
+            }
+            ed.buffer.replace_range(ed.cursor..new_end, "");
+        }
+    }
+
+    fn editor_delete_word_left(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            let new_cursor = word_left_boundary(&ed.buffer, ed.cursor);
+            ed.buffer.replace_range(new_cursor..ed.cursor, "");
+            ed.cursor = new_cursor;
+        }
+    }
+
+    fn editor_delete_word_right(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            let end = word_right_boundary(&ed.buffer, ed.cursor);
+            ed.buffer.replace_range(ed.cursor..end, "");
+        }
+    }
+
+    fn editor_cursor_left(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            if ed.cursor == 0 {
+                return;
+            }
+            let mut c = ed.cursor - 1;
+            while c > 0 && !ed.buffer.is_char_boundary(c) {
+                c -= 1;
+            }
+            ed.cursor = c;
+        }
+    }
+
+    fn editor_cursor_right(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            if ed.cursor >= ed.buffer.len() {
+                return;
+            }
+            let mut c = ed.cursor + 1;
+            while c < ed.buffer.len() && !ed.buffer.is_char_boundary(c) {
+                c += 1;
+            }
+            ed.cursor = c;
+        }
+    }
+
+    fn editor_cursor_up(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            // Move one line up, preserving the visual column.
+            let buf = &ed.buffer;
+            let cur_line_start = buf[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            if cur_line_start == 0 {
+                ed.cursor = 0;
+                return;
+            }
+            let col = ed.cursor - cur_line_start;
+            let prev_line_end = cur_line_start - 1; // the '\n' itself
+            let prev_line_start = buf[..prev_line_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let prev_len = prev_line_end - prev_line_start;
+            ed.cursor = prev_line_start + col.min(prev_len);
+        }
+    }
+
+    fn editor_cursor_down(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            let buf = &ed.buffer;
+            let cur_line_start = buf[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let col = ed.cursor - cur_line_start;
+            let cur_line_end = buf[ed.cursor..]
+                .find('\n')
+                .map(|i| ed.cursor + i)
+                .unwrap_or(buf.len());
+            if cur_line_end >= buf.len() {
+                ed.cursor = buf.len();
+                return;
+            }
+            let next_line_start = cur_line_end + 1;
+            let next_line_end = buf[next_line_start..]
+                .find('\n')
+                .map(|i| next_line_start + i)
+                .unwrap_or(buf.len());
+            let next_len = next_line_end - next_line_start;
+            ed.cursor = next_line_start + col.min(next_len);
+        }
+    }
+
+    fn editor_cursor_home(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            ed.cursor = ed.buffer[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        }
+    }
+
+    fn editor_cursor_end(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            ed.cursor = ed.buffer[ed.cursor..]
+                .find('\n')
+                .map(|i| ed.cursor + i)
+                .unwrap_or(ed.buffer.len());
+        }
+    }
+
+    fn editor_word_left(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            ed.cursor = word_left_boundary(&ed.buffer, ed.cursor);
+        }
+    }
+
+    fn editor_word_right(&mut self) {
+        if let Some(ed) = self.comment_editor.as_mut() {
+            ed.cursor = word_right_boundary(&ed.buffer, ed.cursor);
+        }
+    }
+
     pub fn handle_click(&mut self, col: u16, row: u16) {
         match self.mode {
             Mode::List => {
@@ -523,6 +1207,12 @@ impl<'a> PullRequestsView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        // While the inline editor is open, the user is typing — mouse
+        // drift should not change selection or focus. Block all hover
+        // updates until the editor closes.
+        if self.comment_editor.is_some() {
+            return;
+        }
         match self.mode {
             Mode::List => {
                 if let Some(idx) = self.row_at_list(row, col) {
@@ -679,6 +1369,21 @@ impl<'a> PullRequestsView<'a> {
             Mode::List => self.render_list(f, body_area),
             Mode::Detail => self.render_detail_mode(f, body_area),
         }
+
+        // Place the terminal cursor on the inline comment editor when
+        // it's the active input surface — same convention as the rebase
+        // reword editor.
+        if let Some((cx, cy)) = self.comment_editor_cursor_pos {
+            match &self.ctx.ui_config.common.cursor_type {
+                crate::config::CursorType::Native => {
+                    f.set_cursor_position((cx, cy));
+                }
+                crate::config::CursorType::Virtual(glyph) => {
+                    let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
+                    f.buffer_mut().set_string(cx, cy, glyph, style);
+                }
+            }
+        }
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
@@ -785,8 +1490,11 @@ impl<'a> PullRequestsView<'a> {
             .iter()
             .enumerate()
             .map(|(i, pr)| {
-                let is_opened = self.opened == Some(i);
-                ListItem::new(self.format_pr_row(pr, is_opened))
+                // Triangle marker follows the keyboard / mouse cursor
+                // (hovered), not the previously-opened PR — the user
+                // sees at a glance which row will open on Enter/click.
+                let is_marked = self.hovered == i;
+                ListItem::new(self.format_pr_row(pr, is_marked))
             })
             .collect();
         let mut state = ListState::default();
@@ -919,6 +1627,128 @@ impl<'a> PullRequestsView<'a> {
 
     /// Sub-header below the global header — PR number, title, state chip,
     /// branches, stats. Equivalent to the top portion of a GitHub PR page.
+    /// Inline comment editor reserved at the bottom of the Conversation
+    /// tab. 1-row header (title + author hint), N body rows, 1-row footer
+    /// (Ctrl+Enter / Esc hints + "Sending…" while a submission is in flight).
+    fn render_comment_editor(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        theme: &crate::color::ColorTheme,
+    ) {
+        let Some(editor) = self.comment_editor.as_ref() else {
+            return;
+        };
+        // Header: title + parent author hint for replies.
+        let parent_author = match &editor.kind {
+            CommentEditorKind::Reply { parent_id } => self
+                .opened_detail()
+                .and_then(|d| {
+                    d.conversation
+                        .iter()
+                        .find(|e| e.id == Some(*parent_id))
+                        .map(|e| e.author.as_str())
+                }),
+            _ => None,
+        };
+        let title = editor.kind.header(parent_author);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.list_head_fg))
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    title,
+                    Style::default()
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+            ]));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
+
+        // Split the inner area into body + footer (single-line hint).
+        let body_height = inner.height.saturating_sub(1).max(1);
+        let body_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: body_height,
+        };
+        let footer_area = Rect {
+            x: inner.x,
+            y: inner.y + body_height,
+            width: inner.width,
+            height: 1,
+        };
+
+        // Body: render each logical line as-is, clipped to body_height.
+        let value = Style::default().fg(theme.fg);
+        let body_text = if editor.buffer.is_empty() {
+            // Placeholder hint so the box doesn't look broken when empty.
+            vec![Span::styled(
+                match &editor.kind {
+                    CommentEditorKind::NewTopLevel => "Type your comment…",
+                    CommentEditorKind::Reply { .. } => "Type your reply…",
+                    _ => "Type your edits…",
+                }
+                .to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            )]
+        } else {
+            // We render the raw buffer verbatim (no markdown — author is
+            // still composing, no need to pre-render).
+            editor
+                .buffer
+                .lines()
+                .take(body_height as usize)
+                .map(|l| Span::styled(l.to_string(), value))
+                .collect()
+        };
+        let lines: Vec<Line<'static>> = body_text
+            .into_iter()
+            .map(|s| Line::from(s))
+            .collect();
+        let para = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(para, body_area);
+
+        // Footer: shortcuts hint OR "Sending…" while a write is in flight.
+        // We list Ctrl+S first since Ctrl+Enter doesn't survive in most
+        // terminals (modifier gets stripped from the Enter sequence).
+        let footer_text = if editor.submitting {
+            "  Sending…".to_string()
+        } else {
+            "  Ctrl+S:send   Esc:cancel".to_string()
+        };
+        let footer_style = if editor.submitting {
+            Style::default().fg(theme.status_warn_fg)
+        } else {
+            Style::default().fg(theme.detail_label_fg)
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(footer_text, footer_style)),
+            footer_area,
+        );
+
+        // Place the terminal cursor on the editor surface at the
+        // logical (col, row) corresponding to the buffer cursor.
+        let (col, row) = cursor_screen_pos(&editor.buffer, editor.cursor);
+        let cx = body_area.x + col;
+        let cy = body_area.y + row;
+        // Clamp to the body area.
+        if !editor.submitting
+            && cx < body_area.x + body_area.width
+            && cy < body_area.y + body_area.height
+        {
+            self.comment_editor_cursor_pos = Some((cx, cy));
+        }
+    }
+
     fn render_pr_sub_header(
         &self,
         f: &mut Frame,
@@ -1041,12 +1871,39 @@ impl<'a> PullRequestsView<'a> {
         area: Rect,
         detail: &PullRequestDetail,
     ) {
+        // Reserve the bottom rows for the inline editor when it's open.
+        self.comment_editor_cursor_pos = None;
+        let editor_height: u16 = if self.comment_editor.is_some() {
+            // Header + body (≥ 6 visible rows, up to 10) + footer.
+            // 1 row above the editor stays empty as a visual breather.
+            let body_lines = self
+                .comment_editor
+                .as_ref()
+                .map(|e| e.buffer.lines().count().max(6).min(10))
+                .unwrap_or(6) as u16;
+            (3 + body_lines).min(area.height.saturating_sub(2)).max(8)
+        } else {
+            0
+        };
+        let gap_height: u16 = if editor_height > 0 { 1 } else { 0 };
+        let [conv_area, _gap, editor_area] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(gap_height),
+            Constraint::Length(editor_height),
+        ])
+        .areas(area);
+
         // Clone the theme once: we need a long-lived snapshot while
         // also calling `&mut self` methods (push_thread, scroll fixups)
         // further down.
         let theme = self.ctx.color_theme.clone();
         let theme = &theme;
 
+        if editor_height > 0 {
+            self.render_comment_editor(f, editor_area, theme);
+        }
+
+        let area = conv_area;
         let mut lines: Vec<Line<'static>> = Vec::new();
         // Reset per-frame span tracking so mouse hits use the layout
         // we're about to lay down, not a stale one.
@@ -1762,6 +2619,113 @@ fn file_line(theme: &crate::color::ColorTheme, f: &crate::github::pr::PullFile) 
             Style::default().fg(theme.detail_file_change_delete_fg),
         ),
     ])
+}
+
+/// Compute (column, row) within the editor body for a buffer cursor at
+/// the given byte offset. Lines are split on `\n`; `col` is the
+/// visible-width count of the prefix in the current logical line.
+fn cursor_screen_pos(buf: &str, byte_cursor: usize) -> (u16, u16) {
+    let safe_cursor = byte_cursor.min(buf.len());
+    let prefix = &buf[..safe_cursor];
+    let row = prefix.chars().filter(|c| *c == '\n').count() as u16;
+    let last_line_start = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = console::measure_text_width(&prefix[last_line_start..]) as u16;
+    (col, row)
+}
+
+/// Recursively walk a parent + its replies (DFS, in render order) and
+/// return the entry at the given 1-based selection index. The PR
+/// description is index 0 (handled by the caller); top-level entries
+/// start at 1 and increment by 1 per visited entry.
+fn walk_for_index<'a>(
+    entry: &'a ConversationEntry,
+    children_of: &FxHashMap<u64, Vec<&'a ConversationEntry>>,
+    counter: &mut usize,
+    target: usize,
+) -> Option<&'a ConversationEntry> {
+    if *counter == target {
+        return Some(entry);
+    }
+    *counter += 1;
+    if let Some(id) = entry.id {
+        if let Some(replies) = children_of.get(&id) {
+            for child in replies {
+                if let Some(found) = walk_for_index(child, children_of, counter, target) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Byte index of the next word-boundary to the LEFT of `cursor` —
+/// skips trailing whitespace then alphanumerics. Mirrors Ctrl+Backspace
+/// in modern editors.
+fn word_left_boundary(buf: &str, mut cursor: usize) -> usize {
+    let bytes = buf.as_bytes();
+    while cursor > 0 {
+        let prev = prev_char_boundary(buf, cursor);
+        if !bytes[prev].is_ascii_whitespace() {
+            break;
+        }
+        cursor = prev;
+    }
+    while cursor > 0 {
+        let prev = prev_char_boundary(buf, cursor);
+        if !is_word_byte(bytes[prev]) {
+            break;
+        }
+        cursor = prev;
+    }
+    cursor
+}
+
+fn word_right_boundary(buf: &str, mut cursor: usize) -> usize {
+    let bytes = buf.as_bytes();
+    let len = buf.len();
+    while cursor < len {
+        let next = next_char_boundary(buf, cursor);
+        if !is_word_byte(bytes[cursor]) {
+            break;
+        }
+        cursor = next;
+    }
+    while cursor < len {
+        let next = next_char_boundary(buf, cursor);
+        if !bytes[cursor].is_ascii_whitespace() {
+            break;
+        }
+        cursor = next;
+    }
+    cursor
+}
+
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn prev_char_boundary(buf: &str, mut i: usize) -> usize {
+    if i == 0 {
+        return 0;
+    }
+    i -= 1;
+    while i > 0 && !buf.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn next_char_boundary(buf: &str, mut i: usize) -> usize {
+    let len = buf.len();
+    if i >= len {
+        return len;
+    }
+    i += 1;
+    while i < len && !buf.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 fn adjust_index(current: usize, delta: i32, max: usize) -> usize {
