@@ -71,7 +71,11 @@ push_branch = ["shift-q"]
 # `UserEvent::PullBranch | UserEvent::Pull` — see `src/view/branch_detail.rs`.
 # Leaving this empty keeps `U` as the single canonical pull keybind.
 pull_branch = []
-set_upstream = ["shift-i"]
+# `shift-i` used to live here, but it now opens the Issues view
+# globally. `ctrl-t` (mnemonic: Track upstream) replaces it; users
+# in BranchDetail can still set upstream by clicking row 6 of the
+# action panel as before.
+set_upstream = ["ctrl-t"]
 create_archive = ["shift-e"]
 unselect_branch = ["shift-t"]
 copy_branch_name = ["shift-v"]

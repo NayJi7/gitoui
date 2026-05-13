@@ -747,9 +747,7 @@ impl App<'_> {
                         }
                         Some(UserEvent::Issues)
                             if !text_input_active
-                                && !matches!(self.view, View::Issues(_))
-                                // BranchDetail uses Shift+I as set_upstream — let it fall through.
-                                && !matches!(self.view, View::BranchDetail(_)) =>
+                                && !matches!(self.view, View::Issues(_)) =>
                         {
                             self.ec.send(AppEvent::OpenIssues);
                         }
