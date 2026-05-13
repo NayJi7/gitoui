@@ -15,7 +15,218 @@ fn run_git(path: &Path, args: &[&str]) -> GitResult {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(humanize_git_error(args, &stderr))
+    }
+}
+
+/// Translate a raw `git` stderr into a one-line, footer-friendly
+/// message. The git command's stderr is rich but not pretty — it
+/// often includes multi-line hints, ANSI escapes, and shell-style
+/// suggestions that look noisy in a single-row toast. We pattern-
+/// match on the common failures and fall back to a stripped first
+/// line for anything unrecognised.
+fn humanize_git_error(args: &[&str], stderr: &str) -> String {
+    // Sub-command drives some context-specific messages (e.g.,
+    // "rebase: …" vs "blame: …").
+    let subcommand = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .copied()
+        .unwrap_or("");
+    let stripped = stderr.trim();
+    let lower = stripped.to_ascii_lowercase();
+    let first_line = stripped
+        .lines()
+        .next()
+        .unwrap_or(stripped)
+        .trim()
+        .trim_start_matches("fatal:")
+        .trim_start_matches("error:")
+        .trim_start_matches("warning:")
+        .trim()
+        .to_string();
+
+    // ── Working-tree state failures ────────────────────────────────
+    if lower.contains("your local changes to the following files would be overwritten")
+        || lower.contains("would be overwritten by")
+    {
+        return "Uncommitted local changes block this — commit or stash first."
+            .to_string();
+    }
+    if lower.contains("please commit your changes or stash them") {
+        return "Working tree isn't clean — commit or stash changes first.".into();
+    }
+    if lower.contains("needs merge") || lower.contains("you have unmerged paths") {
+        return "Unmerged paths from a previous conflict — resolve them first.".into();
+    }
+    if lower.contains("nothing to commit") {
+        return "Nothing to commit — working tree is clean.".into();
+    }
+    if lower.contains("nothing to amend") {
+        return "Nothing to amend — no staged changes.".into();
+    }
+
+    // ── Conflict / apply failures ──────────────────────────────────
+    if lower.contains("conflict (")
+        || lower.contains("merge conflict")
+        || lower.contains("automatic merge failed")
+    {
+        return match subcommand {
+            "cherry-pick" => {
+                "Cherry-pick conflict — resolve in the conflict editor, then continue."
+                    .into()
+            }
+            "rebase" => {
+                "Rebase conflict — resolve in the conflict editor, then continue.".into()
+            }
+            "merge" => "Merge conflict — resolve in the conflict editor, then commit.".into(),
+            "revert" => "Revert conflict — resolve in the conflict editor, then continue.".into(),
+            _ => "Conflict — resolve manually then continue.".into(),
+        };
+    }
+    if lower.contains("could not apply") {
+        return format!(
+            "Couldn't apply commit cleanly{}",
+            if subcommand.is_empty() { "" } else { " (likely a conflict)" }
+        );
+    }
+
+    // ── In-progress operation conflicts ────────────────────────────
+    if lower.contains("rebase in progress")
+        || lower.contains("you are currently rebasing")
+    {
+        return "A rebase is already in progress — finish or abort it first.".into();
+    }
+    if lower.contains("you are currently cherry-picking")
+        || lower.contains("cherry-pick is now empty")
+    {
+        return "A cherry-pick is already in progress — finish or abort it first.".into();
+    }
+    if lower.contains("you have not concluded your merge")
+        || lower.contains("merging is not possible")
+    {
+        return "A merge is already in progress — finish or abort it first.".into();
+    }
+
+    // ── Reference / ancestry problems ──────────────────────────────
+    if lower.contains("not something we can merge") {
+        return "That reference isn't mergeable — check the commit exists locally.".into();
+    }
+    if lower.contains("not a valid object")
+        || lower.contains("bad revision")
+        || lower.contains("bad object")
+        || lower.contains("unknown revision")
+        || lower.contains("ambiguous argument")
+    {
+        return "Reference not found — commit or branch doesn't exist locally.".into();
+    }
+    if lower.contains("refusing to merge unrelated histories") {
+        return "Refusing to merge unrelated histories — branches have no common ancestor.".into();
+    }
+    if lower.contains("not a tree object")
+        || lower.contains("is not a commit")
+    {
+        return "Object isn't a commit — wrong kind of git reference.".into();
+    }
+    if subcommand == "rebase" && (lower.contains("no such") || lower.contains("nothing to do")) {
+        return "Rebase target isn't in this branch's history — nothing to do.".into();
+    }
+    if subcommand == "rebase" && lower.contains("invalid upstream") {
+        return "Rebase: invalid upstream — that commit isn't reachable.".into();
+    }
+    if (subcommand == "rebase"
+        && (lower.contains("would have no commits") || lower.contains("nothing to commit")))
+    {
+        return "Rebase would produce no commits — target equals current.".into();
+    }
+
+    // ── Branch / checkout failures ─────────────────────────────────
+    if lower.contains("a branch named") && lower.contains("already exists") {
+        return "Branch already exists with that name.".into();
+    }
+    if lower.contains("not a valid branch name") {
+        return "Invalid branch name.".into();
+    }
+    if lower.contains("cannot delete branch") && lower.contains("checked out") {
+        return "Can't delete the currently-checked-out branch — switch first.".into();
+    }
+    if lower.contains("branch") && lower.contains("not fully merged") {
+        return "Branch isn't fully merged — use force-delete to remove anyway.".into();
+    }
+    if lower.contains("no such branch") {
+        return "Branch doesn't exist locally.".into();
+    }
+    if subcommand == "checkout" && lower.contains("did not match any") {
+        return "Checkout target not found — branch or commit doesn't exist.".into();
+    }
+
+    // ── Path / file problems ───────────────────────────────────────
+    if subcommand == "blame"
+        && (lower.contains("no such path")
+            || lower.contains("did not match")
+            || lower.contains("no such file"))
+    {
+        return "Blame: file isn't in the target commit.".into();
+    }
+    if subcommand == "log"
+        && (lower.contains("no such path") || lower.contains("did not match"))
+    {
+        return "File history: file isn't in this commit's tree.".into();
+    }
+    if lower.contains("pathspec") && lower.contains("did not match") {
+        return "Path not found at that commit.".into();
+    }
+    if lower.contains("no such path in") {
+        return "File not present at that commit.".into();
+    }
+
+    // ── Network / remote failures ──────────────────────────────────
+    if lower.contains("could not read from remote repository")
+        || lower.contains("permission denied (publickey)")
+    {
+        return "Remote unreachable — check SSH/HTTPS auth and network.".into();
+    }
+    if lower.contains("repository not found") {
+        return "Remote repository not found — check the URL/permissions.".into();
+    }
+    if lower.contains("non-fast-forward")
+        || lower.contains("rejected")
+        && subcommand == "push"
+    {
+        return "Push rejected — remote has commits you don't have. Pull/rebase first.".into();
+    }
+    if lower.contains("couldn't find remote ref") {
+        return "Remote ref not found — branch may have been deleted upstream.".into();
+    }
+
+    // ── Tag / stash specifics ──────────────────────────────────────
+    if subcommand == "tag" && lower.contains("already exists") {
+        return "Tag already exists with that name.".into();
+    }
+    if subcommand == "stash"
+        && (lower.contains("no stash entries") || lower.contains("no stash found"))
+    {
+        return "No stash entries to act on.".into();
+    }
+
+    // ── Last-resort fallback: clean up git's prefix + first line. ──
+    let cleaned = first_line
+        .trim_end_matches('.')
+        .trim_end_matches(';');
+    if cleaned.is_empty() {
+        return format!("git {} failed.", subcommand);
+    }
+    if subcommand.is_empty() {
+        cleaned.to_string()
+    } else {
+        // Capitalise the subcommand for a touch of polish.
+        let mut chars = subcommand.chars();
+        let pretty_cmd = match chars.next() {
+            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            None => subcommand.to_string(),
+        };
+        format!("{}: {}", pretty_cmd, cleaned)
     }
 }
 

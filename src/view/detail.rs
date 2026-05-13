@@ -27,6 +27,9 @@ pub struct DetailView<'a> {
     refs: Vec<Ref>,
     head_branch_name: Option<String>,
     head_commit_hash: Option<CommitHash>,
+    /// PR number the user is currently exploring — surfaces in the
+    /// "Commit Details" panel title so they always know the origin.
+    pr_origin: Option<u64>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -53,11 +56,16 @@ impl<'a> DetailView<'a> {
             refs,
             head_branch_name,
             head_commit_hash,
+            pr_origin: None,
             ctx,
             tx,
             list_height: 0,
             detail_area: None,
         }
+    }
+
+    pub fn set_pr_origin(&mut self, pr_number: Option<u64>) {
+        self.pr_origin = pr_number;
     }
 
     /// Pre-select the file whose path matches in the commit's change list.
@@ -324,7 +332,8 @@ impl<'a> DetailView<'a> {
             self.ctx.clone(),
             self.head_branch_name.clone(),
             self.is_head_commit(),
-        );
+        )
+        .with_pr_origin(self.pr_origin);
         f.render_stateful_widget(commit_detail, detail_area, &mut self.commit_detail_state);
     }
 

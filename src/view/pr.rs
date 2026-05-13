@@ -320,13 +320,27 @@ struct PrListColumns {
     state: usize,
     number: usize,
     title: usize,
+    /// Width of the labels column — sized to the worst-case label
+    /// count across visible PRs so rows align. A label chip is
+    /// `LABEL_CHIP_WIDTH` cols wide (2 letters + 2 padding spaces).
+    labels: usize,
     author: usize,
 }
+
+/// How many label chips to show inline in the list, max. Beyond
+/// this the row would crowd the title — anyone needing all labels
+/// can drill into the PR detail to see them.
+const MAX_INLINE_LABELS: usize = 3;
+/// Width of a single short label chip (` XX `). Two letters of the
+/// label name, padded with one space on each side so the bg colour
+/// reads as a chip rather than text.
+const LABEL_CHIP_WIDTH: usize = 4;
 
 impl PrListColumns {
     /// Fixed visual overhead between columns:
     ///   "▶ " (2) + state + "  " (2) + number + "  " (2)
-    ///   + title + "  " (2) + author + " · " (3) + head + " → " (3) + base
+    ///   + title + " " (1) + labels + "  " (2) + author + " · " (3)
+    ///   + head + " → " (3) + base
     const MARKER: usize = 2;
     const GAP: usize = 2;
     const DOT_SEP: usize = 3; // " · "
@@ -373,6 +387,17 @@ impl PrListColumns {
             .max()
             .unwrap_or(0);
 
+        // Labels column = (worst-case chip count × chip width). When
+        // no visible PR has labels the column collapses to 0.
+        let max_chips_per_row = items
+            .iter()
+            .map(|pr| pr.labels.len().min(MAX_INLINE_LABELS))
+            .max()
+            .unwrap_or(0);
+        let labels = max_chips_per_row * LABEL_CHIP_WIDTH;
+        // 1-col gap before the labels chunk (only if the chunk exists).
+        let labels_gap: usize = if labels > 0 { 1 } else { 0 };
+
         // Title flexes between fixed overhead and the worst-case
         // unpadded head/base. If everything fits, title sits at its
         // natural max; otherwise it shrinks and ellipses to `…`.
@@ -381,6 +406,8 @@ impl PrListColumns {
             + Self::GAP
             + number
             + Self::GAP
+            + labels_gap
+            + labels
             + Self::GAP
             + author
             + Self::DOT_SEP
@@ -394,6 +421,7 @@ impl PrListColumns {
             state,
             number,
             title,
+            labels,
             author,
         }
     }
@@ -534,6 +562,20 @@ impl<'a> PullRequestsView<'a> {
         self.commit_list_state.take()
     }
 
+    /// Re-enter Detail mode pointed at `pr_number`, used by the
+    /// app when bouncing back from a CommitDetail or DiffView that
+    /// was launched from this PR.
+    pub fn reopen_pr(&mut self, pr_number: u64) {
+        self.opened_pr_number = Some(pr_number);
+        self.mode = Mode::Detail;
+        self.active_tab = Tab::Conversation;
+        self.files_drilldown = None;
+        self.commits_drilldown = None;
+        if !self.detail_cache.contains_key(&pr_number) {
+            self.spawn_detail_fetch(pr_number);
+        }
+    }
+
     pub fn footer_hint(&self) -> String {
         // When the inline editor is open, the footer is owned by it.
         if self.comment_editor.is_some() {
@@ -563,37 +605,25 @@ impl<'a> PullRequestsView<'a> {
                 {
                     return format!("⌘ {}", "Esc:back");
                 }
+                // Hold the footer until the PR detail has fully
+                // loaded — surfacing `c:comment`, `a:approve`, etc.
+                // before the data lands would let the user fire
+                // actions on a half-populated PR. Only `r:reload`
+                // and `Esc` are safe before the fetch completes.
+                if self.opened_detail().is_none() {
+                    return format!("⌘ {}", ["r:reload", "Esc:back"].join("▕▏"));
+                }
+                // Footer = REVIEW actions (daily verbs). State /
+                // meta shortcuts (Ctrl+X close, draft toggle, labels,
+                // reviewers, open-in-web) sit right-aligned on the
+                // tab-bar row instead — keeps this row scannable.
                 let mut p = vec!["c:comment"];
-                // Enter drills into the focused row on tabs where it
-                // makes sense.
                 if matches!(self.active_tab, Tab::Commits | Tab::Files) {
                     p.push("Enter:view diff");
                 }
                 p.push("a:approve");
                 p.push("x:request changes");
                 p.push("m:merge");
-                // State management — shortcuts adapt to the PR's
-                // current state so we don't surface no-ops.
-                let detail = self.opened_detail();
-                let is_open = detail
-                    .map(|d| matches!(d.state, PullState::Open))
-                    .unwrap_or(false);
-                let is_closed = detail
-                    .map(|d| matches!(d.state, PullState::Closed))
-                    .unwrap_or(false);
-                let is_draft = detail.map(|d| d.draft).unwrap_or(false);
-                if is_open {
-                    p.push("Ctrl+X:close");
-                    p.push(if is_draft {
-                        "Ctrl+D:mark ready"
-                    } else {
-                        "Ctrl+D:to draft"
-                    });
-                } else if is_closed {
-                    p.push("Ctrl+O:reopen");
-                }
-                p.push("l:labels");
-                p.push("v:reviewers");
                 p.push("o:open in web");
                 p.push("r:reload");
                 p
@@ -1051,13 +1081,37 @@ impl<'a> PullRequestsView<'a> {
     fn enter_drilldown(&mut self) {
         match self.active_tab {
             Tab::Files => {
-                let idx = self.files_hovered;
-                if self.opened_detail().map_or(false, |d| idx < d.files.len()) {
-                    self.files_drilldown = Some(idx);
-                    self.files_drilldown_scroll = 0;
-                }
+                let Some(detail) = self.opened_detail() else {
+                    return;
+                };
+                let Some(file) = detail.files.get(self.files_hovered) else {
+                    return;
+                };
+                // Transition to the existing single-file DiffView so
+                // the user sees the same renderer the rest of the app
+                // uses (enhanced / raw / side-by-side modes etc.).
+                self.tx.send(AppEvent::OpenPrFileDiff {
+                    pr_number: detail.number,
+                    sha: detail.head_sha.clone(),
+                    file_path: file.filename.clone(),
+                });
             }
-            Tab::Commits => self.open_commit_drilldown(),
+            Tab::Commits => {
+                let Some(detail) = self.opened_detail() else {
+                    return;
+                };
+                let Some(commit) = detail.commit_list.get(self.commits_hovered) else {
+                    return;
+                };
+                // Transition to the existing CommitDetail view —
+                // the app's `OpenPrCommitDetail` handler does the
+                // background `git fetch` if the commit isn't local
+                // yet, then opens `View::Detail`.
+                self.tx.send(AppEvent::OpenPrCommitDetail {
+                    pr_number: detail.number,
+                    sha: commit.sha.clone(),
+                });
+            }
             _ => {}
         }
     }
@@ -1500,6 +1554,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         };
         let pr_number = detail.number;
+        let pr_title = detail.title.clone();
         let currently_on_pr: Vec<String> =
             detail.labels.iter().map(|l| l.name.clone()).collect();
         let token = self.token.clone();
@@ -1510,10 +1565,10 @@ impl<'a> PullRequestsView<'a> {
         std::thread::spawn(move || {
             match crate::github::pr::list_repo_labels(&token, &coords) {
                 Ok(labels) => {
-                    let all: Vec<String> = labels.into_iter().map(|l| l.name).collect();
                     tx.send(AppEvent::OpenPrLabelsPicker {
                         pr_number,
-                        all_labels: all,
+                        pr_title,
+                        all_labels: labels,
                         currently_on_pr,
                     });
                 }
@@ -1527,6 +1582,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         };
         let pr_number = detail.number;
+        let pr_title = detail.title.clone();
         let currently_requested = detail.reviewers.clone();
         // The PR author can never be a reviewer — bake that into the
         // pool we send to the picker so the user can't tick themselves
@@ -1551,6 +1607,7 @@ impl<'a> PullRequestsView<'a> {
                     filtered.sort();
                     tx.send(AppEvent::OpenPrReviewersPicker {
                         pr_number,
+                        pr_title,
                         all_users: filtered,
                         currently_requested,
                     });
@@ -2418,6 +2475,7 @@ impl<'a> PullRequestsView<'a> {
         let owned_filtered: Vec<PullRequest> =
             filtered.iter().map(|pr| (*pr).clone()).collect();
         let cols = PrListColumns::compute(&owned_filtered, col_budget);
+        let row_width = body_area.width as usize;
         let items: Vec<ListItem<'static>> = filtered
             .iter()
             .enumerate()
@@ -2426,20 +2484,18 @@ impl<'a> PullRequestsView<'a> {
                 // (hovered) so the user can see at a glance which row
                 // will open on Enter / click.
                 let is_marked = self.hovered == i;
-                ListItem::new(self.format_pr_row(pr, is_marked, &cols))
+                ListItem::new(self.format_pr_row(pr, is_marked, &cols, row_width))
             })
             .collect();
         let mut state = ListState::default();
         state.select(Some(self.hovered));
         *state.offset_mut() = self.list_scroll_offset;
-        // Only paint the background on the selected row — the per-span
-        // foregrounds (sha → list_hash_fg, author → list_name_fg, date →
-        // list_date_fg, etc.) stay intact instead of being squashed into
-        // a single list_selected_fg. Bold modifier still helps it pop.
+        // No row-level bg — the label chips paint their own and a
+        // List highlight_style would patch over them. We paint the
+        // selection bg manually per-span in `format_pr_row` instead,
+        // so chips keep their colours intact.
         let list = List::new(items).highlight_style(
-            Style::default()
-                .bg(theme.list_selected_bg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().add_modifier(Modifier::BOLD),
         );
         f.render_stateful_widget(list, body_area, &mut state);
     }
@@ -2499,6 +2555,7 @@ impl<'a> PullRequestsView<'a> {
         pr: &PullRequest,
         is_opened: bool,
         cols: &PrListColumns,
+        row_width: usize,
     ) -> Line<'static> {
         let theme = &self.ctx.color_theme;
         // Each cell is pre-padded to its column width so rows align
@@ -2524,7 +2581,11 @@ impl<'a> PullRequestsView<'a> {
         } else {
             Span::raw("  ")
         };
-        Line::from(vec![
+        // Short label chips — up to MAX_INLINE_LABELS labels, each
+        // rendered as ` XX ` (2-letter abbreviation) with the label's
+        // own colour as background. Empty cells pad to the column
+        // width so neighbouring rows stay aligned.
+        let mut row: Vec<Span<'static>> = vec![
             marker,
             state_span,
             Span::raw("  "),
@@ -2539,6 +2600,21 @@ impl<'a> PullRequestsView<'a> {
                 fit_cell(&pr.title, cols.title),
                 Style::default().fg(theme.list_commit_message_fg),
             ),
+        ];
+        if cols.labels > 0 {
+            row.push(Span::raw(" "));
+            let mut chips_width = 0usize;
+            for lab in pr.labels.iter().take(MAX_INLINE_LABELS) {
+                row.extend(short_label_chip_spans(lab));
+                chips_width += LABEL_CHIP_WIDTH;
+            }
+            // Pad the remaining slots with plain spaces so author
+            // stays at the same column across rows.
+            if chips_width < cols.labels {
+                row.push(Span::raw(" ".repeat(cols.labels - chips_width)));
+            }
+        }
+        row.extend([
             Span::raw("  "),
             Span::styled(
                 fit_cell(&pr.author, cols.author),
@@ -2566,7 +2642,31 @@ impl<'a> PullRequestsView<'a> {
             // 2-col breathing room on the right so branches don't sit
             // flush against the panel's right border.
             Span::raw("  "),
-        ])
+        ]);
+
+        // Selection bg painted manually per-span — chips already have
+        // their own bg and we leave those alone so GitHub colours
+        // stay visible on the hovered row. Trailing fill extends the
+        // selection across the row's remaining width.
+        if is_opened {
+            let sel_bg = theme.list_selected_bg;
+            for span in row.iter_mut() {
+                if span.style.bg.is_none() {
+                    span.style = span.style.bg(sel_bg);
+                }
+            }
+            let content_width: usize = row
+                .iter()
+                .map(|s| console::measure_text_width(s.content.as_ref()))
+                .sum();
+            if content_width < row_width {
+                row.push(Span::styled(
+                    " ".repeat(row_width - content_width),
+                    Style::default().bg(sel_bg),
+                ));
+            }
+        }
+        Line::from(row)
     }
 
 
@@ -2576,9 +2676,25 @@ impl<'a> PullRequestsView<'a> {
             current_number.and_then(|n| self.detail_cache.get(&n)).cloned();
         let theme_label_fg = self.ctx.color_theme.detail_label_fg;
 
-        // ── Layout: sub-header (PR title+meta) ─ tab bar ─ tab content
-        let [sub_header_area, tab_bar_area, tab_content_area] = Layout::vertical([
-            Constraint::Length(2),
+        // ── Layout: info ─ [labels chips] ─ divider ─ tabs ─ tab
+        // content. The labels row is conditional (collapses to 0 rows
+        // when the PR has none), and the divider always sits BELOW
+        // the labels so the chip row reads as part of the PR header.
+        let has_labels = cached_detail
+            .as_ref()
+            .map(|d| !d.labels.is_empty())
+            .unwrap_or(false);
+        let labels_height: u16 = if has_labels { 1 } else { 0 };
+        let [
+            sub_header_area,
+            labels_area,
+            header_divider_area,
+            tab_bar_area,
+            tab_content_area,
+        ] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(labels_height),
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Min(0),
         ])
@@ -2586,6 +2702,20 @@ impl<'a> PullRequestsView<'a> {
         self.tab_content_area = Some(tab_content_area);
 
         self.render_pr_sub_header(f, sub_header_area, cached_detail.as_ref(), current_number);
+        if has_labels {
+            self.render_pr_labels_row(f, labels_area, cached_detail.as_ref());
+        }
+        // Header divider — single `─` row spanning the area width.
+        {
+            let theme = &self.ctx.color_theme;
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "─".repeat(header_divider_area.width as usize),
+                    Style::default().fg(theme.divider_fg),
+                ))),
+                header_divider_area,
+            );
+        }
         self.render_tab_bar(f, tab_bar_area);
 
         let Some(detail) = cached_detail.as_ref() else {
@@ -2898,14 +3028,35 @@ impl<'a> PullRequestsView<'a> {
             spans.extend(badge_spans);
         }
 
-        let divider = Line::from(Span::styled(
-            "─".repeat(area.width as usize),
-            Style::default().fg(theme.divider_fg),
-        ));
+        // Divider intentionally omitted — `render_detail_mode` owns
+        // a dedicated row for it that sits below the optional labels
+        // chip row, so the order on screen is always:
+        //   info → [labels] → divider → tabs → divider → content.
         f.render_widget(
-            Paragraph::new(vec![Line::from(spans), divider]),
+            Paragraph::new(Line::from(spans)),
             area,
         );
+    }
+
+    /// One-row strip showing the PR's currently-attached labels as
+    /// GitHub-style coloured chips. Sits between the sub-header info
+    /// row and the tab bar — only rendered when the PR actually has
+    /// labels (otherwise the row is collapsed by the layout).
+    fn render_pr_labels_row(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        detail: Option<&PullRequestDetail>,
+    ) {
+        let Some(detail) = detail else { return };
+        let mut spans: Vec<Span<'static>> = vec![Span::raw("  ")];
+        for (i, lab) in detail.labels.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" "));
+            }
+            spans.extend(label_chip_spans_local(lab));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     /// Tab bar: clickable list of [Conversation, Commits, Checks, Files]
@@ -2913,12 +3064,17 @@ impl<'a> PullRequestsView<'a> {
     fn render_tab_bar(&mut self, f: &mut Frame, area: Rect) {
         let theme = &self.ctx.color_theme;
         let detail = self.opened_detail().cloned();
-        let counts = [
-            detail.as_ref().map(|d| d.conversation.len()).unwrap_or(0),
-            detail.as_ref().map(|d| d.commit_list.len()).unwrap_or(0),
-            detail.as_ref().map(|d| d.check_runs.len()).unwrap_or(0),
-            detail.as_ref().map(|d| d.files.len()).unwrap_or(0),
-        ];
+        // Per-tab counts only show once the PR detail has loaded —
+        // displaying `Conversation 0  Commits 0  ...` during the
+        // fetch would falsely advertise empty tabs.
+        let counts: Option<[usize; 4]> = detail.as_ref().map(|d| {
+            [
+                d.conversation.len(),
+                d.commit_list.len(),
+                d.check_runs.len(),
+                d.files.len(),
+            ]
+        });
 
         // Render each tab as `  Label N  ` so click hit-testing can map
         // raw column → tab. We accumulate the start column as we go.
@@ -2928,7 +3084,10 @@ impl<'a> PullRequestsView<'a> {
         for (i, tab) in tabs.iter().enumerate() {
             let is_active = *tab == self.active_tab;
             let is_hovered = self.hovered_tab == Some(*tab) && !is_active;
-            let label = format!("{} {}", tab.label(), counts[i]);
+            let label = match counts {
+                Some(c) => format!("{} {}", tab.label(), c[i]),
+                None => tab.label().to_string(),
+            };
             let fg = if is_active {
                 theme.list_head_fg
             } else if is_hovered {
@@ -2955,6 +3114,34 @@ impl<'a> PullRequestsView<'a> {
                 cursor_x += 4;
             }
         }
+        // Right-aligned "Manage" shortcuts — state + meta operations
+        // on the PR sit here so the bottom footer stays focused on
+        // the daily review verbs. Hidden inside a drill-down (the
+        // user only needs `Esc:back` there) AND until the PR detail
+        // has finished loading — surfacing close / draft / labels /
+        // reviewers before we know the PR's state would let the
+        // user fire actions against missing data.
+        let manage_spans = if detail.is_some()
+            && self.files_drilldown.is_none()
+            && self.commits_drilldown.is_none()
+        {
+            self.manage_shortcut_spans(detail.as_ref())
+        } else {
+            Vec::new()
+        };
+        let manage_width: usize = manage_spans
+            .iter()
+            .map(|s| console::measure_text_width(s.content.as_ref()))
+            .sum();
+        let trailing_pad = 2;
+        let gap = (area.width as usize)
+            .saturating_sub(cursor_x.saturating_sub(area.x) as usize)
+            .saturating_sub(manage_width)
+            .saturating_sub(trailing_pad);
+        if gap > 0 && manage_width > 0 {
+            spans.push(Span::raw(" ".repeat(gap)));
+            spans.extend(manage_spans);
+        }
         let divider = Line::from(Span::styled(
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
@@ -2963,6 +3150,56 @@ impl<'a> PullRequestsView<'a> {
             Paragraph::new(vec![Line::from(spans), divider]),
             area,
         );
+    }
+
+    /// Build the right-side "Manage" shortcut spans for the tab bar.
+    /// Picks state-changing keys that depend on the PR's current
+    /// flags (Ctrl+X close ↔ Ctrl+O reopen, Ctrl+D to draft ↔
+    /// mark ready) so we never advertise no-op shortcuts.
+    fn manage_shortcut_spans(
+        &self,
+        detail: Option<&PullRequestDetail>,
+    ) -> Vec<Span<'static>> {
+        let theme = &self.ctx.color_theme;
+        let is_open = detail
+            .map(|d| matches!(d.state, PullState::Open))
+            .unwrap_or(false);
+        let is_closed = detail
+            .map(|d| matches!(d.state, PullState::Closed))
+            .unwrap_or(false);
+        let is_draft = detail.map(|d| d.draft).unwrap_or(false);
+
+        let mut parts: Vec<String> = Vec::new();
+        if is_open {
+            parts.push("Ctrl+X:close".into());
+            parts.push(
+                if is_draft {
+                    "Ctrl+D:mark ready"
+                } else {
+                    "Ctrl+D:to draft"
+                }
+                .into(),
+            );
+        } else if is_closed {
+            parts.push("Ctrl+O:reopen".into());
+        }
+        parts.push("l:labels".into());
+        parts.push("v:reviewers".into());
+
+        // ▕▏ matches the footer hint separator used elsewhere in the
+        // app for visual consistency. `⌘` mirrors the footer prefix
+        // so both rows read as a unified shortcut layer. Separator
+        // shares the same colour as the labels — the bottom footer
+        // does the same (it renders the whole row as one Span).
+        let style = Style::default().fg(theme.detail_label_fg);
+        let mut spans: Vec<Span<'static>> = vec![Span::styled("⌘ ".to_string(), style)];
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled("▕▏".to_string(), style));
+            }
+            spans.push(Span::styled(part.clone(), style));
+        }
+        spans
     }
 
     fn render_tab_conversation(
@@ -3384,11 +3621,11 @@ impl<'a> PullRequestsView<'a> {
         f.render_stateful_widget(list, area, &mut state);
     }
 
-    /// Render the commit drill-down: header (sha + author + date),
-    /// commit message, per-file diff. Esc clears the drill-down.
+    /// Full-screen commit detail view, modelled on the local
+    /// commit-detail layout: a `┐ ┘` framed header with sha / author
+    /// / date / stats / message body, then the file diffs below.
     fn render_commit_drilldown(&mut self, f: &mut Frame, area: Rect, sha: &str) {
         let theme = &self.ctx.color_theme;
-        // Loading placeholder if the fetch is still in flight.
         let Some(commit) = self.commit_detail_cache.get(sha).cloned() else {
             let p = Paragraph::new(Span::styled(
                 "  Loading commit detail…".to_string(),
@@ -3397,76 +3634,151 @@ impl<'a> PullRequestsView<'a> {
             f.render_widget(p, area);
             return;
         };
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        // Header row — short SHA + author + date + Esc hint.
+
+        // Layout = header card (fixed height) + body (scrollable diff).
+        let header_height = self.commit_header_height(&commit, area.width);
+        let [header_area, body_area] = Layout::vertical([
+            Constraint::Length(header_height),
+            Constraint::Min(0),
+        ])
+        .areas(area);
+        self.render_commit_header_card(f, header_area, &commit);
+
+        // Body = files + patches, rendered through the active mode.
+        let diff_mode = self.ctx.ui_config.common.diff_mode;
+        let mut body_lines: Vec<Line<'static>> = Vec::new();
+        if commit.files.is_empty() {
+            body_lines.push(Line::from(Span::styled(
+                "  (no files in this commit)".to_string(),
+                Style::default().fg(theme.detail_label_fg),
+            )));
+        } else {
+            for (i, file) in commit.files.iter().enumerate() {
+                if i > 0 {
+                    body_lines.push(Line::from(""));
+                }
+                body_lines.push(Line::from(diff_file_header_spans(theme, file)));
+                body_lines.push(Line::from(Span::styled(
+                    "─".repeat(body_area.width as usize),
+                    Style::default().fg(theme.divider_fg),
+                )));
+                if let Some(patch) = &file.patch {
+                    let hunks = parse_patch(patch);
+                    let rendered = render_patch_lines(
+                        &hunks,
+                        diff_mode,
+                        theme,
+                        body_area.width as usize,
+                    );
+                    body_lines.extend(rendered);
+                } else {
+                    body_lines.push(Line::from(Span::styled(
+                        "    (no patch — binary or too large)".to_string(),
+                        Style::default().fg(theme.detail_label_fg),
+                    )));
+                }
+            }
+        }
+        let max_scroll = body_lines.len().saturating_sub(body_area.height as usize);
+        if self.commits_drilldown_scroll > max_scroll {
+            self.commits_drilldown_scroll = max_scroll;
+        }
+        f.render_widget(
+            Paragraph::new(body_lines)
+                .scroll((self.commits_drilldown_scroll as u16, 0)),
+            body_area,
+        );
+    }
+
+    /// Pre-compute the header card height — 2 rows of border + body
+    /// rows (sha/author/date/stats line, then the commit message
+    /// split on `\n`). Capped to area.height / 2 so a giant commit
+    /// message never eats the whole screen.
+    fn commit_header_height(
+        &self,
+        commit: &crate::github::pr::CommitDetail,
+        _width: u16,
+    ) -> u16 {
+        let msg_rows = commit.message.lines().count().max(1) as u16;
+        // 1 meta row + 1 blank separator + msg + 2 border rows.
+        (1 + 1 + msg_rows + 2).min(12)
+    }
+
+    fn render_commit_header_card(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        commit: &crate::github::pr::CommitDetail,
+    ) {
+        let theme = &self.ctx.color_theme;
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.divider_fg))
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "Commit".to_string(),
+                    Style::default()
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+            ]));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        // Meta row: short SHA + author + date + stats.
         let short_sha: String = commit.sha.chars().take(7).collect();
-        lines.push(Line::from(vec![
-            Span::raw("  "),
+        let meta = Line::from(vec![
             Span::styled(
                 short_sha,
                 Style::default()
                     .fg(theme.list_hash_fg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw("  "),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
             Span::styled("by ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(commit.author.clone(), Style::default().fg(theme.list_name_fg)),
-            Span::raw("  "),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(commit.date.clone(), Style::default().fg(theme.list_date_fg)),
-            Span::raw("   "),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(
-                format!("+{} -{}", commit.additions, commit.deletions),
+                format!(
+                    "{} file{} · ",
+                    commit.files.len(),
+                    if commit.files.len() == 1 { "" } else { "s" }
+                ),
                 Style::default().fg(theme.detail_label_fg),
             ),
-            Span::raw("   "),
             Span::styled(
-                "Esc:back".to_string(),
-                Style::default().fg(theme.detail_label_fg),
+                format!("+{}", commit.additions),
+                Style::default().fg(theme.detail_file_change_add_fg),
             ),
-        ]));
-        lines.push(Line::from(""));
-        // Commit message — full body, no markdown rendering (we want
-        // verbatim git-log content).
-        for line in commit.message.lines() {
-            lines.push(Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(theme.fg),
-            )));
-        }
-        if !commit.message.is_empty() {
-            lines.push(Line::from(""));
-        }
-        // Files + patches.
-        for file in &commit.files {
-            lines.push(Line::from(diff_file_header_spans(theme, file)));
-            if let Some(patch) = &file.patch {
-                for line in patch.lines() {
-                    lines.push(Line::from(Span::styled(
-                        line.to_string(),
-                        diff_line_style(theme, line),
-                    )));
-                }
+            Span::raw(" "),
+            Span::styled(
+                format!("-{}", commit.deletions),
+                Style::default().fg(theme.detail_file_change_delete_fg),
+            ),
+        ]);
+
+        let mut lines: Vec<Line<'static>> = vec![meta, Line::from("")];
+        for (i, msg_line) in commit.message.lines().enumerate() {
+            // First line of the commit message is the subject — render
+            // it bold so it pops over the body.
+            let style = if i == 0 {
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
             } else {
-                lines.push(Line::from(Span::styled(
-                    "    (no patch — binary or too large)".to_string(),
-                    Style::default().fg(theme.detail_label_fg),
-                )));
-            }
-            lines.push(Line::from(""));
+                Style::default().fg(theme.fg)
+            };
+            lines.push(Line::from(Span::styled(msg_line.to_string(), style)));
         }
-        let total = lines.len();
-        let visible = area.height as usize;
-        let max_scroll = total.saturating_sub(visible);
-        if self.commits_drilldown_scroll > max_scroll {
-            self.commits_drilldown_scroll = max_scroll;
-        }
-        let para = Paragraph::new(lines)
-            .scroll((self.commits_drilldown_scroll as u16, 0));
-        f.render_widget(para, area);
+        f.render_widget(Paragraph::new(lines), inner);
     }
 
-    /// Render the file drill-down: file header + its raw patch with
-    /// diff syntax colouring.
+    /// Full-screen file diff view — framed header card (status, path,
+    /// stats, "i / total" counter) on top, scrollable diff body
+    /// below. Render mode follows the global `diff_mode` setting so
+    /// it matches the local diff view.
     fn render_file_drilldown(
         &mut self,
         f: &mut Frame,
@@ -3479,37 +3791,104 @@ impl<'a> PullRequestsView<'a> {
             self.files_drilldown = None;
             return;
         };
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        let mut header = diff_file_header_spans(theme, file);
-        header.push(Span::raw("   "));
-        header.push(Span::styled(
-            "Esc:back".to_string(),
-            Style::default().fg(theme.detail_label_fg),
-        ));
-        lines.push(Line::from(header));
-        lines.push(Line::from(""));
+
+        let [header_area, body_area] =
+            Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
+        self.render_file_header_card(f, header_area, file, idx, detail.files.len());
+
+        let mut body_lines: Vec<Line<'static>> = Vec::new();
         if let Some(patch) = &file.patch {
-            for line in patch.lines() {
-                lines.push(Line::from(Span::styled(
-                    line.to_string(),
-                    diff_line_style(theme, line),
-                )));
-            }
+            let diff_mode = self.ctx.ui_config.common.diff_mode;
+            let hunks = parse_patch(patch);
+            body_lines.extend(render_patch_lines(
+                &hunks,
+                diff_mode,
+                theme,
+                body_area.width as usize,
+            ));
         } else {
-            lines.push(Line::from(Span::styled(
+            body_lines.push(Line::from(Span::styled(
                 "    (no patch — binary or too large)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )));
         }
-        let total = lines.len();
-        let visible = area.height as usize;
-        let max_scroll = total.saturating_sub(visible);
+        let max_scroll = body_lines.len().saturating_sub(body_area.height as usize);
         if self.files_drilldown_scroll > max_scroll {
             self.files_drilldown_scroll = max_scroll;
         }
-        let para = Paragraph::new(lines)
-            .scroll((self.files_drilldown_scroll as u16, 0));
-        f.render_widget(para, area);
+        f.render_widget(
+            Paragraph::new(body_lines)
+                .scroll((self.files_drilldown_scroll as u16, 0)),
+            body_area,
+        );
+    }
+
+    fn render_file_header_card(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        file: &crate::github::pr::PullFile,
+        idx: usize,
+        total: usize,
+    ) {
+        let theme = &self.ctx.color_theme;
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.divider_fg))
+            .title(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    "File".to_string(),
+                    Style::default()
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+            ]));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        // Split the path into directory / basename — basename bold,
+        // directory muted — mirrors how local file views display it.
+        let (dir, name) = match file.filename.rfind('/') {
+            Some(slash) => (&file.filename[..=slash], &file.filename[slash + 1..]),
+            None => ("", file.filename.as_str()),
+        };
+        let (tag, tag_color) = match file.status {
+            FileStatus::Added => ("Added", theme.detail_file_change_add_fg),
+            FileStatus::Modified => ("Modified", theme.detail_file_change_modify_fg),
+            FileStatus::Removed => ("Deleted", theme.detail_file_change_delete_fg),
+            FileStatus::Renamed => ("Renamed", theme.detail_file_change_move_fg),
+            FileStatus::Other => ("Changed", theme.detail_label_fg),
+        };
+        let spans = vec![
+            Span::styled(
+                tag.to_string(),
+                Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
+            Span::styled(dir.to_string(), Style::default().fg(theme.detail_label_fg)),
+            Span::styled(
+                name.to_string(),
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
+            Span::styled(
+                format!("+{}", file.additions),
+                Style::default().fg(theme.detail_file_change_add_fg),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("-{}", file.deletions),
+                Style::default().fg(theme.detail_file_change_delete_fg),
+            ),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
+            Span::styled(
+                format!("{} of {}", idx + 1, total),
+                Style::default().fg(theme.detail_label_fg),
+            ),
+        ];
+        f.render_widget(Paragraph::new(Line::from(spans)), inner);
     }
 }
 
@@ -4062,6 +4441,88 @@ fn file_line(
     ])
 }
 
+/// Render a single label as a GitHub-style coloured chip ` name `,
+/// flipping foreground between black and white based on the label
+/// colour's perceived luminance. Falls back to plain dim text when
+/// the API didn't return a hex colour.
+fn label_chip_spans_local(
+    label: &crate::github::pr::Label,
+) -> Vec<Span<'static>> {
+    if let Some((r, g, b)) = label
+        .color
+        .as_deref()
+        .and_then(parse_hex_color)
+    {
+        let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+        let fg = if luminance > 140.0 {
+            Color::Rgb(0, 0, 0)
+        } else {
+            Color::Rgb(255, 255, 255)
+        };
+        vec![Span::styled(
+            format!(" {} ", label.name),
+            Style::default()
+                .fg(fg)
+                .bg(Color::Rgb(r, g, b))
+                .add_modifier(Modifier::BOLD),
+        )]
+    } else {
+        vec![Span::raw(label.name.clone())]
+    }
+}
+
+/// Compact 4-col label chip for the PR list — `LABEL_CHIP_WIDTH` cols
+/// total: leading space + 2-letter abbreviation + trailing space, all
+/// painted in the label's background colour. Two letters are picked
+/// from the start of the label name, uppercased so it reads as a
+/// badge rather than a word fragment.
+fn short_label_chip_spans(
+    label: &crate::github::pr::Label,
+) -> Vec<Span<'static>> {
+    let abbr: String = label
+        .name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase();
+    // Pad short names (single char or empty) so the chip stays the
+    // canonical width.
+    let abbr_padded = if abbr.chars().count() >= 2 {
+        abbr
+    } else {
+        format!("{:<2}", abbr)
+    };
+    if let Some((r, g, b)) = label.color.as_deref().and_then(parse_hex_color) {
+        let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+        let fg = if luminance > 140.0 {
+            Color::Rgb(0, 0, 0)
+        } else {
+            Color::Rgb(255, 255, 255)
+        };
+        vec![Span::styled(
+            format!(" {} ", abbr_padded),
+            Style::default()
+                .fg(fg)
+                .bg(Color::Rgb(r, g, b))
+                .add_modifier(Modifier::BOLD),
+        )]
+    } else {
+        vec![Span::raw(format!(" {} ", abbr_padded))]
+    }
+}
+
+fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
+    Some((r, g, b))
+}
+
 /// Inline file header for the drill-down view — tag + filename +
 /// `+N -M`, sharing the colour palette of the list rows so they read
 /// the same.
@@ -4100,25 +4561,426 @@ fn diff_file_header_spans(
     ]
 }
 
-/// Choose a colour for one row of a unified-diff hunk based on its
-/// leading character — green for additions, red for deletions, muted
-/// for hunk headers, fg for context.
-fn diff_line_style(
-    theme: &crate::color::ColorTheme,
-    line: &str,
-) -> Style {
-    match line.chars().next() {
-        Some('+') if !line.starts_with("+++") => {
-            Style::default().fg(theme.detail_file_change_add_fg)
+/// One line inside a parsed unified-diff hunk — kind drives the
+/// per-mode rendering decisions (colour, gutter line numbers,
+/// side-by-side bucketing).
+#[derive(Debug, Clone)]
+enum PatchLineKind {
+    Context,
+    Add,
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+struct PatchLine {
+    kind: PatchLineKind,
+    /// Line content without the leading `+`, `-`, or ` ` marker.
+    text: String,
+}
+
+#[derive(Debug, Clone)]
+struct PatchHunk {
+    old_start: u32,
+    new_start: u32,
+    /// Trailing context text after the second `@@` marker (e.g.,
+    /// function name) — surfaced in the enhanced gutter header.
+    header_extra: String,
+    lines: Vec<PatchLine>,
+}
+
+/// Parse a GitHub-style unified diff patch into hunks. Robust to
+/// malformed input: lines that don't fit any pattern get dropped
+/// quietly so the renderer never panics on a weird payload.
+fn parse_patch(patch: &str) -> Vec<PatchHunk> {
+    let mut hunks: Vec<PatchHunk> = Vec::new();
+    for raw_line in patch.lines() {
+        if let Some(rest) = raw_line.strip_prefix("@@") {
+            // Header: `@@ -old_start[,old_count] +new_start[,new_count] @@ extra`
+            let (range_part, extra) = rest
+                .find("@@")
+                .map(|i| (&rest[..i], rest[i + 2..].trim().to_string()))
+                .unwrap_or((rest, String::new()));
+            let mut old_start = 0u32;
+            let mut new_start = 0u32;
+            for token in range_part.split_whitespace() {
+                let (sign, body) = token.split_at(1);
+                let start: u32 = body
+                    .split(',')
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                match sign {
+                    "-" => old_start = start,
+                    "+" => new_start = start,
+                    _ => {}
+                }
+            }
+            hunks.push(PatchHunk {
+                old_start,
+                new_start,
+                header_extra: extra,
+                lines: Vec::new(),
+            });
+            continue;
         }
-        Some('-') if !line.starts_with("---") => {
-            Style::default().fg(theme.detail_file_change_delete_fg)
-        }
-        Some('@') => Style::default()
-            .fg(theme.list_head_fg)
-            .add_modifier(Modifier::BOLD),
-        _ => Style::default().fg(theme.fg),
+        let Some(hunk) = hunks.last_mut() else {
+            // Lines before the first `@@` (file headers from the
+            // raw patch, "No newline at end of file" markers, etc.)
+            // are not meaningful for the diff body — skip them.
+            continue;
+        };
+        let (kind, text) = match raw_line.chars().next() {
+            Some('+') => (PatchLineKind::Add, raw_line[1..].to_string()),
+            Some('-') => (PatchLineKind::Delete, raw_line[1..].to_string()),
+            Some(' ') => (PatchLineKind::Context, raw_line[1..].to_string()),
+            Some('\\') => continue, // `\ No newline at end of file`
+            _ => continue,
+        };
+        hunk.lines.push(PatchLine { kind, text });
     }
+    hunks
+}
+
+/// Background colours for the enhanced diff modes — picked to match
+/// the local commit-detail view so PR diffs read the same. Dark and
+/// light themes get distinct values to keep the contrast tasteful.
+struct EnhancedDiffPalette {
+    add_bg: Color,
+    del_bg: Color,
+}
+
+impl EnhancedDiffPalette {
+    fn for_theme(theme: &crate::color::ColorTheme) -> Self {
+        let bg_is_light = match theme.bg {
+            Color::Rgb(r, g, b) => {
+                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) > 128.0
+            }
+            _ => false,
+        };
+        if bg_is_light {
+            Self {
+                add_bg: Color::Rgb(172, 242, 189),
+                del_bg: Color::Rgb(255, 186, 181),
+            }
+        } else {
+            Self {
+                add_bg: Color::Rgb(32, 68, 45),
+                del_bg: Color::Rgb(68, 35, 40),
+            }
+        }
+    }
+}
+
+/// Render a parsed patch into ratatui lines using the user's active
+/// diff mode. The width is needed to know how much room each side
+/// gets in the side-by-side modes; it's ignored by raw + enhanced.
+fn render_patch_lines(
+    hunks: &[PatchHunk],
+    mode: crate::config::DiffMode,
+    theme: &crate::color::ColorTheme,
+    width: usize,
+) -> Vec<Line<'static>> {
+    match mode {
+        crate::config::DiffMode::Raw => render_patch_raw(hunks, theme),
+        crate::config::DiffMode::Enhanced => render_patch_enhanced(hunks, theme),
+        crate::config::DiffMode::SideBySide => {
+            render_patch_split(hunks, theme, width, false)
+        }
+        crate::config::DiffMode::SideBySideEnhanced => {
+            render_patch_split(hunks, theme, width, true)
+        }
+    }
+}
+
+/// Raw mode — closest to the unified-diff text on the wire. Each
+/// line keeps its leading marker and is fg-coloured by kind.
+fn render_patch_raw(
+    hunks: &[PatchHunk],
+    theme: &crate::color::ColorTheme,
+) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for hunk in hunks {
+        out.push(Line::from(Span::styled(
+            format!(
+                "@@ -{} +{} @@ {}",
+                hunk.old_start, hunk.new_start, hunk.header_extra
+            ),
+            Style::default()
+                .fg(theme.list_head_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for line in &hunk.lines {
+            let (marker, style) = match line.kind {
+                PatchLineKind::Add => (
+                    "+",
+                    Style::default().fg(theme.detail_file_change_add_fg),
+                ),
+                PatchLineKind::Delete => (
+                    "-",
+                    Style::default().fg(theme.detail_file_change_delete_fg),
+                ),
+                PatchLineKind::Context => (" ", Style::default().fg(theme.fg)),
+            };
+            out.push(Line::from(Span::styled(
+                format!("{}{}", marker, line.text),
+                style,
+            )));
+        }
+    }
+    out
+}
+
+/// Enhanced mode — per-side line-number gutter, full-row background
+/// colour for add / del, vertical bar at the left of each diff line
+/// to make the change region pop. Matches the local diff view.
+fn render_patch_enhanced(
+    hunks: &[PatchHunk],
+    theme: &crate::color::ColorTheme,
+) -> Vec<Line<'static>> {
+    let pal = EnhancedDiffPalette::for_theme(theme);
+    let max_lineno = hunks
+        .iter()
+        .map(|h| {
+            let last_old = h.old_start
+                + h.lines
+                    .iter()
+                    .filter(|l| !matches!(l.kind, PatchLineKind::Add))
+                    .count() as u32;
+            let last_new = h.new_start
+                + h.lines
+                    .iter()
+                    .filter(|l| !matches!(l.kind, PatchLineKind::Delete))
+                    .count() as u32;
+            last_old.max(last_new)
+        })
+        .max()
+        .unwrap_or(0);
+    let gutter_width = (max_lineno.to_string().len()).max(2);
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for hunk in hunks {
+        // Hunk header — single accent row, no bg fill.
+        out.push(Line::from(Span::styled(
+            format!(
+                " {} @@ -{} +{} @@ {}",
+                " ".repeat(2 * gutter_width + 1),
+                hunk.old_start,
+                hunk.new_start,
+                hunk.header_extra,
+            ),
+            Style::default()
+                .fg(theme.list_head_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let mut old_no = hunk.old_start;
+        let mut new_no = hunk.new_start;
+        for line in &hunk.lines {
+            let (old_label, new_label, bar_color, bg) = match line.kind {
+                PatchLineKind::Add => {
+                    let label = format!("{:>w$}", new_no, w = gutter_width);
+                    new_no += 1;
+                    (
+                        " ".repeat(gutter_width),
+                        label,
+                        theme.detail_file_change_add_fg,
+                        Some(pal.add_bg),
+                    )
+                }
+                PatchLineKind::Delete => {
+                    let label = format!("{:>w$}", old_no, w = gutter_width);
+                    old_no += 1;
+                    (
+                        label,
+                        " ".repeat(gutter_width),
+                        theme.detail_file_change_delete_fg,
+                        Some(pal.del_bg),
+                    )
+                }
+                PatchLineKind::Context => {
+                    let o = format!("{:>w$}", old_no, w = gutter_width);
+                    let n = format!("{:>w$}", new_no, w = gutter_width);
+                    old_no += 1;
+                    new_no += 1;
+                    (o, n, theme.divider_fg, None)
+                }
+            };
+            let base = bg
+                .map(|b| Style::default().bg(b))
+                .unwrap_or_else(Style::default);
+            let gutter_style = base.fg(theme.detail_label_fg);
+            let bar_style = if matches!(line.kind, PatchLineKind::Context) {
+                Style::default().fg(theme.divider_fg)
+            } else {
+                base.fg(bar_color)
+            };
+            let text_style = match line.kind {
+                PatchLineKind::Add => base.fg(theme.fg),
+                PatchLineKind::Delete => base.fg(theme.fg),
+                PatchLineKind::Context => Style::default().fg(theme.fg),
+            };
+            out.push(Line::from(vec![
+                Span::styled(format!(" {} {} ", old_label, new_label), gutter_style),
+                Span::styled("▍".to_string(), bar_style),
+                Span::styled(format!(" {}", line.text), text_style),
+            ]));
+        }
+    }
+    out
+}
+
+/// Side-by-side mode — old version on the left, new on the right,
+/// `│` separator in the middle. Modifications (a Delete followed by
+/// an Add inside the same hunk) zip row-by-row so the changed text
+/// aligns horizontally. `enhanced` adds the per-side bg fill +
+/// line-number gutters to match `SideBySideEnhanced` from the local
+/// diff view.
+fn render_patch_split(
+    hunks: &[PatchHunk],
+    theme: &crate::color::ColorTheme,
+    width: usize,
+    enhanced: bool,
+) -> Vec<Line<'static>> {
+    let pal = EnhancedDiffPalette::for_theme(theme);
+    let max_lineno = hunks
+        .iter()
+        .map(|h| {
+            let last_old = h.old_start
+                + h.lines
+                    .iter()
+                    .filter(|l| !matches!(l.kind, PatchLineKind::Add))
+                    .count() as u32;
+            let last_new = h.new_start
+                + h.lines
+                    .iter()
+                    .filter(|l| !matches!(l.kind, PatchLineKind::Delete))
+                    .count() as u32;
+            last_old.max(last_new)
+        })
+        .max()
+        .unwrap_or(0);
+    let gutter_width = if enhanced {
+        max_lineno.to_string().len().max(2)
+    } else {
+        0
+    };
+    // Total width minus `│` and two spaces around it.
+    let side_width = width.saturating_sub(3) / 2;
+    let text_side_width = side_width.saturating_sub(gutter_width + 2).max(1);
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    for hunk in hunks {
+        out.push(Line::from(Span::styled(
+            format!("@@ -{} +{} @@ {}", hunk.old_start, hunk.new_start, hunk.header_extra),
+            Style::default()
+                .fg(theme.list_head_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
+        // Group consecutive Del/Add runs so we can zip them.
+        let mut i = 0usize;
+        let mut old_no = hunk.old_start;
+        let mut new_no = hunk.new_start;
+        while i < hunk.lines.len() {
+            match hunk.lines[i].kind {
+                PatchLineKind::Context => {
+                    let text = hunk.lines[i].text.clone();
+                    out.push(split_row(
+                        Some((old_no, &text)),
+                        Some((new_no, &text)),
+                        gutter_width,
+                        text_side_width,
+                        enhanced,
+                        None,
+                        None,
+                        theme,
+                    ));
+                    old_no += 1;
+                    new_no += 1;
+                    i += 1;
+                }
+                _ => {
+                    // Collect a run of deletes followed by adds.
+                    let mut dels: Vec<&str> = Vec::new();
+                    let mut adds: Vec<&str> = Vec::new();
+                    while i < hunk.lines.len()
+                        && matches!(hunk.lines[i].kind, PatchLineKind::Delete)
+                    {
+                        dels.push(&hunk.lines[i].text);
+                        i += 1;
+                    }
+                    while i < hunk.lines.len()
+                        && matches!(hunk.lines[i].kind, PatchLineKind::Add)
+                    {
+                        adds.push(&hunk.lines[i].text);
+                        i += 1;
+                    }
+                    let pair_count = dels.len().max(adds.len());
+                    for k in 0..pair_count {
+                        let left = dels.get(k).map(|t| (old_no + k as u32, *t));
+                        let right = adds.get(k).map(|t| (new_no + k as u32, *t));
+                        out.push(split_row(
+                            left,
+                            right,
+                            gutter_width,
+                            text_side_width,
+                            enhanced,
+                            if enhanced { Some(pal.del_bg) } else { None },
+                            if enhanced { Some(pal.add_bg) } else { None },
+                            theme,
+                        ));
+                    }
+                    old_no += dels.len() as u32;
+                    new_no += adds.len() as u32;
+                }
+            }
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn split_row(
+    left: Option<(u32, &str)>,
+    right: Option<(u32, &str)>,
+    gutter_width: usize,
+    text_side_width: usize,
+    enhanced: bool,
+    left_bg: Option<Color>,
+    right_bg: Option<Color>,
+    theme: &crate::color::ColorTheme,
+) -> Line<'static> {
+    let format_side = |side: Option<(u32, &str)>, bg: Option<Color>| -> Vec<Span<'static>> {
+        let base = bg
+            .map(|b| Style::default().bg(b))
+            .unwrap_or_else(Style::default);
+        let (lineno, text) = side
+            .map(|(n, t)| (format!("{:>w$}", n, w = gutter_width), t.to_string()))
+            .unwrap_or_else(|| (" ".repeat(gutter_width), String::new()));
+        let truncated: String = if text.chars().count() > text_side_width {
+            let cut: String = text.chars().take(text_side_width.saturating_sub(1)).collect();
+            format!("{}…", cut)
+        } else {
+            format!("{:<w$}", text, w = text_side_width)
+        };
+        if enhanced {
+            vec![
+                Span::styled(
+                    format!("{} ", lineno),
+                    base.fg(theme.detail_label_fg),
+                ),
+                Span::styled(truncated, base.fg(theme.fg)),
+            ]
+        } else {
+            vec![Span::styled(truncated, base.fg(theme.fg))]
+        }
+    };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.extend(format_side(left, left_bg));
+    spans.push(Span::styled(
+        " │ ".to_string(),
+        Style::default().fg(theme.divider_fg),
+    ));
+    spans.extend(format_side(right, right_bg));
+    Line::from(spans)
 }
 
 /// Compute (column, row) within the editor body for a buffer cursor at

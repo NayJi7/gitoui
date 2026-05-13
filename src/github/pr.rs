@@ -28,6 +28,9 @@ pub struct PullRequest {
     pub base_ref: String,
     /// Head commit SHA — used to look up CI status lazily.
     pub head_sha: String,
+    /// Labels attached to the PR, in the order GitHub returned them.
+    /// Surfaced in the list as short coloured chips next to the title.
+    pub labels: Vec<Label>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +56,9 @@ pub struct PullRequestDetail {
     pub draft: bool,
     pub head_label: String,
     pub base_ref: String,
+    /// Head commit SHA — anchors the on-demand `git show` for files
+    /// and commits when drilling into the existing diff / detail views.
+    pub head_sha: String,
     pub body: String,
     pub additions: u64,
     pub deletions: u64,
@@ -273,6 +279,8 @@ struct ApiPullSummary {
     merged_at: Option<String>,
     head: ApiRef,
     base: ApiRef,
+    #[serde(default)]
+    labels: Vec<ApiLabel>,
 }
 
 #[derive(Deserialize)]
@@ -685,6 +693,7 @@ pub fn fetch_pull_request_detail(
         author: pr.user.map(|u| u.login).unwrap_or_else(|| "?".into()),
         state,
         draft: pr.draft,
+        head_sha: pr.head.sha.clone(),
         head_label: if pr.head.label.is_empty() {
             pr.head.ref_name.clone()
         } else {
@@ -1129,6 +1138,7 @@ fn map_summary(raw: ApiPullSummary) -> PullRequest {
         },
         base_ref: raw.base.ref_name,
         head_sha: raw.head.sha,
+        labels: raw.labels.into_iter().map(Into::into).collect(),
     }
 }
 

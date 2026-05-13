@@ -1121,11 +1121,10 @@ impl<'a> DialogView<'a> {
                 pr_title,
                 closing,
             } => {
-                lines.push(info_line(
-                    "PR:",
-                    &format!("#{} {}", pr_number, pr_title),
-                    dim_fg,
-                    yellow,
+                lines.push(pr_header_line(
+                    *pr_number,
+                    pr_title,
+                    &self.ctx.color_theme,
                 ));
                 lines.push(Line::from(""));
                 let msg = if *closing {
@@ -1144,11 +1143,10 @@ impl<'a> DialogView<'a> {
                 to_draft,
                 ..
             } => {
-                lines.push(info_line(
-                    "PR:",
-                    &format!("#{} {}", pr_number, pr_title),
-                    dim_fg,
-                    yellow,
+                lines.push(pr_header_line(
+                    *pr_number,
+                    pr_title,
+                    &self.ctx.color_theme,
                 ));
                 lines.push(Line::from(""));
                 let msg = if *to_draft {
@@ -1163,14 +1161,14 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::PullRequestLabels {
                 pr_number,
+                pr_title,
                 all_labels,
                 ..
             } => {
-                lines.push(info_line(
-                    "PR:",
-                    &format!("#{}", pr_number),
-                    dim_fg,
-                    yellow,
+                lines.push(pr_header_line(
+                    *pr_number,
+                    pr_title,
+                    &self.ctx.color_theme,
                 ));
                 lines.push(Line::from(""));
                 if all_labels.is_empty() {
@@ -1179,23 +1177,55 @@ impl<'a> DialogView<'a> {
                         Style::default().fg(dim_fg),
                     )));
                 } else {
-                    lines.push(label_line("Toggle with Space:", dim_fg));
-                    for (i, name) in all_labels.iter().enumerate() {
+                    // Currently-attached chip row (GitHub-style colored
+                    // pills) — gives instant context for what's on the
+                    // PR before scanning the togglable list.
+                    let attached: Vec<&crate::github::pr::Label> = all_labels
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                        .map(|(_, l)| l)
+                        .collect();
+                    let mut chip_row: Vec<Span<'static>> =
+                        vec![Span::raw("  ".to_string())];
+                    if attached.is_empty() {
+                        chip_row.push(Span::styled(
+                            "(no labels)".to_string(),
+                            Style::default().fg(dim_fg),
+                        ));
+                    } else {
+                        for (i, lab) in attached.iter().enumerate() {
+                            if i > 0 {
+                                chip_row.push(Span::raw(" ".to_string()));
+                            }
+                            chip_row.extend(label_chip_spans(lab, dim_fg));
+                        }
+                    }
+                    lines.push(Line::from(chip_row));
+                    lines.push(Line::from(""));
+                    for (i, lab) in all_labels.iter().enumerate() {
+                        // The clickable row is the first line returned
+                        // — continuation rows (long descriptions) sit
+                        // below but aren't independently selectable.
+                        let rendered =
+                            self.checkbox_line_labelled(i, lab, inner_width);
                         self.checkbox_rows.push(lines.len());
-                        lines.push(self.checkbox_line(i, name));
+                        for ln in rendered {
+                            lines.push(ln);
+                        }
                     }
                 }
             }
             DialogKind::PullRequestReviewers {
                 pr_number,
+                pr_title,
                 all_users,
                 ..
             } => {
-                lines.push(info_line(
-                    "PR:",
-                    &format!("#{}", pr_number),
-                    dim_fg,
-                    yellow,
+                lines.push(pr_header_line(
+                    *pr_number,
+                    pr_title,
+                    &self.ctx.color_theme,
                 ));
                 lines.push(Line::from(""));
                 if all_users.is_empty() {
@@ -1204,7 +1234,39 @@ impl<'a> DialogView<'a> {
                         Style::default().fg(dim_fg),
                     )));
                 } else {
-                    lines.push(label_line("Toggle with Space:", dim_fg));
+                    // Currently-requested reviewers as a @user list
+                    // above the picker, same idea as the labels chip
+                    // row — quick visual summary of the PR's state.
+                    let requested: Vec<&String> = all_users
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
+                        .map(|(_, u)| u)
+                        .collect();
+                    let mut chip_row: Vec<Span<'static>> =
+                        vec![Span::raw("  ".to_string())];
+                    if requested.is_empty() {
+                        chip_row.push(Span::styled(
+                            "(no reviewers requested)".to_string(),
+                            Style::default().fg(dim_fg),
+                        ));
+                    } else {
+                        for (i, name) in requested.iter().enumerate() {
+                            if i > 0 {
+                                chip_row.push(Span::styled(
+                                    " ".to_string(),
+                                    Style::default().fg(dim_fg),
+                                ));
+                            }
+                            chip_row.push(Span::styled(
+                                format!("@{}", name),
+                                Style::default()
+                                    .fg(self.ctx.color_theme.list_name_fg),
+                            ));
+                        }
+                    }
+                    lines.push(Line::from(chip_row));
+                    lines.push(Line::from(""));
                     for (i, name) in all_users.iter().enumerate() {
                         self.checkbox_rows.push(lines.len());
                         lines.push(self.checkbox_line(i, name));
@@ -1597,6 +1659,65 @@ impl<'a> DialogView<'a> {
         ])
     }
 
+    /// Same as `checkbox_line` but renders a GitHub-style coloured
+    /// chip for the label instead of plain text — used by the
+    /// `PullRequestLabels` picker so the row reads like the chip
+    /// row above it.
+    fn checkbox_line_labelled(
+        &self,
+        index: usize,
+        label: &crate::github::pr::Label,
+        inner_width: u16,
+    ) -> Vec<Line<'static>> {
+        let theme = &self.ctx.color_theme;
+        let checked = self.checkboxes.get(index).copied().unwrap_or(false);
+        let pointed = self.is_pointed_at(DialogElement::Checkbox(index));
+
+        let indicator = if pointed { "▸ " } else { "  " };
+        let check_span = if checked {
+            Span::styled("● ", Style::default().fg(theme.status_info_fg))
+        } else {
+            Span::styled("○ ", Style::default().fg(theme.divider_fg))
+        };
+        // Width of the indicator + checkmark + chip + the 2-space
+        // gap before the description — descriptions wrap onto
+        // continuation lines indented to this offset so they line
+        // up under the description instead of the row's left edge.
+        let chip_width = label.name.chars().count() + 2; // ` name `
+        let indent: usize = 2 /* indicator */
+            + 2 /* checkmark */
+            + chip_width
+            + 2 /* gap before description */;
+        let avail = (inner_width as usize).saturating_sub(indent).max(1);
+
+        let mut first_row: Vec<Span<'static>> =
+            vec![Span::raw(indicator.to_string()), check_span];
+        first_row.extend(label_chip_spans(label, theme.fg));
+
+        let desc = label.description.as_deref().unwrap_or("").trim();
+        if desc.is_empty() {
+            return vec![Line::from(first_row)];
+        }
+        let wrapped = wrap_description(desc, avail);
+        let mut out: Vec<Line<'static>> = Vec::with_capacity(wrapped.len());
+        let muted = Style::default().fg(theme.detail_label_fg);
+        for (i, chunk) in wrapped.iter().enumerate() {
+            if i == 0 {
+                let mut row = first_row.clone();
+                row.push(Span::styled(format!("  {}", chunk), muted));
+                out.push(Line::from(row));
+            } else {
+                // Continuation row: indent to where the description
+                // started on the first row, then the wrapped chunk.
+                out.push(Line::from(vec![Span::styled(
+                    format!("{}{}", " ".repeat(indent), chunk),
+                    muted,
+                )]));
+            }
+        }
+        out
+    }
+
     fn radio_line(&self, index: usize, label: &str) -> Line<'static> {
         let theme = &self.ctx.color_theme;
         let selected = self.dropdown_selected == index;
@@ -1828,7 +1949,7 @@ impl<'a> DialogView<'a> {
                     .iter()
                     .enumerate()
                     .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
-                    .map(|(_, name)| name.clone())
+                    .map(|(_, l)| l.name.clone())
                     .collect();
                 (
                     pr_number.to_string(),
@@ -2110,6 +2231,129 @@ fn info_line(label: &str, value: &str, label_fg: Color, value_fg: Color) -> Line
         Span::styled(format!("  {} ", label), Style::default().fg(label_fg)),
         Span::styled(value.to_string(), Style::default().fg(value_fg)),
     ])
+}
+
+/// PR identification header for dialogs — same colour split as the
+/// sub-header: `#NUM` uses the hash accent, the title uses fg BOLD,
+/// `·` separator is muted. Single source of truth so close / draft /
+/// labels / reviewers all read the same.
+fn pr_header_line(
+    pr_number: u64,
+    pr_title: &str,
+    theme: &crate::color::ColorTheme,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::raw("  ".to_string()),
+        Span::styled(
+            format!("#{}", pr_number),
+            Style::default()
+                .fg(theme.list_hash_fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
+        Span::styled(
+            pr_title.to_string(),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
+/// Render a single GitHub label as a coloured chip — `bg` is the
+/// label's own colour, `fg` flips to black or white based on a
+/// brightness heuristic so the name stays readable.
+fn label_chip_spans(
+    label: &crate::github::pr::Label,
+    fallback_fg: Color,
+) -> Vec<Span<'static>> {
+    if let Some((bg, fg)) = label.color.as_deref().and_then(label_chip_colours) {
+        vec![Span::styled(
+            format!(" {} ", label.name),
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+        )]
+    } else {
+        vec![Span::styled(
+            label.name.clone(),
+            Style::default().fg(fallback_fg),
+        )]
+    }
+}
+
+/// Word-wrap `text` into chunks no wider than `width` (by char
+/// count). Words longer than `width` are hard-split. Always returns
+/// at least one chunk.
+fn wrap_description(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+    for word in text.split_whitespace() {
+        let word_w = word.chars().count();
+        if word_w > width {
+            // Word longer than the line — flush current then
+            // hard-split the word.
+            if !current.is_empty() {
+                out.push(std::mem::take(&mut current));
+                current_w = 0;
+            }
+            let mut buf = String::new();
+            let mut buf_w = 0;
+            for c in word.chars() {
+                if buf_w == width {
+                    out.push(std::mem::take(&mut buf));
+                    buf_w = 0;
+                }
+                buf.push(c);
+                buf_w += 1;
+            }
+            current = buf;
+            current_w = buf_w;
+            continue;
+        }
+        let needed = if current_w == 0 { word_w } else { word_w + 1 };
+        if current_w + needed > width {
+            out.push(std::mem::take(&mut current));
+            current_w = 0;
+            current.push_str(word);
+            current_w = word_w;
+        } else {
+            if current_w > 0 {
+                current.push(' ');
+                current_w += 1;
+            }
+            current.push_str(word);
+            current_w += word_w;
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+/// Parse a `rrggbb` hex string and return `(bg, contrast_fg)` —
+/// black foreground on light backgrounds, white on dark.
+fn label_chip_colours(hex: &str) -> Option<(Color, Color)> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
+    // Perceptual luminance — same coefficients GitHub uses in CSS
+    // to pick the contrast foreground for label chips.
+    let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    let fg = if luminance > 140.0 {
+        Color::Rgb(0, 0, 0)
+    } else {
+        Color::Rgb(255, 255, 255)
+    };
+    Some((Color::Rgb(r, g, b), fg))
 }
 
 

@@ -116,6 +116,10 @@ pub struct CommitDetail<'a> {
     ctx: Rc<AppContext>,
     head_branch_name: Option<String>,
     is_head_commit: bool,
+    /// `Some(n)` when this commit was opened from a PR drilldown —
+    /// surfaces as `· PR #n` next to the panel title so the user
+    /// always sees the originating context.
+    pr_origin: Option<u64>,
 }
 
 impl<'a> CommitDetail<'a> {
@@ -134,7 +138,15 @@ impl<'a> CommitDetail<'a> {
             ctx,
             head_branch_name,
             is_head_commit,
+            pr_origin: None,
         }
+    }
+
+    /// Attach a PR origin to the widget so the title row reads
+    /// `Commit Details · PR #N` instead of just `Commit Details`.
+    pub fn with_pr_origin(mut self, pr_number: Option<u64>) -> Self {
+        self.pr_origin = pr_number;
+        self
     }
 }
 
@@ -198,12 +210,18 @@ impl StatefulWidget for CommitDetail<'_> {
             ])
             .areas(content_inner);
 
-        // Render centered title
+        // Render centered title — appends ` · PR #N` in accent
+        // colour when the commit was opened from a PR drilldown.
+        let pr_suffix = self
+            .pr_origin
+            .map(|n| format!(" · PR #{}", n))
+            .unwrap_or_default();
         let title_text = "Commit Details";
-        let title_len = title_text.chars().count() as u16;
-        let title_pad = content_title_area.width.saturating_sub(title_len);
+        let visible_text_len =
+            (title_text.chars().count() + pr_suffix.chars().count()) as u16;
+        let title_pad = content_title_area.width.saturating_sub(visible_text_len);
         let title_left = title_pad / 2;
-        let title_line = Line::from(vec![
+        let mut title_spans: Vec<Span<'_>> = vec![
             Span::styled(" ".repeat(title_left as usize), Style::default()),
             Span::styled(
                 title_text.to_string(),
@@ -211,10 +229,19 @@ impl StatefulWidget for CommitDetail<'_> {
                     .fg(self.ctx.color_theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
-        ]);
-        Paragraph::new(title_line).render(content_title_area, buf);
+        ];
+        if !pr_suffix.is_empty() {
+            title_spans.push(Span::styled(
+                pr_suffix,
+                Style::default()
+                    .fg(self.ctx.color_theme.list_head_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        Paragraph::new(Line::from(title_spans)).render(content_title_area, buf);
 
         // Render small underline (slightly shorter than title)
+        let title_len = visible_text_len;
         let underline_len = (title_len as usize).saturating_sub(4).max(3);
         let underline_pad = content_underline_area
             .width

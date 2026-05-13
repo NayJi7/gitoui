@@ -226,6 +226,27 @@ pub struct App<'a> {
     /// tries to commit a non-git target. Auto-clears once `Instant::elapsed`
     /// passes the 2 s threshold.
     dir_error_message: Option<(String, std::time::Instant)>,
+    /// Navigation stack for PR-originated drilldowns. Each entry
+    /// describes the view to rebuild when the current sub-page
+    /// closes — so `Esc` walks back through the chain
+    /// `DiffView → CommitDetail → PR view` instead of jumping
+    /// straight to the commit graph. Empty when no PR drilldown
+    /// is in flight.
+    pr_nav_stack: Vec<PrNavRestore>,
+}
+
+/// One step of the PR-originated drilldown stack — the view kind
+/// to restore when the user backs out one level.
+#[derive(Debug, Clone)]
+enum PrNavRestore {
+    /// Re-open the PR list view with this PR re-selected (Detail
+    /// mode). Used as the bottom of every PR-originated chain.
+    PullRequest { pr_number: u64 },
+    /// Re-open the local `View::Detail` for this commit. Used as
+    /// the layer just below a DiffView when the user drilled into
+    /// a file from a PR's commit detail (or PR → file directly,
+    /// which synthesises this middle layer).
+    CommitDetail { sha: String },
 }
 
 impl<'a> App<'a> {
@@ -409,6 +430,7 @@ impl<'a> App<'a> {
             dir_input_cursor_anchor: None,
             pending_refresh: None,
             dir_error_message: None,
+            pr_nav_stack: Vec::new(),
             dir_recents: {
                 // On startup: load the saved list and surface the current
                 // working dir at the top so reopening the same project a few
@@ -1203,16 +1225,18 @@ impl App<'_> {
                 }
                 AppEvent::OpenPrLabelsPicker {
                     pr_number,
+                    pr_title,
                     all_labels,
                     currently_on_pr,
                 } => {
                     let selected: Vec<bool> = all_labels
                         .iter()
-                        .map(|name| currently_on_pr.contains(name))
+                        .map(|l| currently_on_pr.contains(&l.name))
                         .collect();
                     self.ec.send(AppEvent::OpenDialog(
                         crate::event::DialogKind::PullRequestLabels {
                             pr_number,
+                            pr_title,
                             all_labels,
                             selected,
                         },
@@ -1220,6 +1244,7 @@ impl App<'_> {
                 }
                 AppEvent::OpenPrReviewersPicker {
                     pr_number,
+                    pr_title,
                     all_users,
                     currently_requested,
                 } => {
@@ -1231,6 +1256,7 @@ impl App<'_> {
                     self.ec.send(AppEvent::OpenDialog(
                         crate::event::DialogKind::PullRequestReviewers {
                             pr_number,
+                            pr_title,
                             all_users,
                             selected,
                             initial,
@@ -1241,6 +1267,16 @@ impl App<'_> {
                     if let View::PullRequests(ref mut view) = self.view {
                         view.on_commit_detail_fetched(sha, result);
                     }
+                }
+                AppEvent::OpenPrCommitDetail { pr_number, sha } => {
+                    self.open_pr_commit_detail(pr_number, sha);
+                }
+                AppEvent::OpenPrFileDiff {
+                    pr_number,
+                    sha,
+                    file_path,
+                } => {
+                    self.open_pr_file_diff(pr_number, sha, file_path);
                 }
                 AppEvent::CloseInteractiveRebase => {
                     // Same pattern as CloseConflictEditor: close + enqueue
@@ -2427,7 +2463,7 @@ fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
     [header, view, gap, status]
 }
 
-impl App<'_> {
+impl<'a> App<'a> {
     fn update_state(&mut self, view_area: Rect) {
         self.app_status.view_area = view_area;
     }
@@ -2493,6 +2529,19 @@ impl App<'_> {
     }
 
     fn close_detail(&mut self) -> bool {
+        // Walk the PR nav stack — when the Detail view sits on top
+        // of a PR drilldown, Esc pops one level and rebuilds the
+        // restore target instead of falling through to the commit
+        // graph. `CommitDetail` shouldn't normally appear at this
+        // depth (Detail closes to PR), but treat it the same way.
+        if let Some(top) = self.pr_nav_stack.pop() {
+            if let View::Detail(ref mut view) = self.view {
+                let list_state = view.take_list_state();
+                if self.restore_pr_nav_target(top, Some(list_state)) {
+                    return true;
+                }
+            }
+        }
         match self.view {
             View::Detail(ref mut view) => {
                 let commit_list_state = view.take_list_state();
@@ -2531,6 +2580,19 @@ impl App<'_> {
     }
 
     fn open_file_diff(&mut self, hash: String, file_path: String) {
+        // When this Detail view sits inside a PR drilldown (its
+        // restore frame is on top of the stack), push a
+        // `CommitDetail{sha=hash}` frame so the file-diff's `Esc`
+        // bounces back to *this* Detail rather than skipping to the
+        // PR. Non-PR Detail → DiffView leaves the stack untouched
+        // (and its `Esc` follows the standard chain).
+        if matches!(
+            self.pr_nav_stack.last(),
+            Some(PrNavRestore::PullRequest { .. })
+        ) {
+            self.pr_nav_stack
+                .push(PrNavRestore::CommitDetail { sha: hash.clone() });
+        }
         if crate::git::diff::is_binary_extension(&file_path) {
             self.ec.send(AppEvent::NotifyWarn(format!(
                 "Binary file: diff not available for {}",
@@ -2672,6 +2734,17 @@ impl App<'_> {
 
     fn close_diff(&mut self) {
         self.file_stream.clear();
+        // Pop one level off the PR nav stack — DiffView typically
+        // sits on top of a CommitDetail (Esc → that detail) or a
+        // PR view (PR → file shortcut, Esc → PR).
+        if let Some(top) = self.pr_nav_stack.pop() {
+            if let View::Diff(ref mut view) = self.view {
+                let list_state = view.take_list_state();
+                if self.restore_pr_nav_target(top, list_state) {
+                    return;
+                }
+            }
+        }
         if let View::Diff(ref mut view) = self.view {
             let commit_list_state = view.take_list_state().unwrap();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
@@ -2684,6 +2757,17 @@ impl App<'_> {
     }
 
     fn close_diff_to_detail(&mut self) {
+        // PR-driven diffs walk the stack — Esc on DiffView pops one
+        // level (typically a CommitDetail for the PR commit), so the
+        // user backs out one step at a time through the chain.
+        if let Some(top) = self.pr_nav_stack.pop() {
+            if let View::Diff(ref mut view) = self.view {
+                let list_state = view.take_list_state();
+                if self.restore_pr_nav_target(top, list_state) {
+                    return;
+                }
+            }
+        }
         if let View::Diff(ref mut view) = self.view {
             let commit_list_state = view.take_list_state().unwrap();
             let (commit, changes, refs) =
@@ -3115,6 +3199,327 @@ impl App<'_> {
                 result,
             });
         });
+    }
+
+    /// Walk one frame off the PR nav stack — re-build whichever
+    /// view the frame describes. Returns `true` when the transition
+    /// happened, `false` when we couldn't honour it (e.g. missing
+    /// GitHub auth) and the caller should fall through to its
+    /// default close behaviour.
+    fn restore_pr_nav_target(
+        &mut self,
+        frame: PrNavRestore,
+        commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
+    ) -> bool {
+        match frame {
+            PrNavRestore::PullRequest { pr_number } => {
+                let token = self
+                    .ctx
+                    .github_auth_state
+                    .token
+                    .clone()
+                    .unwrap_or_default();
+                let coords = crate::github::RepoCoords::from_repo(self.repository.path());
+                if token.is_empty() {
+                    return false;
+                }
+                let Some(coords) = coords else {
+                    return false;
+                };
+                let items = crate::github::pr::list_pull_requests(&token, &coords)
+                    .unwrap_or_default();
+                self.view = View::of_pull_requests(
+                    commit_list_state,
+                    coords,
+                    token,
+                    items,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+                if let View::PullRequests(ref mut v) = self.view {
+                    v.reopen_pr(pr_number);
+                }
+                true
+            }
+            PrNavRestore::CommitDetail { sha } => {
+                let commit_hash = CommitHash::from(sha.as_str());
+                let (commit, changes) = self.repository.commit_detail(&commit_hash);
+                if commit.commit_hash.as_str().is_empty() {
+                    return false;
+                }
+                let Some(list_state) = commit_list_state else {
+                    return false;
+                };
+                let refs: Vec<Ref> = self
+                    .repository
+                    .refs(&commit_hash)
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                let head_branch_name = match self.repository.head() {
+                    Head::Branch { name } => Some(name.clone()),
+                    _ => None,
+                };
+                let head_commit_hash = head_commit_hash_from_repository(self.repository);
+                self.view = View::of_detail(
+                    list_state,
+                    commit,
+                    changes,
+                    refs,
+                    head_branch_name,
+                    head_commit_hash,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+                // The remaining stack frame (if any) is a
+                // PullRequest{n} — tag the Detail with that origin
+                // so its title still reads `· PR #N`.
+                let pr_origin = self.pr_nav_stack.iter().rev().find_map(|f| match f {
+                    PrNavRestore::PullRequest { pr_number } => Some(*pr_number),
+                    _ => None,
+                });
+                if let View::Detail(ref mut v) = self.view {
+                    v.set_pr_origin(pr_origin);
+                }
+                true
+            }
+        }
+    }
+
+    /// Transition from the PR view to the existing `View::Detail`
+    /// for one of the PR's commits. We:
+    /// 1. Stash the PR number in `return_to_pr` so the Detail view's
+    ///    `close` later routes back here instead of the commit graph.
+    /// 2. Snatch the PR view's stored `commit_list_state` so the
+    ///    Detail view has the same state to hand back on Esc.
+    /// 3. Spawn a background `git fetch refs/pull/<n>/head` so the
+    ///    commit + its files become available locally for the
+    ///    existing `git show`-based renderers. On completion the
+    ///    actual transition fires via `BuildPrCommitDetailView`.
+    fn open_pr_commit_detail(&mut self, pr_number: u64, sha: String) {
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        // Push the "return to PR" frame once — the second pass of
+        // this function (post-fetch) re-enters here and would
+        // duplicate the entry otherwise.
+        if !matches!(
+            self.pr_nav_stack.last(),
+            Some(PrNavRestore::PullRequest { pr_number: n }) if *n == pr_number
+        ) {
+            self.pr_nav_stack.push(PrNavRestore::PullRequest { pr_number });
+        }
+        let repo_path = self.repository.path().to_path_buf();
+        let tx = self.ec.sender();
+        let already_local = crate::git::load_commit_by_hash(&repo_path, &sha).is_some();
+        if already_local {
+            self.build_pr_commit_detail_view(pr_number, sha);
+            return;
+        }
+        self.start_spinner("Fetching commit…");
+        std::thread::spawn(move || {
+            let result = crate::git::fetch_pull_request_ref(
+                &repo_path,
+                &coords.owner,
+                &coords.repo,
+                pr_number,
+            );
+            match result {
+                // We can't touch `self.view` from this thread — fire an
+                // event back to the main loop and let it build the
+                // Detail view there.
+                Ok(()) => tx.send(AppEvent::OpenPrCommitDetail {
+                    pr_number,
+                    sha,
+                }),
+                Err(e) => tx.send(AppEvent::NotifyError(format!("PR commit fetch: {}", e))),
+            }
+        });
+    }
+
+    /// Bypass the standard `open_detail_by_hash` flow (which requires
+    /// the commit to be in the in-memory map + uses `selected_commit_
+    /// details`) and build the `View::Detail` directly from the
+    /// fetched PR commit. The Repository's `commit_detail` already
+    /// falls back to `git log -1` for unmapped commits.
+    fn build_pr_commit_detail_view(&mut self, pr_number: u64, sha: String) {
+        self.stop_spinner();
+        let commit_hash = CommitHash::from(sha.as_str());
+        let (commit, changes) = self.repository.commit_detail(&commit_hash);
+        if commit.commit_hash.as_str().is_empty() {
+            self.ec.send(AppEvent::NotifyError(format!(
+                "Cannot resolve commit {} locally.",
+                &sha[..7.min(sha.len())]
+            )));
+            self.pr_nav_stack.clear();
+            return;
+        }
+        // Reach across to whichever view holds the list state — when
+        // bouncing back from a file-diff (CommitDetail → DiffView →
+        // Esc), the Detail view owns it.
+        let commit_list_state = match self.view {
+            View::PullRequests(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Diff(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let Some(list_state) = commit_list_state else {
+            self.ec.send(AppEvent::NotifyError(
+                "Cannot open commit detail without a backing list state.".into(),
+            ));
+            self.pr_nav_stack.clear();
+            return;
+        };
+        let refs: Vec<Ref> = self
+            .repository
+            .refs(&commit_hash)
+            .into_iter()
+            .cloned()
+            .collect();
+        let head_branch_name = match self.repository.head() {
+            Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let head_commit_hash = head_commit_hash_from_repository(self.repository);
+        self.view = View::of_detail(
+            list_state,
+            commit,
+            changes,
+            refs,
+            head_branch_name,
+            head_commit_hash,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+        // Tag the view so its title row reads `Commit Details · PR #N`
+        // — keeps the PR origin visible while the user navigates files.
+        if let View::Detail(ref mut v) = self.view {
+            v.set_pr_origin(Some(pr_number));
+        }
+    }
+
+    /// Transition from the PR view to the existing single-file
+    /// DiffView for one of the PR's changes. Same fetch + state save
+    /// dance as `open_pr_commit_detail`.
+    fn open_pr_file_diff(&mut self, pr_number: u64, sha: String, file_path: String) {
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        // Synthesise a 2-level stack so Esc walks DiffView → Commit
+        // Detail (for `sha`) → PR view. Duplicate-guard on re-entry
+        // after a background fetch.
+        if !matches!(
+            self.pr_nav_stack.last(),
+            Some(PrNavRestore::CommitDetail { sha: existing }) if *existing == sha
+        ) {
+            if !matches!(
+                self.pr_nav_stack.first(),
+                Some(PrNavRestore::PullRequest { pr_number: n }) if *n == pr_number
+            ) {
+                self.pr_nav_stack
+                    .push(PrNavRestore::PullRequest { pr_number });
+            }
+            self.pr_nav_stack
+                .push(PrNavRestore::CommitDetail { sha: sha.clone() });
+        }
+        let repo_path = self.repository.path().to_path_buf();
+        let tx = self.ec.sender();
+        let already_local = self
+            .repository
+            .commit(&CommitHash::from(sha.as_str()))
+            .is_some()
+            || crate::git::load_commit_by_hash(&repo_path, &sha).is_some();
+        if already_local {
+            self.open_file_diff_from_pr(sha, file_path);
+            return;
+        }
+        self.start_spinner("Fetching file…");
+        std::thread::spawn(move || {
+            let result =
+                crate::git::fetch_pull_request_ref(&repo_path, &coords.owner, &coords.repo, pr_number);
+            match result {
+                Ok(()) => {
+                    // After fetch, kick off the diff-open on the
+                    // main thread (via a dedicated event so the
+                    // worker doesn't touch UI state directly).
+                    tx.send(AppEvent::OpenPrFileDiff {
+                        pr_number,
+                        sha,
+                        file_path,
+                    });
+                }
+                Err(e) => {
+                    tx.send(AppEvent::NotifyError(format!("PR file fetch: {}", e)));
+                }
+            }
+        });
+    }
+
+    fn open_file_diff_from_pr(&mut self, sha: String, file_path: String) {
+        self.stop_spinner();
+        // Reuse the standard "open diff for one file at commit"
+        // helper. It expects a commit hash + path and synthesises
+        // the DiffView with the proper old/new content from `git
+        // show`. The Detail view's commit_list_state isn't needed —
+        // the standalone constructor lives on App.
+        self.open_uncommitted_or_commit_file_diff(sha, file_path);
+    }
+
+    /// Build a DiffView for `file_path` at `commit_hash` from
+    /// scratch (no commit-list state). Used when the user drills
+    /// into a file from the PR view — they're not coming from a
+    /// list of commits, so we open a "lonely" diff that returns to
+    /// the PR view on Esc via `return_to_pr`.
+    fn open_uncommitted_or_commit_file_diff(&mut self, commit_hash: String, file_path: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        let diff_entry = match crate::git::diff::DiffEntry::load_for_file(
+            &repo_path,
+            &commit_hash,
+            &file_path,
+        ) {
+            Ok(d) => d,
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Load file diff: {}", e)));
+                return;
+            }
+        };
+        let diff_entries = vec![diff_entry];
+        let commit_list_state = match self.view {
+            View::PullRequests(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let Some(list_state) = commit_list_state else {
+            self.ec.send(AppEvent::NotifyError(
+                "Cannot open file diff without a backing commit list.".into(),
+            ));
+            return;
+        };
+        // List of file paths within the diff — usually just the one
+        // we're opening, but DiffView supports prev/next file nav.
+        let all_paths = vec![(file_path.clone(), true)];
+        self.view = View::of_diff_with_entries(
+            list_state,
+            diff_entries,
+            self.ctx.clone(),
+            self.ec.sender(),
+            format!("Diff: {}", file_path),
+            commit_hash,
+            all_paths,
+            repo_path,
+        );
     }
 
     fn open_pull_requests(&mut self) {

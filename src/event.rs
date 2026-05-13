@@ -158,17 +158,20 @@ pub enum AppEvent {
         result: Result<(), String>,
     },
     /// Repo labels finished fetching for the picker — payload carries
-    /// the full label set, plus which ones are currently attached to
-    /// the PR. The handler opens the multi-select dialog.
+    /// the full label set (with their hex colours so the dialog can
+    /// paint GitHub-style chips), plus which names are currently
+    /// attached to the PR. The handler opens the multi-select dialog.
     OpenPrLabelsPicker {
         pr_number: u64,
-        all_labels: Vec<String>,
+        pr_title: String,
+        all_labels: Vec<crate::github::pr::Label>,
         currently_on_pr: Vec<String>,
     },
     /// Same shape as `OpenPrLabelsPicker` but for reviewers — uses the
     /// `/assignees` endpoint as the user pool.
     OpenPrReviewersPicker {
         pr_number: u64,
+        pr_title: String,
         all_users: Vec<String>,
         currently_requested: Vec<String>,
     },
@@ -178,6 +181,19 @@ pub enum AppEvent {
     PrCommitDetailFetched {
         sha: String,
         result: Result<crate::github::pr::CommitDetail, String>,
+    },
+    /// Open the existing CommitDetail view (`View::Detail`) for a PR
+    /// commit. The app `git fetches` the PR ref first if the commit
+    /// isn't already locally available, then transitions. The PR
+    /// number is remembered so `Esc` returns straight to the PR view
+    /// instead of dropping to the commit graph.
+    OpenPrCommitDetail { pr_number: u64, sha: String },
+    /// Open the existing DiffView for a single file in a PR. Same
+    /// fetch / return-flow mechanics as `OpenPrCommitDetail`.
+    OpenPrFileDiff {
+        pr_number: u64,
+        sha: String,
+        file_path: String,
     },
     OpenDetailByHash {
         hash: String,
@@ -238,16 +254,19 @@ pub enum DialogKind {
     },
     /// Multi-select picker for the PR's labels. `selected` is the
     /// set currently checked (mutated as the user toggles); on confirm
-    /// it becomes the new label set on the PR.
+    /// it becomes the new label set on the PR. Labels carry their
+    /// hex colours so the dialog can paint GitHub-style chips.
     PullRequestLabels {
         pr_number: u64,
-        all_labels: Vec<String>,
+        pr_title: String,
+        all_labels: Vec<crate::github::pr::Label>,
         selected: Vec<bool>,
     },
     /// Multi-select picker for the PR's reviewers. Same shape as
     /// labels — `selected` starts at currently-requested reviewers.
     PullRequestReviewers {
         pr_number: u64,
+        pr_title: String,
         all_users: Vec<String>,
         selected: Vec<bool>,
         initial: Vec<bool>,

@@ -273,7 +273,13 @@ impl Repository {
     }
 
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
-        let commit = self.commit(commit_hash).unwrap().clone();
+        // PR commits fetched on demand (via `refs/pull/<n>/head`) aren't
+        // in the in-memory map — fall back to a one-off `git log -1`
+        // so the existing CommitDetail / DiffView still work for them.
+        let commit = self.commit(commit_hash).cloned().unwrap_or_else(|| {
+            load_commit_by_hash(&self.path, commit_hash.as_str())
+                .unwrap_or_default()
+        });
         let changes = if commit.parent_commit_hashes.is_empty() {
             get_initial_commit_additions(&self.path, commit_hash)
         } else {
@@ -499,6 +505,71 @@ fn load_all_stashes(path: &Path) -> Vec<Commit> {
     cmd.wait().unwrap();
 
     commits
+}
+
+/// Resolve a single commit by hash, even if it isn't reachable from
+/// any local ref (e.g. just fetched from `refs/pull/{n}/head`). Used
+/// by the PR view to surface the existing CommitDetail / DiffView
+/// for commits that haven't been added to the in-memory commit map.
+pub fn load_commit_by_hash(path: &Path, hash: &str) -> Option<Commit> {
+    let output = Command::new("git")
+        .arg("log")
+        .arg("-1")
+        .arg(format!("--pretty={}", load_commits_format()))
+        .arg("--date=iso-strict")
+        .arg(hash)
+        .current_dir(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout);
+    let line = s.lines().next()?;
+    let parts: Vec<&str> = line.split('\x1f').collect();
+    if parts.len() < 10 {
+        return None;
+    }
+    Some(Commit {
+        commit_hash: parts[0].into(),
+        author_name: parts[1].into(),
+        author_email: parts[2].into(),
+        author_date: parse_iso_date(parts[3]),
+        committer_name: parts[4].into(),
+        committer_email: parts[5].into(),
+        committer_date: parse_iso_date(parts[6]),
+        commit_message: parts[7].into(),
+        body: parts[8].into(),
+        parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
+        commit_type: CommitType::Commit,
+    })
+}
+
+/// Fetch a Pull Request's head ref into `refs/pull/{n}/head` so the
+/// commits become available locally for `git show`. Uses the GitHub
+/// URL directly to dodge "which remote is GitHub?" guesswork. Quiet
+/// on success; failure surfaces the git stderr as the error string.
+pub fn fetch_pull_request_ref(
+    path: &Path,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+) -> std::result::Result<(), String> {
+    let url = format!("https://github.com/{}/{}", owner, repo);
+    let refspec = format!(
+        "+refs/pull/{}/head:refs/pull/{}/head",
+        pr_number, pr_number
+    );
+    let output = Command::new("git")
+        .args(["fetch", "--quiet", &url, &refspec])
+        .current_dir(path)
+        .output()
+        .map_err(|e| format!("git fetch failed: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(stderr.lines().next().unwrap_or("git fetch failed").to_string());
+    }
+    Ok(())
 }
 
 fn load_commits_format() -> String {
