@@ -142,6 +142,9 @@ pub struct PullRequestsView<'a> {
     /// Active branch-picker overlay (drawn on top of the compose
     /// form). When `Some`, all key + click events route to it.
     branch_picker: Option<BranchPicker>,
+    /// Active reaction-picker overlay (drawn on top of the comment
+    /// the user fired `+` on). When `Some`, key events route to it.
+    reaction_picker: Option<ReactionPicker>,
     last_error: Option<String>,
     /// Rects captured each frame for mouse hit-testing — `None` until the
     /// first render. Cleared at the top of each render pass.
@@ -211,6 +214,20 @@ impl ComposeField {
         let i = all.iter().position(|f| *f == self).unwrap_or(0);
         all[(i + all.len() - 1) % all.len()]
     }
+}
+
+/// Small inline picker for the 8 GitHub reactions. Stays visually
+/// close to its target comment instead of floating mid-screen so
+/// the user sees what they're reacting to.
+#[derive(Debug, Clone)]
+struct ReactionPicker {
+    /// Conversation index of the comment being reacted to — feeds
+    /// back into `selected_conversation_entry` on confirm.
+    target_idx: usize,
+    /// 0..8 — which of the eight reactions is currently focused.
+    hovered: usize,
+    overlay_rect: Option<Rect>,
+    row_rects: Vec<Rect>,
 }
 
 /// Scrollable single-select branch picker — opens as an overlay
@@ -638,6 +655,7 @@ impl<'a> PullRequestsView<'a> {
             compose: None,
             compose_field_rects: Vec::new(),
             branch_picker: None,
+            reaction_picker: None,
             last_error: None,
             list_area: None,
             tab_content_area: None,
@@ -1177,6 +1195,12 @@ impl<'a> PullRequestsView<'a> {
         //    For `R` we match the uppercase glyph regardless of modifier
         //    — different terminals attach SHIFT, NONE, or even both to
         //    uppercase letters, so we just trust the produced char.
+        // ── Reaction picker takes over every key while open ────────
+        if self.reaction_picker.is_some() {
+            self.handle_event_reaction_picker(key);
+            return;
+        }
+
         if matches!(self.active_tab, Tab::Conversation) {
             match key.code {
                 KeyCode::Char('c') if plain => {
@@ -1193,6 +1217,10 @@ impl<'a> PullRequestsView<'a> {
                 }
                 KeyCode::Char('d') if plain => {
                     self.confirm_delete_comment();
+                    return;
+                }
+                KeyCode::Char('+') => {
+                    self.start_react();
                     return;
                 }
                 _ => {}
@@ -2305,6 +2333,107 @@ impl<'a> PullRequestsView<'a> {
                 .tx
                 .send(AppEvent::NotifyError(format!("Open browser: {}", e))),
         }
+    }
+
+    /// Open the inline reaction-emoji picker on the currently-
+    /// selected comment. Bails when the selected entry isn't a
+    /// reactable comment (reviews don't carry reactions).
+    fn start_react(&mut self) {
+        let target_idx = self.conversation_selected;
+        let Some(entry) = self.selected_conversation_entry() else {
+            return;
+        };
+        if entry.id.is_none() {
+            // Reviews + the PR description card aren't reactable
+            // through this flow (PR body would need a separate code
+            // path against `/issues/{n}/reactions`).
+            return;
+        }
+        self.reaction_picker = Some(ReactionPicker {
+            target_idx,
+            hovered: 0,
+            overlay_rect: None,
+            row_rects: Vec::new(),
+        });
+    }
+
+    fn handle_event_reaction_picker(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+    ) {
+        use ratatui::crossterm::event::KeyCode;
+        let Some(picker) = self.reaction_picker.as_mut() else {
+            return;
+        };
+        let total = crate::github::pr::ReactionKind::all().len();
+        match key.code {
+            KeyCode::Esc => {
+                self.reaction_picker = None;
+            }
+            KeyCode::Left | KeyCode::Up => {
+                if picker.hovered > 0 {
+                    picker.hovered -= 1;
+                }
+            }
+            KeyCode::Right | KeyCode::Down => {
+                if picker.hovered + 1 < total {
+                    picker.hovered += 1;
+                }
+            }
+            KeyCode::Home => picker.hovered = 0,
+            KeyCode::End => picker.hovered = total - 1,
+            KeyCode::Enter => {
+                let chosen = crate::github::pr::ReactionKind::all()[picker.hovered];
+                let target_idx = picker.target_idx;
+                self.reaction_picker = None;
+                self.submit_reaction(target_idx, chosen);
+            }
+            _ => {}
+        }
+    }
+
+    /// Fire the reaction POST in a background thread. The PR view's
+    /// detail cache is invalidated on success so the next render
+    /// re-fetches and surfaces the updated chip row.
+    fn submit_reaction(
+        &mut self,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+    ) {
+        let prev_selected = self.conversation_selected;
+        self.conversation_selected = target_idx;
+        let entry_data = self.selected_conversation_entry().map(|e| {
+            (
+                e.id,
+                matches!(e.kind, ConversationKind::ReviewComment { .. }),
+            )
+        });
+        self.conversation_selected = prev_selected;
+        let Some((Some(comment_id), is_review)) = entry_data else {
+            return;
+        };
+        let Some(number) = self.opened_number() else {
+            return;
+        };
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = if is_review {
+                crate::github::pr::add_review_comment_reaction(
+                    &token, &coords, comment_id, kind,
+                )
+            } else {
+                crate::github::pr::add_issue_comment_reaction(
+                    &token, &coords, comment_id, kind,
+                )
+            };
+            tx.send(AppEvent::PullRequestActionDone {
+                number,
+                action: format!("Reacted with {}", kind.emoji()),
+                result,
+            });
+        });
     }
 
     fn confirm_delete_comment(&mut self) {
@@ -3454,6 +3583,12 @@ impl<'a> PullRequestsView<'a> {
             Tab::Checks => self.render_tab_checks(f, tab_content_area, detail),
             Tab::Files => self.render_tab_files(f, tab_content_area, detail),
         }
+
+        // Reaction picker is the last thing drawn so it sits on top
+        // of the conversation cards (and any inline editor below).
+        if self.reaction_picker.is_some() {
+            self.render_reaction_picker_overlay(f, area);
+        }
     }
 
     /// Full-screen compose-new-PR view — borrows the Detail layout:
@@ -3548,6 +3683,57 @@ impl<'a> PullRequestsView<'a> {
     /// Branch-picker overlay — drawn on top of the compose layout
     /// when `self.branch_picker.is_some()`. Centered list with
     /// per-row colour by `BranchKind`.
+    /// Centered emoji picker overlay for the eight GitHub reactions
+    /// — drawn on top of the conversation when `+` was pressed on a
+    /// reactable comment. Keyboard arrows move the highlight, Enter
+    /// fires the POST, Esc closes.
+    fn render_reaction_picker_overlay(&mut self, f: &mut Frame, area: Rect) {
+        let Some(picker) = self.reaction_picker.as_mut() else {
+            return;
+        };
+        let theme = &self.ctx.color_theme;
+        let kinds = crate::github::pr::ReactionKind::all();
+        // One row tall + borders. Width = sum of 5-col cells per
+        // emoji (` X ` padded) + 1 for the gap, plus 2 for borders.
+        let cell_width: u16 = 6;
+        let width: u16 = (kinds.len() as u16 * cell_width).saturating_add(2);
+        let height: u16 = 3;
+        let x = area.x + (area.width.saturating_sub(width)) / 2;
+        let y = area.y + (area.height.saturating_sub(height)) / 2;
+        let rect = Rect::new(x, y, width, height);
+        picker.overlay_rect = Some(rect);
+        f.render_widget(ratatui::widgets::Clear, rect);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.list_head_fg))
+            .title(Line::from(Span::styled(
+                " React ".to_string(),
+                Style::default()
+                    .fg(theme.list_head_fg)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        let inner = block.inner(rect);
+        f.render_widget(block, rect);
+        picker.row_rects.clear();
+        let mut x_cursor = inner.x;
+        for (i, kind) in kinds.iter().enumerate() {
+            let is_selected = i == picker.hovered;
+            let cell_rect = Rect::new(x_cursor, inner.y, cell_width, 1);
+            picker.row_rects.push(cell_rect);
+            let style = if is_selected {
+                Style::default()
+                    .fg(theme.fg)
+                    .bg(theme.list_selected_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.fg)
+            };
+            let label = Span::styled(format!(" {} ", kind.emoji()), style);
+            f.render_widget(Paragraph::new(Line::from(label)), cell_rect);
+            x_cursor = x_cursor.saturating_add(cell_width);
+        }
+    }
+
     fn render_branch_picker_overlay(&mut self, f: &mut Frame, area: Rect) {
         let Some(picker) = self.branch_picker.as_mut() else {
             return;
@@ -4558,6 +4744,10 @@ impl<'a> PullRequestsView<'a> {
                 // PR description card: quote-reply only (no in-place
                 // edit / delete shortcuts here).
                 inline_shortcuts: vec!["R:quote reply"],
+                // PR body itself doesn't surface its reactions here
+                // — they'd need a separate `GET /reactions` call
+                // (the PR endpoint doesn't inline them on the body).
+                reactions: crate::github::pr::ReactionCounts::default(),
             },
         );
         self.conversation_comment_spans
@@ -4699,6 +4889,12 @@ impl<'a> PullRequestsView<'a> {
             shortcuts.push("e:edit");
             shortcuts.push("d:delete");
         }
+        // Reactions are available on every comment that has an id —
+        // i.e. proper issue / review comments, not the synthesized
+        // review summary rows (which never carry one).
+        if entry.id.is_some() {
+            shortcuts.push("+:react");
+        }
         push_comment_card(
             lines,
             theme,
@@ -4713,6 +4909,7 @@ impl<'a> PullRequestsView<'a> {
                 is_selected: self.conversation_selected == my_idx,
                 is_me,
                 inline_shortcuts: shortcuts,
+                reactions: entry.reactions.clone(),
             },
         );
         self.conversation_comment_spans
@@ -5211,6 +5408,9 @@ struct CommentCardInput<'a> {
     /// Empty for cards that have no card-scoped actions (PR description,
     /// reviews) or when not selected.
     inline_shortcuts: Vec<&'static str>,
+    /// Reaction totals to render as an `emoji N` chip row below the
+    /// comment body. Empty / zero-count = no row drawn.
+    reactions: crate::github::pr::ReactionCounts,
 }
 
 enum CommentAction {
@@ -5443,6 +5643,41 @@ fn push_comment_card(
         // over a colour mismatch where ─ and │/┤ are styled differently).
         row.push(Span::styled("│ ".to_string(), border_style));
         row.extend(line_spans);
+        row.push(Span::styled(format!("{} │", " ".repeat(pad)), border_style));
+        lines.push(Line::from(row));
+    }
+    // Reaction chip row — sits between the body and the bottom
+    // border, drawn only when at least one of the eight reactions
+    // has a count. Each chip = `emoji N` in a muted style, with
+    // 1-col gaps between chips.
+    if input.reactions.total() > 0 {
+        let mut chip_spans: Vec<Span<'static>> = Vec::new();
+        for (kind, count) in input
+            .reactions
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .collect::<Vec<_>>()
+        {
+            if !chip_spans.is_empty() {
+                chip_spans.push(Span::raw("  ".to_string()));
+            }
+            chip_spans.push(Span::styled(
+                format!(" {} {} ", kind.emoji(), count),
+                Style::default()
+                    .fg(theme.fg)
+                    .bg(theme.list_match_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        // Measure to compute the trailing pad to the right border.
+        let used: usize = chip_spans
+            .iter()
+            .map(|s| console::measure_text_width(s.content.as_ref()))
+            .sum();
+        let pad = inner_width.saturating_sub(used.min(inner_width));
+        let mut row = build_body_prefix(theme, input.ancestor_gutters);
+        row.push(Span::styled("│ ".to_string(), border_style));
+        row.extend(chip_spans);
         row.push(Span::styled(format!("{} │", " ".repeat(pad)), border_style));
         lines.push(Line::from(row));
     }

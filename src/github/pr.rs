@@ -108,6 +108,112 @@ pub struct ConversationEntry {
     pub when: String,
     pub body: String,
     pub kind: ConversationKind,
+    /// Aggregate reaction counts attached to this comment. Comes from
+    /// the `reactions` summary object GitHub embeds inline on each
+    /// comment payload — no extra request needed.
+    pub reactions: ReactionCounts,
+}
+
+/// Per-comment reaction tally. GitHub's reactions API supports
+/// exactly 8 emoji — fixed for the foreseeable future — so we model
+/// them as named fields rather than a hashmap.
+#[derive(Debug, Clone, Default)]
+pub struct ReactionCounts {
+    pub plus_one: u64,
+    pub minus_one: u64,
+    pub laugh: u64,
+    pub confused: u64,
+    pub heart: u64,
+    pub hooray: u64,
+    pub rocket: u64,
+    pub eyes: u64,
+}
+
+impl ReactionCounts {
+    /// Total across all reaction types — used to decide whether to
+    /// render the chip row at all.
+    pub fn total(&self) -> u64 {
+        self.plus_one
+            + self.minus_one
+            + self.laugh
+            + self.confused
+            + self.heart
+            + self.hooray
+            + self.rocket
+            + self.eyes
+    }
+
+    /// Walk the eight types in canonical GitHub order, yielding
+    /// `(kind, count)` so callers can `filter(|(_, n)| *n > 0)`.
+    pub fn iter(&self) -> impl Iterator<Item = (ReactionKind, u64)> + '_ {
+        [
+            (ReactionKind::PlusOne, self.plus_one),
+            (ReactionKind::MinusOne, self.minus_one),
+            (ReactionKind::Laugh, self.laugh),
+            (ReactionKind::Hooray, self.hooray),
+            (ReactionKind::Confused, self.confused),
+            (ReactionKind::Heart, self.heart),
+            (ReactionKind::Rocket, self.rocket),
+            (ReactionKind::Eyes, self.eyes),
+        ]
+        .into_iter()
+    }
+}
+
+/// The 8 reaction emoji GitHub supports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionKind {
+    PlusOne,
+    MinusOne,
+    Laugh,
+    Confused,
+    Heart,
+    Hooray,
+    Rocket,
+    Eyes,
+}
+
+impl ReactionKind {
+    /// API content string GitHub expects in
+    /// `POST /reactions { content: "..." }`.
+    pub fn api_content(self) -> &'static str {
+        match self {
+            ReactionKind::PlusOne => "+1",
+            ReactionKind::MinusOne => "-1",
+            ReactionKind::Laugh => "laugh",
+            ReactionKind::Confused => "confused",
+            ReactionKind::Heart => "heart",
+            ReactionKind::Hooray => "hooray",
+            ReactionKind::Rocket => "rocket",
+            ReactionKind::Eyes => "eyes",
+        }
+    }
+
+    pub fn emoji(self) -> &'static str {
+        match self {
+            ReactionKind::PlusOne => "👍",
+            ReactionKind::MinusOne => "👎",
+            ReactionKind::Laugh => "😄",
+            ReactionKind::Confused => "😕",
+            ReactionKind::Heart => "❤️",
+            ReactionKind::Hooray => "🎉",
+            ReactionKind::Rocket => "🚀",
+            ReactionKind::Eyes => "👀",
+        }
+    }
+
+    pub fn all() -> &'static [ReactionKind] {
+        &[
+            ReactionKind::PlusOne,
+            ReactionKind::MinusOne,
+            ReactionKind::Laugh,
+            ReactionKind::Hooray,
+            ReactionKind::Confused,
+            ReactionKind::Heart,
+            ReactionKind::Rocket,
+            ReactionKind::Eyes,
+        ]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,6 +523,8 @@ struct ApiIssueComment {
     body: Option<String>,
     #[serde(default)]
     created_at: String,
+    #[serde(default)]
+    reactions: Option<ApiReactions>,
 }
 
 #[derive(Deserialize)]
@@ -438,6 +546,8 @@ struct ApiReviewComment {
     /// nothing for now (don't show a line if absent).
     #[serde(default)]
     line: Option<u64>,
+    #[serde(default)]
+    reactions: Option<ApiReactions>,
 }
 
 #[derive(Deserialize)]
@@ -449,6 +559,45 @@ struct ApiReviewWithBody {
     body: Option<String>,
     #[serde(default)]
     submitted_at: String,
+}
+
+/// Inline `reactions` summary GitHub embeds on every comment-bearing
+/// resource. Field names follow GH's JSON keys (note the `+1` / `-1`
+/// renames — Rust can't name a field that).
+#[derive(Deserialize, Default)]
+struct ApiReactions {
+    #[serde(default, rename = "+1")]
+    plus_one: u64,
+    #[serde(default, rename = "-1")]
+    minus_one: u64,
+    #[serde(default)]
+    laugh: u64,
+    #[serde(default)]
+    confused: u64,
+    #[serde(default)]
+    heart: u64,
+    #[serde(default)]
+    hooray: u64,
+    #[serde(default)]
+    rocket: u64,
+    #[serde(default)]
+    eyes: u64,
+}
+
+impl From<Option<ApiReactions>> for ReactionCounts {
+    fn from(api: Option<ApiReactions>) -> Self {
+        let api = api.unwrap_or_default();
+        ReactionCounts {
+            plus_one: api.plus_one,
+            minus_one: api.minus_one,
+            laugh: api.laugh,
+            confused: api.confused,
+            heart: api.heart,
+            hooray: api.hooray,
+            rocket: api.rocket,
+            eyes: api.eyes,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -616,6 +765,7 @@ pub fn fetch_pull_request_detail(
     let mut conversation: Vec<(String, ConversationEntry)> = Vec::new();
     for c in issue_comments {
         let when = c.created_at.clone();
+        let reactions: ReactionCounts = c.reactions.into();
         conversation.push((
             when,
             ConversationEntry {
@@ -625,6 +775,7 @@ pub fn fetch_pull_request_detail(
                 when: short_relative(&c.created_at),
                 body: c.body.unwrap_or_default(),
                 kind: ConversationKind::Comment,
+                reactions,
             },
         ));
     }
@@ -651,11 +802,16 @@ pub fn fetch_pull_request_detail(
                 when: short_relative(&r.submitted_at),
                 body,
                 kind: ConversationKind::Review { state },
+                // Review summary objects don't carry reactions —
+                // GitHub only surfaces them on the individual
+                // comments inside the review.
+                reactions: ReactionCounts::default(),
             },
         ));
     }
     for rc in review_comments {
         let when = rc.created_at.clone();
+        let reactions: ReactionCounts = rc.reactions.into();
         conversation.push((
             when,
             ConversationEntry {
@@ -668,6 +824,7 @@ pub fn fetch_pull_request_detail(
                     file: rc.path,
                     line: rc.line,
                 },
+                reactions,
             },
         ));
     }
@@ -1501,6 +1658,79 @@ struct ApiCommitStats {
     additions: u64,
     #[serde(default)]
     deletions: u64,
+}
+
+// ─── Reactions ───────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct ReactionBody<'a> {
+    content: &'a str,
+}
+
+/// Add a reaction to an issue / PR top-level comment. GitHub treats
+/// PR description and issue body the same way for this endpoint.
+pub fn add_issue_comment_reaction(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    kind: ReactionKind,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/comments/{}/reactions",
+        coords.owner, coords.repo, comment_id
+    );
+    write_json(
+        token,
+        &url,
+        reqwest::Method::POST,
+        &ReactionBody {
+            content: kind.api_content(),
+        },
+    )
+}
+
+/// Add a reaction to an inline review comment (the ones threaded
+/// under a specific file/line in the PR diff).
+pub fn add_review_comment_reaction(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    kind: ReactionKind,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/comments/{}/reactions",
+        coords.owner, coords.repo, comment_id
+    );
+    write_json(
+        token,
+        &url,
+        reqwest::Method::POST,
+        &ReactionBody {
+            content: kind.api_content(),
+        },
+    )
+}
+
+/// Add a reaction to the PR / issue body itself (the "opened this PR"
+/// card at the top of the conversation tab).
+pub fn add_issue_reaction(
+    token: &str,
+    coords: &RepoCoords,
+    issue_number: u64,
+    kind: ReactionKind,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/{}/reactions",
+        coords.owner, coords.repo, issue_number
+    );
+    write_json(
+        token,
+        &url,
+        reqwest::Method::POST,
+        &ReactionBody {
+            content: kind.api_content(),
+        },
+    )
 }
 
 // ─── PR creation ─────────────────────────────────────────────────
