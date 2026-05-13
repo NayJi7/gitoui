@@ -183,6 +183,22 @@ pub enum DialogKind {
     /// Confirm squashing a commit into its parent. No options — just a
     /// confirmation prompt before we run the rebase under the hood.
     Squash { target: String },
+    /// Merge a pull request — radio for merge method + optional title
+    /// and message. Confirm runs `PUT /pulls/{n}/merge`.
+    MergePullRequest {
+        number: u64,
+        pr_title: String,
+        pr_body: String,
+    },
+    /// Confirm before deleting a PR comment — preview shows the body
+    /// and author so the user sees which comment is about to go.
+    ConfirmDeleteComment {
+        pr_number: u64,
+        comment_id: u64,
+        is_review: bool,
+        author: String,
+        body_preview: String,
+    },
     // Branch actions
     RenameBranch { branch: String },
     DeleteBranch { branch: String, is_remote: bool },
@@ -257,6 +273,13 @@ pub enum GitAction {
     },
     /// Squash with parent — non-interactive, no options.
     SquashWithParent,
+    /// Merge a PR via the GitHub API. `method` is "merge" / "squash" /
+    /// "rebase" (matches GitHub's `merge_method` body field).
+    MergePullRequest { method: String },
+    /// Delete a PR comment after user confirmation. `target` carries
+    /// the comment id; `is_review` picks between the issue-comments
+    /// and pulls-comments endpoint.
+    DeletePrComment { pr_number: u64, is_review: bool },
     Reset {
         mode: String,
     },

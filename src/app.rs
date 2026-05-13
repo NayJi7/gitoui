@@ -2862,6 +2862,102 @@ impl App<'_> {
     /// the initial `list_pull_requests` call fails. We do the network
     /// call up-front (blocking) and pass the result to the view; on
     /// success the view itself drives further fetches lazily.
+    /// Run a confirmed PR-comment delete in a worker thread. The PR
+    /// view picks up the outcome via `PullRequestActionDone` (same
+    /// channel as comment posts), which invalidates the cache and
+    /// re-fetches the PR detail.
+    fn delete_pr_comment(
+        &mut self,
+        comment_id_str: String,
+        pr_number: u64,
+        is_review: bool,
+    ) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let Ok(comment_id) = comment_id_str.parse::<u64>() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            let result = if is_review {
+                crate::github::pr::delete_review_comment(&token, &coords, comment_id)
+            } else {
+                crate::github::pr::delete_issue_comment(&token, &coords, comment_id)
+            };
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: "Comment deleted".into(),
+                result,
+            });
+        });
+    }
+
+    /// Merge a PR via GitHub REST API. Method is one of "merge",
+    /// "squash", "rebase". Runs in a worker thread; result surfaced
+    /// via `PullRequestActionDone` so the PR view picks it up.
+    fn merge_pull_request(&mut self, pr_number_str: String, method: String) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let Ok(number) = pr_number_str.parse::<u64>() else {
+            return;
+        };
+        let merge_method = match method.as_str() {
+            "merge" => crate::github::pr::MergeMethod::Merge,
+            "squash" => crate::github::pr::MergeMethod::Squash,
+            "rebase" => crate::github::pr::MergeMethod::Rebase,
+            _ => crate::github::pr::MergeMethod::Squash,
+        };
+        let tx = self.ec.sender();
+        let action_label = format!("Merged ({})", method);
+        std::thread::spawn(move || {
+            let result = crate::github::pr::merge_pull_request(
+                &token,
+                &coords,
+                number,
+                merge_method,
+                None,
+                None,
+            );
+            tx.send(AppEvent::PullRequestActionDone {
+                number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
     fn open_pull_requests(&mut self) {
         let token = match &self.ctx.github_auth_state.token {
             Some(t) if !t.is_empty() => t.clone(),
@@ -4232,6 +4328,20 @@ impl App<'_> {
                 // through the standard GitResult path.
                 self.close_dialog();
                 self.squash_with_parent(target);
+                return;
+            }
+            GitAction::MergePullRequest { method } => {
+                // Merge via GitHub REST API on a worker thread. The PR
+                // view picks up the result via PullRequestActionDone
+                // (same channel as comment writes), so on success the
+                // view re-fetches the PR detail and shows it as merged.
+                self.close_dialog();
+                self.merge_pull_request(target, method);
+                return;
+            }
+            GitAction::DeletePrComment { pr_number, is_review } => {
+                self.close_dialog();
+                self.delete_pr_comment(target, pr_number, is_review);
                 return;
             }
             GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),

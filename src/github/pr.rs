@@ -58,6 +58,11 @@ pub struct PullRequestDetail {
     pub reviews: ReviewsSummary,
     pub ci: CiSummary,
     pub files: Vec<PullFile>,
+    /// Aggregate merge readiness — drives the badge shown alongside
+    /// the PR title (Ready to merge / Conflicts / Blocked / etc).
+    pub mergeability: Mergeability,
+    /// Relative timestamp of when the PR was opened, e.g. "13h ago".
+    pub opened_when: String,
     // ── Per-tab payloads (lazy-loaded together with the summary above).
     /// Commits on the PR, oldest first — matches what GitHub's Commits
     /// tab shows.
@@ -132,6 +137,31 @@ pub enum CheckStatus {
     InProgress,
     Completed,
     Other,
+}
+
+/// Mergeability summary derived from GitHub's `mergeable` and
+/// `mergeable_state` fields. Order roughly matches the priority we
+/// surface in the badge (worst state wins when ambiguous).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mergeability {
+    /// Still being computed by GitHub.
+    Unknown,
+    /// PR is in draft mode.
+    Draft,
+    /// Already merged.
+    Merged,
+    /// Closed without merging.
+    Closed,
+    /// Conflicts with the base branch — needs manual resolution.
+    Conflicts,
+    /// CI checks failing.
+    ChecksFailing,
+    /// Required reviews missing (branch protection).
+    Blocked,
+    /// Out of date with base branch but mergeable in principle.
+    Behind,
+    /// All checks green, no conflicts, ready to merge.
+    Ready,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +269,18 @@ struct ApiPullDetail {
     base: ApiRef,
     #[serde(default)]
     requested_reviewers: Vec<ApiUser>,
+    /// `true` / `false` / `null` (still computing). GitHub takes a few
+    /// seconds after a push to compute this.
+    #[serde(default)]
+    mergeable: Option<bool>,
+    /// `clean` / `dirty` / `unstable` / `blocked` / `behind` / `draft`
+    /// / `unknown` — see GitHub docs. We map this to our richer
+    /// `Mergeability` enum below.
+    #[serde(default)]
+    mergeable_state: String,
+    /// ISO-8601 timestamp of when the PR was opened.
+    #[serde(default)]
+    created_at: String,
 }
 
 #[derive(Deserialize)]
@@ -376,8 +418,10 @@ struct ApiWorkflowRun {
 /// (newest first — matches GitHub's web UI default).
 pub fn list_pull_requests(token: &str, coords: &RepoCoords) -> Result<Vec<PullRequest>, String> {
     let client = http_client()?;
+    // Fetch every state so the view can filter client-side between
+    // Open / Merged / Closed / All tabs without re-querying GitHub.
     let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls?state=open&per_page=50",
+        "https://api.github.com/repos/{}/{}/pulls?state=all&per_page=50&sort=updated&direction=desc",
         coords.owner, coords.repo
     );
     let resp = client
@@ -560,11 +604,21 @@ pub fn fetch_pull_request_detail(
     conversation.sort_by(|(a, _), (b, _)| a.cmp(b));
     let conversation: Vec<ConversationEntry> = conversation.into_iter().map(|(_, e)| e).collect();
 
+    let state = derive_state(&pr.state, pr.merged_at.as_deref());
+    let mergeability = derive_mergeability(
+        state,
+        pr.draft,
+        pr.mergeable,
+        &pr.mergeable_state,
+        &reviews,
+        &ci,
+    );
+
     Ok(PullRequestDetail {
         number: pr.number,
         title: pr.title,
         author: pr.user.map(|u| u.login).unwrap_or_else(|| "?".into()),
-        state: derive_state(&pr.state, pr.merged_at.as_deref()),
+        state,
         draft: pr.draft,
         head_label: if pr.head.label.is_empty() {
             pr.head.ref_name.clone()
@@ -588,7 +642,67 @@ pub fn fetch_pull_request_detail(
         commit_list,
         conversation,
         check_runs,
+        mergeability,
+        opened_when: short_relative(&pr.created_at),
     })
+}
+
+/// Combine GitHub's signals into a single readiness flag for the badge.
+/// Worst state wins when they conflict — e.g. a PR that's mergeable but
+/// with failing CI surfaces as `ChecksFailing`, not `Ready`.
+fn derive_mergeability(
+    state: PullState,
+    draft: bool,
+    mergeable: Option<bool>,
+    mergeable_state: &str,
+    reviews: &ReviewsSummary,
+    ci: &CiSummary,
+) -> Mergeability {
+    if matches!(state, PullState::Merged) {
+        return Mergeability::Merged;
+    }
+    if matches!(state, PullState::Closed) {
+        return Mergeability::Closed;
+    }
+    if draft {
+        return Mergeability::Draft;
+    }
+    // `mergeable_state` is more specific than `mergeable` when GitHub
+    // has computed it. Prefer the string when present and recognised.
+    match mergeable_state {
+        "dirty" => return Mergeability::Conflicts,
+        "unstable" => return Mergeability::ChecksFailing,
+        "blocked" => return Mergeability::Blocked,
+        "behind" => return Mergeability::Behind,
+        "draft" => return Mergeability::Draft,
+        "clean" => {
+            // Clean per GitHub — double-check our local roll-ups too,
+            // since GitHub sometimes marks clean while a check is
+            // still pending.
+            if ci.failure > 0 {
+                return Mergeability::ChecksFailing;
+            }
+            if reviews.changes_requested > 0 {
+                return Mergeability::Blocked;
+            }
+            return Mergeability::Ready;
+        }
+        _ => {}
+    }
+    // Fall back to the boolean flag.
+    match mergeable {
+        Some(true) => {
+            if ci.failure > 0 {
+                Mergeability::ChecksFailing
+            } else if reviews.changes_requested > 0 {
+                Mergeability::Blocked
+            } else {
+                Mergeability::Ready
+            }
+        }
+        Some(false) => Mergeability::Conflicts,
+        None => Mergeability::Unknown,
+    }
 }
 
 // ---------- Helpers ----------
@@ -1101,6 +1215,108 @@ pub fn delete_review_comment(
     delete_request(token, &url)
 }
 
+/// Possible verdicts for a PR-level review.
+#[derive(Debug, Clone, Copy)]
+pub enum ReviewVerdict {
+    Approve,
+    RequestChanges,
+    Comment,
+}
+
+impl ReviewVerdict {
+    fn event_str(self) -> &'static str {
+        match self {
+            ReviewVerdict::Approve => "APPROVE",
+            ReviewVerdict::RequestChanges => "REQUEST_CHANGES",
+            ReviewVerdict::Comment => "COMMENT",
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ReviewSubmission<'a> {
+    event: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body: Option<&'a str>,
+}
+
+/// Submit a PR review (Approve / Request changes / Comment). `body` is
+/// optional for Approve but required by GitHub for RequestChanges.
+pub fn submit_review(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    verdict: ReviewVerdict,
+    body: Option<&str>,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}/reviews",
+        coords.owner, coords.repo, pr_number
+    );
+    let body = body.filter(|b| !b.is_empty());
+    write_json(
+        token,
+        &url,
+        reqwest::Method::POST,
+        &ReviewSubmission {
+            event: verdict.event_str(),
+            body,
+        },
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl MergeMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            MergeMethod::Merge => "merge",
+            MergeMethod::Squash => "squash",
+            MergeMethod::Rebase => "rebase",
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct MergeBody<'a> {
+    merge_method: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commit_title: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commit_message: Option<&'a str>,
+}
+
+/// Merge a PR. `commit_title` / `commit_message` are optional — GitHub
+/// uses sensible defaults if omitted (PR title / description).
+pub fn merge_pull_request(
+    token: &str,
+    coords: &RepoCoords,
+    pr_number: u64,
+    method: MergeMethod,
+    commit_title: Option<&str>,
+    commit_message: Option<&str>,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}/merge",
+        coords.owner, coords.repo, pr_number
+    );
+    write_json(
+        token,
+        &url,
+        reqwest::Method::PUT,
+        &MergeBody {
+            merge_method: method.as_str(),
+            commit_title: commit_title.filter(|s| !s.is_empty()),
+            commit_message: commit_message.filter(|s| !s.is_empty()),
+        },
+    )
+}
+
 fn write_json<T: Serialize>(
     token: &str,
     url: &str,
@@ -1122,11 +1338,7 @@ fn write_json<T: Serialize>(
     } else {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        Err(format!(
-            "HTTP {} — {}",
-            status,
-            body.lines().next().unwrap_or("")
-        ))
+        Err(humanize_github_error(status, &body))
     }
 }
 
@@ -1143,10 +1355,113 @@ fn delete_request(token: &str, url: &str) -> Result<(), String> {
     } else {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        Err(format!(
-            "HTTP {} — {}",
-            status,
-            body.lines().next().unwrap_or("")
-        ))
+        Err(humanize_github_error(status, &body))
+    }
+}
+
+/// Translate a GitHub REST API error response into a one-line, human-
+/// friendly message suitable for the footer toast.
+///
+/// GitHub envelopes errors as `{ "message": "...", "errors": [...] }`,
+/// where `errors[].message` (or `errors[]` as a bare string) carries
+/// the actual validation reason. We pattern-match on the canonical
+/// strings documented in GitHub's REST API reference and fall back to
+/// status-code-specific phrasing when the message is unknown.
+fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
+    let parsed: serde_json::Value =
+        serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+    let top_message = parsed
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_string();
+    // `errors` may be an array of bare strings *or* of `{message, code}`
+    // objects depending on the endpoint — handle both.
+    let first_error = parsed
+        .get("errors")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+        .map(|e| match e {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Object(_) => e
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("")
+                .to_string(),
+            _ => String::new(),
+        })
+        .unwrap_or_default();
+
+    let scan = format!("{} {}", top_message, first_error).to_lowercase();
+
+    // Self-review guard (422 on review submission, our most common case).
+    if scan.contains("approve your own pull request") {
+        return "Cannot approve your own PR (GitHub disallows self-review)".into();
+    }
+    if scan.contains("request changes on your own pull request") {
+        return "Cannot request changes on your own PR (GitHub disallows self-review)"
+            .into();
+    }
+    // Merge / state guards.
+    if scan.contains("pull request is not mergeable")
+        || scan.contains("pull request is in unstable state")
+    {
+        return "PR is not mergeable — resolve conflicts or wait for checks".into();
+    }
+    if scan.contains("head branch was modified") {
+        return "Head branch changed since you started — refresh and retry".into();
+    }
+    if scan.contains("base branch was modified") {
+        return "Base branch changed since you started — refresh and retry".into();
+    }
+    if scan.contains("required status check") {
+        return "Required status checks haven't passed yet".into();
+    }
+    if scan.contains("at least 1 approving review") {
+        return "PR needs an approving review before it can merge".into();
+    }
+    if scan.contains("review must be requested") {
+        return "A reviewer must be requested before this action".into();
+    }
+    // Auth / rate / generic categories.
+    if scan.contains("bad credentials") {
+        return "GitHub token rejected — sign in again".into();
+    }
+    if scan.contains("api rate limit exceeded") || scan.contains("secondary rate limit")
+    {
+        return "GitHub rate limit reached — try again later".into();
+    }
+    if scan.contains("must have admin rights")
+        || scan.contains("must have push access")
+        || scan.contains("resource not accessible by")
+    {
+        return "Permission denied — your token lacks the required scope".into();
+    }
+    // Content validation.
+    if scan.contains("body can't be blank") || scan.contains("body is too short") {
+        return "Comment body cannot be empty".into();
+    }
+    if scan.contains("body is too long") {
+        return "Comment is too long".into();
+    }
+
+    // Pick the most specific available detail string for the fallback.
+    let detail = if !first_error.is_empty() {
+        first_error
+    } else if !top_message.is_empty() {
+        top_message
+    } else {
+        body.lines().next().unwrap_or("").to_string()
+    };
+    match status.as_u16() {
+        401 => format!("Authentication failed: {}", detail),
+        403 => format!("Permission denied: {}", detail),
+        404 => "Not found — resource may have been deleted".into(),
+        409 => format!("Conflict: {}", detail),
+        422 => format!("Invalid request: {}", detail),
+        500..=599 => {
+            format!("GitHub server error ({}): {}", status.as_u16(), detail)
+        }
+        _ => format!("HTTP {}: {}", status.as_u16(), detail),
     }
 }

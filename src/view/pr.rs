@@ -12,12 +12,16 @@ use std::rc::Rc;
 use ratatui::{
     crossterm::event::KeyEvent,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 use rustc_hash::FxHashMap;
+
+/// GitHub's purple for merged PRs — matches the badge color on
+/// github.com so the visual cue is instantly recognizable.
+const MERGED_PURPLE: Color = Color::Rgb(0x89, 0x57, 0xe5);
 
 use crate::{
     app::AppContext,
@@ -25,7 +29,7 @@ use crate::{
     github::{
         pr::{
             CheckConclusion, CheckStatus, ConversationEntry, ConversationKind, FileStatus,
-            PullCommit, PullRequest, PullRequestDetail, PullState, ReviewState,
+            Mergeability, PullCommit, PullRequest, PullRequestDetail, PullState, ReviewState,
         },
         RepoCoords,
     },
@@ -42,8 +46,18 @@ pub struct PullRequestsView<'a> {
     /// the user wrote themselves with a `(me)` suffix. `None` when the
     /// auth state didn't include a login.
     me_login: Option<String>,
-    /// Open PRs returned by `list_pull_requests`. May be empty.
+    /// All PRs returned by `list_pull_requests` (state=all). The view
+    /// filters this client-side through `list_filter` so flipping tabs
+    /// doesn't re-hit the API.
     items: Vec<PullRequest>,
+    /// Which subset of `items` the list currently shows.
+    list_filter: PrListFilter,
+    /// Hit-test rects for the filter tab bar — `(filter, screen rect)`
+    /// captured during render. Click within a rect switches to that
+    /// filter.
+    filter_tab_rects: Vec<(PrListFilter, Rect)>,
+    /// Filter tab currently under the mouse (visual feedback only).
+    hovered_filter: Option<PrListFilter>,
     /// Per-PR detail cache. First open of a PR spawns a background fetch;
     /// subsequent visits hit this cache and render instantly.
     detail_cache: FxHashMap<u64, PullRequestDetail>,
@@ -54,10 +68,11 @@ pub struct PullRequestsView<'a> {
     /// the row highlight only — opening the PR (loading its detail)
     /// requires an explicit Enter or click.
     hovered: usize,
-    /// Index of the PR currently displayed in the detail view, if any.
-    /// Marked with a leading triangle in the list. `None` until the user
-    /// clicks or presses Enter on a row.
-    opened: Option<usize>,
+    /// PR number currently displayed in the detail view, if any. Stored
+    /// by number (not index) so it stays stable when the list re-orders
+    /// or the filter changes. Marked with a leading triangle in the
+    /// list when the opened PR is in the current filter.
+    opened_pr_number: Option<u64>,
     /// List vs Detail mode. List is the index of PRs; Detail is the
     /// full GitHub-like multi-tab view for one PR.
     mode: Mode,
@@ -83,6 +98,9 @@ pub struct PullRequestsView<'a> {
     /// captured each render so we can place the terminal cursor on top
     /// of the editor surface.
     comment_editor_cursor_pos: Option<(u16, u16)>,
+    /// Body rect of the inline editor captured during render — used
+    /// to translate clicks inside it into buffer cursor positions.
+    editor_body_area: Option<Rect>,
     /// Logical line range of each comment in the conversation render —
     /// `(comment_idx, first_line, last_line)` — captured at render time
     /// so mouse hits and auto-scroll can resolve which card sits where.
@@ -125,6 +143,51 @@ enum Mode {
     Detail,
 }
 
+/// Which subset of fetched PRs the list view currently shows. The view
+/// fetches `state=all` once and filters client-side between these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrListFilter {
+    Open,
+    Merged,
+    Closed,
+    All,
+}
+
+impl PrListFilter {
+    fn all() -> &'static [PrListFilter] {
+        &[
+            PrListFilter::Open,
+            PrListFilter::Merged,
+            PrListFilter::Closed,
+            PrListFilter::All,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            PrListFilter::Open => "Open",
+            PrListFilter::Merged => "Merged",
+            PrListFilter::Closed => "Closed",
+            PrListFilter::All => "All",
+        }
+    }
+
+    fn matches(self, pr: &PullRequest) -> bool {
+        match self {
+            PrListFilter::Open => matches!(pr.state, PullState::Open),
+            PrListFilter::Merged => matches!(pr.state, PullState::Merged),
+            // "Closed" means closed-without-merge — merged PRs have
+            // their own tab, otherwise the two would overlap.
+            PrListFilter::Closed => matches!(pr.state, PullState::Closed),
+            PrListFilter::All => true,
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::all().iter().position(|f| *f == self).unwrap_or(0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Conversation,
@@ -150,6 +213,14 @@ struct CommentEditor {
     /// `true` while a POST/PATCH/DELETE is in flight — disables
     /// further keypresses and shows a "Sending…" footer.
     submitting: bool,
+    /// Top logical row visible in the editor body. The render anchors
+    /// this on the cursor when the cursor moves outside the viewport,
+    /// but PgUp/PgDn and the mouse wheel adjust it independently so
+    /// the user can browse the buffer without dragging the cursor.
+    scroll_offset: u16,
+    /// Body height captured at the last render. Used by PgUp/PgDn so
+    /// they scroll by exactly one visible page.
+    last_body_height: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +238,10 @@ enum CommentEditorKind {
     EditIssue { comment_id: u64 },
     /// Edit of an own inline review comment.
     EditReview { comment_id: u64 },
+    /// PR-level "Approve" review. Body optional.
+    ApproveReview,
+    /// PR-level "Request changes" review. Body required by GitHub.
+    RequestChangesReview,
 }
 
 impl CommentEditorKind {
@@ -182,6 +257,10 @@ impl CommentEditorKind {
             },
             CommentEditorKind::EditIssue { .. } | CommentEditorKind::EditReview { .. } => {
                 "Edit comment".to_string()
+            }
+            CommentEditorKind::ApproveReview => "Approve PR (optional comment)".to_string(),
+            CommentEditorKind::RequestChangesReview => {
+                "Request changes (comment required)".to_string()
             }
         }
     }
@@ -215,6 +294,136 @@ impl Tab {
     }
 }
 
+/// Per-column widths for the PR list. The "fit" columns (state, number,
+/// title, author) are padded to align tabularly; head/base are *not*
+/// padded — they sit flush against ` → ` so it always reads
+/// `branch → branch` rather than `branch     → main`.
+struct PrListColumns {
+    state: usize,
+    number: usize,
+    title: usize,
+    author: usize,
+}
+
+impl PrListColumns {
+    /// Fixed visual overhead between columns:
+    ///   "▶ " (2) + state + "  " (2) + number + "  " (2)
+    ///   + title + "  " (2) + author + " · " (3) + head + " → " (3) + base
+    const MARKER: usize = 2;
+    const GAP: usize = 2;
+    const DOT_SEP: usize = 3; // " · "
+    const ARROW: usize = 3; // " → "
+
+    fn compute(items: &[PullRequest], available_width: usize) -> Self {
+        // Floors come from the header labels — otherwise a column would
+        // shrink below its title's width.
+        let state = items
+            .iter()
+            .map(|pr| match (pr.state, pr.draft) {
+                (PullState::Open, true) => 5,
+                (PullState::Open, false) => 4,
+                (PullState::Merged, _) => 6,
+                (PullState::Closed, _) => 6,
+            })
+            .max()
+            .unwrap_or(4)
+            .max("STATUS".chars().count());
+        let number = items
+            .iter()
+            .map(|pr| 1 + digits(pr.number))
+            .max()
+            .unwrap_or(2);
+        let author = items
+            .iter()
+            .map(|pr| pr.author.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max("AUTHOR".chars().count());
+        let max_head = items
+            .iter()
+            .map(|pr| strip_head_owner(&pr.head_label).chars().count())
+            .max()
+            .unwrap_or(0);
+        let max_base = items
+            .iter()
+            .map(|pr| pr.base_ref.chars().count())
+            .max()
+            .unwrap_or(0);
+        let max_title = items
+            .iter()
+            .map(|pr| pr.title.chars().count())
+            .max()
+            .unwrap_or(0);
+
+        // Title flexes between fixed overhead and the worst-case
+        // unpadded head/base. If everything fits, title sits at its
+        // natural max; otherwise it shrinks and ellipses to `…`.
+        let fixed = Self::MARKER
+            + state
+            + Self::GAP
+            + number
+            + Self::GAP
+            + Self::GAP
+            + author
+            + Self::DOT_SEP
+            + max_head
+            + Self::ARROW
+            + max_base;
+        let remaining = available_width.saturating_sub(fixed);
+        let title = remaining.min(max_title.max(1)).max(1);
+
+        Self {
+            state,
+            number,
+            title,
+            author,
+        }
+    }
+}
+
+fn digits(n: u64) -> usize {
+    if n == 0 {
+        1
+    } else {
+        (n as f64).log10().floor() as usize + 1
+    }
+}
+
+/// Strip the `<user>:` prefix GitHub adds to `head_label` for forked
+/// PRs — the author already appears in its own column, so showing
+/// `alice:feature` next to an `alice` cell is just noise.
+fn strip_head_owner(label: &str) -> &str {
+    match label.split_once(':') {
+        Some((_, branch)) => branch,
+        None => label,
+    }
+}
+
+/// Left-align `s` into a cell of exactly `width` columns. Truncates
+/// with `…` if it overflows; right-pads with spaces otherwise.
+fn fit_cell(s: &str, width: usize) -> String {
+    let count = s.chars().count();
+    if count == width {
+        s.to_string()
+    } else if count < width {
+        let mut out = String::with_capacity(s.len() + (width - count));
+        out.push_str(s);
+        for _ in 0..(width - count) {
+            out.push(' ');
+        }
+        out
+    } else if width == 0 {
+        String::new()
+    } else {
+        // Truncate to width - 1, then append `…`. Guarded for the
+        // degenerate width=1 case where `…` itself takes the whole cell.
+        let take = width.saturating_sub(1);
+        let mut out: String = s.chars().take(take).collect();
+        out.push('…');
+        out
+    }
+}
+
 impl<'a> PullRequestsView<'a> {
     pub fn new(
         commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
@@ -235,10 +444,13 @@ impl<'a> PullRequestsView<'a> {
             token,
             me_login,
             items,
+            list_filter: PrListFilter::Open,
+            filter_tab_rects: Vec::new(),
+            hovered_filter: None,
             detail_cache: FxHashMap::default(),
             loading_for: None,
             hovered: 0,
-            opened: None,
+            opened_pr_number: None,
             mode: Mode::List,
             active_tab: Tab::Conversation,
             conversation_scroll: 0,
@@ -248,6 +460,7 @@ impl<'a> PullRequestsView<'a> {
             conversation_comment_count: 1,
             comment_editor: None,
             comment_editor_cursor_pos: None,
+            editor_body_area: None,
             commits_scroll: 0,
             commits_hovered: 0,
             checks_scroll: 0,
@@ -311,59 +524,22 @@ impl<'a> PullRequestsView<'a> {
             };
             return format!("⌘ {}", parts.join("▕▏"));
         }
-        // On the Conversation tab the footer is dynamic — `R:reply` only
-        // appears when the selected card is an inline review comment
-        // (GitHub doesn't allow replying to anything else), and
-        // `e:edit` / `d:delete` only appear when the user owns the
-        // selected comment. The shortcuts that don't apply stay
-        // physically blocked in `handle_event_detail` too.
-        if matches!(self.mode, Mode::Detail)
-            && matches!(self.active_tab, Tab::Conversation)
-        {
-            let (reply_kind, can_modify_own) = match self.selected_conversation_entry() {
-                Some(e) => {
-                    let is_review = matches!(e.kind, ConversationKind::ReviewComment { .. });
-                    let is_own = self
-                        .me_login
-                        .as_deref()
-                        .map_or(false, |me| me == e.author);
-                    let editable_kind = matches!(
-                        e.kind,
-                        ConversationKind::Comment
-                            | ConversationKind::ReviewComment { .. }
-                    );
-                    let reply_kind = if is_review {
-                        Some("R:reply")
-                    } else {
-                        // Any other selected card (PR description,
-                        // top-level comment, review) gets a "quote
-                        // reply" — a new top-level comment pre-filled
-                        // with `> @author wrote: …`.
-                        Some("R:quote reply")
-                    };
-                    (reply_kind, is_own && editable_kind)
-                }
-                None => (None, false),
-            };
-            let mut parts: Vec<&str> = vec!["c:comment"];
-            if let Some(r) = reply_kind {
-                parts.push(r);
-            }
-            if can_modify_own {
-                parts.push("e:edit");
-                parts.push("d:delete");
-            }
-            parts.push("r:reload");
-            return format!("⌘ {}", parts.join("▕▏"));
-        }
-
+        // Footer holds the GLOBAL actions only. Card-specific shortcuts
+        // (R:reply / R:quote reply / e:edit / d:delete) live inside the
+        // selected comment's top border — that way the footer stays
+        // calm and the available actions are visually attached to the
+        // card they target.
         let parts: Vec<&str> = match self.mode {
             Mode::List => vec!["r:reload"],
-            // Non-Conversation tabs (Commits / Checks / Files) currently
-            // have no view-level actions beyond the basics — leave the
-            // footer empty so we don't clutter it with universal hints
-            // (⇆ / ↑↓ / Esc) that already live in muscle memory.
-            Mode::Detail => vec!["r:reload"],
+            Mode::Detail => {
+                let mut p = vec!["c:comment"];
+                p.push("a:approve");
+                p.push("x:request changes");
+                p.push("m:merge");
+                p.push("o:open in web");
+                p.push("r:reload");
+                p
+            }
         };
         format!("⌘ {}", parts.join("▕▏"))
     }
@@ -395,11 +571,11 @@ impl<'a> PullRequestsView<'a> {
     /// Detail mode (full-screen tabbed view), resets per-tab scroll, and
     /// fires a background fetch on cache miss.
     fn open_hovered(&mut self) {
-        let Some(pr) = self.items.get(self.hovered) else {
+        let Some(idx) = self.hovered_item_index() else {
             return;
         };
-        let number = pr.number;
-        self.opened = Some(self.hovered);
+        let number = self.items[idx].number;
+        self.opened_pr_number = Some(number);
         self.mode = Mode::Detail;
         self.active_tab = Tab::Conversation;
         self.conversation_scroll = 0;
@@ -446,9 +622,11 @@ impl<'a> PullRequestsView<'a> {
         match crate::github::pr::list_pull_requests(&self.token, &self.coords) {
             Ok(items) => {
                 self.items = items;
-                self.hovered = self.hovered.min(self.items.len().saturating_sub(1));
-                self.opened = prev_number
-                    .and_then(|n| self.items.iter().position(|p| p.number == n));
+                // Keep the opened PR by NUMBER — survives filter changes
+                // and list re-orders. If the PR no longer exists, clear.
+                self.opened_pr_number = prev_number
+                    .filter(|n| self.items.iter().any(|p| p.number == *n));
+                self.clamp_hovered();
                 self.detail_cache.clear();
                 self.loading_for = None;
                 // Detail mode: re-fetch the opened PR's payload. If the
@@ -514,9 +692,22 @@ impl<'a> PullRequestsView<'a> {
             UserEvent::PageUp => self.move_hovered(-10),
             UserEvent::PageDown => self.move_hovered(10),
             UserEvent::GoToTop => self.hovered = 0,
-            UserEvent::GoToBottom => self.hovered = self.items.len().saturating_sub(1),
+            UserEvent::GoToBottom => self.hovered = self.filtered_len().saturating_sub(1),
             UserEvent::ScrollUp => self.scroll_list(-1),
             UserEvent::ScrollDown => self.scroll_list(1),
+            // ←/→ cycle the [Open, Merged, Closed, All] tabs.
+            UserEvent::NavigateLeft => {
+                let filters = PrListFilter::all();
+                let idx = self.list_filter.index();
+                let prev = (idx + filters.len() - 1) % filters.len();
+                self.set_filter(filters[prev]);
+            }
+            UserEvent::NavigateRight => {
+                let filters = PrListFilter::all();
+                let idx = self.list_filter.index();
+                let next = (idx + 1) % filters.len();
+                self.set_filter(filters[next]);
+            }
             _ => {}
         }
     }
@@ -542,48 +733,168 @@ impl<'a> PullRequestsView<'a> {
                 }
                 return;
             }
+            // Mouse wheel scrolls the editor viewport without dragging
+            // the cursor — useful for skimming earlier or later parts
+            // of the buffer while typing somewhere else.
+            match event_with_count.event {
+                UserEvent::ScrollUp => {
+                    self.editor_scroll_viewport(-1);
+                    return;
+                }
+                UserEvent::ScrollDown => {
+                    self.editor_scroll_viewport(1);
+                    return;
+                }
+                _ => {}
+            }
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            match key.code {
+            // `true` when the dispatched action moved the cursor or
+            // edited the buffer — we anchor the viewport to the cursor
+            // afterwards so typing always stays in view. Manual scroll
+            // (PgUp/PgDn, wheel) and non-mutating keys leave the scroll
+            // exactly where the user put it.
+            let cursor_changed = match key.code {
                 KeyCode::Esc => {
                     self.comment_editor = None;
+                    false
                 }
                 // Ctrl+Enter is the canonical "send" combo but many
                 // terminals don't propagate the modifier with Enter
                 // (they send a plain `\r`). Ctrl+S is the reliable
                 // fallback that always reaches us.
-                KeyCode::Char('s') if ctrl => self.submit_comment_editor(),
+                KeyCode::Char('s') if ctrl => {
+                    self.submit_comment_editor();
+                    false
+                }
                 KeyCode::Enter if ctrl => {
                     self.submit_comment_editor();
+                    false
                 }
-                KeyCode::Enter => self.editor_insert_char('\n'),
+                KeyCode::Enter => {
+                    self.editor_insert_char('\n');
+                    true
+                }
                 // Tab inserts indentation. We can't bind Tab to "send"
                 // because users genuinely need it in code/text blocks.
                 KeyCode::Tab => {
                     for _ in 0..4 {
                         self.editor_insert_char(' ');
                     }
+                    true
                 }
                 // Ctrl+Backspace AND Ctrl+H (the legacy ASCII alias many
                 // terminals send instead of Ctrl+Backspace) AND Ctrl+W
                 // (readline convention) all delete the word to the left.
-                KeyCode::Backspace if ctrl => self.editor_delete_word_left(),
-                KeyCode::Char('h') if ctrl => self.editor_delete_word_left(),
-                KeyCode::Char('w') if ctrl => self.editor_delete_word_left(),
-                KeyCode::Backspace => self.editor_delete_left(),
-                KeyCode::Delete if ctrl => self.editor_delete_word_right(),
-                KeyCode::Delete => self.editor_delete_right(),
-                KeyCode::Left if ctrl => self.editor_word_left(),
-                KeyCode::Right if ctrl => self.editor_word_right(),
-                KeyCode::Left => self.editor_cursor_left(),
-                KeyCode::Right => self.editor_cursor_right(),
-                KeyCode::Up => self.editor_cursor_up(),
-                KeyCode::Down => self.editor_cursor_down(),
-                KeyCode::Home => self.editor_cursor_home(),
-                KeyCode::End => self.editor_cursor_end(),
-                KeyCode::Char(c) if !ctrl => self.editor_insert_char(c),
-                _ => {}
+                KeyCode::Backspace if ctrl => {
+                    self.editor_delete_word_left();
+                    true
+                }
+                KeyCode::Char('h') if ctrl => {
+                    self.editor_delete_word_left();
+                    true
+                }
+                KeyCode::Char('w') if ctrl => {
+                    self.editor_delete_word_left();
+                    true
+                }
+                KeyCode::Backspace => {
+                    self.editor_delete_left();
+                    true
+                }
+                KeyCode::Delete if ctrl => {
+                    self.editor_delete_word_right();
+                    true
+                }
+                KeyCode::Delete => {
+                    self.editor_delete_right();
+                    true
+                }
+                KeyCode::Left if ctrl => {
+                    self.editor_word_left();
+                    true
+                }
+                KeyCode::Right if ctrl => {
+                    self.editor_word_right();
+                    true
+                }
+                KeyCode::Left => {
+                    self.editor_cursor_left();
+                    true
+                }
+                KeyCode::Right => {
+                    self.editor_cursor_right();
+                    true
+                }
+                KeyCode::Up => {
+                    self.editor_cursor_up();
+                    true
+                }
+                KeyCode::Down => {
+                    self.editor_cursor_down();
+                    true
+                }
+                KeyCode::Home => {
+                    self.editor_cursor_home();
+                    true
+                }
+                KeyCode::End => {
+                    self.editor_cursor_end();
+                    true
+                }
+                // PgUp / PgDn scroll the viewport without dragging
+                // the cursor — handy for browsing earlier or later
+                // sections while typing further along.
+                KeyCode::PageUp => {
+                    let page = self
+                        .comment_editor
+                        .as_ref()
+                        .map(|e| e.last_body_height.saturating_sub(1).max(1) as i32)
+                        .unwrap_or(1);
+                    self.editor_scroll_viewport(-page);
+                    false
+                }
+                KeyCode::PageDown => {
+                    let page = self
+                        .comment_editor
+                        .as_ref()
+                        .map(|e| e.last_body_height.saturating_sub(1).max(1) as i32)
+                        .unwrap_or(1);
+                    self.editor_scroll_viewport(page);
+                    false
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    self.editor_insert_char(c);
+                    true
+                }
+                _ => false,
+            };
+            if cursor_changed {
+                self.editor_anchor_scroll_to_cursor();
             }
             return;
+        }
+
+        // ── PR-level action shortcuts (work on any tab once a PR is opened).
+        //    a:approve  x:request changes  m:merge  o:open in browser
+        let plain = key.modifiers == KeyModifiers::NONE;
+        match key.code {
+            KeyCode::Char('a') if plain => {
+                self.start_approve();
+                return;
+            }
+            KeyCode::Char('x') if plain => {
+                self.start_request_changes();
+                return;
+            }
+            KeyCode::Char('m') if plain => {
+                self.start_merge();
+                return;
+            }
+            KeyCode::Char('o') if plain => {
+                self.open_in_browser();
+                return;
+            }
+            _ => {}
         }
 
         // ── Conversation-tab action shortcuts (no editor open).
@@ -594,7 +905,6 @@ impl<'a> PullRequestsView<'a> {
         //    — different terminals attach SHIFT, NONE, or even both to
         //    uppercase letters, so we just trust the produced char.
         if matches!(self.active_tab, Tab::Conversation) {
-            let plain = key.modifiers == KeyModifiers::NONE;
             match key.code {
                 KeyCode::Char('c') if plain => {
                     self.start_new_comment();
@@ -731,7 +1041,42 @@ impl<'a> PullRequestsView<'a> {
         self.detail_cache.get(&number)
     }
     fn opened_number(&self) -> Option<u64> {
-        self.opened.and_then(|i| self.items.get(i)).map(|p| p.number)
+        self.opened_pr_number
+    }
+
+    /// Indices into `self.items` of PRs matching the active filter,
+    /// preserving the API's sort order.
+    fn filtered_indices(&self) -> Vec<usize> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter_map(|(i, pr)| if self.list_filter.matches(pr) { Some(i) } else { None })
+            .collect()
+    }
+
+    /// Number of PRs visible under the active filter.
+    fn filtered_len(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|pr| self.list_filter.matches(pr))
+            .count()
+    }
+
+    /// Snap `hovered` to a valid filtered-list index after the filter
+    /// changes or items are reloaded.
+    fn clamp_hovered(&mut self) {
+        let len = self.filtered_len();
+        if len == 0 {
+            self.hovered = 0;
+        } else if self.hovered >= len {
+            self.hovered = len - 1;
+        }
+    }
+
+    /// Resolve `self.hovered` (filtered index) to an index into
+    /// `self.items`, if the filter is non-empty.
+    fn hovered_item_index(&self) -> Option<usize> {
+        self.filtered_indices().get(self.hovered).copied()
     }
 
     /// Look up the conversation entry at `conversation_selected`. Index 0
@@ -785,6 +1130,8 @@ impl<'a> PullRequestsView<'a> {
             buffer: String::new(),
             cursor: 0,
             submitting: false,
+            scroll_offset: 0,
+            last_body_height: 0,
         });
         // The conversation pane shrinks to make room for the editor;
         // we DON'T want any pending "scroll to selected" flag to fire
@@ -793,6 +1140,23 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn start_reply(&mut self) {
+        // Special case: the PR description card (index 0) has no
+        // `ConversationEntry` but GitHub's web UI lets you quote-reply
+        // it via the `…` menu on the card. We mirror that by pulling
+        // the body + author straight off the detail and opening a
+        // pre-filled new-top-level editor.
+        if self.conversation_selected == 0 {
+            let Some(detail) = self.opened_detail() else {
+                self.tx.send(AppEvent::NotifyInfo(
+                    "PR is still loading — try again in a moment.".into(),
+                ));
+                return;
+            };
+            let author = detail.author.clone();
+            let body = detail.body.clone();
+            self.open_quote_reply_editor(author, body);
+            return;
+        }
         let Some(entry) = self.selected_conversation_entry() else {
             self.tx.send(AppEvent::NotifyInfo(
                 "Select a comment to reply to.".into(),
@@ -811,42 +1175,50 @@ impl<'a> PullRequestsView<'a> {
                     buffer: String::new(),
                     cursor: 0,
                     submitting: false,
+                    scroll_offset: 0,
+                    last_body_height: 0,
                 });
             }
             _ => {
-                // GitHub-style quote reply: each line of the original
-                // becomes `> <line>` (blank lines stay as `> ` so the
-                // quote keeps its paragraph breaks), no `@author wrote:`
-                // attribution, two blank lines after the quote so the
-                // cursor lands on a fresh paragraph below it.
                 let author = entry.author.clone();
                 let body = entry.body.clone();
-                let mut quoted = String::new();
-                if body.is_empty() {
-                    quoted.push_str("> \n");
-                } else {
-                    for line in body.lines() {
-                        if line.is_empty() {
-                            quoted.push_str("> \n");
-                        } else {
-                            quoted.push_str("> ");
-                            quoted.push_str(line);
-                            quoted.push('\n');
-                        }
-                    }
-                }
-                quoted.push_str("\n\n");
-                let cursor = quoted.len();
-                self.comment_editor = Some(CommentEditor {
-                    kind: CommentEditorKind::QuoteReply {
-                        quoted_author: author,
-                    },
-                    buffer: quoted,
-                    cursor,
-                    submitting: false,
-                });
+                self.open_quote_reply_editor(author, body);
             }
         }
+        self.conversation_scroll_to_selected = false;
+    }
+
+    /// Open a new-top-level editor pre-filled with a GitHub-style
+    /// quote of `body` (each line prefixed with `> `, blank lines
+    /// preserved as `> ` so paragraph breaks survive). Cursor lands
+    /// two blank lines below the quote — ready for the user's reply.
+    fn open_quote_reply_editor(&mut self, author: String, body: String) {
+        let mut quoted = String::new();
+        if body.is_empty() {
+            quoted.push_str("> \n");
+        } else {
+            for line in body.lines() {
+                if line.is_empty() {
+                    quoted.push_str("> \n");
+                } else {
+                    quoted.push_str("> ");
+                    quoted.push_str(line);
+                    quoted.push('\n');
+                }
+            }
+        }
+        quoted.push_str("\n\n");
+        let cursor = quoted.len();
+        self.comment_editor = Some(CommentEditor {
+            kind: CommentEditorKind::QuoteReply {
+                quoted_author: author,
+            },
+            buffer: quoted,
+            cursor,
+            submitting: false,
+            scroll_offset: 0,
+            last_body_height: 0,
+        });
         self.conversation_scroll_to_selected = false;
     }
 
@@ -855,15 +1227,14 @@ impl<'a> PullRequestsView<'a> {
             return;
         };
         // Edit is only available on own comments — flagged on the
-        // entry's author against the cached `me_login`.
+        // entry's author against the cached `me_login`. The footer
+        // shortcuts already hide `e:edit` on non-own comments, so an
+        // explicit keypress here is silently ignored (no toast).
         let is_me = self
             .me_login
             .as_deref()
             .map_or(false, |me| me == entry.author);
         if !is_me {
-            self.tx.send(AppEvent::NotifyInfo(
-                "You can only edit comments you wrote.".into(),
-            ));
             return;
         }
         let kind = match (&entry.kind, entry.id) {
@@ -873,12 +1244,7 @@ impl<'a> PullRequestsView<'a> {
             (ConversationKind::ReviewComment { .. }, Some(id)) => {
                 CommentEditorKind::EditReview { comment_id: id }
             }
-            _ => {
-                self.tx.send(AppEvent::NotifyInfo(
-                    "This comment is not editable here.".into(),
-                ));
-                return;
-            }
+            _ => return,
         };
         let buffer = entry.body.clone();
         let cursor = buffer.len();
@@ -887,56 +1253,127 @@ impl<'a> PullRequestsView<'a> {
             buffer,
             cursor,
             submitting: false,
+            scroll_offset: 0,
+            last_body_height: 0,
         });
         self.conversation_scroll_to_selected = false;
+    }
+
+    // ────────────────────── PR-level review actions ──────────────────────
+
+    fn start_approve(&mut self) {
+        if self.opened_number().is_none() {
+            return;
+        }
+        self.comment_editor = Some(CommentEditor {
+            kind: CommentEditorKind::ApproveReview,
+            buffer: String::new(),
+            cursor: 0,
+            submitting: false,
+            scroll_offset: 0,
+            last_body_height: 0,
+        });
+        self.conversation_scroll_to_selected = false;
+    }
+
+    fn start_request_changes(&mut self) {
+        if self.opened_number().is_none() {
+            return;
+        }
+        self.comment_editor = Some(CommentEditor {
+            kind: CommentEditorKind::RequestChangesReview,
+            buffer: String::new(),
+            cursor: 0,
+            submitting: false,
+            scroll_offset: 0,
+            last_body_height: 0,
+        });
+        self.conversation_scroll_to_selected = false;
+    }
+
+    fn start_merge(&mut self) {
+        let Some(number) = self.opened_number() else {
+            return;
+        };
+        // Delegate to the standard dialog system so the user picks the
+        // merge method + can tweak the commit title/message before
+        // confirming. `DialogKind::MergePullRequest` is wired in app.rs
+        // to call back via `merge_pull_request` on confirm.
+        let title = self
+            .opened_detail()
+            .map(|d| d.title.clone())
+            .unwrap_or_default();
+        let body = self
+            .opened_detail()
+            .map(|d| d.body.clone())
+            .unwrap_or_default();
+        self.tx.send(AppEvent::OpenDialog(
+            crate::event::DialogKind::MergePullRequest {
+                number,
+                pr_title: title,
+                pr_body: body,
+            },
+        ));
+    }
+
+    fn open_in_browser(&mut self) {
+        let Some(number) = self.opened_number() else {
+            return;
+        };
+        let url = format!(
+            "https://github.com/{}/{}/pull/{}",
+            self.coords.owner, self.coords.repo, number
+        );
+        // Best-effort: spawn xdg-open / open / start in a detached
+        // process. Surface the URL in a toast either way so the user
+        // can copy it manually if the launcher isn't installed.
+        match crate::external::open_url(&url) {
+            Ok(()) => self
+                .tx
+                .send(AppEvent::NotifyInfo(format!("Opened {}", url))),
+            Err(e) => self
+                .tx
+                .send(AppEvent::NotifyError(format!("Open browser: {}", e))),
+        }
     }
 
     fn confirm_delete_comment(&mut self) {
         let Some(entry) = self.selected_conversation_entry() else {
             return;
         };
+        // Delete is only available on own comments. The footer shortcuts
+        // already hide `d:delete` on non-own comments, so an explicit
+        // keypress here is silently ignored (no toast).
         let is_me = self
             .me_login
             .as_deref()
             .map_or(false, |me| me == entry.author);
         if !is_me {
-            self.tx.send(AppEvent::NotifyInfo(
-                "You can only delete comments you wrote.".into(),
-            ));
             return;
         }
         let (id, is_review) = match (&entry.kind, entry.id) {
             (ConversationKind::Comment, Some(id)) => (id, false),
             (ConversationKind::ReviewComment { .. }, Some(id)) => (id, true),
-            _ => {
-                self.tx.send(AppEvent::NotifyInfo(
-                    "This comment is not deletable.".into(),
-                ));
-                return;
-            }
+            _ => return,
         };
-        // Fire the delete without an additional confirm prompt — the
-        // toast on completion + the destructive nature of the key (`d`)
-        // are the explicit signal. We re-fetch on success to refresh
-        // the thread.
         let Some(number) = self.opened_number() else {
             return;
         };
-        let token = self.token.clone();
-        let coords = self.coords.clone();
-        let tx = self.tx.clone();
-        std::thread::spawn(move || {
-            let result = if is_review {
-                crate::github::pr::delete_review_comment(&token, &coords, id)
-            } else {
-                crate::github::pr::delete_issue_comment(&token, &coords, id)
-            };
-            tx.send(AppEvent::PullRequestActionDone {
-                number,
-                action: "Comment deleted".into(),
-                result,
-            });
-        });
+        let author = entry.author.clone();
+        let body_preview = entry.body.clone();
+        // Hand off to the standard confirm-dialog system. The dialog's
+        // OK button maps to `GitAction::DeletePrComment`, which app.rs
+        // intercepts and runs through `delete_pr_comment` (background
+        // thread + `PullRequestActionDone` result).
+        self.tx.send(AppEvent::OpenDialog(
+            crate::event::DialogKind::ConfirmDeleteComment {
+                pr_number: number,
+                comment_id: id,
+                is_review,
+                author,
+                body_preview,
+            },
+        ));
     }
 
     fn submit_comment_editor(&mut self) {
@@ -944,9 +1381,13 @@ impl<'a> PullRequestsView<'a> {
             return;
         };
         let body = editor.buffer.trim().to_string();
-        if body.is_empty() {
+        // ApproveReview is the only kind that accepts an empty body —
+        // everything else (regular comment, reply, edit, RequestChanges)
+        // refuses to send.
+        let allow_empty = matches!(editor.kind, CommentEditorKind::ApproveReview);
+        if body.is_empty() && !allow_empty {
             self.tx.send(AppEvent::NotifyWarn(
-                "Comment body is empty — nothing to send.".into(),
+                "Body is empty — nothing to send.".into(),
             ));
             return;
         }
@@ -964,6 +1405,8 @@ impl<'a> PullRequestsView<'a> {
             CommentEditorKind::EditIssue { .. } | CommentEditorKind::EditReview { .. } => {
                 "Comment updated".into()
             }
+            CommentEditorKind::ApproveReview => "Approved".into(),
+            CommentEditorKind::RequestChangesReview => "Changes requested".into(),
         };
         // Flip into "sending" state so the editor renders a spinner
         // and discards further input until the result arrives.
@@ -989,6 +1432,29 @@ impl<'a> PullRequestsView<'a> {
                 }
                 CommentEditorKind::EditReview { comment_id } => {
                     crate::github::pr::patch_review_comment(&token, &coords, comment_id, &body)
+                }
+                CommentEditorKind::ApproveReview => {
+                    let body_opt = if body.is_empty() {
+                        None
+                    } else {
+                        Some(body.as_str())
+                    };
+                    crate::github::pr::submit_review(
+                        &token,
+                        &coords,
+                        number,
+                        crate::github::pr::ReviewVerdict::Approve,
+                        body_opt,
+                    )
+                }
+                CommentEditorKind::RequestChangesReview => {
+                    crate::github::pr::submit_review(
+                        &token,
+                        &coords,
+                        number,
+                        crate::github::pr::ReviewVerdict::RequestChanges,
+                        Some(body.as_str()),
+                    )
                 }
             };
             tx.send(AppEvent::PullRequestActionDone {
@@ -1174,17 +1640,128 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
+    /// Move the editor's buffer cursor to the byte offset that
+    /// corresponds to a click at `(col, row)` inside the editor body.
+    /// Out-of-line clicks land on the closest valid position
+    /// (clamped to line length / buffer length).
+    fn editor_move_cursor_to_click(&mut self, col: u16, row: u16) {
+        let Some(body) = self.editor_body_area else {
+            return;
+        };
+        if !rect_contains(Some(body), col, row) {
+            return;
+        }
+        let Some(ed) = self.comment_editor.as_mut() else {
+            return;
+        };
+        if ed.submitting {
+            return;
+        }
+        let row_in_body = row.saturating_sub(body.y) as usize;
+        let col_in_body = col.saturating_sub(body.x) as usize;
+        let target_row = ed.scroll_offset as usize + row_in_body;
+        // Walk to the start of `target_row` in the buffer, then walk
+        // along the line up to `col_in_body` chars.
+        let mut current_row = 0usize;
+        let mut line_start: usize = 0;
+        for (byte_idx, ch) in ed.buffer.char_indices() {
+            if current_row == target_row {
+                break;
+            }
+            if ch == '\n' {
+                current_row += 1;
+                line_start = byte_idx + 1;
+            }
+        }
+        if current_row < target_row {
+            // Click was below the last line — clamp to buffer end.
+            ed.cursor = ed.buffer.len();
+            return;
+        }
+        // Walk chars from line_start until we hit col_in_body or `\n`
+        // or the end of the buffer.
+        let mut byte_pos = line_start;
+        let mut col_walked = 0usize;
+        for (offset, ch) in ed.buffer[line_start..].char_indices() {
+            if ch == '\n' || col_walked >= col_in_body {
+                byte_pos = line_start + offset;
+                break;
+            }
+            col_walked += 1;
+            byte_pos = line_start + offset + ch.len_utf8();
+        }
+        ed.cursor = byte_pos.min(ed.buffer.len());
+    }
+
+    /// Push `scroll_offset` just enough to keep the cursor inside the
+    /// last-known viewport. Called from every cursor-mutating helper
+    /// so typing / arrow-key navigation always reveals the cursor —
+    /// but unlike a render-time anchor, this leaves a previously-set
+    /// manual scroll alone whenever the cursor is still visible.
+    fn editor_anchor_scroll_to_cursor(&mut self) {
+        let Some(ed) = self.comment_editor.as_mut() else {
+            return;
+        };
+        let body = ed.last_body_height;
+        if body == 0 {
+            return;
+        }
+        let (_, cursor_row) = cursor_screen_pos(&ed.buffer, ed.cursor);
+        if cursor_row < ed.scroll_offset {
+            ed.scroll_offset = cursor_row;
+        } else if cursor_row >= ed.scroll_offset + body {
+            ed.scroll_offset = cursor_row + 1 - body;
+        }
+    }
+
+    /// Scroll the editor viewport up by one page without moving the
+    /// cursor. The cursor's logical position stays put — the user is
+    /// browsing the buffer, not navigating.
+    fn editor_scroll_viewport(&mut self, delta: i32) {
+        let Some(ed) = self.comment_editor.as_mut() else {
+            return;
+        };
+        let total_rows = if ed.buffer.is_empty() {
+            1u16
+        } else {
+            ed.buffer.matches('\n').count() as u16 + 1
+        };
+        let body = ed.last_body_height.max(1);
+        let max_offset = total_rows.saturating_sub(body);
+        let new_offset = (ed.scroll_offset as i32 + delta).clamp(0, max_offset as i32);
+        ed.scroll_offset = new_offset as u16;
+    }
+
     pub fn handle_click(&mut self, col: u16, row: u16) {
         match self.mode {
             Mode::List => {
+                // Filter tab bar click → switch filter.
+                let filter_hit = self
+                    .filter_tab_rects
+                    .iter()
+                    .find(|(_, rect)| rect_contains(Some(*rect), col, row))
+                    .map(|(f, _)| *f);
+                if let Some(f) = filter_hit {
+                    self.set_filter(f);
+                    return;
+                }
                 if let Some(idx) = self.row_at_list(row, col) {
-                    if idx < self.items.len() {
+                    if idx < self.filtered_len() {
                         self.hovered = idx;
                         self.open_hovered();
                     }
                 }
             }
             Mode::Detail => {
+                // Inline editor click → reposition the buffer cursor.
+                // Routed first because the editor sits on top of the
+                // conversation pane.
+                if self.comment_editor.is_some()
+                    && rect_contains(self.editor_body_area, col, row)
+                {
+                    self.editor_move_cursor_to_click(col, row);
+                    return;
+                }
                 // Tab bar click → switch tab.
                 for (tab, rect) in &self.tab_bar_rects {
                     if rect_contains(Some(*rect), col, row) {
@@ -1215,8 +1792,19 @@ impl<'a> PullRequestsView<'a> {
         }
         match self.mode {
             Mode::List => {
+                // Filter tab hover (visual feedback only — click switches).
+                let mut new_hover: Option<PrListFilter> = None;
+                for (filter, rect) in &self.filter_tab_rects {
+                    if rect_contains(Some(*rect), col, row) {
+                        new_hover = Some(*filter);
+                        break;
+                    }
+                }
+                if new_hover != self.hovered_filter {
+                    self.hovered_filter = new_hover;
+                }
                 if let Some(idx) = self.row_at_list(row, col) {
-                    if idx < self.items.len() && idx != self.hovered {
+                    if idx < self.filtered_len() && idx != self.hovered {
                         self.hovered = idx;
                     }
                 }
@@ -1314,7 +1902,7 @@ impl<'a> PullRequestsView<'a> {
         }
         let visible_row = row.saturating_sub(self.list_inner_y) as usize;
         let idx = self.list_scroll_offset + visible_row;
-        if idx < self.items.len() {
+        if idx < self.filtered_len() {
             Some(idx)
         } else {
             None
@@ -1322,22 +1910,35 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn move_hovered(&mut self, delta: i32) {
-        if self.items.is_empty() {
+        let len = self.filtered_len();
+        if len == 0 {
             return;
         }
-        let max = self.items.len() as i32 - 1;
+        let max = len as i32 - 1;
         self.hovered = (self.hovered as i32 + delta).clamp(0, max) as usize;
     }
 
     /// Pan the visible list window by `delta` rows without touching the
     /// hovered cursor. Mouse wheel calls this.
     fn scroll_list(&mut self, delta: i32) {
-        if self.items.is_empty() {
+        let len = self.filtered_len();
+        if len == 0 {
             return;
         }
-        let max = self.items.len().saturating_sub(1) as i32;
+        let max = len.saturating_sub(1) as i32;
         let new = (self.list_scroll_offset as i32 + delta).clamp(0, max) as usize;
         self.list_scroll_offset = new;
+    }
+
+    /// Switch the active list filter and snap the cursor / scroll back
+    /// to the top of the new subset.
+    fn set_filter(&mut self, filter: PrListFilter) {
+        if self.list_filter == filter {
+            return;
+        }
+        self.list_filter = filter;
+        self.hovered = 0;
+        self.list_scroll_offset = 0;
     }
 
     // ---------- rendering ----------
@@ -1347,6 +1948,7 @@ impl<'a> PullRequestsView<'a> {
         // from a different layout never matches a click.
         self.list_area = None;
         self.tab_content_area = None;
+        self.editor_body_area = None;
         self.tab_bar_rects.clear();
 
         let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
@@ -1446,55 +2048,88 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn render_list(&mut self, f: &mut Frame, area: Rect) {
-        let theme = &self.ctx.color_theme;
+        // Build the filter tabs as the block's title — they replace
+        // the static "Pull Requests" label so the panel stays compact.
+        let (title_spans, tab_rects) = self.build_filter_title(area);
+        self.filter_tab_rects = tab_rects;
+
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.divider_fg))
-            .title(Line::from(Span::styled(
-                " Open PRs ",
-                Style::default()
-                    .fg(theme.fg)
-                    .add_modifier(Modifier::BOLD),
-            )));
+            .border_style(Style::default().fg(self.ctx.color_theme.divider_fg))
+            .title(Line::from(title_spans));
         let inner = block.inner(area);
         f.render_widget(block, area);
         self.list_area = Some(area);
-        self.list_inner_y = inner.y;
-        if self.items.is_empty() {
+        // 1-row breathing gap below the filter tabs. We deliberately
+        // keep the full inner width so the List widget can paint the
+        // selection bg all the way to the panel border — the per-row
+        // right margin is created by reserving 1 col in the column
+        // budget (see RIGHT_MARGIN below).
+        let body_area = Rect::new(
+            inner.x,
+            inner.y.saturating_add(1),
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
+        self.list_inner_y = body_area.y;
+        let theme = &self.ctx.color_theme;
+
+        // Filtered slice for both rendering and clamp logic.
+        let filtered: Vec<&PullRequest> = self
+            .items
+            .iter()
+            .filter(|pr| self.list_filter.matches(pr))
+            .collect();
+
+        if filtered.is_empty() {
             self.list_scroll_offset = 0;
+            let msg = match self.list_filter {
+                PrListFilter::Open => "No open pull requests.",
+                PrListFilter::Merged => "No merged pull requests.",
+                PrListFilter::Closed => "No closed pull requests.",
+                PrListFilter::All => "No pull requests in this repo.",
+            };
             let empty = Paragraph::new(Span::styled(
-                "No open pull requests.",
+                msg,
                 Style::default().fg(theme.detail_label_fg),
             ))
             .alignment(Alignment::Center);
-            f.render_widget(empty, inner);
+            f.render_widget(empty, body_area);
             return;
         }
         // Keyboard nav (↑↓ etc.) re-anchors the scroll so the hovered
         // row stays on-screen. Mouse-wheel scroll, on the other hand,
         // moves the viewport independently and may leave `hovered`
         // outside the visible window — that's by design.
-        let visible = inner.height as usize;
-        if self.hovered >= self.list_scroll_offset + visible {
+        let visible = body_area.height as usize;
+        if visible > 0 && self.hovered >= self.list_scroll_offset + visible {
             self.list_scroll_offset = self.hovered + 1 - visible;
         } else if self.hovered < self.list_scroll_offset {
             self.list_scroll_offset = self.hovered;
         }
-        let max_offset = self.items.len().saturating_sub(visible);
+        let max_offset = filtered.len().saturating_sub(visible);
         if self.list_scroll_offset > max_offset {
             self.list_scroll_offset = max_offset;
         }
 
-        let items: Vec<ListItem<'static>> = self
-            .items
+        // Reserve 2 cols on the right for the row margin — the row's
+        // trailing `Span::raw("  ")` lands there, and the List widget
+        // also paints the selection bg into it, so the highlight
+        // extends visually to the panel border.
+        const RIGHT_MARGIN: usize = 2;
+        let col_budget = (body_area.width as usize).saturating_sub(RIGHT_MARGIN);
+        let owned_filtered: Vec<PullRequest> =
+            filtered.iter().map(|pr| (*pr).clone()).collect();
+        let cols = PrListColumns::compute(&owned_filtered, col_budget);
+        let items: Vec<ListItem<'static>> = filtered
             .iter()
             .enumerate()
             .map(|(i, pr)| {
                 // Triangle marker follows the keyboard / mouse cursor
-                // (hovered), not the previously-opened PR — the user
-                // sees at a glance which row will open on Enter/click.
+                // (hovered) so the user can see at a glance which row
+                // will open on Enter / click.
                 let is_marked = self.hovered == i;
-                ListItem::new(self.format_pr_row(pr, is_marked))
+                ListItem::new(self.format_pr_row(pr, is_marked, &cols))
             })
             .collect();
         let mut state = ListState::default();
@@ -1509,42 +2144,78 @@ impl<'a> PullRequestsView<'a> {
                 .bg(theme.list_selected_bg)
                 .add_modifier(Modifier::BOLD),
         );
-        f.render_stateful_widget(list, inner, &mut state);
+        f.render_stateful_widget(list, body_area, &mut state);
     }
 
-    fn format_pr_row(&self, pr: &PullRequest, is_opened: bool) -> Line<'static> {
+    /// Build the filter-tabs title row that sits on the top border of
+    /// the PR list panel. Returns the styled spans (to pass into
+    /// `Block::title`) plus per-tab screen rects (for click
+    /// hit-testing). Left-aligned titles in ratatui start at
+    /// `area.x + 1` (just after the rounded corner).
+    fn build_filter_title(
+        &self,
+        area: Rect,
+    ) -> (Vec<Span<'static>>, Vec<(PrListFilter, Rect)>) {
         let theme = &self.ctx.color_theme;
-        // State word — colored text instead of a filled chip so it sits
-        // alongside the commit-list style of plain coloured spans.
-        let state_span = match (pr.state, pr.draft) {
-            (PullState::Open, true) => Span::styled(
-                "DRAFT",
-                Style::default()
-                    .fg(theme.detail_label_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            (PullState::Open, false) => Span::styled(
-                "OPEN",
-                Style::default()
-                    .fg(theme.status_success_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            (PullState::Merged, _) => Span::styled(
-                "MERGED",
-                Style::default()
-                    .fg(theme.list_ref_branch_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            (PullState::Closed, _) => Span::styled(
-                "CLOSED",
-                Style::default()
-                    .fg(theme.status_error_fg)
-                    .add_modifier(Modifier::BOLD),
-            ),
+        let counts: Vec<usize> = PrListFilter::all()
+            .iter()
+            .map(|f| self.items.iter().filter(|pr| f.matches(pr)).count())
+            .collect();
+
+        // 3-col gap between tabs so they read as distinct categories.
+        const TAB_GAP: u16 = 3;
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+        let mut rects: Vec<(PrListFilter, Rect)> = Vec::new();
+        let mut cursor_x: u16 = area.x.saturating_add(2); // border (1) + leading space (1)
+        for (i, filter) in PrListFilter::all().iter().enumerate() {
+            let is_active = *filter == self.list_filter;
+            let is_hovered = self.hovered_filter == Some(*filter) && !is_active;
+            let label = format!("{} {}", filter.label(), counts[i]);
+            let fg = if is_active {
+                theme.list_head_fg
+            } else if is_hovered {
+                theme.fg
+            } else {
+                theme.detail_label_fg
+            };
+            let mut style = Style::default().fg(fg);
+            if is_active {
+                style = style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            } else if is_hovered {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            let label_len = label.chars().count() as u16;
+            rects.push((*filter, Rect::new(cursor_x, area.y, label_len, 1)));
+            spans.push(Span::styled(label, style));
+            cursor_x = cursor_x.saturating_add(label_len);
+            if i + 1 < PrListFilter::all().len() {
+                spans.push(Span::raw(" ".repeat(TAB_GAP as usize)));
+                cursor_x = cursor_x.saturating_add(TAB_GAP);
+            }
+        }
+        spans.push(Span::raw(" "));
+        (spans, rects)
+    }
+
+    fn format_pr_row(
+        &self,
+        pr: &PullRequest,
+        is_opened: bool,
+        cols: &PrListColumns,
+    ) -> Line<'static> {
+        let theme = &self.ctx.color_theme;
+        // Each cell is pre-padded to its column width so rows align
+        // tabularly across the list, regardless of value length.
+        let (state_text, state_color) = match (pr.state, pr.draft) {
+            (PullState::Open, true) => ("DRAFT", theme.detail_label_fg),
+            (PullState::Open, false) => ("OPEN", theme.status_success_fg),
+            (PullState::Merged, _) => ("MERGED", MERGED_PURPLE),
+            (PullState::Closed, _) => ("CLOSED", theme.status_error_fg),
         };
-        // Base ref always renders as a REMOTE branch (it's the GitHub
-        // target — the local repo may not even have it checked out, so
-        // `list_ref_remote_branch_fg` matches what the graph would use).
+        let state_span = Span::styled(
+            fit_cell(state_text, cols.state),
+            Style::default().fg(state_color).add_modifier(Modifier::BOLD),
+        );
         // Leading `▶` flags the PR whose detail is currently shown.
         let marker = if is_opened {
             Span::styled(
@@ -1561,27 +2232,46 @@ impl<'a> PullRequestsView<'a> {
             state_span,
             Span::raw("  "),
             Span::styled(
-                format!("#{}", pr.number),
+                fit_cell(&format!("#{}", pr.number), cols.number),
                 Style::default()
                     .fg(theme.list_hash_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
-                pr.title.clone(),
+                fit_cell(&pr.title, cols.title),
                 Style::default().fg(theme.list_commit_message_fg),
             ),
             Span::raw("  "),
-            Span::styled(pr.author.clone(), Style::default().fg(theme.list_name_fg)),
-            Span::raw("  → "),
+            Span::styled(
+                fit_cell(&pr.author, cols.author),
+                Style::default().fg(theme.list_name_fg),
+            ),
+            Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
+            // Head branch (local-style green) → base branch (remote-style
+            // red), matching the convention used in the detail sub-header.
+            // Not padded so the arrow always reads `branch → branch`
+            // instead of `branch       → main`. Fork prefix `user:` is
+            // stripped — the author column already shows who opened it.
+            Span::styled(
+                strip_head_owner(&pr.head_label).to_string(),
+                Style::default()
+                    .fg(theme.list_ref_branch_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" → ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(
                 pr.base_ref.clone(),
                 Style::default()
                     .fg(theme.list_ref_remote_branch_fg)
                     .add_modifier(Modifier::BOLD),
             ),
+            // 2-col breathing room on the right so branches don't sit
+            // flush against the panel's right border.
+            Span::raw("  "),
         ])
     }
+
 
     fn render_detail_mode(&mut self, f: &mut Frame, area: Rect) {
         let current_number = self.opened_number();
@@ -1636,22 +2326,32 @@ impl<'a> PullRequestsView<'a> {
         area: Rect,
         theme: &crate::color::ColorTheme,
     ) {
-        let Some(editor) = self.comment_editor.as_ref() else {
-            return;
+        // Pull the data we need from the editor up-front so we can
+        // hand it back as `&mut` later to update the scroll offset
+        // without fighting the borrow checker.
+        let (kind, buffer, cursor_byte, submitting) = {
+            let Some(editor) = self.comment_editor.as_ref() else {
+                return;
+            };
+            (
+                editor.kind.clone(),
+                editor.buffer.clone(),
+                editor.cursor,
+                editor.submitting,
+            )
         };
-        // Header: title + parent author hint for replies.
-        let parent_author = match &editor.kind {
+        let parent_author_owned: Option<String> = match &kind {
             CommentEditorKind::Reply { parent_id } => self
                 .opened_detail()
                 .and_then(|d| {
                     d.conversation
                         .iter()
                         .find(|e| e.id == Some(*parent_id))
-                        .map(|e| e.author.as_str())
+                        .map(|e| e.author.clone())
                 }),
             _ => None,
         };
-        let title = editor.kind.header(parent_author);
+        let title = kind.header(parent_author_owned.as_deref());
 
         let block = Block::default()
             .borders(Borders::ALL)
@@ -1672,76 +2372,101 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // Split the inner area into body + footer (single-line hint).
-        let body_height = inner.height.saturating_sub(1).max(1);
+        // Whole inner area goes to the body — Ctrl+S / Esc shortcuts
+        // live in the app footer so we don't burn an editor row on a
+        // hint that's already visible at the bottom of the screen.
+        // When a submit is in flight we still want a 1-row strip for
+        // the "Sending…" status; otherwise the editor reclaims it.
+        let footer_height: u16 = if submitting { 1 } else { 0 };
+        let body_height = inner.height.saturating_sub(footer_height).max(1);
         let body_area = Rect {
             x: inner.x,
             y: inner.y,
             width: inner.width,
             height: body_height,
         };
+        // Capture for mouse hit-testing — clicks inside translate
+        // back to a buffer cursor position.
+        self.editor_body_area = Some(body_area);
         let footer_area = Rect {
             x: inner.x,
             y: inner.y + body_height,
             width: inner.width,
-            height: 1,
+            height: footer_height,
         };
 
-        // Body: render each logical line as-is, clipped to body_height.
+        // Compute the cursor's logical (col, row) in the buffer first
+        // so we can scroll the body window to keep it visible.
+        let (cursor_col, cursor_row) = cursor_screen_pos(&buffer, cursor_byte);
+
+        // Total logical row count — number of `\n` in the buffer plus 1
+        // (we don't add a trailing empty line for a final `\n`).
+        let total_rows = if buffer.is_empty() {
+            1
+        } else {
+            buffer.matches('\n').count() as u16 + 1
+        };
+
+        // Read the scroll offset as-is — auto-anchoring lives in the
+        // cursor-mutating helpers (so manual wheel/PgUp/PgDn don't get
+        // snapped back to the cursor on the next render).
+        let mut scroll_offset: u16 = self
+            .comment_editor
+            .as_ref()
+            .map(|e| e.scroll_offset)
+            .unwrap_or(0);
+        let max_scroll = total_rows.saturating_sub(body_height);
+        if scroll_offset > max_scroll {
+            scroll_offset = max_scroll;
+        }
+        if let Some(ed) = self.comment_editor.as_mut() {
+            ed.scroll_offset = scroll_offset;
+            ed.last_body_height = body_height;
+        }
+
+        // Body: render the buffer's logical lines starting from the
+        // scroll offset, up to body_height. Wrap is OFF so screen rows
+        // map 1:1 with logical rows — keeps cursor positioning trivial.
         let value = Style::default().fg(theme.fg);
-        let body_text = if editor.buffer.is_empty() {
-            // Placeholder hint so the box doesn't look broken when empty.
-            vec![Span::styled(
-                match &editor.kind {
+        let body_text: Vec<Line<'static>> = if buffer.is_empty() {
+            vec![Line::from(Span::styled(
+                match &kind {
                     CommentEditorKind::NewTopLevel => "Type your comment…",
                     CommentEditorKind::Reply { .. } => "Type your reply…",
                     _ => "Type your edits…",
                 }
                 .to_string(),
                 Style::default().fg(theme.detail_label_fg),
-            )]
+            ))]
         } else {
-            // We render the raw buffer verbatim (no markdown — author is
-            // still composing, no need to pre-render).
-            editor
-                .buffer
-                .lines()
+            buffer
+                .split('\n')
+                .skip(scroll_offset as usize)
                 .take(body_height as usize)
-                .map(|l| Span::styled(l.to_string(), value))
+                .map(|l| Line::from(Span::styled(l.to_string(), value)))
                 .collect()
         };
-        let lines: Vec<Line<'static>> = body_text
-            .into_iter()
-            .map(|s| Line::from(s))
-            .collect();
-        let para = Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false });
-        f.render_widget(para, body_area);
+        f.render_widget(Paragraph::new(body_text), body_area);
 
-        // Footer: shortcuts hint OR "Sending…" while a write is in flight.
-        // We list Ctrl+S first since Ctrl+Enter doesn't survive in most
-        // terminals (modifier gets stripped from the Enter sequence).
-        let footer_text = if editor.submitting {
-            "  Sending…".to_string()
-        } else {
-            "  Ctrl+S:send   Esc:cancel".to_string()
-        };
-        let footer_style = if editor.submitting {
-            Style::default().fg(theme.status_warn_fg)
-        } else {
-            Style::default().fg(theme.detail_label_fg)
-        };
-        f.render_widget(
-            Paragraph::new(Span::styled(footer_text, footer_style)),
-            footer_area,
-        );
+        // In-editor footer is only used to surface the in-flight
+        // status — Ctrl+S / Esc hints already sit in the app footer.
+        if submitting {
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "  Sending…".to_string(),
+                    Style::default().fg(theme.status_warn_fg),
+                )),
+                footer_area,
+            );
+        }
 
-        // Place the terminal cursor on the editor surface at the
-        // logical (col, row) corresponding to the buffer cursor.
-        let (col, row) = cursor_screen_pos(&editor.buffer, editor.cursor);
-        let cx = body_area.x + col;
-        let cy = body_area.y + row;
-        // Clamp to the body area.
-        if !editor.submitting
+        // Place the terminal cursor on the editor surface — translate
+        // the logical row into the viewport's row by subtracting the
+        // current scroll offset.
+        let visible_row = cursor_row.saturating_sub(scroll_offset);
+        let cx = body_area.x + cursor_col;
+        let cy = body_area.y + visible_row;
+        if !submitting
             && cx < body_area.x + body_area.width
             && cy < body_area.y + body_area.height
         {
@@ -1759,45 +2484,123 @@ impl<'a> PullRequestsView<'a> {
         let theme = &self.ctx.color_theme;
         let mut spans: Vec<Span<'static>> = Vec::new();
         spans.push(Span::raw("  "));
+        let mut badge_spans: Vec<Span<'static>> = Vec::new();
         if let Some(detail) = detail {
-            spans.push(state_word_span(theme, detail.state, detail.draft));
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
+            // Compute the badge first so we can reserve room for it on
+            // the right and let the title flex/ellipsis to fit. Without
+            // this, a long title pushes the badge off-screen entirely.
+            badge_spans = mergeability_badge(theme, detail.mergeability);
+            let badge_width: usize = badge_spans
+                .iter()
+                .map(|s| console::measure_text_width(s.content.as_ref()))
+                .sum();
+
+            // Build the non-title spans separately so we can size the
+            // title relative to actual terminal width.
+            let state_span = state_word_span(theme, detail.state, detail.draft);
+            let num_span = Span::styled(
                 format!("#{}", detail.number),
                 Style::default()
                     .fg(theme.list_hash_fg)
                     .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                truncate(&detail.title, 80),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
+            );
+            let by_span = Span::styled(
+                "by ",
+                Style::default().fg(theme.detail_label_fg),
+            );
+            let author_span = Span::styled(
                 detail.author.clone(),
                 Style::default().fg(theme.list_name_fg),
-            ));
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                detail.head_label.clone(),
+            );
+            // Same fork-prefix strip as the PR list — the author name
+            // already appears as its own span, no need to repeat it.
+            let head_span = Span::styled(
+                strip_head_owner(&detail.head_label).to_string(),
                 Style::default()
                     .fg(theme.list_ref_branch_fg)
                     .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(" → ", Style::default().fg(theme.detail_label_fg)));
-            spans.push(Span::styled(
+            );
+            let arrow_span =
+                Span::styled(" → ", Style::default().fg(theme.detail_label_fg));
+            let base_span = Span::styled(
                 detail.base_ref.clone(),
                 Style::default()
                     .fg(theme.list_ref_remote_branch_fg)
                     .add_modifier(Modifier::BOLD),
+            );
+
+            // Fixed overhead = leading "  " (2) + state + "  " (2) + #num
+            //   + "  " (2) + [title here] + " · " (3) + "by " (3) + author
+            //   + " · " (3) + head + " → " (3) + base + min_gap (2)
+            //   + badge + trailing (2).
+            let trailing_pad = 2;
+            let min_gap = 2;
+            let measure = |s: &Span<'_>| console::measure_text_width(s.content.as_ref());
+            let fixed_overhead = 2
+                + measure(&state_span)
+                + 2
+                + measure(&num_span)
+                + 2
+                + 3
+                + measure(&by_span)
+                + measure(&author_span)
+                + 3
+                + measure(&head_span)
+                + 3
+                + measure(&base_span)
+                + min_gap
+                + badge_width
+                + trailing_pad;
+            let title_budget = (area.width as usize).saturating_sub(fixed_overhead).max(8);
+            let title_truncated = truncate(&detail.title, title_budget);
+
+            let dot_sep = || {
+                Span::styled(" · ", Style::default().fg(theme.detail_label_fg))
+            };
+
+            spans.push(state_span);
+            spans.push(Span::raw("  "));
+            spans.push(num_span);
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                title_truncated,
+                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ));
+            spans.push(dot_sep());
+            spans.push(by_span);
+            spans.push(author_span);
+            spans.push(dot_sep());
+            spans.push(head_span);
+            spans.push(arrow_span);
+            spans.push(base_span);
         } else if let Some(n) = number {
             spans.push(Span::styled(
                 format!("Loading PR #{}…", n),
                 Style::default().fg(theme.detail_label_fg),
             ));
         }
+
+        // Right-align the mergeability badge: measure both sides, pad
+        // with spaces in between so the badge sits on the right edge.
+        let left_width: usize = spans
+            .iter()
+            .map(|s| console::measure_text_width(s.content.as_ref()))
+            .sum();
+        let badge_width: usize = badge_spans
+            .iter()
+            .map(|s| console::measure_text_width(s.content.as_ref()))
+            .sum();
+        let total = area.width as usize;
+        let trailing_pad = 2;
+        let gap = total
+            .saturating_sub(left_width)
+            .saturating_sub(badge_width)
+            .saturating_sub(trailing_pad);
+        if gap > 0 && badge_width > 0 {
+            spans.push(Span::raw(" ".repeat(gap)));
+            spans.extend(badge_spans);
+        }
+
         let divider = Line::from(Span::styled(
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
@@ -1925,12 +2728,15 @@ impl<'a> PullRequestsView<'a> {
             CommentCardInput {
                 author: &detail.author,
                 action: CommentAction::Opened,
-                when: "",
+                when: &detail.opened_when,
                 body: &detail.body,
                 ancestor_gutters: &[],
                 has_children: false,
                 is_selected: self.conversation_selected == pr_idx,
                 is_me: pr_is_me,
+                // PR description card: quote-reply only (no in-place
+                // edit / delete shortcuts here).
+                inline_shortcuts: vec!["R:quote reply"],
             },
         );
         self.conversation_comment_spans
@@ -2048,6 +2854,30 @@ impl<'a> PullRequestsView<'a> {
             .me_login
             .as_deref()
             .map_or(false, |me| me == entry.author);
+        // Build the inline shortcut chips for THIS card:
+        //  - reply variant depends on whether the card is a file-level
+        //    review comment (true reply) vs a top-level entry (quote
+        //    reply, GitHub doesn't natively thread those)
+        //  - edit / delete only for own editable kinds (review entries
+        //    aren't editable from the API).
+        let mut shortcuts: Vec<&'static str> = Vec::new();
+        let is_review_comment = matches!(
+            entry.kind,
+            ConversationKind::ReviewComment { .. }
+        );
+        if is_review_comment {
+            shortcuts.push("R:reply");
+        } else {
+            shortcuts.push("R:quote reply");
+        }
+        let editable_kind = matches!(
+            entry.kind,
+            ConversationKind::Comment | ConversationKind::ReviewComment { .. }
+        );
+        if is_me && editable_kind {
+            shortcuts.push("e:edit");
+            shortcuts.push("d:delete");
+        }
         push_comment_card(
             lines,
             theme,
@@ -2061,6 +2891,7 @@ impl<'a> PullRequestsView<'a> {
                 has_children,
                 is_selected: self.conversation_selected == my_idx,
                 is_me,
+                inline_shortcuts: shortcuts,
             },
         );
         self.conversation_comment_spans
@@ -2140,10 +2971,11 @@ impl<'a> PullRequestsView<'a> {
             self.commits_scroll = max_offset;
         }
 
+        let cols = CommitColumns::compute(&detail.commit_list, area.width as usize);
         let items: Vec<ListItem<'static>> = detail
             .commit_list
             .iter()
-            .map(|c| ListItem::new(commit_row(theme, c)))
+            .map(|c| ListItem::new(commit_row(theme, c, &cols)))
             .collect();
         let mut state = ListState::default();
         state.select(Some(self.commits_hovered));
@@ -2222,10 +3054,11 @@ impl<'a> PullRequestsView<'a> {
         } else if self.files_hovered < self.files_scroll {
             self.files_scroll = self.files_hovered;
         }
+        let cols = FileColumns::compute(&detail.files, area.width as usize);
         let items: Vec<ListItem<'static>> = detail
             .files
             .iter()
-            .map(|f| ListItem::new(file_line(theme, f)))
+            .map(|f| ListItem::new(file_line(theme, f, &cols)))
             .collect();
         let mut state = ListState::default();
         state.select(Some(self.files_hovered));
@@ -2270,6 +3103,11 @@ struct CommentCardInput<'a> {
     /// `true` when `author` matches the authenticated GitHub login —
     /// we append a small `(me)` chip after the name.
     is_me: bool,
+    /// Action shortcuts to surface inline in the top border when this
+    /// card is selected (e.g. ["R:reply", "e:edit", "d:delete"]).
+    /// Empty for cards that have no card-scoped actions (PR description,
+    /// reviews) or when not selected.
+    inline_shortcuts: Vec<&'static str>,
 }
 
 enum CommentAction {
@@ -2440,8 +3278,37 @@ fn push_comment_card(
         consumed += console::measure_text_width(w.content.as_ref());
         top.push(w);
     }
-    let after_title = card_width.saturating_sub(consumed).saturating_sub(2);
-    top.push(Span::styled(format!(" {}┐", "─".repeat(after_title)), border_style));
+
+    // Inline shortcut chips on the right side of the top border, only
+    // when the card is selected. `╶╴` (two short mid-line horizontals,
+    // U+2576 + U+2574) keeps the 2-column footprint of the footer's
+    // `▕▏` but sits at the line's midpoint instead of full height —
+    // reads as a low-key separator that matches the box-drawing family.
+    let shortcut_text = if input.is_selected && !input.inline_shortcuts.is_empty() {
+        format!(" {} ", input.inline_shortcuts.join("╶╴"))
+    } else {
+        String::new()
+    };
+    let shortcut_width = console::measure_text_width(&shortcut_text);
+    let after_title = card_width
+        .saturating_sub(consumed)
+        .saturating_sub(2) // " " before title + "┐"
+        .saturating_sub(shortcut_width);
+    top.push(Span::styled(
+        format!(" {}", "─".repeat(after_title)),
+        border_style,
+    ));
+    if !shortcut_text.is_empty() {
+        // Chip uses a dimmer fg so it doesn't compete with the selected
+        // border colour, but still BOLD so the keys read clearly.
+        top.push(Span::styled(
+            shortcut_text,
+            Style::default()
+                .fg(theme.detail_label_fg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    top.push(Span::styled("┐".to_string(), border_style));
     lines.push(Line::from(top));
 
     // ── Body rows. For child cards (`depth > 0`), the FIRST body row
@@ -2484,6 +3351,38 @@ fn push_comment_card(
     lines.push(Line::from(bot));
 }
 
+/// Compact "ready to merge" / "conflicts" / etc. badge rendered at the
+/// right edge of the PR sub-header. Mirrors the colour cues GitHub uses
+/// in its own merge-box: green for ready, red for blockers, yellow for
+/// warnings, grey for terminal / unknown states.
+fn mergeability_badge(
+    theme: &crate::color::ColorTheme,
+    state: Mergeability,
+) -> Vec<Span<'static>> {
+    let (label, fg) = match state {
+        Mergeability::Ready => ("● Ready to merge", theme.status_success_fg),
+        Mergeability::ChecksFailing => ("● Checks failing", theme.status_error_fg),
+        Mergeability::Conflicts => ("● Merge conflicts", theme.status_error_fg),
+        Mergeability::Blocked => ("● Review required", theme.status_warn_fg),
+        Mergeability::Behind => ("● Base is ahead", theme.status_warn_fg),
+        Mergeability::Draft => ("● Draft", theme.detail_label_fg),
+        Mergeability::Merged => ("● Merged", MERGED_PURPLE),
+        Mergeability::Closed => ("● Closed", theme.detail_label_fg),
+        Mergeability::Unknown => ("● Checking…", theme.detail_label_fg),
+    };
+    // Wrap in parens so the badge reads as parenthetical status info
+    // instead of competing visually with the title.
+    let paren_style = Style::default().fg(theme.detail_label_fg);
+    vec![
+        Span::styled("(".to_string(), paren_style),
+        Span::styled(
+            label.to_string(),
+            Style::default().fg(fg).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(")".to_string(), paren_style),
+    ]
+}
+
 fn state_word_span(
     theme: &crate::color::ColorTheme,
     state: PullState,
@@ -2505,7 +3404,7 @@ fn state_word_span(
         (PullState::Merged, _) => Span::styled(
             "MERGED",
             Style::default()
-                .fg(theme.list_ref_branch_fg)
+                .fg(MERGED_PURPLE)
                 .add_modifier(Modifier::BOLD),
         ),
         (PullState::Closed, _) => Span::styled(
@@ -2517,24 +3416,82 @@ fn state_word_span(
     }
 }
 
-fn commit_row(theme: &crate::color::ColorTheme, c: &PullCommit) -> Line<'static> {
+/// Per-column widths for the Commits tab. Sha is fixed by hash length,
+/// author and date are sized to the longest value, subject takes the
+/// rest (ellipsis when narrow).
+struct CommitColumns {
+    sha: usize,
+    subject: usize,
+    author: usize,
+    date: usize,
+}
+
+impl CommitColumns {
+    fn compute(items: &[PullCommit], available_width: usize) -> Self {
+        let sha = items
+            .iter()
+            .map(|c| c.short_sha.chars().count())
+            .max()
+            .unwrap_or(7);
+        let author = items
+            .iter()
+            .map(|c| c.author.chars().count())
+            .max()
+            .unwrap_or(0);
+        let date = items
+            .iter()
+            .map(|c| c.date.chars().count())
+            .max()
+            .unwrap_or(0);
+        let max_subject = items
+            .iter()
+            .map(|c| c.subject.chars().count())
+            .max()
+            .unwrap_or(0);
+        // leading "  " (2) + sha + "  " (2) + subject + "  " (2)
+        //   + author + "  " (2) + date + trailing (2)
+        let fixed = 2 + sha + 2 + 2 + author + 2 + date + 2;
+        let subject = available_width
+            .saturating_sub(fixed)
+            .min(max_subject.max(1))
+            .max(1);
+        Self {
+            sha,
+            subject,
+            author,
+            date,
+        }
+    }
+}
+
+fn commit_row(
+    theme: &crate::color::ColorTheme,
+    c: &PullCommit,
+    cols: &CommitColumns,
+) -> Line<'static> {
     Line::from(vec![
         Span::raw("  "),
         Span::styled(
-            c.short_sha.clone(),
+            fit_cell(&c.short_sha, cols.sha),
             Style::default()
                 .fg(theme.list_hash_fg)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(
-            c.subject.clone(),
+            fit_cell(&c.subject, cols.subject),
             Style::default().fg(theme.list_commit_message_fg),
         ),
         Span::raw("  "),
-        Span::styled(c.author.clone(), Style::default().fg(theme.list_name_fg)),
+        Span::styled(
+            fit_cell(&c.author, cols.author),
+            Style::default().fg(theme.list_name_fg),
+        ),
         Span::raw("  "),
-        Span::styled(c.date.clone(), Style::default().fg(theme.list_date_fg)),
+        Span::styled(
+            fit_cell(&c.date, cols.date),
+            Style::default().fg(theme.list_date_fg),
+        ),
     ])
 }
 
@@ -2590,7 +3547,51 @@ fn ci_summary_spans(theme: &crate::color::ColorTheme, ci: &crate::github::pr::Ci
     )
 }
 
-fn file_line(theme: &crate::color::ColorTheme, f: &crate::github::pr::PullFile) -> Line<'static> {
+/// Per-column widths for the Files tab. Filename flexes; additions and
+/// deletions pad to the widest count so `+N -M` stacks tidily.
+struct FileColumns {
+    filename: usize,
+    additions: usize,
+    deletions: usize,
+}
+
+impl FileColumns {
+    fn compute(items: &[crate::github::pr::PullFile], available_width: usize) -> Self {
+        let additions = items
+            .iter()
+            .map(|f| 1 + digits(f.additions))
+            .max()
+            .unwrap_or(2);
+        let deletions = items
+            .iter()
+            .map(|f| 1 + digits(f.deletions))
+            .max()
+            .unwrap_or(2);
+        let max_filename = items
+            .iter()
+            .map(|f| f.filename.chars().count())
+            .max()
+            .unwrap_or(0);
+        // leading "    " (4) + tag (1) + "  " (2) + filename + "  " (2)
+        //   + additions + " " (1) + deletions + trailing (2)
+        let fixed = 4 + 1 + 2 + 2 + additions + 1 + deletions + 2;
+        let filename = available_width
+            .saturating_sub(fixed)
+            .min(max_filename.max(1))
+            .max(1);
+        Self {
+            filename,
+            additions,
+            deletions,
+        }
+    }
+}
+
+fn file_line(
+    theme: &crate::color::ColorTheme,
+    f: &crate::github::pr::PullFile,
+    cols: &FileColumns,
+) -> Line<'static> {
     // Re-use the commit-detail palette for file-change tags so a PR's
     // file list reads the same way as the local commit's diff list.
     let (tag, tag_color) = match f.status {
@@ -2607,15 +3608,18 @@ fn file_line(theme: &crate::color::ColorTheme, f: &crate::github::pr::PullFile) 
             Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled(f.filename.clone(), Style::default().fg(theme.fg)),
+        Span::styled(
+            fit_cell(&f.filename, cols.filename),
+            Style::default().fg(theme.fg),
+        ),
         Span::raw("  "),
         Span::styled(
-            format!("+{}", f.additions),
+            fit_cell(&format!("+{}", f.additions), cols.additions),
             Style::default().fg(theme.detail_file_change_add_fg),
         ),
         Span::raw(" "),
         Span::styled(
-            format!("-{}", f.deletions),
+            fit_cell(&format!("-{}", f.deletions), cols.deletions),
             Style::default().fg(theme.detail_file_change_delete_fg),
         ),
     ])
@@ -2761,123 +3765,364 @@ fn rect_contains(rect: Option<Rect>, col: u16, row: u16) -> bool {
 /// - Word-wrap every visual line at `inner_width` so long paragraphs
 ///   flow naturally instead of being chopped with an ellipsis.
 /// - Collapses runs of blank lines down to a single blank line.
-fn render_markdown_body(
+/// Render a markdown body to a sequence of wrapped, styled lines fit
+/// for the PR comment cards. Backed by `pulldown-cmark` so we get
+/// CommonMark + GFM (task lists, strikethrough, tables) for free.
+pub(crate) fn render_markdown_body(
     body: &str,
     theme: &crate::color::ColorTheme,
     inner_width: usize,
 ) -> Vec<Vec<Span<'static>>> {
-    let stripped = strip_html(body);
-    let mut out: Vec<Vec<Span<'static>>> = Vec::new();
-    let mut prev_blank = true; // suppress leading blank rows
-    let mut in_code_block = false;
+    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TASKLISTS);
+    opts.insert(Options::ENABLE_TABLES);
+
+    let parser = Parser::new_ext(body, opts);
 
     let normal = Style::default().fg(theme.fg);
     let label = Style::default().fg(theme.detail_label_fg);
     let code_style = Style::default().fg(theme.list_hash_fg);
+    // Heading hierarchy — terminals can't size text, so we lean on
+    // colour + modifiers to telegraph the level. H1 also gets an
+    // underline so it visually outweighs H2 at a glance.
+    let h1_style = Style::default()
+        .fg(theme.list_head_fg)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
     let h2_style = Style::default()
         .fg(theme.list_head_fg)
         .add_modifier(Modifier::BOLD);
     let h3_style = Style::default()
         .fg(theme.fg)
         .add_modifier(Modifier::BOLD);
+    let h_other_style = Style::default()
+        .fg(theme.detail_label_fg)
+        .add_modifier(Modifier::BOLD);
+    let link_style = Style::default()
+        .fg(theme.list_head_fg)
+        .add_modifier(Modifier::UNDERLINED);
+    let check_done_style = Style::default().fg(theme.status_success_fg);
 
-    for raw_line in stripped.lines() {
-        let line = raw_line.trim_end();
+    let mut out: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut inline: Vec<Span<'static>> = Vec::new();
+    let mut style_stack: Vec<Style> = vec![normal];
+    // None = bullet; Some(n) = ordered with the next-number-to-emit.
+    let mut list_stack: Vec<Option<u64>> = Vec::new();
+    let mut bq_depth: usize = 0;
+    let mut in_code_block: bool = false;
+    let mut code_buf: String = String::new();
+    let mut pending_marker: Option<(String, Style)> = None;
 
-        // Code-block fence — toggle state, swallow the line.
-        if line.trim().starts_with("```") {
-            in_code_block = !in_code_block;
-            continue;
+    let push_blank_separator = |out: &mut Vec<Vec<Span<'static>>>| {
+        if out.is_empty() {
+            return;
         }
-        if in_code_block {
-            for w in wrap_text(line, inner_width) {
-                out.push(vec![Span::styled(w, code_style)]);
+        if let Some(last) = out.last() {
+            if last
+                .iter()
+                .all(|s| s.content.as_ref().trim().is_empty())
+            {
+                return;
             }
-            prev_blank = false;
-            continue;
         }
+        out.push(Vec::new());
+    };
 
-        if line.trim().is_empty() {
-            if !prev_blank {
-                out.push(vec![]);
-            }
-            prev_blank = true;
-            continue;
-        }
-        prev_blank = false;
+    let measure_prefix = |prefix: &[Span<'static>]| -> usize {
+        prefix
+            .iter()
+            .map(|s| console::measure_text_width(s.content.as_ref()))
+            .sum()
+    };
 
-        // Horizontal rule
-        let t = line.trim();
-        if t == "---" || t == "***" || t == "___" {
-            out.push(vec![Span::styled(
-                "─".repeat(inner_width.max(4)),
-                Style::default().fg(theme.divider_fg),
-            )]);
-            continue;
-        }
+    let build_first_prefix =
+        |bq_depth: usize, list_stack: &[Option<u64>], marker: &Option<(String, Style)>| {
+            let mut p: Vec<Span<'static>> = Vec::new();
+            for _ in 0..bq_depth {
+                p.push(Span::styled("│ ".to_string(), label));
+            }
+            if !list_stack.is_empty() {
+                // Continuation indentation for outer nesting levels.
+                for _ in 0..(list_stack.len() - 1) {
+                    p.push(Span::raw("  ".to_string()));
+                }
+                if let Some((text, style)) = marker {
+                    p.push(Span::styled(text.clone(), *style));
+                } else {
+                    p.push(Span::raw("  ".to_string()));
+                }
+            }
+            p
+        };
 
-        // Headings
-        if let Some(rest) = strip_heading(line, "### ") {
-            for w in wrap_text(rest, inner_width) {
-                out.push(vec![Span::styled(w, h3_style)]);
-            }
-            continue;
+    let build_cont_prefix = |bq_depth: usize, list_depth: usize| {
+        let mut p: Vec<Span<'static>> = Vec::new();
+        for _ in 0..bq_depth {
+            p.push(Span::styled("│ ".to_string(), label));
         }
-        if let Some(rest) = strip_heading(line, "## ") {
-            for w in wrap_text(rest, inner_width) {
-                out.push(vec![Span::styled(w, h2_style)]);
-            }
-            continue;
+        for _ in 0..list_depth {
+            p.push(Span::raw("  ".to_string()));
         }
-        if let Some(rest) = strip_heading(line, "# ") {
-            for w in wrap_text(rest, inner_width) {
-                out.push(vec![Span::styled(w, h2_style)]);
-            }
-            continue;
-        }
+        p
+    };
 
-        // Blockquote
-        if let Some(rest) = line.strip_prefix("> ") {
-            let inline = parse_inline_markdown(rest, theme);
-            let avail = inner_width.saturating_sub(2);
-            for line_spans in wrap_styled_spans(inline, avail) {
-                let mut row = vec![Span::styled("│ ".to_string(), label)];
+    let mut flush_inline =
+        |out: &mut Vec<Vec<Span<'static>>>,
+         inline: &mut Vec<Span<'static>>,
+         bq_depth: usize,
+         list_stack: &[Option<u64>],
+         pending_marker: &mut Option<(String, Style)>| {
+            if inline.is_empty() {
+                return;
+            }
+            let first_prefix =
+                build_first_prefix(bq_depth, list_stack, pending_marker);
+            let cont_prefix = build_cont_prefix(bq_depth, list_stack.len());
+            let avail = inner_width.saturating_sub(measure_prefix(&first_prefix));
+            let wrapped = wrap_styled_spans(std::mem::take(inline), avail.max(1));
+            for (i, line_spans) in wrapped.into_iter().enumerate() {
+                let mut row: Vec<Span<'static>> = if i == 0 {
+                    first_prefix.clone()
+                } else {
+                    cont_prefix.clone()
+                };
                 row.extend(line_spans);
                 out.push(row);
             }
-            continue;
-        }
-
-        // List item (`-`, `*`, or indented sub-bullet)
-        let (prefix, content, prefix_width) = if let Some(rest) = line.strip_prefix("- ") {
-            (Some("• "), rest, 2)
-        } else if let Some(rest) = line.strip_prefix("* ") {
-            (Some("• "), rest, 2)
-        } else if let Some(rest) = line.strip_prefix("  - ") {
-            (Some("  ◦ "), rest, 4)
-        } else if let Some(rest) = line.strip_prefix("  * ") {
-            (Some("  ◦ "), rest, 4)
-        } else {
-            (None, line, 0)
+            *pending_marker = None;
         };
 
-        let inline = parse_inline_markdown(content, theme);
-        let avail = inner_width.saturating_sub(prefix_width);
-        let wrapped = wrap_styled_spans(inline, avail);
-        for (i, line_spans) in wrapped.into_iter().enumerate() {
-            let mut row = Vec::new();
-            if let Some(p) = prefix {
-                let s = if i == 0 {
-                    p.to_string()
+    for event in parser {
+        match event {
+            Event::Start(tag) => match tag {
+                Tag::Paragraph => {}
+                Tag::Heading { level, .. } => {
+                    let s = match level {
+                        HeadingLevel::H1 => h1_style,
+                        HeadingLevel::H2 => h2_style,
+                        HeadingLevel::H3 => h3_style,
+                        _ => h_other_style,
+                    };
+                    style_stack.push(s);
+                }
+                Tag::BlockQuote(_) => {
+                    bq_depth += 1;
+                }
+                Tag::CodeBlock(_) => {
+                    in_code_block = true;
+                    code_buf.clear();
+                }
+                Tag::List(start) => {
+                    list_stack.push(start);
+                }
+                Tag::Item => {
+                    let depth = list_stack.len();
+                    let marker_text = match list_stack.last() {
+                        Some(Some(n)) => format!("{}. ", n),
+                        Some(None) => match depth {
+                            1 => "• ".to_string(),
+                            2 => "◦ ".to_string(),
+                            _ => "▪ ".to_string(),
+                        },
+                        None => "• ".to_string(),
+                    };
+                    pending_marker = Some((marker_text, label));
+                }
+                Tag::Emphasis => {
+                    // Most terminal fonts lack italic glyphs, so we
+                    // pin a distinct accent colour on top of the
+                    // ITALIC modifier — that way `*foo*` reads
+                    // differently from `**foo**` and from normal
+                    // text no matter what the terminal supports.
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or(normal)
+                        .fg(theme.list_date_fg)
+                        .add_modifier(Modifier::ITALIC);
+                    style_stack.push(s);
+                }
+                Tag::Strong => {
+                    // Bold gets the head-accent colour in addition to
+                    // the BOLD modifier — terminals that don't thicken
+                    // text still surface bold via hue.
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or(normal)
+                        .fg(theme.list_head_fg)
+                        .add_modifier(Modifier::BOLD);
+                    style_stack.push(s);
+                }
+                Tag::Strikethrough => {
+                    let s = style_stack
+                        .last()
+                        .copied()
+                        .unwrap_or(normal)
+                        .add_modifier(Modifier::CROSSED_OUT);
+                    style_stack.push(s);
+                }
+                Tag::Link { .. } => {
+                    style_stack.push(link_style);
+                }
+                Tag::Image { .. } => {
+                    style_stack.push(label);
+                    inline.push(Span::styled("[image: ".to_string(), label));
+                }
+                // Tables, footnotes, html blocks, definition lists, etc.
+                // are passed through transparently: their inline `Text`
+                // events still hit the buffer, just without special
+                // block decoration.
+                _ => {}
+            },
+            Event::End(tag_end) => match tag_end {
+                TagEnd::Paragraph => {
+                    flush_inline(
+                        &mut out,
+                        &mut inline,
+                        bq_depth,
+                        &list_stack,
+                        &mut pending_marker,
+                    );
+                    if list_stack.is_empty() {
+                        push_blank_separator(&mut out);
+                    }
+                }
+                TagEnd::Heading(_) => {
+                    flush_inline(
+                        &mut out,
+                        &mut inline,
+                        bq_depth,
+                        &list_stack,
+                        &mut pending_marker,
+                    );
+                    style_stack.pop();
+                    push_blank_separator(&mut out);
+                }
+                TagEnd::BlockQuote(_) => {
+                    bq_depth = bq_depth.saturating_sub(1);
+                }
+                TagEnd::CodeBlock => {
+                    let buf = std::mem::take(&mut code_buf);
+                    let prefix = build_cont_prefix(bq_depth, list_stack.len());
+                    let avail = inner_width
+                        .saturating_sub(measure_prefix(&prefix))
+                        .max(1);
+                    for raw_line in buf.lines() {
+                        let wrapped = wrap_styled_spans(
+                            vec![Span::styled(raw_line.to_string(), code_style)],
+                            avail,
+                        );
+                        for piece in wrapped {
+                            let mut row = prefix.clone();
+                            row.extend(piece);
+                            out.push(row);
+                        }
+                    }
+                    in_code_block = false;
+                    push_blank_separator(&mut out);
+                }
+                TagEnd::List(_) => {
+                    list_stack.pop();
+                    if list_stack.is_empty() {
+                        push_blank_separator(&mut out);
+                    }
+                }
+                TagEnd::Item => {
+                    flush_inline(
+                        &mut out,
+                        &mut inline,
+                        bq_depth,
+                        &list_stack,
+                        &mut pending_marker,
+                    );
+                    if let Some(Some(n)) = list_stack.last_mut() {
+                        *n += 1;
+                    }
+                    pending_marker = None;
+                }
+                TagEnd::Emphasis
+                | TagEnd::Strong
+                | TagEnd::Strikethrough
+                | TagEnd::Link => {
+                    style_stack.pop();
+                }
+                TagEnd::Image => {
+                    style_stack.pop();
+                    inline.push(Span::styled("]".to_string(), label));
+                }
+                _ => {}
+            },
+            Event::Text(s) => {
+                if in_code_block {
+                    code_buf.push_str(&s);
                 } else {
-                    " ".repeat(prefix_width)
-                };
-                row.push(Span::styled(s, label));
+                    let style = style_stack.last().copied().unwrap_or(normal);
+                    inline.push(Span::styled(s.into_string(), style));
+                }
             }
-            row.extend(line_spans);
-            out.push(row);
+            Event::Code(s) => {
+                inline.push(Span::styled(s.into_string(), code_style));
+            }
+            Event::Html(_) | Event::InlineHtml(_) => {
+                // Skip raw HTML — looks ugly in a TUI and most GitHub
+                // markdown only uses it for collapsible sections we
+                // can't render anyway.
+            }
+            Event::SoftBreak => {
+                // GitHub Flavored Markdown (in comments/PR bodies)
+                // treats a single newline as a hard line break. We
+                // follow the same convention so what users see in the
+                // composer matches what hits the wire.
+                flush_inline(
+                    &mut out,
+                    &mut inline,
+                    bq_depth,
+                    &list_stack,
+                    &mut pending_marker,
+                );
+            }
+            Event::HardBreak => {
+                flush_inline(
+                    &mut out,
+                    &mut inline,
+                    bq_depth,
+                    &list_stack,
+                    &mut pending_marker,
+                );
+            }
+            Event::Rule => {
+                let divider = Style::default().fg(theme.divider_fg);
+                out.push(vec![Span::styled(
+                    "─".repeat(inner_width.max(4)),
+                    divider,
+                )]);
+            }
+            Event::TaskListMarker(checked) => {
+                let (text, style) = if checked {
+                    ("[x] ".to_string(), check_done_style)
+                } else {
+                    ("[ ] ".to_string(), label)
+                };
+                inline.push(Span::styled(text, style));
+            }
+            Event::FootnoteReference(_)
+            | Event::InlineMath(_)
+            | Event::DisplayMath(_) => {}
         }
     }
+
+    // Flush anything still buffered (rare — happens on malformed input
+    // where a paragraph is never closed).
+    flush_inline(
+        &mut out,
+        &mut inline,
+        bq_depth,
+        &list_stack,
+        &mut pending_marker,
+    );
 
     // Trim trailing blank rows for cleaner cards.
     while out.last().map_or(false, |row| {
@@ -2887,194 +4132,13 @@ fn render_markdown_body(
         out.pop();
     }
 
-    let _ = normal;
     out
 }
 
-fn strip_heading<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
-    // Strip the heading marker but only when it's at the start. We don't
-    // bother with closing `#` on the right (rare in GitHub markdown).
-    line.strip_prefix(marker)
-}
-
-/// Inline markdown for a single content string. Produces a flat list of
-/// styled spans honouring **bold**, *italic*, `inline code`, and
-/// `[label](url)` links (label only).
-fn parse_inline_markdown(
-    text: &str,
-    theme: &crate::color::ColorTheme,
-) -> Vec<Span<'static>> {
-    let normal = Style::default().fg(theme.fg);
-    let bold = normal.add_modifier(Modifier::BOLD);
-    let italic = normal.add_modifier(Modifier::ITALIC);
-    let code = Style::default().fg(theme.list_hash_fg);
-    let link = Style::default()
-        .fg(theme.list_head_fg)
-        .add_modifier(Modifier::UNDERLINED);
-
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut buf = String::new();
-    let mut chars = text.chars().peekable();
-
-    let flush_buf = |buf: &mut String, spans: &mut Vec<Span<'static>>, style: Style| {
-        if !buf.is_empty() {
-            spans.push(Span::styled(std::mem::take(buf), style));
-        }
-    };
-
-    while let Some(c) = chars.next() {
-        match c {
-            // **bold**
-            '*' if chars.peek() == Some(&'*') => {
-                chars.next();
-                flush_buf(&mut buf, &mut spans, normal);
-                let mut bold_text = String::new();
-                let mut closed = false;
-                while let Some(c) = chars.next() {
-                    if c == '*' && chars.peek() == Some(&'*') {
-                        chars.next();
-                        closed = true;
-                        break;
-                    }
-                    bold_text.push(c);
-                }
-                if closed {
-                    spans.push(Span::styled(bold_text, bold));
-                } else {
-                    // Unclosed → render as plain text with the leading **
-                    buf.push_str("**");
-                    buf.push_str(&bold_text);
-                }
-            }
-            // *italic* / _italic_
-            '*' | '_' => {
-                // Only treat as italic when the closing delimiter is
-                // found before whitespace breaks the run.
-                let delim = c;
-                flush_buf(&mut buf, &mut spans, normal);
-                let mut italic_text = String::new();
-                let mut closed = false;
-                let saved_iter = chars.clone();
-                while let Some(c) = chars.next() {
-                    if c == delim {
-                        closed = true;
-                        break;
-                    }
-                    italic_text.push(c);
-                }
-                if closed && !italic_text.is_empty() {
-                    spans.push(Span::styled(italic_text, italic));
-                } else {
-                    // Rewind: treat as literal.
-                    chars = saved_iter;
-                    buf.push(delim);
-                }
-            }
-            // `inline code`
-            '`' => {
-                flush_buf(&mut buf, &mut spans, normal);
-                let mut code_text = String::new();
-                let mut closed = false;
-                let saved_iter = chars.clone();
-                while let Some(c) = chars.next() {
-                    if c == '`' {
-                        closed = true;
-                        break;
-                    }
-                    code_text.push(c);
-                }
-                if closed {
-                    spans.push(Span::styled(code_text, code));
-                } else {
-                    chars = saved_iter;
-                    buf.push('`');
-                }
-            }
-            // [label](url)
-            '[' => {
-                let saved_iter = chars.clone();
-                let mut label_text = String::new();
-                let mut found_close = false;
-                while let Some(c) = chars.next() {
-                    if c == ']' {
-                        found_close = true;
-                        break;
-                    }
-                    label_text.push(c);
-                }
-                if found_close && chars.peek() == Some(&'(') {
-                    chars.next(); // consume '('
-                    let mut url = String::new();
-                    let mut closed_paren = false;
-                    while let Some(c) = chars.next() {
-                        if c == ')' {
-                            closed_paren = true;
-                            break;
-                        }
-                        url.push(c);
-                    }
-                    if closed_paren {
-                        flush_buf(&mut buf, &mut spans, normal);
-                        let _ = url;
-                        spans.push(Span::styled(label_text, link));
-                        continue;
-                    }
-                }
-                // Not a link — restore.
-                chars = saved_iter;
-                buf.push('[');
-            }
-            _ => buf.push(c),
-        }
-    }
-    flush_buf(&mut buf, &mut spans, normal);
-    spans
-}
-
-/// Word-wrap a plain string into multiple lines of at most `max_width`
-/// display columns. Wraps at whitespace boundaries; falls back to a
-/// hard cut if a single token exceeds the width.
-fn wrap_text(s: &str, max_width: usize) -> Vec<String> {
-    if max_width == 0 {
-        return vec![s.to_string()];
-    }
-    if console::measure_text_width(s) <= max_width {
-        return vec![s.to_string()];
-    }
-    let mut lines: Vec<String> = vec![String::new()];
-    let mut cur_w = 0usize;
-    for token in split_into_tokens(s) {
-        let tw = console::measure_text_width(&token);
-        let is_space = token.chars().all(char::is_whitespace);
-        if cur_w + tw > max_width && cur_w > 0 {
-            lines.push(String::new());
-            cur_w = 0;
-            if is_space {
-                continue;
-            }
-        }
-        if tw > max_width {
-            // Token alone is wider than the line — hard split it.
-            for ch in token.chars() {
-                let cw = console::measure_text_width(&ch.to_string());
-                if cur_w + cw > max_width && cur_w > 0 {
-                    lines.push(String::new());
-                    cur_w = 0;
-                }
-                lines.last_mut().unwrap().push(ch);
-                cur_w += cw;
-            }
-        } else {
-            lines.last_mut().unwrap().push_str(&token);
-            cur_w += tw;
-        }
-    }
-    lines
-}
-
-/// Same as `wrap_text` but for an already-styled span list. Preserves
-/// each span's style across wraps.
-fn wrap_styled_spans(
+/// Word-wrap a styled span list into multiple visual lines fitting
+/// within `max_width` display columns. Each span's style is preserved
+/// across wraps.
+pub(crate) fn wrap_styled_spans(
     spans: Vec<Span<'static>>,
     max_width: usize,
 ) -> Vec<Vec<Span<'static>>> {
@@ -3161,51 +4225,6 @@ fn split_into_tokens(s: &str) -> Vec<String> {
     }
     if !current.is_empty() {
         out.push(current);
-    }
-    out
-}
-
-/// Best-effort HTML → plain text for PR / comment bodies. GitHub
-/// Flavoured Markdown allows inline HTML (especially `<a href>` from
-/// suggestion footers and tip blocks) which renders as literal tag
-/// soup in a TUI. We:
-/// - Replace `<a href="X">label</a>` with just `label`.
-/// - Replace `<br>` / `<br/>` with `\n`.
-/// - Strip every other `<…>` tag.
-/// - Leave HTML entities like `&amp;` alone for now (rare in commit/PR bodies).
-fn strip_html(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        if c != '<' {
-            out.push(c);
-            continue;
-        }
-        // Find the matching '>' in the remaining string.
-        let rest = &s[i + 1..];
-        let close = match rest.find('>') {
-            Some(c) => c,
-            None => {
-                out.push('<');
-                continue;
-            }
-        };
-        let tag_inner = &rest[..close];
-        let lower = tag_inner.to_ascii_lowercase();
-        let stripped = lower.trim();
-        // <br> / <br/> become real line breaks.
-        if stripped == "br" || stripped == "br/" || stripped == "br /" {
-            out.push('\n');
-        }
-        // Skip past the '>' — consume chars until we pass that byte index.
-        // `i + 1 + close + 1` is the absolute byte position just after '>'.
-        let target = i + 1 + close + 1;
-        while let Some(&(j, _)) = chars.peek() {
-            if j >= target {
-                break;
-            }
-            chars.next();
-        }
     }
     out
 }

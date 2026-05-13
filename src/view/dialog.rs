@@ -65,6 +65,9 @@ impl<'a> DialogView<'a> {
             DialogKind::Rebase { .. } => (vec![false, false], 0),
             DialogKind::Reset { .. } => (vec![], 1),
             DialogKind::Squash { .. } => (vec![], 0),
+            // Default to "squash" — by far the most common choice when
+            // merging a PR in a team workflow.
+            DialogKind::MergePullRequest { .. } => (vec![], 1),
             DialogKind::PushBranch { .. } => (vec![false], 0),
             DialogKind::Checkout { .. } => (vec![false], 0),
             DialogKind::RenameBranch { .. } => (vec![], 0),
@@ -76,6 +79,7 @@ impl<'a> DialogView<'a> {
             DialogKind::CleanUntracked => (vec![], 0),
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
+            DialogKind::ConfirmDeleteComment { .. } => (vec![], 0),
             DialogKind::AddWorktree => (vec![false], 0),
             // Two radio options: 0=Stash, 1=Discard. Default to Stash (safer).
             DialogKind::CheckoutHasLocalChanges { .. } => (vec![], 0),
@@ -163,6 +167,7 @@ impl<'a> DialogView<'a> {
     fn radio_count(&self) -> usize {
         match &self.kind {
             DialogKind::Reset { .. } => 3,
+            DialogKind::MergePullRequest { .. } => 3,
             DialogKind::ChooseRemote { remotes, .. } => remotes.len(),
             DialogKind::SetUpstream { remotes, .. } => remotes.len(),
             DialogKind::CheckoutHasLocalChanges { .. } => 2,
@@ -920,6 +925,26 @@ impl<'a> DialogView<'a> {
                 self.radio_rows.push(lines.len());
                 lines.push(self.radio_line(2, "Hard  — Discard all changes"));
             }
+            DialogKind::MergePullRequest { number, pr_title, .. } => {
+                lines.push(info_line(
+                    "Merge PR:",
+                    &format!("#{} {}", number, pr_title),
+                    dim_fg,
+                    yellow,
+                ));
+                lines.push(Line::from(""));
+                lines.push(label_line("Method:", dim_fg));
+                self.radio_rows.push(lines.len());
+                lines.push(
+                    self.radio_line(0, "Merge commit — keep history of branch"),
+                );
+                self.radio_rows.push(lines.len());
+                lines.push(self.radio_line(1, "Squash — collapse into a single commit"));
+                self.radio_rows.push(lines.len());
+                lines.push(
+                    self.radio_line(2, "Rebase — replay each commit onto base"),
+                );
+            }
             DialogKind::RenameBranch { branch } => {
                 lines.push(info_line("Current:", branch, dim_fg, yellow));
                 lines.push(Line::from(""));
@@ -1039,6 +1064,50 @@ impl<'a> DialogView<'a> {
                 )));
                 lines.push(Line::from(""));
                 lines.push(warning_line("This action cannot be undone.", warn_fg));
+            }
+            DialogKind::ConfirmDeleteComment {
+                author,
+                body_preview,
+                ..
+            } => {
+                lines.push(Line::from(vec![
+                    Span::styled("Author: ", Style::default().fg(dim_fg)),
+                    Span::styled(
+                        format!("@{}", author),
+                        Style::default().fg(self.ctx.color_theme.list_name_fg),
+                    ),
+                ]));
+                lines.push(Line::from(""));
+                // Body preview — full markdown rendering (bold, italic,
+                // code, lists, blockquotes, links, GFM task lists) so
+                // what the user sees matches the actual comment they're
+                // deleting. Capped so the popup stays compact.
+                let avail = (inner_width as usize).saturating_sub(2);
+                const MAX_PREVIEW_LINES: usize = 6;
+                let theme = &self.ctx.color_theme;
+                let rendered = crate::view::pr::render_markdown_body(
+                    body_preview,
+                    theme,
+                    avail.max(1),
+                );
+                let overflowed = rendered.len() > MAX_PREVIEW_LINES;
+                for line_spans in rendered.into_iter().take(MAX_PREVIEW_LINES) {
+                    let mut row: Vec<Span<'static>> =
+                        vec![Span::raw("  ".to_string())];
+                    row.extend(line_spans);
+                    lines.push(Line::from(row));
+                }
+                if overflowed {
+                    lines.push(Line::from(Span::styled(
+                        "  …",
+                        Style::default().fg(dim_fg),
+                    )));
+                }
+                lines.push(Line::from(""));
+                lines.push(warning_line(
+                    "Delete this comment? This cannot be undone.",
+                    warn_fg,
+                ));
             }
             DialogKind::AddRemote => {
                 lines.push(label_line("Name:", dim_fg));
@@ -1220,6 +1289,7 @@ impl<'a> DialogView<'a> {
             DialogKind::Merge { .. } => " Merge ",
             DialogKind::Rebase { .. } => " Rebase ",
             DialogKind::Reset { .. } => " Reset ",
+            DialogKind::MergePullRequest { .. } => " Merge Pull Request ",
             DialogKind::RenameBranch { .. } => " Rename Branch ",
             DialogKind::DeleteBranch { .. } => " Delete Branch ",
             DialogKind::DeleteTag { .. } => " Delete Tag ",
@@ -1236,6 +1306,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmUnstageAll => " Unstage All ",
             DialogKind::ConfirmPopStash { .. } => " Pop Stash ",
             DialogKind::ConfirmDropStash { .. } => " Drop Stash ",
+            DialogKind::ConfirmDeleteComment { .. } => " Delete Comment ",
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
             DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
@@ -1449,7 +1520,11 @@ impl<'a> DialogView<'a> {
         let c_start = (start + validate_text.len() + spacing) as u16;
         let c_end = (start + validate_text.len() + spacing + cancel_text.len()) as u16;
 
-        let validate_style = if self.is_highlighted(DialogElement::Validate) {
+        // Buttons are mutually exclusive — only one can ever be the
+        // active target. Use `is_pointed_at` (mouse hover overrides
+        // keyboard focus) so we never paint both Validate and Cancel
+        // as selected at once.
+        let validate_style = if self.is_pointed_at(DialogElement::Validate) {
             Style::default()
                 .fg(theme.bg)
                 .bg(theme.status_success_fg)
@@ -1458,7 +1533,7 @@ impl<'a> DialogView<'a> {
             Style::default().fg(theme.status_success_fg)
         };
 
-        let cancel_style = if self.is_highlighted(DialogElement::Cancel) {
+        let cancel_style = if self.is_pointed_at(DialogElement::Cancel) {
             Style::default()
                 .fg(theme.bg)
                 .bg(theme.status_error_fg)
@@ -1587,6 +1662,20 @@ impl<'a> DialogView<'a> {
                     },
                 )
             }
+            DialogKind::MergePullRequest { number, .. } => {
+                let method = match self.dropdown_selected {
+                    0 => "merge",
+                    1 => "squash",
+                    2 => "rebase",
+                    _ => "squash",
+                };
+                (
+                    number.to_string(),
+                    GitAction::MergePullRequest {
+                        method: method.to_string(),
+                    },
+                )
+            }
             DialogKind::RenameBranch { branch } => {
                 if self.input_value.trim().is_empty() {
                     self.tx
@@ -1654,6 +1743,18 @@ impl<'a> DialogView<'a> {
             DialogKind::CleanUntracked => (String::new(), GitAction::CleanUntracked),
             DialogKind::ConfirmPopStash { stash_ref } => (stash_ref.clone(), GitAction::PopStash),
             DialogKind::ConfirmDropStash { stash_ref } => (stash_ref.clone(), GitAction::DropStash),
+            DialogKind::ConfirmDeleteComment {
+                pr_number,
+                comment_id,
+                is_review,
+                ..
+            } => (
+                comment_id.to_string(),
+                GitAction::DeletePrComment {
+                    pr_number: *pr_number,
+                    is_review: *is_review,
+                },
+            ),
             DialogKind::AddRemote => {
                 if self.input_value.trim().is_empty() {
                     self.tx
@@ -1820,6 +1921,7 @@ fn info_line(label: &str, value: &str, label_fg: Color, value_fg: Color) -> Line
         Span::styled(value.to_string(), Style::default().fg(value_fg)),
     ])
 }
+
 
 fn label_line(label: &str, color: Color) -> Line<'static> {
     Line::from(Span::styled(
