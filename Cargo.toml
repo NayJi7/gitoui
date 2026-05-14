@@ -1,6 +1,6 @@
 [package]
 name = "gitoui"
-version = "0.1.0"
+version = "0.1.1"
 description = "Interactive Git client for the terminal"
 authors = ["NayJi7 <naayji7@gmail.com>"]
 homepage = "https://github.com/NayJi7/gitoui"
