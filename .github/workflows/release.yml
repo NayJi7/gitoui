@@ -40,6 +40,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          # macOS runners stash `rustup-init` under the name `cargo`
+          # in the bin cache. On restore that shadows the real cargo
+          # binary, so `cargo build` errors with "unexpected argument".
+          cache-bin: false
       - name: Install cross (Linux cross-compile only)
         if: matrix.cross
         uses: taiki-e/install-action@v2

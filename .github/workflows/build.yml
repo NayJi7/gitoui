@@ -25,6 +25,13 @@ jobs:
           toolchain: ${{ matrix.versions }}
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The default `cache-bin: true` caches ~/.cargo/bin, which on
+          # macOS runners ends up storing `rustup-init` under the name
+          # `cargo`. On restore, `cargo build` is then interpreted as
+          # `rustup-init build` → "unexpected argument 'build'". Skip
+          # caching the bin dir so rustup keeps its real shims.
+          cache-bin: false
       - name: Version
         run: |
           rustc --version
@@ -71,6 +78,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          # See lint job — avoid the macOS cargo/rustup-init collision.
+          cache-bin: false
       - name: Install cross (Linux cross-compile only)
         if: matrix.cross
         uses: taiki-e/install-action@v2
