@@ -1,5 +1,5 @@
 name: Release
-  
+
 on:
   push:
     tags:
@@ -11,43 +11,58 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        targets:
+        include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            cross: false
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            cross: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            cross: true
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
+            cross: false
           - target: aarch64-apple-darwin
             os: macos-latest
-    runs-on: ${{ matrix.targets.os }}
+            cross: false
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup
-        run: rustup target add ${{ matrix.targets.target }}
-      - name: Build
-        uses: houseabsolute/actions-rust-cross@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          command: build
-          target: ${{ matrix.targets.target }}
-          args: "--release"
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross (Linux cross-compile only)
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
       - name: Set release version
         run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> ${GITHUB_ENV}
       - name: Archive
-        run: tar -czf gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.targets.target }}.tar.gz -C target/${{ matrix.targets.target }}/release gitoui
+        run: tar -czf gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release gitoui
       - name: Checksum
-        run: shasum -a 256 gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.targets.target }}.tar.gz
+        run: shasum -a 256 gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.targets.target }}
-          path: gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.targets.target }}.tar.gz
+          name: release-${{ matrix.target }}
+          path: gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
   release:
     permissions:

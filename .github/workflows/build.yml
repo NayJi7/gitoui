@@ -42,27 +42,44 @@ jobs:
 
   build:
     strategy:
+      fail-fast: false
       matrix:
-        # x86_64-unknown-linux-gnu build is included in the lint job, so skip it here
-        targets:
+        include:
+          # x86_64-unknown-linux-gnu is covered by the `lint` job above —
+          # skip it here to keep CI minutes manageable.
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            cross: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            cross: true
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
+            cross: true
+          # macOS — Apple Silicon runners ship both arches' SDKs, so x86_64
+          # and aarch64 are both native enough for plain `cargo build`.
           - target: x86_64-apple-darwin
             os: macos-latest
+            cross: false
           - target: aarch64-apple-darwin
             os: macos-latest
-    runs-on: ${{ matrix.targets.os }}
+            cross: false
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup
-        run: rustup target add ${{ matrix.targets.target }}
-      - name: Build
-        uses: houseabsolute/actions-rust-cross@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          command: build
-          target: ${{ matrix.targets.target }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross (Linux cross-compile only)
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --target ${{ matrix.target }}
+          else
+            cargo build --target ${{ matrix.target }}
+          fi
