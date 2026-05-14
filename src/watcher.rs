@@ -87,15 +87,17 @@ struct GitFingerprint {
 
 impl GitFingerprint {
     fn capture(git_dir: &Path) -> Self {
-        let mut fp = GitFingerprint::default();
-        fp.head = fs::read(git_dir.join("HEAD")).ok();
-        fp.packed_refs = fs::read(git_dir.join("packed-refs")).ok();
-        fp.merge_head = fs::read(git_dir.join("MERGE_HEAD")).ok();
-        fp.cherry_pick_head = fs::read(git_dir.join("CHERRY_PICK_HEAD")).ok();
-        fp.rebase_head = fs::read(git_dir.join("REBASE_HEAD")).ok();
-        fp.index_mtime = fs::metadata(git_dir.join("index"))
-            .and_then(|m| m.modified())
-            .ok();
+        let mut fp = GitFingerprint {
+            head: fs::read(git_dir.join("HEAD")).ok(),
+            packed_refs: fs::read(git_dir.join("packed-refs")).ok(),
+            merge_head: fs::read(git_dir.join("MERGE_HEAD")).ok(),
+            cherry_pick_head: fs::read(git_dir.join("CHERRY_PICK_HEAD")).ok(),
+            rebase_head: fs::read(git_dir.join("REBASE_HEAD")).ok(),
+            index_mtime: fs::metadata(git_dir.join("index"))
+                .and_then(|m| m.modified())
+                .ok(),
+            ..GitFingerprint::default()
+        };
 
         // Walk refs/ recursively. Tiny in practice (one file per branch/tag).
         let refs_root = git_dir.join("refs");

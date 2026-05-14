@@ -163,7 +163,7 @@ impl LayoutBranch {
     }
 }
 
-fn load_commits<'a>(commits: &[&'a Commit], _repository: &Repository) -> Vec<LayoutVertex> {
+fn load_commits(commits: &[&Commit], _repository: &Repository) -> Vec<LayoutVertex> {
     // Build hash → index map
     let mut hash_to_id: FxHashMap<&CommitHash, usize> = FxHashMap::default();
     for (i, c) in commits.iter().enumerate() {
@@ -227,7 +227,7 @@ fn get_available_colour(_start_at: usize, available_colours: &[usize]) -> usize 
 
 fn determine_path(
     start_at: usize,
-    vertices: &mut Vec<LayoutVertex>,
+    vertices: &mut [LayoutVertex],
     branches: &mut Vec<LayoutBranch>,
     available_colours: &mut Vec<usize>,
 ) {

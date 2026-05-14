@@ -194,7 +194,8 @@ fn main() {
     );
 
     println!("\n== LOCAL HELPERS ==");
-    let _tpl = load_first_template(&coords);
+    let repo_path = std::env::current_dir().expect("cwd");
+    let _tpl = load_first_template(&repo_path);
     check("load_first_template", true, "(returns Option — no crash)");
 
     println!("\n=== RESULT: {} pass / {} fail ===", pass, fail);

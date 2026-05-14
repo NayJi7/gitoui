@@ -838,7 +838,7 @@ pub(crate) fn load_first_template_at(
                 let mut files: Vec<_> = entries
                     .flatten()
                     .filter(|e| {
-                        e.path().extension().map_or(false, |x| {
+                        e.path().extension().is_some_and(|x| {
                             x == "md" || x == "markdown" || x == "yml" || x == "yaml"
                         })
                     })

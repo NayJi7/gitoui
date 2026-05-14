@@ -767,10 +767,6 @@ impl CommitDetail<'_> {
             .collect()
     }
 
-    fn empty_line(&self) -> Line<'_> {
-        Line::raw("")
-    }
-
     fn divider_line(&self, width: usize) -> Line<'_> {
         Line::from("─".repeat(width).fg(self.ctx.color_theme.divider_fg))
     }

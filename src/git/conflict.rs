@@ -18,9 +18,10 @@
 use std::path::Path;
 
 /// Which side of a conflict the user wants to keep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HunkResolution {
     /// No decision yet — file is not safe to save.
+    #[default]
     Unresolved,
     /// Keep only `ours` (HEAD side).
     Ours,
@@ -30,12 +31,6 @@ pub enum HunkResolution {
     BothOursFirst,
     /// Keep both, theirs first then ours.
     BothTheirsFirst,
-}
-
-impl Default for HunkResolution {
-    fn default() -> Self {
-        HunkResolution::Unresolved
-    }
 }
 
 /// A single `<<<<<<<` … `>>>>>>>` conflict region in a file.
@@ -231,7 +226,6 @@ pub fn parse_conflict_text(path: &str, text: &str) -> ConflictFile {
                 if strip_marker_prefix(l, '>').is_some() {
                     // Malformed: closing without a separator. Treat ours as theirs-end.
                     theirs_label = strip_marker_prefix(l, '>').unwrap_or_default();
-                    i += 1;
                     segments.push(FileSegment::Hunk(ConflictHunk {
                         ours,
                         base: None,
@@ -250,14 +244,14 @@ pub fn parse_conflict_text(path: &str, text: &str) -> ConflictFile {
             }
 
             // Phase 2 (diff3 only): accumulate base lines until =======.
-            if base.is_some() {
+            if let Some(base_lines) = base.as_mut() {
                 while i < last_idx {
                     let l = lines[i];
                     if strip_marker_prefix(l, '=').is_some() {
                         i += 1;
                         break;
                     }
-                    base.as_mut().unwrap().push(l.to_string());
+                    base_lines.push(l.to_string());
                     i += 1;
                 }
             }

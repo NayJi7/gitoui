@@ -214,23 +214,21 @@ impl<'a> ConfigView<'a> {
         let event = event_with_count.event;
         let count = event_with_count.count;
         match event {
-            UserEvent::NavigateUp | UserEvent::SelectUp => {
-                if self.selected > 0 {
+            UserEvent::NavigateUp | UserEvent::SelectUp if self.selected > 0 => {
+                self.selected -= 1;
+                if self.selected == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
                     self.selected -= 1;
-                    if self.selected == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
-                        self.selected -= 1;
-                    }
                 }
             }
-            UserEvent::NavigateDown | UserEvent::SelectDown => {
-                if self.selected + 1 < CONFIG_ITEM_COUNT {
-                    self.selected += 1;
-                    if self.selected == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
-                        if self.selected + 1 < CONFIG_ITEM_COUNT {
-                            self.selected += 1;
-                        } else {
-                            self.selected -= 1;
-                        }
+            UserEvent::NavigateDown | UserEvent::SelectDown
+                if self.selected + 1 < CONFIG_ITEM_COUNT =>
+            {
+                self.selected += 1;
+                if self.selected == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
+                    if self.selected + 1 < CONFIG_ITEM_COUNT {
+                        self.selected += 1;
+                    } else {
+                        self.selected -= 1;
                     }
                 }
             }
@@ -1785,8 +1783,10 @@ mod tests {
 
     #[test]
     fn github_auth_pending_description_includes_copy_reopen_hint() {
-        let mut state = GithubAuthState::default();
-        state.message = Some("Enter EB39-EEF2 at https://github.com/login/device".into());
+        let state = GithubAuthState {
+            message: Some("Enter EB39-EEF2 at https://github.com/login/device".into()),
+            ..GithubAuthState::default()
+        };
         let description = super::github_auth_description(&state, true);
 
         assert!(description.contains("Enter EB39-EEF2 at https://github.com/login/device"));

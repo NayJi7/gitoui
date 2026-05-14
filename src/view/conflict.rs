@@ -217,7 +217,7 @@ impl<'a> ConflictView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
-        let parts = vec![
+        let parts = [
             "o:ours".to_string(),
             "t:theirs".to_string(),
             "b:both".to_string(),
@@ -996,12 +996,11 @@ impl<'a> ConflictView<'a> {
     }
 }
 
-/// Pre-rendered line carrying both the styled Ratatui `Line` and the metadata
-/// the scroll/mouse logic needs (current-hunk position, owning hunk index).
+/// Pre-rendered line carrying both the styled Ratatui `Line` and the
+/// owning hunk index, needed by the scroll/mouse logic.
 #[derive(Clone, Debug)]
 struct RenderedLine {
     line: Line<'static>,
-    is_current_hunk: bool,
     /// Hunk this line belongs to (None for context / placeholders).
     hunk_idx: Option<usize>,
 }
@@ -1093,7 +1092,6 @@ fn make_line(
     }
     RenderedLine {
         line: Line::from(spans),
-        is_current_hunk: matches!(state, HunkState::Current),
         hunk_idx,
     }
 }
@@ -1167,7 +1165,6 @@ fn make_annotated_line(
     }
     RenderedLine {
         line: Line::from(spans),
-        is_current_hunk: matches!(origin, LineOrigin::Unresolved),
         hunk_idx,
     }
 }

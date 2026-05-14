@@ -119,29 +119,23 @@ impl<'a> UncommittedView<'a> {
                     }
                 }
             }
-            UserEvent::StageAll => {
-                if !self.unstaged.is_empty() || !self.untracked.is_empty() {
-                    self.tx
-                        .send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
+            UserEvent::StageAll if (!self.unstaged.is_empty() || !self.untracked.is_empty()) => {
+                self.tx
+                    .send(AppEvent::OpenDialog(DialogKind::ConfirmStageAll));
+            }
+            UserEvent::Unstage if self.state.section == UncommittedSection::Staged => {
+                if let Some(file) =
+                    self.state
+                        .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                {
+                    self.tx.send(AppEvent::UnstageFile {
+                        file: file.path.clone(),
+                    });
                 }
             }
-            UserEvent::Unstage => {
-                if self.state.section == UncommittedSection::Staged {
-                    if let Some(file) =
-                        self.state
-                            .selected_file(&self.unstaged, &self.staged, &self.untracked)
-                    {
-                        self.tx.send(AppEvent::UnstageFile {
-                            file: file.path.clone(),
-                        });
-                    }
-                }
-            }
-            UserEvent::UnstageAll | UserEvent::Pull => {
-                if !self.staged.is_empty() {
-                    self.tx
-                        .send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
-                }
+            UserEvent::UnstageAll | UserEvent::Pull if !self.staged.is_empty() => {
+                self.tx
+                    .send(AppEvent::OpenDialog(DialogKind::ConfirmUnstageAll));
             }
             UserEvent::Discard => {
                 if let Some(file) =
@@ -154,11 +148,9 @@ impl<'a> UncommittedView<'a> {
                         }));
                 }
             }
-            UserEvent::DiscardAll => {
-                if !self.unstaged.is_empty() || !self.staged.is_empty() {
-                    self.tx
-                        .send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
-                }
+            UserEvent::DiscardAll if (!self.unstaged.is_empty() || !self.staged.is_empty()) => {
+                self.tx
+                    .send(AppEvent::OpenDialog(DialogKind::ConfirmDiscardAll));
             }
             UserEvent::Stash | UserEvent::Reset => {
                 self.tx

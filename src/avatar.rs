@@ -540,7 +540,7 @@ fn fallback_avatar_png(seed: &str) -> Vec<u8> {
         let dy = y as f32 - center;
         if dx * dx + dy * dy > radius_sq {
             *pixel = Rgba([0, 0, 0, 0]);
-        } else if ((x / 16 + y / 16 + digest[((x / 16) % 16) as usize] as u32) % 3) == 0 {
+        } else if (x / 16 + y / 16 + digest[((x / 16) % 16) as usize] as u32).is_multiple_of(3) {
             *pixel = Rgba(fg);
         } else {
             *pixel = Rgba(bg);
@@ -693,8 +693,8 @@ fn prepare_avatar_cells_from_image(image: &RgbaImage, cell_width: usize) -> Opti
         let x_start = (column as u32 * width) / cell_width as u32;
         let x_end = ((column as u32 + 1) * width / cell_width as u32).max(x_start + 1);
         let y_mid = height / 2;
-        let top = average_region(&image, x_start, x_end, 0, y_mid.max(1));
-        let bottom = average_region(&image, x_start, x_end, y_mid, height);
+        let top = average_region(image, x_start, x_end, 0, y_mid.max(1));
+        let bottom = average_region(image, x_start, x_end, y_mid, height);
         cells.push(PreparedImageCell::new(
             "▀".to_string(),
             Style::default()

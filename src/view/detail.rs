@@ -691,19 +691,19 @@ impl<'a> DetailView<'a> {
         if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
             match change {
                 FileChange::Add { path, .. } | FileChange::Modify { path, .. } => {
-                    let _ = self.tx.send(AppEvent::OpenFileDiff {
+                    self.tx.send(AppEvent::OpenFileDiff {
                         hash: self.commit.commit_hash.as_str().to_string(),
                         file_path: path.clone(),
                     });
                 }
                 FileChange::Move { to, .. } => {
-                    let _ = self.tx.send(AppEvent::OpenFileDiff {
+                    self.tx.send(AppEvent::OpenFileDiff {
                         hash: self.commit.commit_hash.as_str().to_string(),
                         file_path: to.clone(),
                     });
                 }
                 FileChange::Delete { path, .. } => {
-                    let _ = self.tx.send(AppEvent::OpenFileDiff {
+                    self.tx.send(AppEvent::OpenFileDiff {
                         hash: self.commit.commit_hash.as_str().to_string(),
                         file_path: path.clone(),
                     });

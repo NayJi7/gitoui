@@ -268,7 +268,6 @@ pub fn squash_with_parent(repo: &Path, target_hash: &str) -> Result<RebaseOutcom
         return Err(String::from_utf8_lossy(&parents.stderr).trim().to_string());
     }
     let parent_count = String::from_utf8_lossy(&parents.stdout)
-        .trim()
         .split_whitespace()
         .count()
         .saturating_sub(1);

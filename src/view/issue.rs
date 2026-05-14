@@ -29,10 +29,9 @@ use crate::{
     github::RepoCoords,
     view::pr::{
         build_body_prefix, build_junction_prefix, cursor_screen_pos, fit_cell,
-        label_chip_spans_local, paint_login_avatar, parse_hex_color, push_comment_card,
-        render_markdown_body, short_label_chip_spans, word_left_boundary, word_right_boundary,
-        wrap_styled_spans, AvatarSlot, CommentAction, CommentCardInput, MERGED_PURPLE,
-        TREE_LEVEL_WIDTH,
+        label_chip_spans_local, parse_hex_color, push_comment_card, render_markdown_body,
+        short_label_chip_spans, word_left_boundary, word_right_boundary, wrap_styled_spans,
+        AvatarSlot, CommentAction, CommentCardInput, MERGED_PURPLE, TREE_LEVEL_WIDTH,
     },
 };
 
@@ -868,21 +867,15 @@ impl<'a> IssuesView<'a> {
             KeyCode::Esc => {
                 self.tx.send(AppEvent::CloseIssues);
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.hovered > 0 {
-                    self.hovered -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k') if self.hovered > 0 => {
+                self.hovered -= 1;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.hovered + 1 < filtered_len {
-                    self.hovered += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j') if self.hovered + 1 < filtered_len => {
+                self.hovered += 1;
             }
             KeyCode::Home | KeyCode::Char('g') => self.hovered = 0,
-            KeyCode::End | KeyCode::Char('G') => {
-                if filtered_len > 0 {
-                    self.hovered = filtered_len - 1;
-                }
+            KeyCode::End | KeyCode::Char('G') if filtered_len > 0 => {
+                self.hovered = filtered_len - 1;
             }
             // Tab no longer cycles filter — ←/→ owns that (via the
             // UserEvent dispatch in `handle_event` above). Tab can
@@ -902,17 +895,19 @@ impl<'a> IssuesView<'a> {
                 self.opened_issue_number = None;
                 self.active_tab = Tab::Conversation;
             }
-            KeyCode::Up | KeyCode::Char('k') if matches!(self.active_tab, Tab::Conversation) => {
-                if self.conversation_selected > 0 {
-                    self.conversation_selected -= 1;
-                    self.conversation_scroll_to_selected = true;
-                }
+            KeyCode::Up | KeyCode::Char('k')
+                if matches!(self.active_tab, Tab::Conversation)
+                    && self.conversation_selected > 0 =>
+            {
+                self.conversation_selected -= 1;
+                self.conversation_scroll_to_selected = true;
             }
-            KeyCode::Down | KeyCode::Char('j') if matches!(self.active_tab, Tab::Conversation) => {
-                if self.conversation_selected + 1 < comment_count {
-                    self.conversation_selected += 1;
-                    self.conversation_scroll_to_selected = true;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if matches!(self.active_tab, Tab::Conversation)
+                    && self.conversation_selected + 1 < comment_count =>
+            {
+                self.conversation_selected += 1;
+                self.conversation_scroll_to_selected = true;
             }
             KeyCode::Home | KeyCode::Char('g') if matches!(self.active_tab, Tab::Conversation) => {
                 self.conversation_selected = 0;
@@ -1452,19 +1447,18 @@ impl<'a> IssuesView<'a> {
         }
         // Walk chars from line_start until we hit col_in_view or `\n`.
         let mut byte_pos = line_start;
-        let mut col_walked: usize = 0;
-        for (offset, ch) in buf[line_start..].char_indices() {
+        for (col_walked, (offset, ch)) in buf[line_start..].char_indices().enumerate() {
             if ch == '\n' || col_walked >= col_in_view as usize {
                 byte_pos = line_start + offset;
                 break;
             }
-            col_walked += 1;
             byte_pos = line_start + offset + ch.len_utf8();
         }
         c.body_cursor = byte_pos.min(buf.len());
         c.field = ComposeField::Body;
-        // Drop the borrow before calling the anchor helper.
-        drop(c);
+        // Release the borrow before calling the anchor helper (next
+        // call needs &mut self).
+        let _ = c;
         self.compose_body_anchor_to_cursor();
     }
 
@@ -1839,13 +1833,11 @@ impl<'a> IssuesView<'a> {
             return;
         }
         let mut byte_pos = line_start;
-        let mut col_walked = 0usize;
-        for (offset, ch) in ed.buffer[line_start..].char_indices() {
+        for (col_walked, (offset, ch)) in ed.buffer[line_start..].char_indices().enumerate() {
             if ch == '\n' || col_walked >= col_in_body {
                 byte_pos = line_start + offset;
                 break;
             }
-            col_walked += 1;
             byte_pos = line_start + offset + ch.len_utf8();
         }
         ed.cursor = byte_pos.min(ed.buffer.len());
@@ -1862,15 +1854,11 @@ impl<'a> IssuesView<'a> {
             KeyCode::Esc => {
                 self.reaction_picker = None;
             }
-            KeyCode::Left | KeyCode::Up => {
-                if picker.hovered > 0 {
-                    picker.hovered -= 1;
-                }
+            KeyCode::Left | KeyCode::Up if picker.hovered > 0 => {
+                picker.hovered -= 1;
             }
-            KeyCode::Right | KeyCode::Down => {
-                if picker.hovered + 1 < total {
-                    picker.hovered += 1;
-                }
+            KeyCode::Right | KeyCode::Down if picker.hovered + 1 < total => {
+                picker.hovered += 1;
             }
             KeyCode::Home => picker.hovered = 0,
             KeyCode::End => picker.hovered = total - 1,
@@ -1928,7 +1916,7 @@ impl<'a> IssuesView<'a> {
                 kind: MentionKind::Pr,
             });
         }
-        out.sort_by(|a, b| b.number.cmp(&a.number));
+        out.sort_by_key(|i| std::cmp::Reverse(i.number));
         out
     }
 
@@ -2509,7 +2497,7 @@ impl<'a> IssuesView<'a> {
         let is_me = self
             .me_login
             .as_deref()
-            .map_or(false, |me| me == entry.author);
+            .is_some_and(|me| me == entry.author);
         let Some(comment_id) = entry.id else {
             return;
         };
@@ -2542,7 +2530,7 @@ impl<'a> IssuesView<'a> {
         let is_me = self
             .me_login
             .as_deref()
-            .map_or(false, |me| me == entry.author);
+            .is_some_and(|me| me == entry.author);
         let Some(comment_id) = entry.id else {
             return;
         };
@@ -2952,11 +2940,9 @@ impl<'a> IssuesView<'a> {
         // Comment editor takes priority — click inside it positions
         // the cursor; click outside dismisses nothing (so the user
         // can still scan the conversation without losing their draft).
-        if self.comment_editor.is_some() {
-            if rect_contains(self.editor_body_area, col, row) {
-                self.editor_move_cursor_to_click(col, row);
-                return;
-            }
+        if self.comment_editor.is_some() && rect_contains(self.editor_body_area, col, row) {
+            self.editor_move_cursor_to_click(col, row);
+            return;
         }
         if self.reaction_picker.is_some() {
             let chosen = {
@@ -3732,7 +3718,7 @@ impl<'a> IssuesView<'a> {
 
         // Editor (when open) takes the bottom of the tab content.
         if self.comment_editor.is_some() {
-            let editor_h = tab_content_area.height.min(10).max(5);
+            let editor_h = tab_content_area.height.clamp(5, 10);
             let split = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Min(1), Constraint::Length(editor_h)])
@@ -3966,7 +3952,7 @@ impl<'a> IssuesView<'a> {
         self.conversation_avatar_slots.clear();
         let me_login = self.me_login.clone();
 
-        let is_me_top = me_login.as_deref().map_or(false, |me| me == detail.author);
+        let is_me_top = me_login.as_deref().is_some_and(|me| me == detail.author);
         let idx0_first = lines.len();
         // Pre-compute whether the body has at least one resolvable
         // `#N` ref so we can advertise the `↵:open ref` shortcut on the
@@ -4036,7 +4022,7 @@ impl<'a> IssuesView<'a> {
                     lines.push(Line::from(""));
                 }
                 let first = lines.len();
-                let is_me = me_login.as_deref().map_or(false, |me| me == c.author);
+                let is_me = me_login.as_deref().is_some_and(|me| me == c.author);
                 let selected = self.conversation_selected == idx;
                 let mut shortcuts: Vec<&'static str> = Vec::new();
                 if selected {
@@ -4321,7 +4307,7 @@ impl<'a> IssuesView<'a> {
             }
         }
 
-        out.sort_by(|a, b| b.number.cmp(&a.number));
+        out.sort_by_key(|r| std::cmp::Reverse(r.number));
         out
     }
 
@@ -5144,19 +5130,20 @@ impl<'a> IssuesView<'a> {
                     self.comment_editor_cursor_pos = Some((cx, title_rect.y));
                 }
             }
-            ComposeField::Body if body_focused => {
+            ComposeField::Body
+                if body_focused
                 // Only place the terminal cursor when its logical
                 // row is INSIDE the visible scroll window — without
                 // this guard `saturating_sub(scroll)` makes the
                 // cursor visually jump to row 0 of the body whenever
                 // we scroll past it, which the user perceives as
                 // "the scroll moved my cursor".
-                if cursor_row >= scroll && cursor_row < scroll + body_inner.height {
-                    let cx = body_inner.x + cursor_col;
-                    let cy = body_inner.y + (cursor_row - scroll);
-                    if cx < body_inner.x + body_inner.width {
-                        self.comment_editor_cursor_pos = Some((cx, cy));
-                    }
+                && cursor_row >= scroll && cursor_row < scroll + body_inner.height =>
+            {
+                let cx = body_inner.x + cursor_col;
+                let cy = body_inner.y + (cursor_row - scroll);
+                if cx < body_inner.x + body_inner.width {
+                    self.comment_editor_cursor_pos = Some((cx, cy));
                 }
             }
             _ => {}
@@ -5382,8 +5369,8 @@ pub(crate) fn filter_mention_items_pub(query: &str, all: &[MentionItem]) -> Vec<
             .filter(|m| matches!(m.kind, MentionKind::Pr))
             .cloned()
             .collect();
-        issues.sort_by(|a, b| b.number.cmp(&a.number));
-        prs.sort_by(|a, b| b.number.cmp(&a.number));
+        issues.sort_by_key(|m| std::cmp::Reverse(m.number));
+        prs.sort_by_key(|m| std::cmp::Reverse(m.number));
         let half = MAX_ITEMS / 2;
         let mut out: Vec<MentionItem> = Vec::new();
         out.extend(issues.iter().take(half).cloned());
@@ -5399,7 +5386,7 @@ pub(crate) fn filter_mention_items_pub(query: &str, all: &[MentionItem]) -> Vec<
                 .collect();
             out.extend(extra);
         }
-        out.sort_by(|a, b| b.number.cmp(&a.number));
+        out.sort_by_key(|m| std::cmp::Reverse(m.number));
         return out;
     }
     let q = query.to_lowercase();
@@ -5812,19 +5799,6 @@ fn rect_contains(rect: Option<Rect>, col: u16, row: u16) -> bool {
         return false;
     };
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
-}
-
-fn state_icon(
-    theme: &crate::color::ColorTheme,
-    state: IssueState,
-    reason: Option<IssueStateReason>,
-) -> Span<'static> {
-    let (icon, fg) = match (state, reason) {
-        (IssueState::Open, _) => ("●", theme.status_success_fg),
-        (IssueState::Closed, Some(IssueStateReason::NotPlanned)) => ("◌", theme.detail_label_fg),
-        (IssueState::Closed, _) => ("●", MERGED_PURPLE),
-    };
-    Span::styled(icon.to_string(), Style::default().fg(fg))
 }
 
 fn state_chip(

@@ -131,8 +131,8 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     if subcommand == "rebase" && lower.contains("invalid upstream") {
         return "Rebase: invalid upstream — that commit isn't reachable.".into();
     }
-    if (subcommand == "rebase"
-        && (lower.contains("would have no commits") || lower.contains("nothing to commit")))
+    if subcommand == "rebase"
+        && (lower.contains("would have no commits") || lower.contains("nothing to commit"))
     {
         return "Rebase would produce no commits — target equals current.".into();
     }
@@ -802,7 +802,7 @@ pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
     let mut is_first = true;
 
     for line in stdout.lines() {
-        if line.starts_with("worktree ") {
+        if let Some(rest) = line.strip_prefix("worktree ") {
             if let Some(path) = current_path.take() {
                 let is_current = is_first;
                 is_first = false;
@@ -815,11 +815,11 @@ pub fn list_worktrees(repo_path: &Path) -> Vec<WorktreeInfo> {
                 });
                 current_head.clear();
             }
-            current_path = Some(line["worktree ".len()..].to_string());
-        } else if line.starts_with("HEAD ") {
-            current_head = line["HEAD ".len()..].to_string();
-        } else if line.starts_with("branch ") {
-            current_branch = Some(line["branch ".len()..].to_string());
+            current_path = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("HEAD ") {
+            current_head = rest.to_string();
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            current_branch = Some(rest.to_string());
         }
     }
     if let Some(path) = current_path {

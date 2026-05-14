@@ -51,10 +51,6 @@ struct RowRect {
     item_idx: usize,
     /// Inner area row this entry occupies on screen.
     row: u16,
-    /// Whether the click range here cycles the action (the `[Pick]` tag)
-    /// or just selects the row.
-    action_col_start: u16,
-    action_col_end: u16,
     full_x: u16,
     full_x_end: u16,
 }
@@ -378,7 +374,6 @@ impl<'a> InteractiveRebaseView<'a> {
 
     /// Resume-mode handlers — these run only when the view is showing the
     /// recovery panel for an in-progress rebase.
-
     fn continue_rebase(&mut self) {
         match crate::git::rebase::continue_rebase(&self.repo_path) {
             Ok(crate::git::rebase::RebaseOutcome::Clean) => {
@@ -672,15 +667,11 @@ impl<'a> InteractiveRebaseView<'a> {
                     self.move_selection(1);
                 }
             }
-            UserEvent::NavigateLeft => {
-                if !self.grabbed {
-                    self.cycle_action(self.selected, false);
-                }
+            UserEvent::NavigateLeft if !self.grabbed => {
+                self.cycle_action(self.selected, false);
             }
-            UserEvent::NavigateRight => {
-                if !self.grabbed {
-                    self.cycle_action(self.selected, true);
-                }
+            UserEvent::NavigateRight if !self.grabbed => {
+                self.cycle_action(self.selected, true);
             }
             UserEvent::ScrollUp => {
                 self.scroll_delta = self.scroll_delta.saturating_sub(1);
@@ -1071,13 +1062,11 @@ impl<'a> InteractiveRebaseView<'a> {
         // not just Inline). Then apply scroll like render_inline does.
         let mut all_lines: Vec<Line<'static>> = Vec::new();
         let mut row_screen_rows: Vec<u16> = Vec::new();
-        let mut action_ranges: Vec<(u16, u16)> = Vec::new();
         let mut reword_doc_row: Option<u16> = None;
         for (i, item) in self.items.iter().enumerate() {
             let editing = matches!(&self.reword_editing, Some(r) if r.item_idx == i);
             row_screen_rows.push(all_lines.len() as u16);
-            let (line, action_range) = self.render_row(i, item, inner.width, false);
-            action_ranges.push(action_range);
+            let (line, _action_range) = self.render_row(i, item, inner.width, false);
             all_lines.push(line);
             if editing {
                 reword_doc_row = Some(all_lines.len() as u16);
@@ -1103,12 +1092,9 @@ impl<'a> InteractiveRebaseView<'a> {
             let r = doc_row as usize;
             if r >= start && r < end {
                 let screen = inner.y + (r - start) as u16;
-                let (acs, ace) = action_ranges[i];
                 self.row_rects.push(RowRect {
                     item_idx: i,
                     row: screen,
-                    action_col_start: inner.x + acs,
-                    action_col_end: inner.x + ace,
                     full_x: inner.x,
                     full_x_end: inner.x + inner.width,
                 });
@@ -1155,13 +1141,11 @@ impl<'a> InteractiveRebaseView<'a> {
         // reword editor (if any) so we can place the terminal cursor on
         // the right cell after rendering.
         let mut row_screen_rows: Vec<u16> = Vec::new();
-        let mut action_ranges: Vec<(u16, u16)> = Vec::new();
         let mut reword_doc_row: Option<u16> = None;
         for (i, item) in self.items.iter().enumerate() {
             let editing = matches!(&self.reword_editing, Some(r) if r.item_idx == i);
             row_screen_rows.push(lines.len() as u16);
-            let (line, action_range) = self.render_row(i, item, inner.width, true);
-            action_ranges.push(action_range);
+            let (line, _action_range) = self.render_row(i, item, inner.width, true);
             lines.push(line);
             lines.push(self.render_inline_description(item));
             if editing {
@@ -1189,12 +1173,9 @@ impl<'a> InteractiveRebaseView<'a> {
             let r = doc_row as usize;
             if r >= start && r < end {
                 let screen = inner.y + (r - start) as u16;
-                let (acs, ace) = action_ranges[i];
                 self.row_rects.push(RowRect {
                     item_idx: i,
                     row: screen,
-                    action_col_start: inner.x + acs,
-                    action_col_end: inner.x + ace,
                     full_x: inner.x,
                     full_x_end: inner.x + inner.width,
                 });
@@ -1247,17 +1228,6 @@ impl<'a> InteractiveRebaseView<'a> {
             visible.push(Line::raw(""));
         }
         f.render_widget(Paragraph::new(visible), inner);
-    }
-
-    fn compute_scroll_start(&self, visible_height: usize) -> usize {
-        let total = self.items.len();
-        if total <= visible_height {
-            return 0;
-        }
-        let want = self.selected.saturating_sub(visible_height / 4);
-        ((want as i32) + self.scroll_delta)
-            .max(0)
-            .min(total.saturating_sub(visible_height) as i32) as usize
     }
 
     /// Build a single rebase-todo row. Returns the Line and the column range

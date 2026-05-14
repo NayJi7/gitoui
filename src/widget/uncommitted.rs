@@ -640,7 +640,7 @@ impl<'a> UncommittedWidget<'a> {
             };
             let key_style = style.add_modifier(Modifier::BOLD);
             lines.push(Line::from(vec![
-                Span::styled(format!("{}", label), style),
+                Span::styled(label.to_string(), style),
                 Span::styled(format!(" ({})", key), key_style),
             ]));
         }

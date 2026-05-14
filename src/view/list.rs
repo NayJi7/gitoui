@@ -475,9 +475,9 @@ impl<'a> ListView<'a> {
                         self.clear_search_query();
                     }
                     if is_uncommitted {
-                        let _ = self.tx.send(AppEvent::OpenUncommitted);
+                        self.tx.send(AppEvent::OpenUncommitted);
                     } else {
-                        let _ = self.tx.send(AppEvent::OpenDetail);
+                        self.tx.send(AppEvent::OpenDetail);
                     }
                 }
             }

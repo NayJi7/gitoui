@@ -1964,7 +1964,7 @@ impl App<'_> {
         let popup_bg = theme.bg;
         for y in area.y..area.y + area.height {
             for x in area.x..area.x + area.width {
-                let cell = f.buffer_mut().get_mut(x, y);
+                let cell = &mut f.buffer_mut()[(x, y)];
                 cell.reset();
                 cell.set_style(Style::default().bg(popup_bg));
                 cell.set_char(' ');
@@ -2031,24 +2031,22 @@ impl App<'_> {
             let total = suggestions.len();
             let position_label = format!(" {}/{} ", end, total);
             // Drop it on the top border so it doesn't compete with content rows.
-            if let Some(_) = position_label.chars().next() {
+            if position_label.chars().next().is_some() {
                 let label_x = area.x
                     + area
                         .width
                         .saturating_sub(position_label.chars().count() as u16 + 2);
                 let label_y = area.y;
-                let mut x = label_x;
-                for c in position_label.chars() {
+                for (x, c) in (label_x..).zip(position_label.chars()) {
                     if x >= area.x + area.width {
                         break;
                     }
-                    f.buffer_mut().get_mut(x, label_y).set_char(c).set_style(
+                    f.buffer_mut()[(x, label_y)].set_char(c).set_style(
                         Style::default()
                             .fg(theme.list_head_fg)
                             .bg(theme.bg)
                             .add_modifier(ratatui::style::Modifier::BOLD),
                     );
-                    x += 1;
                 }
             }
         }
@@ -2493,10 +2491,7 @@ impl App<'_> {
                     // panel (fetch).
                     View::BranchDetail(_) => "⌘ r:fetch".into(),
                     View::TagDetail(_) => "⌘ r:fetch".into(),
-                    View::Uncommitted(_) => self
-                        .view
-                        .uncommitted_footer_hint()
-                        .unwrap_or_else(String::new),
+                    View::Uncommitted(_) => self.view.uncommitted_footer_hint().unwrap_or_default(),
                     View::FileHistory(_) => self
                         .view
                         .file_history_footer_hint()
@@ -3821,7 +3816,7 @@ impl<'a> App<'a> {
             .github_auth_state
             .token
             .as_ref()
-            .map_or(false, |t| !t.is_empty());
+            .is_some_and(|t| !t.is_empty());
         has_token && self.has_github_remote
     }
 
@@ -4636,7 +4631,7 @@ impl<'a> App<'a> {
             let tx = self.ec.sender();
             thread::spawn(move || {
                 thread::sleep(std::time::Duration::from_secs(3));
-                let _ = tx.send(AppEvent::Refresh(RefreshViewContext::List {
+                tx.send(AppEvent::Refresh(RefreshViewContext::List {
                     list_context: crate::view::ListRefreshViewContext {
                         commit_hash: String::new(),
                         selected: 0,
@@ -4654,7 +4649,7 @@ impl<'a> App<'a> {
         let tx = self.ec.sender();
         thread::spawn(move || {
             let _ = actions::fetch(&repo_path);
-            let _ = tx.send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+            tx.send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                 list_context: crate::view::ListRefreshViewContext {
                     commit_hash: String::new(),
                     selected: 0,
@@ -5116,10 +5111,10 @@ impl<'a> App<'a> {
                     } else {
                         msg
                     };
-                    let _ = tx.send(AppEvent::NotifySuccess(msg));
+                    tx.send(AppEvent::NotifySuccess(msg));
                 }
                 Err(msg) => {
-                    let _ = tx.send(AppEvent::NotifyError(msg));
+                    tx.send(AppEvent::NotifyError(msg));
                 }
             }
         });
@@ -5150,7 +5145,7 @@ impl<'a> App<'a> {
                     } else {
                         msg
                     };
-                    let _ = tx.send(AppEvent::Refresh(RefreshViewContext::List {
+                    tx.send(AppEvent::Refresh(RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
                             commit_hash: String::new(),
                             selected: 0,
@@ -5161,7 +5156,7 @@ impl<'a> App<'a> {
                     }));
                 }
                 Err(msg) => {
-                    let _ = tx.send(AppEvent::NotifyError(msg));
+                    tx.send(AppEvent::NotifyError(msg));
                 }
             },
         );
@@ -5219,11 +5214,7 @@ impl<'a> App<'a> {
         }
         let (result, success_label) = match action {
             GitAction::Checkout => {
-                let r = if target.starts_with("refs/stash") {
-                    actions::checkout_commit(repo_path, &target)
-                } else {
-                    actions::checkout_commit(repo_path, &target)
-                };
+                let r = actions::checkout_commit(repo_path, &target);
                 (r, None)
             }
             GitAction::CheckoutDiscard => {

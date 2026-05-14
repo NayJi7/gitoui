@@ -727,6 +727,11 @@ fn calc_corner_edge_drawing_pixels(
     pixels
 }
 
+// Per-row render hot path — every commit in the visible graph triggers
+// one call. The 13 args are genuinely independent inputs (geometry,
+// styling, state flags); bundling them into a struct just adds an
+// indirection without making the signature easier to read.
+#[allow(clippy::too_many_arguments)]
 pub fn calc_graph_row_image(
     commit_pos_x: usize,
     cell_count: usize,

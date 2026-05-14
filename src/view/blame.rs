@@ -311,11 +311,9 @@ impl<'a> BlameView<'a> {
                     self.focused_block = Some(0);
                 }
             }
-            UserEvent::GoToBottom => {
-                if !self.blocks.is_empty() {
-                    self.focused_block = Some(self.blocks.len() - 1);
-                    self.scroll_to_focused();
-                }
+            UserEvent::GoToBottom if !self.blocks.is_empty() => {
+                self.focused_block = Some(self.blocks.len() - 1);
+                self.scroll_to_focused();
             }
             UserEvent::HelpToggle => self.tx.send(AppEvent::OpenHelp),
             UserEvent::FileHistory => {

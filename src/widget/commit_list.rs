@@ -350,11 +350,8 @@ impl<'a> CommitListState<'a> {
         default_regex: bool,
     ) -> CommitListState<'a> {
         let total = commits.len();
-        let _has_uncommitted = commits.first().map_or(false, |c| c.is_uncommitted);
-        let commit_hash_set = commits
-            .iter()
-            .filter_map(|c| Some(&c.commit.commit_hash))
-            .collect();
+        let _has_uncommitted = commits.first().is_some_and(|c| c.is_uncommitted);
+        let commit_hash_set = commits.iter().map(|c| &c.commit.commit_hash).collect();
         let head_commit_hash = match head {
             Head::Detached { target } => Some(target.clone()),
             Head::Branch { name } => ref_name_to_commit_index_map
@@ -1377,7 +1374,7 @@ impl CommitList<'_> {
             let pad_x = area.left() + max_graph_width as u16;
             for i in 0..state.height.min(area.height as usize) {
                 let y = area.top() + i as u16;
-                let is_selected = i == state.selected
+                let _is_selected = i == state.selected
                     && state.hovered_branch.is_none()
                     && state.hovered_tag.is_none();
                 // Pad cell keeps the app background — selection starts at the │ marker
@@ -1410,7 +1407,7 @@ impl CommitList<'_> {
                         return;
                     };
                     let y = area.top() + i as u16;
-                    let is_selected = i == state_ref.selected
+                    let _is_selected = i == state_ref.selected
                         && state_ref.hovered_branch.is_none()
                         && state_ref.hovered_tag.is_none();
                     for (x, image_cell) in prepared_image
@@ -1673,7 +1670,7 @@ impl CommitList<'_> {
         // --- SELECTIVE PATH: only the selected row changed, re-render just the two affected rows ---
         if stable_matches && !selected_matches {
             let old_selected = state.avatar_prev_selected;
-            let clear_cell = self.ctx.image_protocol.clear_cell();
+            let _clear_cell = self.ctx.image_protocol.clear_cell();
             for (i, (_, commit_info)) in self.rendering_commit_info_iter(state).enumerate() {
                 if commit_info.is_uncommitted {
                     continue;
@@ -2097,7 +2094,7 @@ fn refs_spans<'a>(
         let is_hovered = if *is_tag {
             hovered_tag == Some(names[0])
         } else {
-            hovered_branch.map_or(false, |hb| names.iter().any(|n| *n == hb))
+            hovered_branch.is_some_and(|hb| names.contains(&hb))
         };
 
         let is_head_branch = if let Head::Branch { name: head_name } = head {
@@ -2121,26 +2118,16 @@ fn refs_spans<'a>(
             current_width += head_text_width;
         }
 
-        let style = if *is_tag {
-            if is_hovered {
-                Style::default()
-                    .fg(*fg)
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED)
-                    .add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default().fg(*fg).add_modifier(Modifier::BOLD)
-            }
+        // Tags and branches share the same style — `*is_tag` only changes
+        // the leading icon glyph (set below), not the text decoration.
+        let style = if is_hovered {
+            Style::default()
+                .fg(*fg)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::REVERSED)
         } else {
-            if is_hovered {
-                Style::default()
-                    .fg(*fg)
-                    .add_modifier(Modifier::BOLD)
-                    .add_modifier(Modifier::UNDERLINED)
-                    .add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default().fg(*fg).add_modifier(Modifier::BOLD)
-            }
+            Style::default().fg(*fg).add_modifier(Modifier::BOLD)
         };
 
         let icon_text = if *is_tag { "🏷  " } else { "⎇ " };
@@ -2265,7 +2252,7 @@ fn date_column_width(dates: &[String]) -> u16 {
         .map(|date| console::measure_text_width(date) as u16)
         .max()
         .unwrap_or(0);
-    (content_width + 2).max(4).min(DATE_MAX_WIDTH)
+    (content_width + 2).clamp(4, DATE_MAX_WIDTH)
 }
 
 fn column_header_text(col_type: &UserListColumnType, avatars_enabled: bool) -> &'static str {

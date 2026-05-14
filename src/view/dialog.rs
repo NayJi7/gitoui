@@ -204,12 +204,6 @@ impl<'a> DialogView<'a> {
         Self::has_input_for(&self.kind)
     }
 
-    fn has_second_input_field(&self) -> bool {
-        matches!(self.kind, DialogKind::AddRemote)
-            || (matches!(self.kind, DialogKind::AddTag { .. })
-                && self.checkboxes.first().copied().unwrap_or(false))
-    }
-
     fn radio_count(&self) -> usize {
         match &self.kind {
             DialogKind::Reset { .. } => 3,
@@ -1280,8 +1274,21 @@ impl<'a> DialogView<'a> {
                 lines.push(pr_header_line(*pr_number, pr_title, &self.ctx.color_theme));
                 lines.push(Line::from(""));
                 if all_users.is_empty() {
+                    // GitHub forbids the PR author from being a reviewer
+                    // of their own PR (HTTP 422 on request), so we filter
+                    // them out client-side. On a solo repo this leaves
+                    // the list empty — make that clear instead of the
+                    // vague "no users found".
                     lines.push(Line::from(Span::styled(
-                        "No assignable users found.".to_string(),
+                        "No reviewers available.".to_string(),
+                        Style::default().fg(dim_fg),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "The PR author can't be a reviewer of their own PR,".to_string(),
+                        Style::default().fg(dim_fg),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "and this repo has no other collaborators.".to_string(),
                         Style::default().fg(dim_fg),
                     )));
                 } else {
@@ -2225,7 +2232,7 @@ impl<'a> DialogView<'a> {
                         .send(AppEvent::NotifyError("Branch name cannot be empty".into()));
                     return;
                 }
-                let checkout = self.checkboxes.get(0).copied().unwrap_or(false);
+                let checkout = self.checkboxes.first().copied().unwrap_or(false);
                 (
                     target.clone(),
                     GitAction::CreateBranch {
@@ -2236,7 +2243,7 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::Checkout { target, .. } => (target.clone(), GitAction::Checkout),
             DialogKind::CherryPick { target } => {
-                let record_origin = self.checkboxes.get(0).copied().unwrap_or(false);
+                let record_origin = self.checkboxes.first().copied().unwrap_or(false);
                 let no_commit = self.checkboxes.get(1).copied().unwrap_or(false);
                 (
                     target.clone(),
@@ -2250,7 +2257,7 @@ impl<'a> DialogView<'a> {
             DialogKind::Drop { target } => (target.clone(), GitAction::Drop),
             DialogKind::Squash { target } => (target.clone(), GitAction::SquashWithParent),
             DialogKind::Merge { target, .. } => {
-                let no_ff = self.checkboxes.get(0).copied().unwrap_or(true);
+                let no_ff = self.checkboxes.first().copied().unwrap_or(true);
                 let squash = self.checkboxes.get(1).copied().unwrap_or(false);
                 let no_commit = self.checkboxes.get(2).copied().unwrap_or(false);
                 (
@@ -2263,7 +2270,7 @@ impl<'a> DialogView<'a> {
                 )
             }
             DialogKind::Rebase { target } => {
-                let interactive = self.checkboxes.get(0).copied().unwrap_or(false);
+                let interactive = self.checkboxes.first().copied().unwrap_or(false);
                 let ignore_date = self.checkboxes.get(1).copied().unwrap_or(false);
                 (
                     target.clone(),
@@ -2407,17 +2414,17 @@ impl<'a> DialogView<'a> {
                 )
             }
             DialogKind::DeleteBranch { branch, .. } => {
-                let force = self.checkboxes.get(0).copied().unwrap_or(false);
+                let force = self.checkboxes.first().copied().unwrap_or(false);
                 (branch.clone(), GitAction::DeleteBranch { force })
             }
             DialogKind::DeleteTag { tag } => (tag.clone(), GitAction::DeleteTag),
             DialogKind::PushTag { tag } => (tag.clone(), GitAction::PushTag),
             DialogKind::PullBranch { branch } => {
-                let rebase = self.checkboxes.get(0).copied().unwrap_or(false);
+                let rebase = self.checkboxes.first().copied().unwrap_or(false);
                 (branch.clone(), GitAction::PullBranch { rebase })
             }
             DialogKind::PushBranch { branch } => {
-                let force = self.checkboxes.get(0).copied().unwrap_or(false);
+                let force = self.checkboxes.first().copied().unwrap_or(false);
                 (branch.clone(), GitAction::PushBranch { force })
             }
             DialogKind::StashWithMessage => {
@@ -2426,7 +2433,7 @@ impl<'a> DialogView<'a> {
                 } else {
                     Some(self.input_value.clone())
                 };
-                let include_untracked = self.checkboxes.get(0).copied().unwrap_or(false);
+                let include_untracked = self.checkboxes.first().copied().unwrap_or(false);
                 (
                     String::new(),
                     GitAction::Stash {
@@ -2442,7 +2449,7 @@ impl<'a> DialogView<'a> {
                     ));
                     return;
                 }
-                let amend = self.checkboxes.get(0).copied().unwrap_or(false);
+                let amend = self.checkboxes.first().copied().unwrap_or(false);
                 (
                     String::new(),
                     GitAction::Commit {
@@ -2556,7 +2563,7 @@ impl<'a> DialogView<'a> {
                         .send(AppEvent::NotifyError("Name cannot be empty".into()));
                     return;
                 }
-                let checkout = self.checkboxes.get(0).copied().unwrap_or(false);
+                let checkout = self.checkboxes.first().copied().unwrap_or(false);
                 (String::new(), GitAction::AddWorktree { name, checkout })
             }
             DialogKind::CheckoutHasLocalChanges { target, .. } => {
@@ -2732,7 +2739,6 @@ fn wrap_description(text: &str, width: usize) -> Vec<String> {
             // hard-split the word.
             if !current.is_empty() {
                 out.push(std::mem::take(&mut current));
-                current_w = 0;
             }
             let mut buf = String::new();
             let mut buf_w = 0;
@@ -2751,7 +2757,6 @@ fn wrap_description(text: &str, width: usize) -> Vec<String> {
         let needed = if current_w == 0 { word_w } else { word_w + 1 };
         if current_w + needed > width {
             out.push(std::mem::take(&mut current));
-            current_w = 0;
             current.push_str(word);
             current_w = word_w;
         } else {

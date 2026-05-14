@@ -229,7 +229,7 @@ impl<'a> View<'a> {
             View::Detail(view) => view.as_list_state().search_state().is_active(),
             View::Diff(view) => view
                 .as_list_state()
-                .map_or(false, |s| s.search_state().is_active()),
+                .is_some_and(|s| s.search_state().is_active()),
             View::UserCommand(view) => view.as_list_state().search_state().is_active(),
             View::Refs(view) => view.as_list_state().search_state().is_active(),
             View::Help(view) => view.is_search_active(),
@@ -255,7 +255,7 @@ impl<'a> View<'a> {
             View::Detail(view) => view.as_list_state().search_state().is_querying(),
             View::Diff(view) => view
                 .as_list_state()
-                .map_or(false, |s| s.search_state().is_querying()),
+                .is_some_and(|s| s.search_state().is_querying()),
             View::UserCommand(view) => view.as_list_state().search_state().is_querying(),
             View::Refs(view) => view.as_list_state().search_state().is_querying(),
             View::Help(view) => view.is_search_querying(),

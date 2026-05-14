@@ -19,21 +19,6 @@ pub struct GraphPreview {
 }
 
 impl GraphPreview {
-    pub fn build(
-        style: GraphStyle,
-        graph_color_set: &GraphColorSet,
-        image_protocol: ImageProtocol,
-        bg_rgb: Option<(u8, u8, u8)>,
-    ) -> Self {
-        Self::build_with_cell_width(
-            style,
-            CellWidthType::Double,
-            graph_color_set,
-            image_protocol,
-            bg_rgb,
-        )
-    }
-
     pub fn build_with_cell_width(
         style: GraphStyle,
         cell_width_type: CellWidthType,
@@ -141,7 +126,13 @@ mod tests {
     fn build_preview_for_each_style_produces_three_rows() {
         let color_set = GraphColorSet::new(&GraphColorConfig::default());
         for style in [GraphStyle::Smooth, GraphStyle::Rounded, GraphStyle::Angular] {
-            let preview = GraphPreview::build(style, &color_set, ImageProtocol::Iterm2, None);
+            let preview = GraphPreview::build_with_cell_width(
+                style,
+                CellWidthType::Double,
+                &color_set,
+                ImageProtocol::Iterm2,
+                None,
+            );
             assert_eq!(preview.rows.len(), 3, "style={:?}", style);
             assert_eq!(preview.style, style);
         }

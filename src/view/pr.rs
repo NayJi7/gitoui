@@ -332,13 +332,9 @@ struct ComposeState {
     /// after the PR is created (REST has no `labels` field on the
     /// create endpoint).
     labels: Vec<crate::github::pr::Label>,
-    /// Reviewers the user picked in the compose form — applied
-    /// right after the PR is created (same reason as labels).
-    reviewers: Vec<String>,
     /// Preview metadata fetched from `git log base..head` — `None`
     /// until the first computation finishes.
     preview: Option<ComposePreview>,
-    preview_loading: bool,
     submitting: bool,
 }
 
@@ -831,7 +827,7 @@ impl<'a> PullRequestsView<'a> {
                 kind: MentionKind::Pr,
             });
         }
-        out.sort_by(|a, b| b.number.cmp(&a.number));
+        out.sort_by_key(|m| std::cmp::Reverse(m.number));
         out
     }
 
@@ -1101,7 +1097,7 @@ impl<'a> PullRequestsView<'a> {
     pub fn footer_hint(&self) -> String {
         // When the inline editor is open, the footer is owned by it.
         if self.comment_editor.is_some() {
-            let parts = if self.comment_editor.as_ref().map_or(false, |e| e.submitting) {
+            let parts = if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
                 vec!["Sending…", "Esc:cancel"]
             } else {
                 vec!["Ctrl+S:send", "Esc:cancel"]
@@ -1117,7 +1113,7 @@ impl<'a> PullRequestsView<'a> {
         // cancel. The branch picker, when open, narrows it further
         // to just nav + select + cancel.
         if matches!(self.mode, Mode::Compose) {
-            let submitting = self.compose.as_ref().map_or(false, |c| c.submitting);
+            let submitting = self.compose.as_ref().is_some_and(|c| c.submitting);
             if submitting {
                 return format!("⌘ {}", ["Submitting…", "Esc:cancel"].join("▕▏"));
             }
@@ -1375,7 +1371,7 @@ impl<'a> PullRequestsView<'a> {
         if self.comment_editor.is_some() {
             // While a submission is in flight, only Esc cancels — every
             // other key is swallowed.
-            if self.comment_editor.as_ref().map_or(false, |e| e.submitting) {
+            if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
                 if matches!(key.code, KeyCode::Esc) {
                     self.comment_editor = None;
                 }
@@ -1996,7 +1992,7 @@ impl<'a> PullRequestsView<'a> {
         let is_me = self
             .me_login
             .as_deref()
-            .map_or(false, |me| me == entry.author);
+            .is_some_and(|me| me == entry.author);
         if !is_me {
             return;
         }
@@ -2201,34 +2197,6 @@ impl<'a> PullRequestsView<'a> {
     /// Drill from the Commits tab into a single commit's detail view.
     /// Cache hit → instant; miss → background fetch with a loading
     /// placeholder until `on_commit_detail_fetched` swaps it in.
-    fn open_commit_drilldown(&mut self) {
-        let Some(detail) = self.opened_detail() else {
-            return;
-        };
-        let Some(commit) = detail.commit_list.get(self.commits_hovered) else {
-            return;
-        };
-        let sha = commit.sha.clone();
-        self.commits_drilldown = Some(sha.clone());
-        self.commits_drilldown_scroll = 0;
-        if self.commit_detail_cache.contains_key(&sha) || self.commit_detail_loading.contains(&sha)
-        {
-            return;
-        }
-        self.commit_detail_loading.insert(sha.clone());
-        let token = self.token.clone();
-        let coords = self.coords.clone();
-        let tx = self.tx.clone();
-        let fetch_sha = sha.clone();
-        std::thread::spawn(move || {
-            let result = crate::github::pr::fetch_commit_detail(&token, &coords, &fetch_sha);
-            tx.send(AppEvent::PrCommitDetailFetched {
-                sha: fetch_sha,
-                result,
-            });
-        });
-    }
-
     pub fn on_commit_detail_fetched(
         &mut self,
         sha: String,
@@ -2276,9 +2244,7 @@ impl<'a> PullRequestsView<'a> {
             body_scroll: 0,
             body_last_height: 0,
             labels: Vec::new(),
-            reviewers: Vec::new(),
             preview: None,
-            preview_loading: false,
             submitting: false,
         });
         self.mode = Mode::Compose;
@@ -2320,7 +2286,7 @@ impl<'a> PullRequestsView<'a> {
 
         // Submission spinner: only Esc cancels, everything else
         // is swallowed.
-        let submitting = self.compose.as_ref().map_or(false, |c| c.submitting);
+        let submitting = self.compose.as_ref().is_some_and(|c| c.submitting);
         if submitting {
             if matches!(key.code, KeyCode::Esc) {
                 self.compose = None;
@@ -2646,18 +2612,16 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
         let mut byte_pos = line_start;
-        let mut col_walked: usize = 0;
-        for (offset, ch) in buf[line_start..].char_indices() {
+        for (col_walked, (offset, ch)) in buf[line_start..].char_indices().enumerate() {
             if ch == '\n' || col_walked >= col_in_view as usize {
                 byte_pos = line_start + offset;
                 break;
             }
-            col_walked += 1;
             byte_pos = line_start + offset + ch.len_utf8();
         }
         c.cursor = byte_pos.min(buf.len());
         c.focused = ComposeField::Body;
-        drop(c);
+        let _ = c;
         self.compose_body_anchor_to_cursor();
     }
 
@@ -2913,15 +2877,11 @@ impl<'a> PullRequestsView<'a> {
             KeyCode::Esc => {
                 self.reaction_picker = None;
             }
-            KeyCode::Left | KeyCode::Up => {
-                if picker.hovered > 0 {
-                    picker.hovered -= 1;
-                }
+            KeyCode::Left | KeyCode::Up if picker.hovered > 0 => {
+                picker.hovered -= 1;
             }
-            KeyCode::Right | KeyCode::Down => {
-                if picker.hovered + 1 < total {
-                    picker.hovered += 1;
-                }
+            KeyCode::Right | KeyCode::Down if picker.hovered + 1 < total => {
+                picker.hovered += 1;
             }
             KeyCode::Home => picker.hovered = 0,
             KeyCode::End => picker.hovered = total - 1,
@@ -3056,7 +3016,7 @@ impl<'a> PullRequestsView<'a> {
         let is_me = self
             .me_login
             .as_deref()
-            .map_or(false, |me| me == entry.author);
+            .is_some_and(|me| me == entry.author);
         if !is_me {
             return;
         }
@@ -3396,13 +3356,11 @@ impl<'a> PullRequestsView<'a> {
         // Walk chars from line_start until we hit col_in_body or `\n`
         // or the end of the buffer.
         let mut byte_pos = line_start;
-        let mut col_walked = 0usize;
-        for (offset, ch) in ed.buffer[line_start..].char_indices() {
+        for (col_walked, (offset, ch)) in ed.buffer[line_start..].char_indices().enumerate() {
             if ch == '\n' || col_walked >= col_in_body {
                 byte_pos = line_start + offset;
                 break;
             }
-            col_walked += 1;
             byte_pos = line_start + offset + ch.len_utf8();
         }
         ed.cursor = byte_pos.min(ed.buffer.len());
@@ -3814,22 +3772,6 @@ impl<'a> PullRequestsView<'a> {
             // Conversation tab uses its own per-comment hit-test rather
             // than row-indexed list addressing — see `row_at_tab`.
             Tab::Conversation => self.conversation_selected = idx,
-        }
-    }
-
-    /// Translate a screen row into a list `selected` index, accounting for
-    /// the current scroll offset. Returns None when the click is outside
-    /// the list's content rows (e.g. on the border).
-    fn row_at(&self, row: u16) -> Option<usize> {
-        if row < self.list_inner_y {
-            return None;
-        }
-        let visible_row = row.saturating_sub(self.list_inner_y) as usize;
-        let idx = self.list_scroll_offset + visible_row;
-        if idx < self.filtered_len() {
-            Some(idx)
-        } else {
-            None
         }
     }
 
@@ -5666,7 +5608,7 @@ impl<'a> PullRequestsView<'a> {
             let body_lines = self
                 .comment_editor
                 .as_ref()
-                .map(|e| e.buffer.lines().count().max(6).min(10))
+                .map(|e| e.buffer.lines().count().clamp(6, 10))
                 .unwrap_or(6) as u16;
             (3 + body_lines).min(area.height.saturating_sub(2)).max(8)
         } else {
@@ -5702,7 +5644,7 @@ impl<'a> PullRequestsView<'a> {
         let pr_is_me = self
             .me_login
             .as_deref()
-            .map_or(false, |me| me == detail.author);
+            .is_some_and(|me| me == detail.author);
         // 1. PR description rendered as the first "card" (top-level, no
         //    parent → empty ancestor gutters, and no descending line
         //    since the conversation feed is not its "child" tree).
@@ -5913,7 +5855,7 @@ impl<'a> PullRequestsView<'a> {
         let is_me = self
             .me_login
             .as_deref()
-            .map_or(false, |me| me == entry.author);
+            .is_some_and(|me| me == entry.author);
         // Build the inline shortcut chips for THIS card:
         //  - reply variant depends on whether the card is a file-level
         //    review comment (true reply) vs a top-level entry (quote
@@ -7221,29 +7163,6 @@ fn check_row(
     ])
 }
 
-fn ci_summary_spans(
-    theme: &crate::color::ColorTheme,
-    ci: &crate::github::pr::CiSummary,
-) -> Span<'static> {
-    if ci.total == 0 {
-        return Span::styled(
-            "— no checks".to_string(),
-            Style::default().fg(theme.detail_label_fg),
-        );
-    }
-    let (label, color) = if ci.failure > 0 {
-        ("✗ failing", theme.status_error_fg)
-    } else if ci.pending > 0 {
-        ("⏳ running", theme.status_warn_fg)
-    } else {
-        ("✓ passing", theme.status_success_fg)
-    };
-    Span::styled(
-        format!("{} {}/{}", label, ci.success, ci.total),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )
-}
-
 /// Per-column widths for the Files tab. Filename flexes; additions and
 /// deletions pad to the widest count so `+N -M` stacks tidily.
 struct FileColumns {
@@ -7812,9 +7731,7 @@ fn split_row(
     theme: &crate::color::ColorTheme,
 ) -> Line<'static> {
     let format_side = |side: Option<(u32, &str)>, bg: Option<Color>| -> Vec<Span<'static>> {
-        let base = bg
-            .map(|b| Style::default().bg(b))
-            .unwrap_or_else(Style::default);
+        let base = bg.map(|b| Style::default().bg(b)).unwrap_or_default();
         let (lineno, text) = side
             .map(|(n, t)| (format!("{:>w$}", n, w = gutter_width), t.to_string()))
             .unwrap_or_else(|| (" ".repeat(gutter_width), String::new()));
@@ -7973,8 +7890,11 @@ fn rect_contains(rect: Option<Rect>, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
-/// Render a markdown body string into a stack of styled lines ready
-/// to be placed inside a card. Handles:
+/// Render a markdown body to a sequence of wrapped, styled lines fit
+/// for the PR comment cards. Backed by `pulldown-cmark` so we get
+/// CommonMark + GFM (task lists, strikethrough, tables) for free.
+///
+/// Handles:
 /// - Headings (`# `, `## `, `### `) — bold + accent color
 /// - Bold `**text**` and italic `*text*` / `_text_`
 /// - Inline code `` `code` `` (in hash color)
@@ -7984,11 +7904,8 @@ fn rect_contains(rect: Option<Rect>, col: u16, row: u16) -> bool {
 /// - Horizontal rules (`---`, `***`, `___`)
 /// - Links `[label](url)` — just the label, underlined accent
 /// - Word-wrap every visual line at `inner_width` so long paragraphs
-///   flow naturally instead of being chopped with an ellipsis.
-/// - Collapses runs of blank lines down to a single blank line.
-/// Render a markdown body to a sequence of wrapped, styled lines fit
-/// for the PR comment cards. Backed by `pulldown-cmark` so we get
-/// CommonMark + GFM (task lists, strikethrough, tables) for free.
+///   flow naturally instead of being chopped with an ellipsis
+/// - Collapses runs of blank lines down to a single blank line
 pub(crate) fn render_markdown_body(
     body: &str,
     theme: &crate::color::ColorTheme,
@@ -8084,30 +8001,29 @@ pub(crate) fn render_markdown_body(
         p
     };
 
-    let mut flush_inline =
-        |out: &mut Vec<Vec<Span<'static>>>,
-         inline: &mut Vec<Span<'static>>,
-         bq_depth: usize,
-         list_stack: &[Option<u64>],
-         pending_marker: &mut Option<(String, Style)>| {
-            if inline.is_empty() {
-                return;
-            }
-            let first_prefix = build_first_prefix(bq_depth, list_stack, pending_marker);
-            let cont_prefix = build_cont_prefix(bq_depth, list_stack.len());
-            let avail = inner_width.saturating_sub(measure_prefix(&first_prefix));
-            let wrapped = wrap_styled_spans(std::mem::take(inline), avail.max(1));
-            for (i, line_spans) in wrapped.into_iter().enumerate() {
-                let mut row: Vec<Span<'static>> = if i == 0 {
-                    first_prefix.clone()
-                } else {
-                    cont_prefix.clone()
-                };
-                row.extend(line_spans);
-                out.push(row);
-            }
-            *pending_marker = None;
-        };
+    let flush_inline = |out: &mut Vec<Vec<Span<'static>>>,
+                        inline: &mut Vec<Span<'static>>,
+                        bq_depth: usize,
+                        list_stack: &[Option<u64>],
+                        pending_marker: &mut Option<(String, Style)>| {
+        if inline.is_empty() {
+            return;
+        }
+        let first_prefix = build_first_prefix(bq_depth, list_stack, pending_marker);
+        let cont_prefix = build_cont_prefix(bq_depth, list_stack.len());
+        let avail = inner_width.saturating_sub(measure_prefix(&first_prefix));
+        let wrapped = wrap_styled_spans(std::mem::take(inline), avail.max(1));
+        for (i, line_spans) in wrapped.into_iter().enumerate() {
+            let mut row: Vec<Span<'static>> = if i == 0 {
+                first_prefix.clone()
+            } else {
+                cont_prefix.clone()
+            };
+            row.extend(line_spans);
+            out.push(row);
+        }
+        *pending_marker = None;
+    };
 
     for event in parser {
         match event {
@@ -8330,9 +8246,10 @@ pub(crate) fn render_markdown_body(
     );
 
     // Trim trailing blank rows for cleaner cards.
-    while out.last().map_or(false, |row| {
-        row.iter().all(|s| s.content.as_ref().trim().is_empty())
-    }) {
+    while out
+        .last()
+        .is_some_and(|row| row.iter().all(|s| s.content.as_ref().trim().is_empty()))
+    {
         out.pop();
     }
 
@@ -8818,7 +8735,7 @@ fn compose_preview_file_statuses(
         };
         // For renames, the format is `R100\told\tnew` — strip to the
         // final path.
-        let name = name.split('\t').last().unwrap_or(name);
+        let name = name.split('\t').next_back().unwrap_or(name);
         map.insert(name.to_string(), status);
     }
     map

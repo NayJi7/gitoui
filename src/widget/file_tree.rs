@@ -14,20 +14,11 @@ pub struct FileTree<'a> {
     color_theme: &'a ColorTheme,
 }
 
+#[derive(Default)]
 pub struct FileTreeState {
     pub selected: usize,
     offset: usize,
     height: usize,
-}
-
-impl Default for FileTreeState {
-    fn default() -> Self {
-        Self {
-            selected: 0,
-            offset: 0,
-            height: 0,
-        }
-    }
 }
 
 impl FileTreeState {

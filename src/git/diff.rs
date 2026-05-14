@@ -620,6 +620,25 @@ fn diff_intra_line(
     (old_ranges, new_ranges)
 }
 
+impl DiffEntry {
+    pub fn count_additions_and_deletions(&self) -> (usize, usize) {
+        let mut additions = 0;
+        let mut deletions = 0;
+
+        for hunk in &self.hunks {
+            for line in &hunk.lines {
+                match line.line_type {
+                    DiffLineType::Addition => additions += 1,
+                    DiffLineType::Deletion => deletions += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        (additions, deletions)
+    }
+}
+
 #[cfg(test)]
 mod intra_line_tests {
     use super::*;
@@ -664,24 +683,5 @@ mod intra_line_tests {
         let (old, new) = diff_intra_line("", "new");
         assert!(old.is_empty());
         assert!(new.is_empty());
-    }
-}
-
-impl DiffEntry {
-    pub fn count_additions_and_deletions(&self) -> (usize, usize) {
-        let mut additions = 0;
-        let mut deletions = 0;
-
-        for hunk in &self.hunks {
-            for line in &hunk.lines {
-                match line.line_type {
-                    DiffLineType::Addition => additions += 1,
-                    DiffLineType::Deletion => deletions += 1,
-                    _ => {}
-                }
-            }
-        }
-
-        (additions, deletions)
     }
 }

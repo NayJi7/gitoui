@@ -373,7 +373,7 @@ impl<'a> DiffView<'a> {
                     if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
                         if cs > pe + 1 {
                             let gap = (cs - pe - 1) as usize;
-                            let default_visible = 3.min(gap / 2).max(0);
+                            let default_visible = 3.min(gap / 2);
                             states.push(GapState {
                                 visible_up: default_visible,
                                 visible_down: default_visible,
@@ -572,23 +572,19 @@ impl<'a> DiffView<'a> {
                     self.update_search_status_bar();
                 }
             }
-            UserEvent::GoToNext => {
-                if !self.search_matches.is_empty() {
-                    self.search_current = (self.search_current + 1) % self.search_matches.len();
-                    self.scroll_to_match(self.search_current);
-                    self.update_search_status_bar();
-                }
+            UserEvent::GoToNext if !self.search_matches.is_empty() => {
+                self.search_current = (self.search_current + 1) % self.search_matches.len();
+                self.scroll_to_match(self.search_current);
+                self.update_search_status_bar();
             }
-            UserEvent::GoToPrevious => {
-                if !self.search_matches.is_empty() {
-                    self.search_current = if self.search_current == 0 {
-                        self.search_matches.len() - 1
-                    } else {
-                        self.search_current - 1
-                    };
-                    self.scroll_to_match(self.search_current);
-                    self.update_search_status_bar();
-                }
+            UserEvent::GoToPrevious if !self.search_matches.is_empty() => {
+                self.search_current = if self.search_current == 0 {
+                    self.search_matches.len() - 1
+                } else {
+                    self.search_current - 1
+                };
+                self.scroll_to_match(self.search_current);
+                self.update_search_status_bar();
             }
             UserEvent::FileHistory => {
                 let file_path = self
@@ -780,11 +776,7 @@ impl<'a> DiffView<'a> {
                             .enumerate()
                             .min_by_key(|(_, s)| {
                                 let mid = s.start.midpoint(s.end);
-                                if mid >= target {
-                                    mid - target
-                                } else {
-                                    target - mid
-                                }
+                                mid.abs_diff(target)
                             })
                             .map(|(i, _)| i)
                     };
@@ -921,14 +913,14 @@ impl<'a> DiffView<'a> {
             let dim_fg = self.ctx.color_theme.divider_fg;
             let bright_fg = self.ctx.color_theme.fg;
             let total_w = content_area.width as usize;
-            for vis_idx in 0..visible_lines.len() {
+            for (vis_idx, line) in visible_lines.iter_mut().enumerate() {
                 let abs_idx = self.scroll_offset + vis_idx;
                 if abs_idx >= span.start && abs_idx < span.end {
                     // Pick the row's dominant bg flavour: an add line keeps a
                     // bright green, a del line a bright red, everything else
                     // a neutral grey. Detection looks at the first span that
                     // already carries a bg.
-                    let row_bg = visible_lines[vis_idx]
+                    let row_bg = line
                         .spans
                         .iter()
                         .find_map(|s| s.style.bg)
@@ -943,7 +935,6 @@ impl<'a> DiffView<'a> {
                         })
                         .unwrap_or(neutral_bg);
 
-                    let line = &mut visible_lines[vis_idx];
                     let mut used: usize = 0;
                     for s in line.spans.iter_mut() {
                         s.style.bg = Some(row_bg);
@@ -969,7 +960,7 @@ impl<'a> DiffView<'a> {
             let match_bg = self.ctx.color_theme.list_match_bg;
             let match_fg = self.ctx.color_theme.list_match_fg;
 
-            for vis_idx in 0..visible_lines.len() {
+            for (vis_idx, line) in visible_lines.iter_mut().enumerate() {
                 let abs_idx = self.scroll_offset + vis_idx;
                 let line_matches: Vec<SearchMatch> = self
                     .search_matches
@@ -980,8 +971,8 @@ impl<'a> DiffView<'a> {
                 if !line_matches.is_empty() {
                     let current_start_in_line =
                         current.filter(|c| c.line_idx == abs_idx).map(|c| c.start);
-                    visible_lines[vis_idx] = highlight_search_matches(
-                        &visible_lines[vis_idx],
+                    *line = highlight_search_matches(
+                        line,
                         &line_matches,
                         current_start_in_line,
                         match_bg,
@@ -3026,7 +3017,7 @@ impl<'a> DiffView<'a> {
                 && row >= area.y
                 && row < area.y + area.height;
             if in_area {
-                let local_row = (self.scroll_offset + (row - area.y) as usize) as usize;
+                let local_row = self.scroll_offset + (row - area.y) as usize;
                 let local_col = col.saturating_sub(area.x);
                 for btn in self.expand_buttons.iter() {
                     if btn.line_idx == local_row
@@ -3131,18 +3122,6 @@ fn pad_to_width(text: &str, width: usize) -> String {
 
 fn gap_has_hidden_lines(total: usize, visible_up: usize, visible_down: usize) -> bool {
     visible_up.saturating_add(visible_down) < total
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fully_expanded_gaps_are_not_hidden() {
-        assert!(!gap_has_hidden_lines(10, 5, 5));
-        assert!(!gap_has_hidden_lines(10, 12, 0));
-        assert!(gap_has_hidden_lines(10, 4, 5));
-    }
 }
 
 /// Split `s` at the nearest whitespace boundary before `max_chars` characters,
@@ -3624,4 +3603,16 @@ fn wrap_diff_line_with_syntax_and_bar(
     }
 
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fully_expanded_gaps_are_not_hidden() {
+        assert!(!gap_has_hidden_lines(10, 5, 5));
+        assert!(!gap_has_hidden_lines(10, 12, 0));
+        assert!(gap_has_hidden_lines(10, 4, 5));
+    }
 }

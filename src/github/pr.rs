@@ -472,20 +472,6 @@ struct ApiReview {
 }
 
 #[derive(Deserialize)]
-struct ApiCheckRunsResponse {
-    #[serde(default)]
-    check_runs: Vec<ApiCheckRun>,
-}
-
-#[derive(Deserialize)]
-struct ApiCheckRun {
-    #[serde(default)]
-    status: String,
-    #[serde(default)]
-    conclusion: Option<String>,
-}
-
-#[derive(Deserialize)]
 struct ApiPullFile {
     #[serde(default)]
     filename: String,
@@ -1680,7 +1666,7 @@ fn list_my_reactions_at(
             e.user
                 .as_ref()
                 .and_then(|u| u.login.as_deref())
-                .map_or(false, |l| l.eq_ignore_ascii_case(&me_low))
+                .is_some_and(|l| l.eq_ignore_ascii_case(&me_low))
         })
         .filter_map(|e| reaction_kind_from_content(&e.content).map(|k| (k, e.id)))
         .collect())

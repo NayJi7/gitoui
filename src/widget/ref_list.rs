@@ -93,12 +93,15 @@ impl RefListState {
 
     pub fn selected_branch(&self) -> Option<String> {
         let selected = self.tree_state.selected();
-        if selected.len() > 1 && selected[0] == TREE_BRANCH_ROOT_IDENT {
-            selected.last().cloned()
-        } else if selected.len() > 1
-            && selected[0] == TREE_REMOTE_ROOT_IDENT
-            && selected.last().map(String::as_str) != Some(ADD_REMOTE_IDENT)
-        {
+        if selected.len() <= 1 {
+            return None;
+        }
+        // Local branch leaf or remote-branch leaf (but not the synthetic
+        // "+ Add remote" entry that lives under the remote-roots subtree).
+        let is_branch = selected[0] == TREE_BRANCH_ROOT_IDENT
+            || (selected[0] == TREE_REMOTE_ROOT_IDENT
+                && selected.last().map(String::as_str) != Some(ADD_REMOTE_IDENT));
+        if is_branch {
             selected.last().cloned()
         } else {
             None
@@ -218,15 +221,15 @@ impl RefList {
 
 fn collect_node_identifiers(
     items: &[TreeItem<'_, String>],
-    prefix: &mut Vec<String>,
+    prefix: &[String],
     out: &mut HashSet<Vec<String>>,
 ) {
     for item in items {
-        let mut path = prefix.clone();
+        let mut path = prefix.to_vec();
         path.push(item.identifier().clone());
         if !item.children().is_empty() {
             out.insert(path.clone());
-            collect_node_identifiers(item.children(), &mut path, out);
+            collect_node_identifiers(item.children(), &path, out);
         }
     }
 }
@@ -236,7 +239,7 @@ impl StatefulWidget for RefList {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         state.nodes_with_children.clear();
-        collect_node_identifiers(&self.items, &mut Vec::new(), &mut state.nodes_with_children);
+        collect_node_identifiers(&self.items, &[], &mut state.nodes_with_children);
 
         let tree = Tree::new(&self.items)
             .unwrap()

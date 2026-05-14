@@ -256,19 +256,19 @@ impl<'a> CompareView<'a> {
         // hovering the file list the wheel scrolls its offset (no selection
         // change — the user must click or use ↑↓ to commit a new file);
         // otherwise the wheel falls through to the inner DiffView.
-        if matches!(event, UserEvent::ScrollUp | UserEvent::ScrollDown) {
-            if self.hovered_file_idx.is_some() {
-                let delta = count as isize
-                    * if matches!(event, UserEvent::ScrollUp) {
-                        -1
-                    } else {
-                        1
-                    };
-                self.scroll_files(delta);
-                return;
-            }
-            // else: forward to diff pane below.
+        if matches!(event, UserEvent::ScrollUp | UserEvent::ScrollDown)
+            && self.hovered_file_idx.is_some()
+        {
+            let delta = count as isize
+                * if matches!(event, UserEvent::ScrollUp) {
+                    -1
+                } else {
+                    1
+                };
+            self.scroll_files(delta);
+            return;
         }
+        // else: forward to diff pane below.
 
         // Horizontal navigation always targets the show-more BUTTONS in the
         // diff pane. The inner DiffView already implements
@@ -673,12 +673,5 @@ impl<'a> CompareView<'a> {
         } else {
             Vec::new()
         }
-    }
-
-    pub fn as_list_state(&self) -> Option<&CommitListState<'a>> {
-        self.diff_pane
-            .as_ref()
-            .and_then(|p| p.as_list_state())
-            .or(self.commit_list_state.as_ref())
     }
 }

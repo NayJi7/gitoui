@@ -236,11 +236,9 @@ impl<'a> FileHistoryView<'a> {
                 self.selected = 0;
                 self.scroll_offset = 0;
             }
-            UserEvent::GoToBottom => {
-                if !self.entries.is_empty() {
-                    self.selected = self.entries.len() - 1;
-                    self.scroll_to_selected();
-                }
+            UserEvent::GoToBottom if !self.entries.is_empty() => {
+                self.selected = self.entries.len() - 1;
+                self.scroll_to_selected();
             }
             UserEvent::HelpToggle => {
                 self.tx.send(AppEvent::OpenHelp);

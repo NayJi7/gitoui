@@ -511,7 +511,7 @@ pub fn run() -> Result<()> {
     )
     .unwrap();
     ratatui::restore();
-    ret.map_err(Into::into)
+    ret
 }
 
 /// Print the gitoui logo + wordmark inline (opencode-style) before the no-repo
@@ -630,10 +630,8 @@ fn parse_github_repo(url: &str) -> Option<String> {
         rest
     } else if let Some(rest) = url.strip_prefix("https://github.com/") {
         rest
-    } else if let Some(rest) = url.strip_prefix("ssh://git@github.com/") {
-        rest
     } else {
-        return None;
+        url.strip_prefix("ssh://git@github.com/")?
     };
     let path = path.trim_end_matches(".git");
     let (owner, repo) = path.split_once('/')?;

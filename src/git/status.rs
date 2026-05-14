@@ -155,7 +155,7 @@ impl UncommittedChanges {
                 .unwrap_or_default();
             DateTime::from_timestamp(duration.as_secs() as i64, 0)
                 .map(|dt| dt.with_timezone(&Local))
-                .unwrap_or_else(|| Local::now())
+                .unwrap_or_else(Local::now)
         });
 
         Ok(changes)

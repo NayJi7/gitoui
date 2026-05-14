@@ -244,16 +244,19 @@ mod tests {
         use crate::config::GraphColorConfig;
 
         fn cfg_with_branches(branches: Vec<&str>) -> GraphColorConfig {
-            let mut c = GraphColorConfig::default();
-            c.branches = branches.into_iter().map(|s| s.to_string()).collect();
-            c.background = "#222222".into();
-            c
+            GraphColorConfig {
+                branches: branches.into_iter().map(|s| s.to_string()).collect(),
+                background: "#222222".into(),
+                ..Default::default()
+            }
         }
 
         #[test]
         fn theme_branches_override_config_when_non_empty() {
-            let mut theme = ColorTheme::default();
-            theme.graph_branches = vec!["#aabbcc".into(), "#ddeeff".into()];
+            let theme = ColorTheme {
+                graph_branches: vec!["#aabbcc".into(), "#ddeeff".into()],
+                ..ColorTheme::default()
+            };
             let cfg = cfg_with_branches(vec!["#111111", "#222222", "#333333"]);
 
             let set = build_graph_color_set(&theme, &cfg);
@@ -278,8 +281,10 @@ mod tests {
 
         #[test]
         fn transparent_background_is_patched_with_theme_bg() {
-            let mut theme = ColorTheme::default();
-            theme.bg = RatatuiColor::Rgb(0x1a, 0x1b, 0x26);
+            let theme = ColorTheme {
+                bg: RatatuiColor::Rgb(0x1a, 0x1b, 0x26),
+                ..ColorTheme::default()
+            };
             let mut cfg = cfg_with_branches(vec!["#ffffff"]);
             cfg.background = "#00000000".into(); // explicit transparent sentinel
 
@@ -294,8 +299,10 @@ mod tests {
 
         #[test]
         fn explicit_background_is_kept_unchanged() {
-            let mut theme = ColorTheme::default();
-            theme.bg = RatatuiColor::Rgb(0x1a, 0x1b, 0x26);
+            let theme = ColorTheme {
+                bg: RatatuiColor::Rgb(0x1a, 0x1b, 0x26),
+                ..ColorTheme::default()
+            };
             let mut cfg = cfg_with_branches(vec!["#ffffff"]);
             cfg.background = "#abcdef".into();
 
@@ -306,8 +313,10 @@ mod tests {
 
         #[test]
         fn non_rgb_theme_bg_skips_patching() {
-            let mut theme = ColorTheme::default();
-            theme.bg = RatatuiColor::Reset; // not an RGB triple
+            let theme = ColorTheme {
+                bg: RatatuiColor::Reset, // not an RGB triple
+                ..ColorTheme::default()
+            };
             let mut cfg = cfg_with_branches(vec!["#ffffff"]);
             cfg.background = "#00000000".into();
 
