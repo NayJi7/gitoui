@@ -45,13 +45,19 @@ jobs:
           # in the bin cache. On restore that shadows the real cargo
           # binary, so `cargo build` errors with "unexpected argument".
           cache-bin: false
-      - name: Install zig + cargo-zigbuild (Linux cross-compile only)
+      # See build.yml comment — `zig` itself isn't in taiki-e/install-
+      # action's manifest, so install via the dedicated setup-zig
+      # action; cargo-zigbuild then uses it as the cross linker.
+      - name: Install zig (Linux cross-compile only)
+        if: matrix.cross
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild (Linux cross-compile only)
         if: matrix.cross
         uses: taiki-e/install-action@v2
         with:
-          # See build.yml — `cargo-zigbuild` replaces `cross` to dodge
-          # cross 0.2.5's stale glibc base images.
-          tool: cargo-zigbuild,zig
+          tool: cargo-zigbuild
       - name: Build
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
