@@ -472,8 +472,10 @@ pub struct UiCommonConfig {
     /// (this field is intentionally not exposed in the in-app config
     /// page; it's a TOML-only knob):
     ///
-    ///     [ui.common]
-    ///     nerd-font = false
+    /// ```toml
+    /// [ui.common]
+    /// nerd-font = false
+    /// ```
     #[default = true]
     pub nerd_font: bool,
 }
