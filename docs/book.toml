@@ -1,11 +1,11 @@
 [book]
-authors = ["Kyosuke Fujimoto"]
+authors = ["NayJi7"]
 language = "en"
 src = "src"
 title = "Gitoui"
 description = "Gitoui Documentation"
 
 [output.html]
-git-repository-url = "https://github.com/lusingander/gitoui"
+git-repository-url = "https://github.com/NayJi7/gitoui"
 site-url = "/gitoui/"
 default-theme = "rust"

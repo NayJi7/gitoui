@@ -11,7 +11,7 @@ A rich git commit graph in your terminal, like magic 📚
 
 ## About
 
-Gitoui ([`/zéːriə/`](https://lusingander.github.io/gitoui/faq/index.html#how-do-i-pronounce-gitoui)) is a TUI application that uses the terminal emulators' image display protocol to render commit graphs like `git log --graph --all`.
+**gitoui** (pronounced `/ʒi.tu.i/` — French "gi-tou-i", informally "git-wii") is a TUI application that uses the terminal emulators' image display protocol to render commit graphs like `git log --graph --all`.
 
 ### Why?
 
@@ -32,23 +32,25 @@ Personally, I found the output from `git log --graph` difficult to read, even wi
 
 ## Documentation
 
-For detailed usage, configuration, and advanced features, see [the full documentation](https://lusingander.github.io/gitoui/).
+For detailed usage, configuration, and advanced features, see [the full documentation](https://nayji7.github.io/gitoui/).
 
 ## Requirements
 
 - Git
 - Supported terminal emulator
-  - Refer to [Compatibility](https://lusingander.github.io/gitoui/getting-started/compatibility.html) for details.
+  - Refer to [Compatibility](https://nayji7.github.io/gitoui/getting-started/compatibility.html) for details.
 
 ## Installation
 
-If you're using Cargo:
+One-line installer for Linux + macOS (auto-detects OS/arch, drops the
+binary in `~/.local/bin/gitoui`, re-run to update):
 
 ```
-$ cargo install --locked gitoui
+$ curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
 ```
 
-For other download options, see [Installation](https://lusingander.github.io/gitoui/getting-started/installation.html).
+For manual binary downloads, build-from-source, and version pinning, see
+[Installation](https://nayji7.github.io/gitoui/getting-started/installation.html).
 
 ## Usage
 
@@ -79,13 +81,13 @@ Options:
   -V, --version                   Print version
 ```
 
-For details on each option, see [Command Line Options](https://lusingander.github.io/gitoui/getting-started/command-line-options.html).
+For details on each option, see [Command Line Options](https://nayji7.github.io/gitoui/getting-started/command-line-options.html).
 
 ### Keybindings
 
 You can see the keybindings by pressing the `?` key.
 
-The [default key bindings](https://lusingander.github.io/gitoui/keybindings/index.html) can be overridden. See [Custom Keybindings](https://lusingander.github.io/gitoui/keybindings/custom-keybindings.html) for more information.
+The [default key bindings](https://nayji7.github.io/gitoui/keybindings/index.html) can be overridden. See [Custom Keybindings](https://nayji7.github.io/gitoui/keybindings/custom-keybindings.html) for more information.
 
 ### Config
 
@@ -99,14 +101,14 @@ Config files are loaded in the following order of priority:
 If the config file does not exist, the default values will be used for all items.
 If the config file exists but some items are not set, the default values will be used for those unset items.
 
-For detailed information about the config file format, see [Config File Format](https://lusingander.github.io/gitoui/configurations/config-file-format.html).
+For detailed information about the config file format, see [Config File Format](https://nayji7.github.io/gitoui/configurations/config-file-format.html).
 
 ### User command
 
 The User command feature allows you to execute custom external commands.
 You can display the output of commands like `git diff` in a dedicated view, execute commands like branch deletion in the background, or run interactive commands like `vim` by suspending the application.
 
-For details on how to set commands, see [User Command](https://lusingander.github.io/gitoui/features/user-command.html).
+For details on how to set commands, see [User Command](https://nayji7.github.io/gitoui/features/user-command.html).
 
 ## Compatibility
 
@@ -118,7 +120,7 @@ These image protocols are supported:
 - [Terminal graphics protocol (kitty)](https://sw.kovidgoyal.net/kitty/graphics-protocol/)
   - Supports both the existing graphics protocol mode and the [Unicode placeholder](https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders) mode.
 
-For more information, see [Compatibility](https://lusingander.github.io/gitoui/getting-started/compatibility.html).
+For more information, see [Compatibility](https://nayji7.github.io/gitoui/getting-started/compatibility.html).
 
 ### Partially supported environments
 
@@ -128,7 +130,7 @@ For more information, see [Compatibility](https://lusingander.github.io/gitoui/g
 
 - Sixel graphics is not supported.
 - Other terminal multiplexers (screen, Zellij, etc.) other than those listed in [Partially supported environments](#partially-supported-environments) are not supported.
-- Windows is not officially supported. Please refer to [the related issue](https://github.com/lusingander/gitoui/issues/147#issuecomment-4192875627).
+- Windows is not officially supported. Please refer to [the related issue](https://github.com/NayJi7/gitoui/issues/147#issuecomment-4192875627).
 
 ## Screenshots
 

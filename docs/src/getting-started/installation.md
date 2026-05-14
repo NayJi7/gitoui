@@ -1,46 +1,33 @@
 # Installation
 
-### [Cargo](https://crates.io/crates/gitoui)
+### One-line installer (Linux / macOS)
 
 ```
-$ cargo install --locked gitoui
+$ curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
 ```
 
-### [Arch Linux](https://archlinux.org/packages/extra/x86_64/gitoui/)
+Auto-detects your OS + architecture, downloads the matching release tarball
+to `~/.local/bin/gitoui`, and verifies its checksum. Run it again any time
+to update to the latest release.
+
+Override the install directory or pin a specific version:
 
 ```
-$ pacman -S gitoui
+$ INSTALL_DIR=$HOME/bin GITOUI_VERSION=v0.1.0 \
+    curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
 ```
 
-### [Homebrew](https://formulae.brew.sh/formula/gitoui)
+### Downloading the binary manually
 
-```
-$ brew install gitoui
-```
-
-or from [tap](https://github.com/lusingander/homebrew-tap/blob/master/gitoui.rb):
-
-```
-$ brew install lusingander/tap/gitoui
-```
-
-### [NetBSD](https://pkgsrc.se/devel/gitoui)
-
-```
-$ pkgin install gitoui
-```
-
-### Downloading binary
-
-You can download pre-compiled binaries from [releases](https://github.com/lusingander/gitoui/releases).
+Pre-compiled binaries for Linux + macOS (x86_64 and aarch64) are attached
+to each [release](https://github.com/NayJi7/gitoui/releases). Each archive
+ships a single `gitoui` executable; drop it anywhere on your `$PATH`.
 
 ### Build from source
 
-If you want to check the latest development version, build from source:
-
 ```
-$ git clone https://github.com/lusingander/gitoui.git
+$ git clone https://github.com/NayJi7/gitoui.git
 $ cd gitoui
-$ cargo build --release # Unless it's a release build, it's very slow.
+$ cargo build --release    # debug builds are noticeably slower
 $ ./target/release/gitoui
 ```
