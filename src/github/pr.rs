@@ -1944,6 +1944,26 @@ struct CreatePrBody<'a> {
 
 /// `POST /repos/{owner}/{repo}/pulls`. Returns the new PR's number
 /// on success — the caller can then open its detail view.
+/// Try to load the body of the first pull-request template found
+/// in this repo's checkout. GitHub looks for these paths in order,
+/// case-insensitive; we mirror the canonical case-sensitive ones
+/// since they cover ~all real-world repos. Returns `None` when no
+/// template is configured — the compose form then starts with an
+/// empty body.
+pub fn load_pr_template(repo_path: &std::path::Path) -> Option<String> {
+    let candidates = [
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/pull_request_template.md",
+        ".github/PULL_REQUEST_TEMPLATE",
+        ".github/pull_request_template",
+        "docs/PULL_REQUEST_TEMPLATE.md",
+        "docs/pull_request_template.md",
+        "PULL_REQUEST_TEMPLATE.md",
+        "pull_request_template.md",
+    ];
+    crate::github::issue::load_first_template_at(repo_path, &candidates)
+}
+
 pub fn create_pull_request(
     token: &str,
     coords: &RepoCoords,

@@ -324,6 +324,10 @@ struct ComposeState {
     /// focus — they're never edited simultaneously).
     cursor: usize,
     body_scroll: u16,
+    /// Height of the body block's inner area captured at the last
+    /// render. Drives mouse-wheel + cursor-anchor clamping without
+    /// having to re-derive the layout outside the render path.
+    body_last_height: u16,
     /// Labels the user picked in the compose form — applied right
     /// after the PR is created (REST has no `labels` field on the
     /// create endpoint).
@@ -837,13 +841,13 @@ impl<'a> PullRequestsView<'a> {
         out
     }
 
-    fn open_mention_popup(&mut self, anchor: usize) {
-        use crate::view::issue::{filter_mention_items_pub, MentionPopup, MentionTarget};
+    fn open_mention_popup(&mut self, anchor: usize, target: crate::view::issue::MentionTarget) {
+        use crate::view::issue::{filter_mention_items_pub, MentionPopup};
         self.spawn_mention_issue_numbers_fetch();
         let universe = self.mention_universe();
         let filtered = filter_mention_items_pub("", &universe);
         self.mention_popup = Some(MentionPopup {
-            target: MentionTarget::CommentEditor,
+            target,
             anchor,
             query: String::new(),
             filtered,
@@ -871,22 +875,43 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn update_mention_query_from_editor(&mut self) {
-        let (anchor, cursor, buf): (usize, usize, String) = {
+        use crate::view::issue::MentionTarget;
+        let (target, anchor, cursor, buf): (MentionTarget, usize, usize, String) = {
             let Some(p) = self.mention_popup.as_ref() else {
                 return;
             };
-            let Some(ed) = self.comment_editor.as_ref() else {
-                return;
-            };
-            (p.anchor, ed.cursor, ed.buffer.clone())
+            match p.target {
+                MentionTarget::CommentEditor => {
+                    let Some(ed) = self.comment_editor.as_ref() else {
+                        return;
+                    };
+                    (p.target, p.anchor, ed.cursor, ed.buffer.clone())
+                }
+                MentionTarget::ComposeBody => {
+                    let Some(c) = self.compose.as_ref() else {
+                        return;
+                    };
+                    (p.target, p.anchor, c.cursor, c.body.clone())
+                }
+            }
         };
-        // Sanity: the `#` should still be where we anchored.
-        if buf.as_bytes().get(anchor).copied() != Some(b'#') || cursor < anchor {
+        let _ = target;
+        // Sanity: the `#` must still be at the anchor and the cursor
+        // must sit AFTER it. `cursor <= anchor` covers ← past the `#`
+        // and selecting/clicking before it — without this stricter
+        // bound, `buf[anchor + 1..cursor]` below panics with
+        // "begin > end" the moment the user presses ←.
+        if buf.as_bytes().get(anchor).copied() != Some(b'#') || cursor <= anchor {
             self.close_mention_popup();
             return;
         }
         // Query is the chars between `#` (exclusive) and cursor.
-        let query: String = buf[anchor + 1..cursor.min(buf.len())]
+        // Belt-and-suspenders clamp: even with the guards above, an
+        // inconsistent (cursor, buf.len()) snapshot mid-edit would
+        // panic the slice. Force ordered, in-bounds indices.
+        let start = (anchor + 1).min(buf.len());
+        let end = cursor.min(buf.len()).max(start);
+        let query: String = buf[start..end]
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric())
             .collect();
@@ -903,24 +928,42 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn pick_mention(&mut self) {
-        let (anchor, query_len, number) = {
+        use crate::view::issue::MentionTarget;
+        let (target, anchor, query_len, number) = {
             let Some(p) = self.mention_popup.as_ref() else {
                 return;
             };
             let Some(item) = p.filtered.get(p.hovered) else {
                 return;
             };
-            (p.anchor, p.query.chars().count(), item.number)
+            (p.target, p.anchor, p.query.chars().count(), item.number)
         };
         self.mention_popup = None;
-        let Some(ed) = self.comment_editor.as_mut() else {
-            return;
-        };
-        let end = anchor + 1 + query_len; // `#` + query chars
-        let end = end.min(ed.buffer.len());
         let replacement = format!("#{}", number);
-        ed.buffer.replace_range(anchor..end, &replacement);
-        ed.cursor = anchor + replacement.len();
+        // Clamp the splice range to ordered, in-bounds indices.
+        // Without this, an inconsistent (anchor, buf) snapshot
+        // (e.g. anchor past end after a multi-key edit) panics
+        // `replace_range` with "begin > end".
+        match target {
+            MentionTarget::CommentEditor => {
+                let Some(ed) = self.comment_editor.as_mut() else {
+                    return;
+                };
+                let start = anchor.min(ed.buffer.len());
+                let end = (anchor + 1 + query_len).min(ed.buffer.len()).max(start);
+                ed.buffer.replace_range(start..end, &replacement);
+                ed.cursor = start + replacement.len();
+            }
+            MentionTarget::ComposeBody => {
+                let Some(c) = self.compose.as_mut() else {
+                    return;
+                };
+                let start = anchor.min(c.body.len());
+                let end = (anchor + 1 + query_len).min(c.body.len()).max(start);
+                c.body.replace_range(start..end, &replacement);
+                c.cursor = start + replacement.len();
+            }
+        }
     }
 
     fn handle_event_mention_popup(&mut self, key: KeyEvent) {
@@ -959,19 +1002,48 @@ impl<'a> PullRequestsView<'a> {
             }
             _ => {}
         }
-        // Pass-through to editor, then re-derive the query.
+        // Pass-through to the surface the popup is anchored on, then
+        // re-derive the query from the resulting buffer state.
+        use crate::view::issue::MentionTarget;
         use ratatui::crossterm::event::KeyModifiers;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match key.code {
-            KeyCode::Backspace if ctrl => self.editor_delete_word_left(),
-            KeyCode::Backspace => self.editor_delete_left(),
-            KeyCode::Delete => self.editor_delete_right(),
-            KeyCode::Left => self.editor_cursor_left(),
-            KeyCode::Right => self.editor_cursor_right(),
-            KeyCode::Home => self.editor_cursor_home(),
-            KeyCode::End => self.editor_cursor_end(),
-            KeyCode::Char(c) if !ctrl => self.editor_insert_char(c),
-            _ => {}
+        let target = self
+            .mention_popup
+            .as_ref()
+            .map(|p| p.target)
+            .unwrap_or(MentionTarget::CommentEditor);
+        match target {
+            MentionTarget::CommentEditor => match key.code {
+                KeyCode::Backspace if ctrl => self.editor_delete_word_left(),
+                KeyCode::Backspace => self.editor_delete_left(),
+                KeyCode::Delete => self.editor_delete_right(),
+                KeyCode::Left => self.editor_cursor_left(),
+                KeyCode::Right => self.editor_cursor_right(),
+                KeyCode::Home => self.editor_cursor_home(),
+                KeyCode::End => self.editor_cursor_end(),
+                KeyCode::Char(c) if !ctrl => self.editor_insert_char(c),
+                _ => {}
+            },
+            MentionTarget::ComposeBody => {
+                if let Some(state) = self.compose.as_mut() {
+                    if !matches!(state.focused, ComposeField::Body) {
+                        state.focused = ComposeField::Body;
+                    }
+                    match key.code {
+                        KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Backspace => compose_field_delete_left(state),
+                        KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Left => compose_field_cursor_left(state),
+                        KeyCode::Right => compose_field_cursor_right(state),
+                        KeyCode::Home => compose_field_cursor_home(state),
+                        KeyCode::End => compose_field_cursor_end(state),
+                        KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
+                        _ => {}
+                    }
+                }
+                self.compose_body_anchor_to_cursor();
+            }
         }
         self.update_mention_query_from_editor();
     }
@@ -2216,15 +2288,23 @@ impl<'a> PullRequestsView<'a> {
         let repo_path = self.coords_repo_path();
         let head = current_head_branch(&repo_path).unwrap_or_default();
         let title = latest_commit_subject(&repo_path, &head).unwrap_or_default();
+        // Seed the body from a repo-local PR template if one exists.
+        // Mirror GitHub web's lookup order — `.github/`, `docs/`, and
+        // the repo root — covering the three locations the platform
+        // recognises.
+        let body =
+            crate::github::pr::load_pr_template(&repo_path).unwrap_or_default();
+        let cursor = body.len();
         self.compose = Some(ComposeState {
             head,
             base: "main".to_string(),
             title,
-            body: String::new(),
+            body,
             draft: false,
             focused: ComposeField::Title,
-            cursor: 0,
+            cursor,
             body_scroll: 0,
+            body_last_height: 0,
             labels: Vec::new(),
             reviewers: Vec::new(),
             preview: None,
@@ -2336,6 +2416,7 @@ impl<'a> PullRequestsView<'a> {
             if let Some(s) = self.compose.as_mut() {
                 compose_body_cursor_vertical(s, key.code);
             }
+            self.compose_body_anchor_to_cursor();
             return;
         }
 
@@ -2391,38 +2472,83 @@ impl<'a> PullRequestsView<'a> {
                 }
             }
             ComposeField::Body => {
-                let Some(state) = self.compose.as_mut() else {
-                    return;
+                // Capture the `#` position BEFORE insertion so the
+                // popup anchor points at the freshly-written hash.
+                let mention_anchor: Option<usize> = match key.code {
+                    KeyCode::Char('#') if !ctrl => {
+                        self.compose.as_ref().map(|c| c.cursor)
+                    }
+                    _ => None,
                 };
-                match key.code {
-                    KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
-                    KeyCode::Enter => compose_field_insert_char(state, '\n'),
-                    KeyCode::Tab => {
-                        // 4-space indent inside the body — same
-                        // convention as the comment editor.
-                        for _ in 0..4 {
-                            compose_field_insert_char(state, ' ');
+                {
+                    let Some(state) = self.compose.as_mut() else {
+                        return;
+                    };
+                    match key.code {
+                        KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
+                        KeyCode::Enter => compose_field_insert_char(state, '\n'),
+                        KeyCode::Tab => {
+                            // 4-space indent inside the body — same
+                            // convention as the comment editor.
+                            for _ in 0..4 {
+                                compose_field_insert_char(state, ' ');
+                            }
                         }
+                        KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Backspace => compose_field_delete_left(state),
+                        KeyCode::Left if ctrl => {
+                            let new = word_left_boundary(&state.body, state.cursor);
+                            state.cursor = new;
+                        }
+                        KeyCode::Right if ctrl => {
+                            let new = word_right_boundary(&state.body, state.cursor);
+                            state.cursor = new;
+                        }
+                        KeyCode::Left => compose_field_cursor_left(state),
+                        KeyCode::Right => compose_field_cursor_right(state),
+                        KeyCode::Home => compose_field_cursor_home(state),
+                        KeyCode::End => compose_field_cursor_end(state),
+                        _ => {}
                     }
-                    KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
-                    KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
-                    KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
-                    KeyCode::Backspace => compose_field_delete_left(state),
-                    KeyCode::Left if ctrl => {
-                        let new = word_left_boundary(&state.body, state.cursor);
-                        state.cursor = new;
-                    }
-                    KeyCode::Right if ctrl => {
-                        let new = word_right_boundary(&state.body, state.cursor);
-                        state.cursor = new;
-                    }
-                    KeyCode::Left => compose_field_cursor_left(state),
-                    KeyCode::Right => compose_field_cursor_right(state),
-                    KeyCode::Home => compose_field_cursor_home(state),
-                    KeyCode::End => compose_field_cursor_end(state),
-                    _ => {}
+                }
+                // Anchor the viewport on the cursor AFTER mutation
+                // so typing past the last visible row scrolls into
+                // view. Mouse wheel doesn't reach this branch — it's
+                // intercepted earlier — so wheel scroll stays sticky.
+                self.compose_body_anchor_to_cursor();
+                if let Some(a) = mention_anchor {
+                    self.open_mention_popup(
+                        a,
+                        crate::view::issue::MentionTarget::ComposeBody,
+                    );
                 }
             }
+        }
+    }
+
+    /// Re-anchor `body_scroll` so the body cursor sits inside the
+    /// last-rendered viewport. Called from cursor-mutating actions
+    /// (typing, arrow keys, vertical nav, click) — NOT from the
+    /// render path or from mouse-wheel scroll, so wheel scrolling
+    /// stays where the user puts it.
+    fn compose_body_anchor_to_cursor(&mut self) {
+        let Some(c) = self.compose.as_mut() else {
+            return;
+        };
+        if !matches!(c.focused, ComposeField::Body) {
+            return;
+        }
+        let view = c.body_last_height;
+        if view == 0 {
+            return;
+        }
+        let (_, cursor_row) = cursor_screen_pos(&c.body, c.cursor);
+        if cursor_row < c.body_scroll {
+            c.body_scroll = cursor_row;
+        } else if cursor_row >= c.body_scroll + view {
+            c.body_scroll = cursor_row + 1 - view;
         }
     }
 
@@ -2490,11 +2616,90 @@ impl<'a> PullRequestsView<'a> {
     /// we pan its viewport without moving the highlighted row — the
     /// user can still arrow up/down to change the selection.
     fn compose_handle_scroll(&mut self, delta: i32) {
+        // Branch picker scroll wins when open — its viewport
+        // shouldn't be hijacked by the body underneath.
         if let Some(picker) = self.branch_picker.as_mut() {
             let max = picker.branches.len().saturating_sub(1);
             let new = (picker.scroll as i32 + delta).clamp(0, max as i32);
             picker.scroll = new as usize;
+            return;
         }
+        // Otherwise scroll the Body viewport. Clamp against the
+        // body's row count and last-rendered height so we can't
+        // scroll past the end.
+        let Some(c) = self.compose.as_mut() else {
+            return;
+        };
+        let total_rows = if c.body.is_empty() {
+            1
+        } else {
+            c.body.matches('\n').count() as u16 + 1
+        };
+        let view = c.body_last_height.max(1);
+        let max_scroll = total_rows.saturating_sub(view);
+        let new = (c.body_scroll as i32 + delta).clamp(0, max_scroll as i32);
+        c.body_scroll = new as u16;
+    }
+
+    /// Snap the compose Body cursor to the byte position under a
+    /// click at `(col, row)`. Mirrors the issue-view helper of the
+    /// same name; only the field accessors differ.
+    fn compose_body_move_cursor_to_click(&mut self, click_col: u16, click_row: u16) {
+        let body_rect = match self
+            .compose_field_rects
+            .iter()
+            .find(|(f, _)| matches!(f, ComposeField::Body))
+            .map(|(_, r)| *r)
+        {
+            Some(r) => r,
+            None => return,
+        };
+        let inner_x = body_rect.x.saturating_add(1);
+        let inner_y = body_rect.y.saturating_add(1);
+        let inner_right = body_rect.x + body_rect.width.saturating_sub(1);
+        let inner_bottom = body_rect.y + body_rect.height.saturating_sub(1);
+        let col_in_view = click_col
+            .saturating_sub(inner_x)
+            .min(inner_right.saturating_sub(inner_x));
+        let row_in_view = click_row
+            .saturating_sub(inner_y)
+            .min(inner_bottom.saturating_sub(inner_y).saturating_sub(1));
+        let Some(c) = self.compose.as_mut() else {
+            return;
+        };
+        let scroll = c.body_scroll as usize;
+        let logical_line = scroll + row_in_view as usize;
+        let buf = c.body.clone();
+        let mut line_start: usize = 0;
+        let mut current_line: usize = 0;
+        for (offset, ch) in buf.char_indices() {
+            if current_line == logical_line {
+                break;
+            }
+            if ch == '\n' {
+                current_line += 1;
+                line_start = offset + ch.len_utf8();
+            }
+        }
+        if current_line < logical_line {
+            c.cursor = buf.len();
+            c.focused = ComposeField::Body;
+            return;
+        }
+        let mut byte_pos = line_start;
+        let mut col_walked: usize = 0;
+        for (offset, ch) in buf[line_start..].char_indices() {
+            if ch == '\n' || col_walked >= col_in_view as usize {
+                byte_pos = line_start + offset;
+                break;
+            }
+            col_walked += 1;
+            byte_pos = line_start + offset + ch.len_utf8();
+        }
+        c.cursor = byte_pos.min(buf.len());
+        c.focused = ComposeField::Body;
+        drop(c);
+        self.compose_body_anchor_to_cursor();
     }
 
     /// Open a multi-select overlay for the compose-form's Labels
@@ -3081,7 +3286,7 @@ impl<'a> PullRequestsView<'a> {
             ed.cursor += c.len_utf8();
         }
         if let Some(a) = anchor {
-            self.open_mention_popup(a);
+            self.open_mention_popup(a, crate::view::issue::MentionTarget::CommentEditor);
         }
     }
 
@@ -3491,7 +3696,9 @@ impl<'a> PullRequestsView<'a> {
                     state.focused = field;
                     state.cursor = match field {
                         ComposeField::Title => state.title.len(),
-                        ComposeField::Body => state.body.len(),
+                        // Body cursor lands precisely under the
+                        // click, not at the end — handled below.
+                        ComposeField::Body => state.cursor,
                         _ => 0,
                     };
                 }
@@ -3506,6 +3713,9 @@ impl<'a> PullRequestsView<'a> {
                         if let Some(s) = self.compose.as_mut() {
                             s.draft = !s.draft;
                         }
+                    }
+                    ComposeField::Body => {
+                        self.compose_body_move_cursor_to_click(col, row);
                     }
                     _ => {}
                 }
@@ -3827,13 +4037,29 @@ impl<'a> PullRequestsView<'a> {
         // it's the active input surface — same convention as the rebase
         // reword editor.
         if let Some((cx, cy)) = self.comment_editor_cursor_pos {
-            match &self.ctx.ui_config.common.cursor_type {
-                crate::config::CursorType::Native => {
-                    f.set_cursor_position((cx, cy));
-                }
-                crate::config::CursorType::Virtual(glyph) => {
-                    let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
-                    f.buffer_mut().set_string(cx, cy, glyph, style);
+            // Suppress while the mention popup overlaps the cursor
+            // position — a blinking cursor on top of the popup body
+            // reads as a glitch. Popup intercepts every keystroke so
+            // the cursor isn't actionable until the popup closes.
+            let occluded = self
+                .mention_popup
+                .as_ref()
+                .and_then(|p| p.overlay_rect)
+                .is_some_and(|rect| {
+                    cx >= rect.x
+                        && cx < rect.x + rect.width
+                        && cy >= rect.y
+                        && cy < rect.y + rect.height
+                });
+            if !occluded {
+                match &self.ctx.ui_config.common.cursor_type {
+                    crate::config::CursorType::Native => {
+                        f.set_cursor_position((cx, cy));
+                    }
+                    crate::config::CursorType::Virtual(glyph) => {
+                        let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
+                        f.buffer_mut().set_string(cx, cy, glyph, style);
+                    }
                 }
             }
         }
@@ -4391,10 +4617,13 @@ impl<'a> PullRequestsView<'a> {
             divider_area,
         );
 
-        // ── Body: left = form (50%), right = preview (50%) ──
+        // ── Body: left = form (slightly wider), right = preview ──
+        // Form gets ~60% so the multi-line Body editor has room to
+        // breathe without crowding labels/draft rows. Preview pane
+        // still has enough width for commit subjects + file paths.
         let [form_area, preview_area] = Layout::horizontal([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
+            Constraint::Percentage(60),
+            Constraint::Percentage(40),
         ])
         .areas(body_area);
         self.render_compose_form(f, form_area);
@@ -4803,6 +5032,29 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(body_block, body_block_rect);
         self.compose_field_rects
             .push((ComposeField::Body, body_block_rect));
+        // Render-time scroll: ONLY clamp against the current max.
+        // We deliberately do NOT re-anchor on the cursor here —
+        // that lives in `compose_body_anchor_to_cursor` and is
+        // called from cursor-mutating actions only. Re-anchoring at
+        // render time would snap the viewport back to the cursor on
+        // every frame, undoing mouse-wheel scrolls and making
+        // every hover feel like it jumped to the bottom.
+        let total_rows = if state.body.is_empty() {
+            1
+        } else {
+            state.body.matches('\n').count() as u16 + 1
+        };
+        let mut scroll = state.body_scroll;
+        let max_scroll = total_rows.saturating_sub(body_inner.height);
+        if scroll > max_scroll {
+            scroll = max_scroll;
+        }
+        if let Some(s) = self.compose.as_mut() {
+            s.body_scroll = scroll;
+            s.body_last_height = body_inner.height;
+        }
+        let base_style = Style::default().fg(theme.fg);
+        let mention_fg = theme.list_hash_fg;
         let body_lines: Vec<Line<'static>> = if state.body.is_empty() {
             vec![Line::from(Span::styled(
                 "(type a description — supports markdown)".to_string(),
@@ -4812,12 +5064,21 @@ impl<'a> PullRequestsView<'a> {
             state
                 .body
                 .split('\n')
+                .skip(scroll as usize)
+                .take(body_inner.height as usize)
                 .map(|l| {
-                    Line::from(Span::styled(l.to_string(), Style::default().fg(theme.fg)))
+                    crate::view::issue::editor_line_with_mentions(l, base_style, mention_fg)
                 })
                 .collect()
         };
         f.render_widget(Paragraph::new(body_lines), body_inner);
+        // Expose the body's inner rect so the mention popup can
+        // anchor on it (popup positioning reads `editor_body_area`).
+        // Done only when Body is focused — clicks/keys elsewhere
+        // shouldn't be hit-tested against the body.
+        if body_focused {
+            self.editor_body_area = Some(body_inner);
+        }
         y = body_block_rect.y + body_block_rect.height;
 
         // Labels row — shows the currently-picked chips inline. The
@@ -4895,11 +5156,19 @@ impl<'a> PullRequestsView<'a> {
                 }
             }
             ComposeField::Body => {
+                // Only place the cursor when it sits inside the visible
+                // viewport `[scroll, scroll + body_inner.height)`. Without
+                // this guard, scrolling away from the cursor would clamp
+                // its visual position to the top of the body (via
+                // `saturating_sub`-style arithmetic), making it look like
+                // the scroll moved the cursor.
                 let (col, row) = cursor_screen_pos(&state.body, state.cursor);
-                let cx = body_inner.x + col;
-                let cy = body_inner.y + row;
-                if cx < body_inner.x + body_inner.width && cy < body_inner.y + body_inner.height {
-                    self.comment_editor_cursor_pos = Some((cx, cy));
+                if row >= scroll && row < scroll + body_inner.height {
+                    let cx = body_inner.x + col;
+                    let cy = body_inner.y + (row - scroll);
+                    if cx < body_inner.x + body_inner.width {
+                        self.comment_editor_cursor_pos = Some((cx, cy));
+                    }
                 }
             }
             _ => {}

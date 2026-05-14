@@ -835,31 +835,49 @@ pub fn list_linked_prs(
 }
 
 /// Try to load the body of the first issue template found under
-/// `.github/ISSUE_TEMPLATE/`. Returns `None` when no template is
+/// `.github/ISSUE_TEMPLATE/` (or the alternative single-file paths
+/// GitHub recognises). Returns `None` when no template is
 /// configured. The lookup is path-based — we don't go through the
-/// API because the user already has the repo on disk.
-pub fn load_first_template(_coords: &RepoCoords) -> Option<String> {
-    use std::fs;
+/// API because the user already has the repo on disk. All paths are
+/// resolved relative to `repo_path` so gitoui works even when run
+/// from a sub-directory of the worktree.
+pub fn load_first_template(repo_path: &std::path::Path) -> Option<String> {
     let candidates = [
         ".github/ISSUE_TEMPLATE",
         ".github/ISSUE_TEMPLATE.md",
         ".github/issue_template.md",
+        "docs/ISSUE_TEMPLATE.md",
+        "ISSUE_TEMPLATE.md",
     ];
+    load_first_template_at(repo_path, &candidates)
+}
+
+/// Shared lookup for issue + PR template directories / single files.
+/// Tries each candidate path relative to `repo_path`; the first hit
+/// returns the (frontmatter-stripped) body. For directories the
+/// first alphabetically-sorted `.md` / `.yaml` is picked, mirroring
+/// the behaviour GitHub's web UI uses when no template is selected
+/// in the picker.
+pub(crate) fn load_first_template_at(
+    repo_path: &std::path::Path,
+    candidates: &[&str],
+) -> Option<String> {
+    use std::fs;
     for c in candidates {
-        let path = std::path::Path::new(c);
+        let path = repo_path.join(c);
         if path.is_file() {
-            if let Ok(s) = fs::read_to_string(path) {
+            if let Ok(s) = fs::read_to_string(&path) {
                 return Some(strip_template_frontmatter(&s));
             }
         }
         if path.is_dir() {
-            if let Ok(entries) = fs::read_dir(path) {
+            if let Ok(entries) = fs::read_dir(&path) {
                 let mut files: Vec<_> = entries
                     .flatten()
                     .filter(|e| {
-                        e.path()
-                            .extension()
-                            .map_or(false, |x| x == "md" || x == "markdown" || x == "yml" || x == "yaml")
+                        e.path().extension().map_or(false, |x| {
+                            x == "md" || x == "markdown" || x == "yml" || x == "yaml"
+                        })
                     })
                     .collect();
                 files.sort_by_key(|e| e.file_name());
@@ -874,10 +892,10 @@ pub fn load_first_template(_coords: &RepoCoords) -> Option<String> {
     None
 }
 
-/// Strip the leading `---\n...\n---` YAML frontmatter from an issue
+/// Strip the leading `---\n...\n---` YAML frontmatter from a
 /// template — that block is metadata for GitHub's web UI, not body
 /// content we want to seed into the compose buffer.
-fn strip_template_frontmatter(s: &str) -> String {
+pub(crate) fn strip_template_frontmatter(s: &str) -> String {
     let mut lines = s.lines();
     if lines.next() != Some("---") {
         return s.to_string();

@@ -698,6 +698,23 @@ impl<'a> IssuesView<'a> {
             self.handle_event_comment_editor(key);
             return;
         }
+        // Compose body scroll — mouse wheel pans the body viewport
+        // when focus is on the Body field. Keeps the cursor in
+        // place (we just shift body_scroll); a subsequent ↑/↓ keys
+        // moves the cursor as usual and re-anchors the viewport.
+        if matches!(self.mode, Mode::Compose) {
+            match evt.event {
+                UserEvent::ScrollUp => {
+                    self.compose_body_scroll_viewport(-3);
+                    return;
+                }
+                UserEvent::ScrollDown => {
+                    self.compose_body_scroll_viewport(3);
+                    return;
+                }
+                _ => {}
+            }
+        }
         // Semantic event dispatch — gives us count-aware nav (e.g.
         // typing `5j` to move 5 rows down), mouse wheel, and a single
         // path that all bindings flow through.
@@ -1066,6 +1083,7 @@ impl<'a> IssuesView<'a> {
         if matches!(key.code, KeyCode::Up | KeyCode::Down) {
             if editing_body && self.compose_body_can_move_vertically(key.code) {
                 self.compose_body_vertical(key.code);
+                self.compose_body_anchor_to_cursor();
                 return;
             }
             if matches!(key.code, KeyCode::Up) {
@@ -1111,6 +1129,40 @@ impl<'a> IssuesView<'a> {
             KeyCode::Enter => self.submit_compose(),
             KeyCode::Char(ch) if !ctrl => self.compose_field_insert_char(ch),
             _ => {}
+        }
+        // After any body-focused key, anchor the scroll viewport to
+        // the cursor so typing past the bottom row brings new text
+        // into view. Mouse-wheel scroll bypasses this path (it goes
+        // through the dedicated `ScrollUp/Down` intercept earlier),
+        // so wheel-scrolling no longer gets reverted on the next
+        // render — that was the source of the "scroll doesn't stick"
+        // and "hover scrolls to bottom" bugs.
+        if editing_body {
+            self.compose_body_anchor_to_cursor();
+        }
+    }
+
+    /// Re-anchor `body_scroll` so the body cursor stays inside the
+    /// last-rendered viewport. Called from cursor-mutating actions
+    /// (typing, arrow keys, click, vertical nav) — NOT from the
+    /// render path. Mouse-wheel scrolling never calls this, which is
+    /// why the user's wheel scroll stays where they put it.
+    fn compose_body_anchor_to_cursor(&mut self) {
+        let Some(c) = self.compose.as_mut() else {
+            return;
+        };
+        if !matches!(c.field, ComposeField::Body) {
+            return;
+        }
+        let view = c.body_last_height;
+        if view == 0 {
+            return;
+        }
+        let (_, cursor_row) = cursor_screen_pos(&c.body, c.body_cursor);
+        if cursor_row < c.body_scroll {
+            c.body_scroll = cursor_row;
+        } else if cursor_row >= c.body_scroll + view {
+            c.body_scroll = cursor_row + 1 - view;
         }
     }
 
@@ -1352,6 +1404,93 @@ impl<'a> IssuesView<'a> {
             }
             _ => {}
         }
+    }
+
+    /// Pan the compose Body viewport by `delta` rows without
+    /// touching the cursor. Clamped to the buffer's row count vs.
+    /// the last-rendered body height.
+    fn compose_body_scroll_viewport(&mut self, delta: i32) {
+        let Some(c) = self.compose.as_mut() else {
+            return;
+        };
+        let total_rows = if c.body.is_empty() {
+            1
+        } else {
+            c.body.matches('\n').count() as u16 + 1
+        };
+        let view = c.body_last_height.max(1);
+        let max_scroll = total_rows.saturating_sub(view);
+        let new = (c.body_scroll as i32 + delta).clamp(0, max_scroll as i32);
+        c.body_scroll = new as u16;
+    }
+
+    /// Translate a click inside the compose Body rect into a byte
+    /// offset in `state.body` and seat the cursor there. Mirrors
+    /// `editor_move_cursor_to_click` for the comment editor.
+    fn compose_body_move_cursor_to_click(&mut self, click_col: u16, click_row: u16) {
+        // The first stored `(ComposeField::Body, rect)` is the
+        // bordered block; the click might land on the border, in
+        // which case we still snap to the nearest inner cell.
+        let body_rect = match self
+            .compose_field_rects
+            .iter()
+            .find(|(f, _)| matches!(f, ComposeField::Body))
+            .map(|(_, r)| *r)
+        {
+            Some(r) => r,
+            None => return,
+        };
+        // Inner area = rect minus its 1-cell border on each side.
+        let inner_x = body_rect.x.saturating_add(1);
+        let inner_y = body_rect.y.saturating_add(1);
+        let inner_right = body_rect.x + body_rect.width.saturating_sub(1);
+        let inner_bottom = body_rect.y + body_rect.height.saturating_sub(1);
+        let col_in_view = click_col
+            .saturating_sub(inner_x)
+            .min(inner_right.saturating_sub(inner_x));
+        let row_in_view = click_row
+            .saturating_sub(inner_y)
+            .min(inner_bottom.saturating_sub(inner_y).saturating_sub(1));
+        let Some(c) = self.compose.as_mut() else {
+            return;
+        };
+        let scroll = c.body_scroll as usize;
+        let logical_line = scroll + row_in_view as usize;
+        // Walk lines to find the start byte of the target line.
+        let buf = c.body.clone();
+        let mut line_start: usize = 0;
+        let mut current_line: usize = 0;
+        for (offset, ch) in buf.char_indices() {
+            if current_line == logical_line {
+                break;
+            }
+            if ch == '\n' {
+                current_line += 1;
+                line_start = offset + ch.len_utf8();
+            }
+        }
+        if current_line < logical_line {
+            // Click below the last line — drop cursor at end.
+            c.body_cursor = buf.len();
+            c.field = ComposeField::Body;
+            return;
+        }
+        // Walk chars from line_start until we hit col_in_view or `\n`.
+        let mut byte_pos = line_start;
+        let mut col_walked: usize = 0;
+        for (offset, ch) in buf[line_start..].char_indices() {
+            if ch == '\n' || col_walked >= col_in_view as usize {
+                byte_pos = line_start + offset;
+                break;
+            }
+            col_walked += 1;
+            byte_pos = line_start + offset + ch.len_utf8();
+        }
+        c.body_cursor = byte_pos.min(buf.len());
+        c.field = ComposeField::Body;
+        // Drop the borrow before calling the anchor helper.
+        drop(c);
+        self.compose_body_anchor_to_cursor();
     }
 
     fn compose_field_next(&mut self) {
@@ -1883,22 +2022,31 @@ impl<'a> IssuesView<'a> {
         };
         self.mention_popup = None;
         let replacement = format!("#{}", number);
+        // Clamp the splice range — an inconsistent (anchor, buf)
+        // snapshot would otherwise panic `replace_range` with
+        // "begin > end" mid-edit.
         match target {
             MentionTarget::CommentEditor => {
                 let Some(ed) = self.comment_editor.as_mut() else {
                     return;
                 };
-                let end = walk_chars(&ed.buffer, anchor + 1, query_len);
-                ed.buffer.replace_range(anchor..end, &replacement);
-                ed.cursor = anchor + replacement.len();
+                let start = anchor.min(ed.buffer.len());
+                let end = walk_chars(&ed.buffer, start.saturating_add(1), query_len)
+                    .min(ed.buffer.len())
+                    .max(start);
+                ed.buffer.replace_range(start..end, &replacement);
+                ed.cursor = start + replacement.len();
             }
             MentionTarget::ComposeBody => {
                 let Some(c) = self.compose.as_mut() else {
                     return;
                 };
-                let end = walk_chars(&c.body, anchor + 1, query_len);
-                c.body.replace_range(anchor..end, &replacement);
-                c.body_cursor = anchor + replacement.len();
+                let start = anchor.min(c.body.len());
+                let end = walk_chars(&c.body, start.saturating_add(1), query_len)
+                    .min(c.body.len())
+                    .max(start);
+                c.body.replace_range(start..end, &replacement);
+                c.body_cursor = start + replacement.len();
             }
         }
     }
@@ -2726,7 +2874,7 @@ impl<'a> IssuesView<'a> {
             crate::github::issue::list_repo_milestones(&token, &coords).unwrap_or_default();
         // Try to seed from the first available issue template (if any).
         let template_body =
-            crate::github::issue::load_first_template(&coords).unwrap_or_default();
+            crate::github::issue::load_first_template(&self.ctx.repo_path).unwrap_or_default();
         self.compose = Some(ComposeState {
             title: String::new(),
             title_cursor: 0,
@@ -2960,12 +3108,18 @@ impl<'a> IssuesView<'a> {
                     if let Some(c) = self.compose.as_mut() {
                         c.field = field;
                     }
-                    // Click on Labels / Assignees / Milestone also
-                    // opens the picker — match what users expect.
                     match field {
+                        // Click on Labels / Assignees / Milestone
+                        // also opens the picker.
                         ComposeField::Labels => self.open_compose_labels_picker(),
                         ComposeField::Assignees => self.open_compose_assignees_picker(),
                         ComposeField::Milestone => self.open_compose_milestone_picker(),
+                        // Click inside the Body block snaps the
+                        // cursor to the clicked character — same
+                        // UX as the comment editor.
+                        ComposeField::Body => {
+                            self.compose_body_move_cursor_to_click(col, row);
+                        }
                         _ => {}
                     }
                     return;
@@ -3295,6 +3449,21 @@ impl<'a> IssuesView<'a> {
         let Some((cx, cy)) = self.comment_editor_cursor_pos else {
             return;
         };
+        // Suppress the terminal cursor when the mention popup is up —
+        // a blinking cursor sitting on top of the popup body reads as
+        // a glitch. The popup intercepts every keystroke anyway, so
+        // the editor cursor isn't actionable while it's open.
+        if let Some(p) = self.mention_popup.as_ref() {
+            if let Some(rect) = p.overlay_rect {
+                if cx >= rect.x
+                    && cx < rect.x + rect.width
+                    && cy >= rect.y
+                    && cy < rect.y + rect.height
+                {
+                    return;
+                }
+            }
+        }
         match &self.ctx.ui_config.common.cursor_type {
             crate::config::CursorType::Native => {
                 f.set_cursor_position((cx, cy));
@@ -5033,17 +5202,19 @@ impl<'a> IssuesView<'a> {
         } else {
             state.body.matches('\n').count() as u16 + 1
         };
+        // Render-time scroll handling: ONLY clamp against the
+        // current max — do NOT re-anchor on the cursor here. The
+        // anchor lives in `compose_body_anchor_to_cursor` and is
+        // called by cursor-mutating actions only. Re-anchoring at
+        // render time would snap `body_scroll` back to the cursor
+        // on every frame, undoing any mouse-wheel scroll the user
+        // just did and making hover feel like it scrolls to the
+        // bottom.
+        let _ = cursor_row;
         let mut scroll = state.body_scroll;
         let max_scroll = total_rows.saturating_sub(body_inner.height);
         if scroll > max_scroll {
             scroll = max_scroll;
-        }
-        if body_focused {
-            if cursor_row < scroll {
-                scroll = cursor_row;
-            } else if cursor_row >= scroll + body_inner.height {
-                scroll = cursor_row + 1 - body_inner.height;
-            }
         }
         let body_str = state.body.clone();
         if let Some(cc) = self.compose.as_mut() {
@@ -5079,12 +5250,20 @@ impl<'a> IssuesView<'a> {
                 }
             }
             ComposeField::Body if body_focused => {
-                let cx = body_inner.x + cursor_col;
-                let cy = body_inner.y + cursor_row.saturating_sub(scroll);
-                if cx < body_inner.x + body_inner.width
-                    && cy < body_inner.y + body_inner.height
+                // Only place the terminal cursor when its logical
+                // row is INSIDE the visible scroll window — without
+                // this guard `saturating_sub(scroll)` makes the
+                // cursor visually jump to row 0 of the body whenever
+                // we scroll past it, which the user perceives as
+                // "the scroll moved my cursor".
+                if cursor_row >= scroll
+                    && cursor_row < scroll + body_inner.height
                 {
-                    self.comment_editor_cursor_pos = Some((cx, cy));
+                    let cx = body_inner.x + cursor_col;
+                    let cy = body_inner.y + (cursor_row - scroll);
+                    if cx < body_inner.x + body_inner.width {
+                        self.comment_editor_cursor_pos = Some((cx, cy));
+                    }
                 }
             }
             _ => {}
