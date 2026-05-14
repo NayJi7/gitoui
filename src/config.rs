@@ -466,6 +466,16 @@ pub struct UiCommonConfig {
     pub conflict_view: ConflictViewMode,
     #[default(RebaseViewMode::Inline)]
     pub rebase_view: RebaseViewMode,
+    /// Whether to render Nerd Font glyphs in chrome (e.g. the GitHub
+    /// logomark in the PR / Issues view headers). On by default — users
+    /// without a Nerd Font installed can opt out via the config file
+    /// (this field is intentionally not exposed in the in-app config
+    /// page; it's a TOML-only knob):
+    ///
+    ///     [ui.common]
+    ///     nerd-font = false
+    #[default = true]
+    pub nerd_font: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

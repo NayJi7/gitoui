@@ -4067,7 +4067,10 @@ impl<'a> PullRequestsView<'a> {
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let theme = &self.ctx.color_theme;
-        let title = Line::from(vec![
+        // Build the left-aligned title spans first so we can measure
+        // their visual width and insert a right-aligned GitHub mark
+        // anchored to the panel's right edge.
+        let mut left: Vec<Span<'static>> = vec![
             Span::raw("  "),
             // `⋔` (pitchfork) = fork-and-merge shape, the visual
             // signature of a pull request. Purple matches GitHub's
@@ -4092,12 +4095,33 @@ impl<'a> PullRequestsView<'a> {
                 format!("{} open", self.items.len()),
                 Style::default().fg(theme.detail_label_fg),
             ),
-        ]);
+        ];
+        // Right-aligned ` GitHub` mark — only when the user has opted
+        // in to Nerd Font glyphs (no reliable runtime detection exists,
+        // so it's an explicit config flag).
+        if self.ctx.ui_config.common.nerd_font {
+            const GH_TAG: &str = "\u{f09b} GitHub";
+            const RIGHT_PAD: usize = 2;
+            let left_w: usize = left
+                .iter()
+                .map(|s| console::measure_text_width(s.content.as_ref()))
+                .sum();
+            let tag_w = console::measure_text_width(GH_TAG);
+            let total_w = area.width as usize;
+            if total_w > left_w + tag_w + RIGHT_PAD {
+                let fill = total_w - left_w - tag_w - RIGHT_PAD;
+                left.push(Span::raw(" ".repeat(fill)));
+                left.push(Span::styled(
+                    GH_TAG.to_string(),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ));
+            }
+        }
         let divider = Line::from(Span::styled(
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
-        f.render_widget(Paragraph::new(vec![title, divider]), area);
+        f.render_widget(Paragraph::new(vec![Line::from(left), divider]), area);
     }
 
     fn render_error_banner(&self, f: &mut Frame, area: Rect) {
