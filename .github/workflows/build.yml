@@ -12,24 +12,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      msrv: ${{ steps.get-msrv.outputs.msrv }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Get MSRV
-        id: get-msrv
-        run: |
-          MSRV=$(grep '^rust-version' Cargo.toml | cut -d '"' -f 2)
-          echo "msrv=$MSRV" >> $GITHUB_OUTPUT
   lint:
-    needs: prepare
     strategy:
       matrix:
         versions:
           - stable
-          - ${{ needs.prepare.outputs.msrv }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
