@@ -744,12 +744,14 @@ impl App<'_> {
                         Some(UserEvent::PullRequests)
                             if !text_input_active
                                 && !matches!(self.view, View::PullRequests(_))
+                                && !matches!(self.view, View::Issues(_))
                                 && self.github_features_available() =>
                         {
                             // Global shortcut — open the PR view from
                             // anywhere EXCEPT when we're already inside
-                            // it. Inside the PR view, `R` is reserved
-                            // for the reply action and must fall through
+                            // it OR inside the Issues view. In both of
+                            // those, `R` is reserved for the in-view
+                            // quote-reply action and must fall through
                             // to the view's own handle_event. Gated on
                             // (auth + github-hosted remote) so the key
                             // is a no-op when the feature can't actually
@@ -1245,6 +1247,12 @@ impl App<'_> {
                     }
                 }
                 AppEvent::ClosePullRequests => {
+                    // Wipe the terminal's image protocol state so
+                    // the PR-view avatars don't bleed into the
+                    // commit list we're about to render. Same
+                    // routine as the open path uses.
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
                     self.close_pull_requests();
                 }
                 AppEvent::OpenIssues => {
@@ -1253,6 +1261,12 @@ impl App<'_> {
                     self.open_issues();
                 }
                 AppEvent::CloseIssues => {
+                    // Same as ClosePullRequests — wipe lingering
+                    // image-protocol placements so the avatars from
+                    // the Issues view don't ghost onto the next
+                    // view (commit list) we're about to render.
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
                     self.close_issues();
                 }
                 AppEvent::IssueDetailFetched { number, result } => {

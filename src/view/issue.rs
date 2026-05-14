@@ -71,6 +71,14 @@ pub struct IssuesView<'a> {
     /// Pending avatars to paint after the Conversation tab Paragraph
     /// renders. Drained at the end of the frame.
     conversation_avatar_slots: Vec<AvatarSlot>,
+    /// Full set of avatars painted on the screen last frame. ONE
+    /// vec for the whole view so cross-section transitions (list →
+    /// detail, tab switches, scroll, …) automatically clear the
+    /// avatars from the previous section.
+    prev_painted_avatars: Vec<crate::view::pr::PaintedAvatar>,
+    /// Accumulator filled by each render path during a frame.
+    /// Drained and diffed once at the end of `render()`.
+    pending_avatar_paints: Vec<(crate::view::pr::PaintedAvatar, Color)>,
     /// Clickable `#N` reference hit-boxes inside the Conversation
     /// tab. Captured during the post-render restyle pass; consumed
     /// by `handle_click` to navigate to the referenced item.
@@ -405,6 +413,8 @@ impl<'a> IssuesView<'a> {
             comment_editor_cursor_pos: None,
             editor_body_area: None,
             conversation_avatar_slots: Vec::new(),
+            prev_painted_avatars: Vec::new(),
+            pending_avatar_paints: Vec::new(),
             conversation_ref_links: Vec::new(),
             references_hovered: 0,
             references_count: 0,
@@ -3110,10 +3120,13 @@ impl<'a> IssuesView<'a> {
         self.conversation_scroll = 0;
         self.conversation_selected = 0;
         self.conversation_scroll_to_selected = true;
-        // Fire all three fetches eagerly so the Timeline / Linked
-        // counts appear in the tab bar at the same time as the
-        // Conversation count — the user shouldn't have to switch
-        // tabs to discover what's there.
+        // Fire all four fetches eagerly: detail / timeline / linked
+        // populate the tab counts before the user has to switch tabs,
+        // and the PR cache primes the `#N` reference resolver so
+        // refs in the body card (e.g. `#1`) render as proper links on
+        // the very first frame — without this, the resolver runs
+        // against an empty `mention_pr_cache` and the ref text shows
+        // as plain `#N` until some later action triggers the fetch.
         if !self.detail_cache.contains_key(&number) && self.loading_for != Some(number) {
             self.spawn_detail_fetch(number);
         }
@@ -3127,6 +3140,7 @@ impl<'a> IssuesView<'a> {
         {
             self.spawn_linked_fetch(number);
         }
+        self.spawn_mention_prs_fetch();
     }
 
     fn spawn_detail_fetch(&mut self, number: u64) {
@@ -3173,6 +3187,10 @@ impl<'a> IssuesView<'a> {
         self.comment_editor_cursor_pos = None;
         self.list_area = None;
         self.tab_content_area = None;
+        // Per-frame avatar accumulator — flushed once at the end
+        // via the diff helper so cross-section transitions clear
+        // stale placements correctly.
+        self.pending_avatar_paints.clear();
 
         // Compose keeps the same top header as the list/detail
         // views (⊙ Issues OWNER/REPO …) — only the body area below
@@ -3190,6 +3208,7 @@ impl<'a> IssuesView<'a> {
             if self.mention_popup.is_some() {
                 self.render_mention_popup(f, area);
             }
+            self.flush_pending_avatars(f);
             self.place_terminal_cursor(f);
             return;
         }
@@ -3227,7 +3246,45 @@ impl<'a> IssuesView<'a> {
         if self.mention_popup.is_some() {
             self.render_mention_popup(f, chunks[2]);
         }
+        self.flush_pending_avatars(f);
         self.place_terminal_cursor(f);
+    }
+
+    /// Drains `pending_avatar_paints` and runs the single-pass
+    /// diff against `prev_painted_avatars`: stale slots (from a
+    /// section that doesn't render this frame) get a clear-cell
+    /// emitted at their old position, unchanged slots are marked
+    /// skip (no protocol re-emit), new slots are painted fresh.
+    fn flush_pending_avatars(&mut self, f: &mut Frame) {
+        let pending = std::mem::take(&mut self.pending_avatar_paints);
+        let prev = std::mem::take(&mut self.prev_painted_avatars);
+        // Build the list of "occluding" rects — overlays drawn this
+        // frame whose visual region must not show any avatar from
+        // the cards beneath. Avatars sitting inside any of them get
+        // dropped from `pending`; the diff then sees them as "no
+        // longer current" and emits a clear command, so the popup
+        // body is uncluttered.
+        let mut occluders: Vec<Rect> = Vec::new();
+        if let Some(p) = self.mention_popup.as_ref() {
+            if let Some(r) = p.overlay_rect {
+                occluders.push(r);
+            }
+        }
+        if let Some(p) = self.reaction_picker.as_ref() {
+            if let Some(r) = p.overlay_rect {
+                occluders.push(r);
+            }
+        }
+        let pending: Vec<(crate::view::pr::PaintedAvatar, Color)> = pending
+            .into_iter()
+            .filter(|(pa, _)| {
+                !occluders
+                    .iter()
+                    .any(|r| rect_contains(Some(*r), pa.screen_x, pa.screen_y))
+            })
+            .collect();
+        self.prev_painted_avatars =
+            crate::view::pr::paint_avatars_with_diff(f, &self.ctx, &prev, pending);
     }
 
     /// Position the terminal cursor on the active text input surface
@@ -3261,10 +3318,13 @@ impl<'a> IssuesView<'a> {
             .count();
         let title = Line::from(vec![
             Span::raw("  "),
+            // `◉` (fisheye) = filled dot on a ring, mirrors GitHub's
+            // open-issue indicator. Green matches the `Open` state
+            // colour the rest of the view already uses.
             Span::styled(
-                "⊙ ",
+                "◉ ",
                 Style::default()
-                    .fg(theme.list_head_fg)
+                    .fg(theme.status_success_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -3470,28 +3530,28 @@ impl<'a> IssuesView<'a> {
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
         f.render_stateful_widget(list, body_area, &mut state);
 
-        // Paint avatars after the List renders.
+        // Push issue-list avatar intents into the per-frame
+        // accumulator. The trailing diff pass in `render()` handles
+        // clearing stale slots and skip-emitting unchanged ones.
         let slots = std::mem::take(&mut self.list_avatar_slots);
+        let theme_bg = self.ctx.color_theme.bg;
+        let sel_bg = self.ctx.color_theme.list_selected_bg;
         for slot in &slots {
             let screen_y = body_area.y + slot.line as u16;
             if screen_y >= body_area.y + body_area.height {
                 continue;
             }
             let screen_x = body_area.x + slot.col;
-            let bg = if slot.is_selected {
-                self.ctx.color_theme.list_selected_bg
-            } else {
-                self.ctx.color_theme.bg
-            };
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &slot.login,
-                screen_x,
-                screen_y,
-                slot.is_selected,
+            let bg = if slot.is_selected { sel_bg } else { theme_bg };
+            self.pending_avatar_paints.push((
+                crate::view::pr::PaintedAvatar {
+                    login: slot.login.clone(),
+                    screen_x,
+                    screen_y,
+                    is_selected: slot.is_selected,
+                },
                 bg,
-            );
+            ));
         }
     }
 
@@ -3583,7 +3643,7 @@ impl<'a> IssuesView<'a> {
     }
 
     fn render_issue_sub_header(
-        &self,
+        &mut self,
         f: &mut Frame,
         area: Rect,
         detail: Option<&IssueDetail>,
@@ -3696,15 +3756,15 @@ impl<'a> IssuesView<'a> {
         f.render_widget(Paragraph::new(Line::from(spans)), area);
         let theme_bg = self.ctx.color_theme.bg;
         for (login, col) in avatar_paints {
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &login,
-                area.x + col,
-                area.y,
-                false,
+            self.pending_avatar_paints.push((
+                crate::view::pr::PaintedAvatar {
+                    login,
+                    screen_x: area.x + col,
+                    screen_y: area.y,
+                    is_selected: false,
+                },
                 theme_bg,
-            );
+            ));
         }
     }
 
@@ -3991,9 +4051,7 @@ impl<'a> IssuesView<'a> {
         let para = Paragraph::new(lines).scroll((scroll as u16, 0));
         f.render_widget(para, area);
 
-        // Overlay avatars after the Paragraph paints — they sit on
-        // top of the reserved slot inside the top border. Skip cards
-        // scrolled out of the viewport so we don't waste image cells.
+        // Push conversation avatars into the per-frame accumulator.
         let slots = std::mem::take(&mut self.conversation_avatar_slots);
         let theme_bg = self.ctx.color_theme.bg;
         for slot in &slots {
@@ -4006,15 +4064,15 @@ impl<'a> IssuesView<'a> {
             }
             let screen_y = area.y + row_in_area;
             let screen_x = area.x + slot.col;
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &slot.login,
-                screen_x,
-                screen_y,
-                false,
+            self.pending_avatar_paints.push((
+                crate::view::pr::PaintedAvatar {
+                    login: slot.login.clone(),
+                    screen_x,
+                    screen_y,
+                    is_selected: false,
+                },
                 theme_bg,
-            );
+            ));
         }
     }
 
@@ -4065,15 +4123,15 @@ impl<'a> IssuesView<'a> {
             if row >= area.height {
                 continue;
             }
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &login,
-                area.x + col,
-                area.y + row,
-                false,
+            self.pending_avatar_paints.push((
+                crate::view::pr::PaintedAvatar {
+                    login,
+                    screen_x: area.x + col,
+                    screen_y: area.y + row,
+                    is_selected: false,
+                },
                 theme_bg,
-            );
+            ));
         }
     }
 
@@ -4887,18 +4945,19 @@ impl<'a> IssuesView<'a> {
             render_row(f, y, assignees_focused, "Assignees:", assignees_value);
         self.compose_field_rects
             .push((ComposeField::Assignees, assignees_rect));
-        // Avatars overlay — paint after the Paragraph renders.
+        // Avatars overlay — diff-tracked via the view-wide
+        // accumulator (flushed at the end of `render()`).
         let theme_bg = theme.bg;
-        for (login, x) in &assignee_paints {
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                login,
-                *x,
-                assignees_rect.y,
-                false,
+        for (login, x) in assignee_paints {
+            self.pending_avatar_paints.push((
+                crate::view::pr::PaintedAvatar {
+                    login,
+                    screen_x: x,
+                    screen_y: assignees_rect.y,
+                    is_selected: false,
+                },
                 theme_bg,
-            );
+            ));
         }
         y += 2;
 
@@ -5366,6 +5425,18 @@ pub(crate) fn paint_mention_popup(
             .min(area.y + area.height.saturating_sub(height))
     };
     let rect = Rect::new(x, y, width, height);
+    // Clear ONE extra column to the left of the popup before
+    // drawing it: wide emojis (👍 👎 😀 …) painted on the card
+    // underneath can have their anchor cell sitting at `x - 1`
+    // with their continuation cell at `x`. `Clear` on the popup's
+    // own rect wipes the continuation marker but leaves the
+    // anchor, so the terminal still draws 2 visual cells for the
+    // emoji — its 2nd cell bleeds into the popup's left border.
+    // Extending the clear by 1 col wipes the anchor too.
+    if x > 0 {
+        let pre_rect = Rect::new(x - 1, y, 1, height);
+        f.render_widget(ratatui::widgets::Clear, pre_rect);
+    }
     f.render_widget(ratatui::widgets::Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -5726,40 +5797,40 @@ fn timeline_event_line(
 ) -> (Line<'static>, Option<u16>) {
     let actor = ev.actor.clone().unwrap_or_else(|| "?".into());
     let mut spans: Vec<Span<'static>> = Vec::new();
-    // `wide` flags emojis that render 2 visual cells in most fonts —
-    // those need an extra trailing space so the actor name doesn't
-    // touch the glyph. Narrow icons stay tight.
-    let (icon, fg, wide) = match &ev.kind {
+    let (icon, fg) = match &ev.kind {
         TimelineKind::Labeled { .. } | TimelineKind::Unlabeled { .. } => {
-            ("🏷", theme.list_head_fg, true)
+            ("🏷", theme.list_head_fg)
         }
         TimelineKind::Assigned { .. } | TimelineKind::Unassigned { .. } => {
-            ("👤", theme.list_name_fg, true)
+            ("👤", theme.list_name_fg)
         }
         TimelineKind::Milestoned { .. } | TimelineKind::Demilestoned { .. } => {
-            ("◎", theme.list_head_fg, false)
+            ("◎", theme.list_head_fg)
         }
-        TimelineKind::Closed { .. } => ("●", MERGED_PURPLE, false),
-        TimelineKind::Reopened => ("●", theme.status_success_fg, false),
-        TimelineKind::Renamed { .. } => ("✎", theme.detail_label_fg, false),
-        TimelineKind::CrossReferenced { .. } => ("↪", theme.list_head_fg, false),
-        TimelineKind::Mentioned => ("@", theme.detail_label_fg, false),
-        TimelineKind::Subscribed => ("☆", theme.detail_label_fg, false),
-        TimelineKind::Pinned | TimelineKind::Unpinned => ("⚲", theme.detail_label_fg, false),
-        TimelineKind::Other { .. } => ("·", theme.detail_label_fg, false),
+        TimelineKind::Closed { .. } => ("●", MERGED_PURPLE),
+        TimelineKind::Reopened => ("●", theme.status_success_fg),
+        TimelineKind::Renamed { .. } => ("✎", theme.detail_label_fg),
+        TimelineKind::CrossReferenced { .. } => ("↪", theme.list_head_fg),
+        TimelineKind::Mentioned => ("@", theme.detail_label_fg),
+        TimelineKind::Subscribed => ("☆", theme.detail_label_fg),
+        TimelineKind::Pinned | TimelineKind::Unpinned => ("⚲", theme.detail_label_fg),
+        TimelineKind::Other { .. } => ("·", theme.detail_label_fg),
     };
-    let icon_str = if wide {
-        format!(" {}  ", icon)
-    } else {
-        format!(" {} ", icon)
-    };
+    // Fixed 5-cell icon zone (`" {icon}<pad>"`) so EVERY timeline
+    // event lines up the avatar at the same buffer column, no
+    // matter whether the icon glyph measures 1 cell (`🏷` in some
+    // terminals, `●`, `✎`, …) or 2 cells (`👤`). Without this
+    // padding the rows end up offset by 1, which is exactly the
+    // misalignment we saw on the `assigned` row.
+    let icon_width = console::measure_text_width(icon) as u16;
+    let trailing_pad = 5u16.saturating_sub(1 + icon_width);
+    let icon_str = format!(" {}{}", icon, " ".repeat(trailing_pad as usize));
     spans.push(Span::styled(icon_str, Style::default().fg(fg)));
-    // Reserve 3 cells (2 avatar + 1 sp) only when avatars are on —
-    // `actor_col` points at the first of those 3 cells.
+    // Avatar zone is 3 cells (2 image + 1 padding) starting at the
+    // fixed icon-zone end (col 5).
     let actor_col: Option<u16> = if avatars_on {
-        let c: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
         spans.push(Span::raw("   "));
-        Some(c)
+        Some(5)
     } else {
         None
     };

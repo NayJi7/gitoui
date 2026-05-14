@@ -376,10 +376,14 @@ impl<'a> BlameView<'a> {
         let theme = &self.ctx.color_theme;
         let title_line = Line::from(vec![
             Span::raw("  "),
+            // `▤` (square with horizontal lines) reads as "stacked
+            // rows of annotation" — the blame view's whole purpose.
+            // Blue keeps it visually distinct from the warm-toned
+            // PR / Issues icons.
             Span::styled(
-                "◎ ",
+                "▤ ",
                 Style::default()
-                    .fg(theme.list_hash_fg)
+                    .fg(theme.status_info_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(

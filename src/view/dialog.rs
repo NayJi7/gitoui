@@ -46,6 +46,11 @@ pub struct DialogView<'a> {
     body_expand_row: Option<usize>,
     checkbox_rows: Vec<usize>,
     radio_rows: Vec<usize>,
+    /// `(login, line_idx, col_offset)` triples collected during the
+    /// `IssueAssignees` row build. Painted as GitHub avatars after
+    /// the body Paragraph renders so each assignee gets its profile
+    /// picture alongside the green-coloured login.
+    assignee_avatar_paints: Vec<(String, usize, u16)>,
     button_row: usize,
     validate_col: (u16, u16),
     cancel_col: (u16, u16),
@@ -160,6 +165,7 @@ impl<'a> DialogView<'a> {
             body_expand_row: None,
             checkbox_rows: Vec::new(),
             radio_rows: Vec::new(),
+            assignee_avatar_paints: Vec::new(),
             button_row: 0,
             validate_col: (0, 0),
             cancel_col: (0, 0),
@@ -793,6 +799,30 @@ impl<'a> DialogView<'a> {
 
         f.render_widget(block, dialog_area);
         f.render_widget(Paragraph::new(lines), inner);
+        // GitHub avatars for the IssueAssignees picker — painted on
+        // top of the rendered Paragraph so the rounded edges blend
+        // over the dialog's bg.
+        if matches!(self.kind, DialogKind::IssueAssignees { .. }) {
+            let theme_bg = self.ctx.color_theme.bg;
+            for (login, line_idx, col_offset) in self.assignee_avatar_paints.clone() {
+                let screen_x = inner.x + col_offset;
+                let screen_y = inner.y + line_idx as u16;
+                if screen_x + 2 > inner.x + inner.width
+                    || screen_y >= inner.y + inner.height
+                {
+                    continue;
+                }
+                crate::view::pr::paint_login_avatar(
+                    f,
+                    &self.ctx,
+                    &login,
+                    screen_x,
+                    screen_y,
+                    false,
+                    theme_bg,
+                );
+            }
+        }
 
         if self.is_highlighted(DialogElement::Input) {
             if let Some(input_row) = self.input_row {
@@ -853,6 +883,7 @@ impl<'a> DialogView<'a> {
         self.second_input_row = None;
         self.checkbox_rows.clear();
         self.radio_rows.clear();
+        self.assignee_avatar_paints.clear();
         self.body_expand_row = None;
 
         let theme = &self.ctx.color_theme;
@@ -1382,9 +1413,56 @@ impl<'a> DialogView<'a> {
                         Style::default().fg(dim_fg),
                     )));
                 } else {
+                    // Custom row builder so each assignee gets its
+                    // GitHub avatar (when enabled) and the login
+                    // renders in `list_name_fg` (green) — same
+                    // convention as the author column elsewhere.
+                    let theme = &self.ctx.color_theme;
+                    let avatars_on =
+                        self.ctx.avatar_manager.lock().unwrap().is_enabled();
                     for (i, name) in all_users.iter().enumerate() {
                         self.checkbox_rows.push(lines.len());
-                        lines.push(self.checkbox_line(i, name));
+                        let checked =
+                            self.checkboxes.get(i).copied().unwrap_or(false);
+                        let pointed =
+                            self.is_pointed_at(DialogElement::Checkbox(i));
+                        let indicator = if pointed { "▸ " } else { "  " };
+                        let check_span = if checked {
+                            Span::styled(
+                                "● ".to_string(),
+                                Style::default().fg(theme.status_info_fg),
+                            )
+                        } else {
+                            Span::styled(
+                                "○ ".to_string(),
+                                Style::default().fg(theme.divider_fg),
+                            )
+                        };
+                        let label_style = if pointed {
+                            Style::default()
+                                .fg(theme.list_name_fg)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(theme.list_name_fg)
+                        };
+                        let mut spans: Vec<Span<'static>> = vec![
+                            Span::raw(indicator.to_string()),
+                            check_span,
+                        ];
+                        let mut avatar_col: u16 = (indicator.chars().count()
+                            + 2) as u16; // indicator + "● "
+                        if avatars_on {
+                            // Reserve 3 cells: 2 for the avatar + 1
+                            // gap before the login. The paint pass
+                            // overlays the avatar on top.
+                            spans.push(Span::raw("   ".to_string()));
+                            self.assignee_avatar_paints
+                                .push((name.clone(), lines.len(), avatar_col));
+                            avatar_col = avatar_col.saturating_add(3);
+                        }
+                        let _ = avatar_col; // silence warning, used implicitly above
+                        spans.push(Span::styled(name.clone(), label_style));
+                        lines.push(Line::from(spans));
                     }
                 }
             }

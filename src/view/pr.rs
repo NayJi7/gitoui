@@ -112,6 +112,17 @@ pub struct PullRequestsView<'a> {
     conversation_avatar_slots: Vec<AvatarSlot>,
     /// Same as `conversation_avatar_slots` but for the PR list rows.
     list_avatar_slots: Vec<AvatarSlot>,
+    /// Full set of avatars painted on the screen last frame. ONE
+    /// vec for the whole view so cross-section transitions (list →
+    /// detail, commits → conversation, …) automatically clear the
+    /// avatars from the previous section: they end up in `prev`
+    /// but not in `current`, so the diff emits clear cells for
+    /// every stale position.
+    prev_painted_avatars: Vec<PaintedAvatar>,
+    /// Accumulator filled by each render path during a frame.
+    /// Drained and diffed against `prev_painted_avatars` at the
+    /// very end of `render()`. Always cleared at frame start.
+    pending_avatar_paints: Vec<(PaintedAvatar, Color)>,
     /// Body rect of the inline editor captured during render — used
     /// to translate clicks inside it into buffer cursor positions.
     editor_body_area: Option<Rect>,
@@ -686,6 +697,8 @@ impl<'a> PullRequestsView<'a> {
             comment_editor_cursor_pos: None,
             conversation_avatar_slots: Vec::new(),
             list_avatar_slots: Vec::new(),
+            prev_painted_avatars: Vec::new(),
+            pending_avatar_paints: Vec::new(),
             editor_body_area: None,
             commits_scroll: 0,
             commits_hovered: 0,
@@ -3415,11 +3428,17 @@ impl<'a> PullRequestsView<'a> {
                 }
                 // Click inside a tab's row-based content → set hovered
                 // for that tab. Files / Commits / Checks all use the
-                // same "rows of items" model.
+                // same "rows of items" model. On the Commits + Files
+                // tabs a click also drills into the clicked row (same
+                // outcome as Enter) — matches what users expect from
+                // GitHub web's PR sub-pages.
                 if let Some(area) = self.tab_content_area {
                     if rect_contains(Some(area), col, row) {
                         if let Some(idx) = self.row_at_tab(row, area) {
                             self.set_tab_hovered(idx);
+                            if matches!(self.active_tab, Tab::Commits | Tab::Files) {
+                                self.enter_drilldown();
+                            }
                         }
                     }
                 }
@@ -3724,6 +3743,12 @@ impl<'a> PullRequestsView<'a> {
         self.editor_body_area = None;
         self.tab_bar_rects.clear();
         self.comment_editor_cursor_pos = None;
+        // Reset the per-frame avatar accumulator — render paths
+        // push their intents here, then the trailing diff pass at
+        // the end of this fn evicts last-frame's stale avatars
+        // (e.g. when the previous frame rendered the PR list and
+        // this frame renders detail mode) before painting fresh.
+        self.pending_avatar_paints.clear();
 
         let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
             3
@@ -3757,6 +3782,47 @@ impl<'a> PullRequestsView<'a> {
             }
         }
 
+        // Single avatar diff pass for the whole frame — handles
+        // cross-section transitions cleanly: any avatar in `prev`
+        // but missing from `pending` (filter switch, scrolled
+        // out of view, tab switch, list → detail, …) gets a
+        // `clear_cell` emitted at its old position so the
+        // persistent image placement is evicted. We additionally
+        // drop pending avatars whose screen position falls inside
+        // a currently-open overlay (mention popup, reaction picker)
+        // so those overlays don't get image bytes punched through
+        // them — terminal images stack on top of cell content, so
+        // without this filter the popup body would show the cards'
+        // avatars bleeding through.
+        let pending = std::mem::take(&mut self.pending_avatar_paints);
+        let prev = std::mem::take(&mut self.prev_painted_avatars);
+        let mut occluders: Vec<Rect> = Vec::new();
+        if let Some(p) = self.mention_popup.as_ref() {
+            if let Some(r) = p.overlay_rect {
+                occluders.push(r);
+            }
+        }
+        if let Some(p) = self.reaction_picker.as_ref() {
+            if let Some(r) = p.overlay_rect {
+                occluders.push(r);
+            }
+        }
+        if let Some(p) = self.branch_picker.as_ref() {
+            if let Some(r) = p.overlay_rect {
+                occluders.push(r);
+            }
+        }
+        let pending: Vec<(PaintedAvatar, Color)> = pending
+            .into_iter()
+            .filter(|(pa, _)| {
+                !occluders
+                    .iter()
+                    .any(|r| rect_contains(Some(*r), pa.screen_x, pa.screen_y))
+            })
+            .collect();
+        self.prev_painted_avatars =
+            paint_avatars_with_diff(f, &self.ctx, &prev, pending);
+
         // Place the terminal cursor on the inline comment editor when
         // it's the active input surface — same convention as the rebase
         // reword editor.
@@ -3777,11 +3843,12 @@ impl<'a> PullRequestsView<'a> {
         let theme = &self.ctx.color_theme;
         let title = Line::from(vec![
             Span::raw("  "),
+            // `⋔` (pitchfork) = fork-and-merge shape, the visual
+            // signature of a pull request. Purple matches GitHub's
+            // PR brand colour.
             Span::styled(
-                "⊙ ",
-                Style::default()
-                    .fg(theme.list_head_fg)
-                    .add_modifier(Modifier::BOLD),
+                "⋔ ",
+                Style::default().fg(MERGED_PURPLE).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Pull Requests ",
@@ -3947,34 +4014,30 @@ impl<'a> PullRequestsView<'a> {
         );
         f.render_stateful_widget(list, body_area, &mut state);
 
-        // Paint avatars over the row-local pad reserved in
-        // format_pr_row. Each slot is positioned by its row index
-        // within the visible window plus the column offset captured
-        // when the row was formatted.
+        // Push slot intents into the per-frame accumulator. The
+        // single diff pass at the end of `render()` decides what
+        // to clear vs. skip vs. paint — using one `prev` for the
+        // entire view so cross-section transitions automatically
+        // evict stale image placements.
         let slots = std::mem::take(&mut self.list_avatar_slots);
+        let theme_bg = self.ctx.color_theme.bg;
+        let sel_bg = self.ctx.color_theme.list_selected_bg;
         for slot in &slots {
             let screen_y = body_area.y + slot.line as u16;
             if screen_y >= body_area.y + body_area.height {
                 continue;
             }
             let screen_x = body_area.x + slot.col;
-            // PR list paints a row-wide selection bg only on opened
-            // PRs (see format_pr_row); the avatar's rounded edges
-            // need to blend over that exact colour.
-            let bg = if slot.is_selected {
-                self.ctx.color_theme.list_selected_bg
-            } else {
-                self.ctx.color_theme.bg
-            };
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &slot.login,
-                screen_x,
-                screen_y,
-                slot.is_selected,
+            let bg = if slot.is_selected { sel_bg } else { theme_bg };
+            self.pending_avatar_paints.push((
+                PaintedAvatar {
+                    login: slot.login.clone(),
+                    screen_x,
+                    screen_y,
+                    is_selected: slot.is_selected,
+                },
                 bg,
-            );
+            ));
         }
     }
 
@@ -4098,10 +4161,16 @@ impl<'a> PullRequestsView<'a> {
                 row.push(Span::raw(" ".repeat(cols.labels - chips_width)));
             }
         }
+        // 1-cell gap between label chips and the avatar so they
+        // never touch — image 25 showed `BU` glued to the avatar
+        // without this padding.
+        if avatars_on {
+            row.push(Span::raw(" "));
+        }
         // Capture the row-relative column where the avatar will be
-        // painted. `row` so far ends just before the gap that
-        // precedes the author column; we land the avatar inside that
-        // gap, then add an extra space to keep the author legible.
+        // painted. `row` so far ends just after the spacing we just
+        // pushed; the avatar lands in the next two cells, then a
+        // trailing space keeps the author legible.
         let avatar_col: Option<u16> = if avatars_on {
             Some(
                 row.iter()
@@ -4111,8 +4180,9 @@ impl<'a> PullRequestsView<'a> {
         } else {
             None
         };
-        // Reserve 3 cells (avatar + breathing space) only when avatars
-        // are enabled; otherwise the row keeps a tight 2-cell gap.
+        // Reserve 3 cells (avatar 2 + breathing space 1) only when
+        // avatars are enabled; otherwise the row keeps a tight 2-cell
+        // gap.
         let pre_author = if avatars_on { "   " } else { "  " };
         row.extend([
             Span::raw(pre_author),
@@ -5087,7 +5157,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn render_pr_sub_header(
-        &self,
+        &mut self,
         f: &mut Frame,
         area: Rect,
         detail: Option<&PullRequestDetail>,
@@ -5243,15 +5313,15 @@ impl<'a> PullRequestsView<'a> {
             area,
         );
         if let Some((login, col)) = avatar_paint {
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &login,
-                area.x + col,
-                area.y,
-                false,
+            self.pending_avatar_paints.push((
+                PaintedAvatar {
+                    login,
+                    screen_x: area.x + col,
+                    screen_y: area.y,
+                    is_selected: false,
+                },
                 self.ctx.color_theme.bg,
-            );
+            ));
         }
     }
 
@@ -5621,12 +5691,12 @@ impl<'a> PullRequestsView<'a> {
         let para = Paragraph::new(lines).scroll((scroll as u16, 0));
         f.render_widget(para, area);
 
-        // Overlay queued avatars after the Paragraph paints. Skip any
-        // card scrolled outside the viewport. Conversation cards
-        // don't paint a row bg on selection — only the box border
-        // changes colour — so the avatar's rounded edges always
-        // blend over `theme.bg`, regardless of selection state.
+        // Push conversation avatars into the per-frame accumulator.
+        // The single diff pass at the end of `render()` handles
+        // clearing stale slots (scroll, comment removed, …) and
+        // skip-rendering unchanged ones.
         let slots = std::mem::take(&mut self.conversation_avatar_slots);
+        let theme_bg = self.ctx.color_theme.bg;
         for slot in &slots {
             if slot.line < scroll {
                 continue;
@@ -5637,15 +5707,15 @@ impl<'a> PullRequestsView<'a> {
             }
             let screen_y = area.y + row_in_area;
             let screen_x = area.x + slot.col;
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &slot.login,
-                screen_x,
-                screen_y,
-                false,
-                self.ctx.color_theme.bg,
-            );
+            self.pending_avatar_paints.push((
+                PaintedAvatar {
+                    login: slot.login.clone(),
+                    screen_x,
+                    screen_y,
+                    is_selected: false,
+                },
+                theme_bg,
+            ));
         }
     }
 
@@ -5877,31 +5947,26 @@ impl<'a> PullRequestsView<'a> {
         );
         f.render_stateful_widget(list, area, &mut state);
 
-        // Overlay avatars — selected row uses the highlighted bg so
-        // the rounded edges blend correctly. We can't ask the List
-        // widget which row is selected after render, but we know it
-        // from `self.commits_hovered`.
+        // Push commits-tab avatars into the per-frame accumulator.
         let selected = self.commits_hovered;
+        let theme_bg = self.ctx.color_theme.bg;
+        let sel_bg = self.ctx.color_theme.list_selected_bg;
         for (login, col, row) in paints {
             if row as usize >= area.height as usize {
                 continue;
             }
             let abs_row = self.commits_scroll + row as usize;
             let is_sel = abs_row == selected;
-            let bg = if is_sel {
-                self.ctx.color_theme.list_selected_bg
-            } else {
-                self.ctx.color_theme.bg
-            };
-            paint_login_avatar(
-                f,
-                &self.ctx,
-                &login,
-                area.x + col,
-                area.y + row,
-                is_sel,
+            let bg = if is_sel { sel_bg } else { theme_bg };
+            self.pending_avatar_paints.push((
+                PaintedAvatar {
+                    login,
+                    screen_x: area.x + col,
+                    screen_y: area.y + row,
+                    is_selected: is_sel,
+                },
                 bg,
-            );
+            ));
         }
     }
 
@@ -6405,6 +6470,120 @@ pub(crate) struct AvatarSlot {
     pub(crate) is_selected: bool,
 }
 
+/// Materialised avatar position — what was painted on screen during
+/// a particular frame. The diff helper compares the previous frame's
+/// list against the current one to decide which cells to clear vs.
+/// skip vs. paint anew. Equality includes the selected state so a
+/// row swapping selected/unselected forces a repaint (different bg).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PaintedAvatar {
+    pub(crate) login: String,
+    pub(crate) screen_x: u16,
+    pub(crate) screen_y: u16,
+    pub(crate) is_selected: bool,
+}
+
+/// Diff-aware avatar painter. Given the previous frame's painted set
+/// and the current frame's intended set (with the bg colour for each
+/// new paint), it:
+///
+///   * For slots in `prev` but not in `current` → writes the image
+///     protocol's `clear_cell` over the old position so the persistent
+///     Kitty / iTerm2 placement is evicted (fixes the "ghost trail"
+///     left by hover/scroll/filter changes).
+///   * For slots present in both → marks the cells as `set_skip(true)`
+///     so ratatui's diff renderer doesn't re-emit the protocol bytes
+///     this frame (kills the hover flicker — image bytes weighing
+///     thousands of bytes were being shipped on every cursor move).
+///   * For slots in `current` but not in `prev` (or moved/changed) →
+///     paints via `paint_login_avatar` as before.
+///
+/// Returns the new `prev` for the caller to store on the view —
+/// typically as `self.prev_*_painted_avatars`.
+pub(crate) fn paint_avatars_with_diff(
+    f: &mut Frame,
+    ctx: &AppContext,
+    prev: &[PaintedAvatar],
+    current: Vec<(PaintedAvatar, Color)>,
+) -> Vec<PaintedAvatar> {
+    use crate::protocol::ImageProtocol;
+    let is_kitty = matches!(
+        ctx.image_protocol,
+        ImageProtocol::Kitty | ImageProtocol::KittyUnicode { .. }
+    );
+    // 1. Clear residue at every position that was painted last frame
+    //    but isn't part of the current set.
+    //
+    // For Kitty: emit the cursor-position + delete-at-cursor escape
+    // sequence DIRECTLY to stdout — we can't stuff this into the
+    // ratatui buffer cell because the resulting symbol's
+    // `unicode-width` ends up at ~11 (`_Ga=d,d=C;` + payload char),
+    // and ratatui then marks the next 10 cells as continuation and
+    // skips their emit → the underlying text disappears. By writing
+    // the delete escape outside the buffer pipeline, the terminal
+    // evicts the placement BEFORE ratatui flushes its cells; the
+    // Paragraph's chars at those positions then render normally
+    // on top.
+    //
+    // For iTerm2 / Sixel: images flow inline with terminal content;
+    // ratatui's normal re-paint at those positions already replaces
+    // the image bytes, no protocol escape needed.
+    if is_kitty {
+        use std::io::Write;
+        let mut stdout = std::io::stdout().lock();
+        let area = f.buffer_mut().area();
+        let right = area.right();
+        let bottom = area.bottom();
+        for p in prev {
+            if current.iter().any(|(c, _)| c == p) {
+                continue;
+            }
+            for dx in 0..2u16 {
+                let x = p.screen_x + dx;
+                if x >= right || p.screen_y >= bottom {
+                    break;
+                }
+                // CSI cursor-position is 1-based: row Y, col X.
+                let _ = write!(
+                    stdout,
+                    "\x1b[{};{}H\x1b_Ga=d,d=C;\x1b\\",
+                    p.screen_y + 1,
+                    x + 1
+                );
+            }
+        }
+        let _ = stdout.flush();
+    }
+    // 2. For each current slot, decide whether to skip-paint (no
+    //    re-emit, preserve terminal pixels) or paint fresh.
+    for (pa, bg) in &current {
+        if prev.contains(pa) {
+            let buf = f.buffer_mut();
+            let area = buf.area();
+            let right = area.right();
+            let bottom = area.bottom();
+            for dx in 0..2u16 {
+                let x = pa.screen_x + dx;
+                if x >= right || pa.screen_y >= bottom {
+                    break;
+                }
+                buf[(x, pa.screen_y)].set_skip(true);
+            }
+        } else {
+            paint_login_avatar(
+                f,
+                ctx,
+                &pa.login,
+                pa.screen_x,
+                pa.screen_y,
+                pa.is_selected,
+                *bg,
+            );
+        }
+    }
+    current.into_iter().map(|(p, _)| p).collect()
+}
+
 /// Paint a single login's avatar at `(screen_x, screen_y)`. No-op
 /// when avatars are disabled, the login is empty, or the avatar
 /// isn't yet on disk (a background prefetch may have been fired but
@@ -6858,10 +7037,18 @@ fn commit_row(
             Style::default().fg(theme.list_commit_message_fg),
         ),
     ];
+    // 1-cell gap between the subject and the avatar so dense
+    // commit titles don't crash into the avatar. Only when we'll
+    // actually paint an avatar — otherwise the regular 2-cell
+    // gap below covers the column rhythm.
+    let want_avatar = avatars_on && !c.author_login.is_empty();
+    if want_avatar {
+        spans.push(Span::raw(" "));
+    }
     // Only reserve the 3-cell pad when avatars are enabled AND the
     // commit has a resolved GitHub login (otherwise paint would
     // skip and the pad would just be a gap).
-    let avatar_col = if avatars_on && !c.author_login.is_empty() {
+    let avatar_col = if want_avatar {
         let col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
         spans.push(Span::raw("   "));
         Some(col)
