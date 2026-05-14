@@ -81,15 +81,19 @@ jobs:
         with:
           # See lint job — avoid the macOS cargo/rustup-init collision.
           cache-bin: false
-      - name: Install cross (Linux cross-compile only)
+      - name: Install zig + cargo-zigbuild (Linux cross-compile only)
         if: matrix.cross
         uses: taiki-e/install-action@v2
         with:
-          tool: cross
+          # cargo-zigbuild uses `zig cc` as the cross-compiler. Replaces
+          # `cross` which on v0.2.5 shipped Ubuntu 16-era base images
+          # whose glibc is too old to run host-built build scripts of
+          # current crates (serde_core, libc) on ubuntu-24.04 runners.
+          tool: cargo-zigbuild,zig
       - name: Build
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --target ${{ matrix.target }}
+            cargo zigbuild --target ${{ matrix.target }}
           else
             cargo build --target ${{ matrix.target }}
           fi
