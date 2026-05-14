@@ -151,15 +151,19 @@ impl ReactionCounts {
     /// Walk the eight types in canonical GitHub order, yielding
     /// `(kind, count)` so callers can `filter(|(_, n)| *n > 0)`.
     pub fn iter(&self) -> impl Iterator<Item = (ReactionKind, u64)> + '_ {
+        // Same trailing-Heart order as `ReactionKind::all()` — keeps
+        // the chip row in a Paragraph layout that survives `❤️`'s
+        // unicode-width=1 vs terminal-width=2 mismatch by never
+        // letting another emoji sit after it on the same line.
         [
             (ReactionKind::PlusOne, self.plus_one),
             (ReactionKind::MinusOne, self.minus_one),
             (ReactionKind::Laugh, self.laugh),
             (ReactionKind::Hooray, self.hooray),
             (ReactionKind::Confused, self.confused),
-            (ReactionKind::Heart, self.heart),
             (ReactionKind::Rocket, self.rocket),
             (ReactionKind::Eyes, self.eyes),
+            (ReactionKind::Heart, self.heart),
         ]
         .into_iter()
     }
@@ -208,15 +212,21 @@ impl ReactionKind {
     }
 
     pub fn all() -> &'static [ReactionKind] {
+        // Heart sits LAST in the iteration order — its U+FE0F
+        // variation selector makes `unicode-width` report 1 col
+        // while terminals render 2, which silently clips the next
+        // emoji on the row (`🚀` vanishing was the symptom). Putting
+        // it at the tail means the mismatch never lands before
+        // another glyph in the same `Paragraph` line.
         &[
             ReactionKind::PlusOne,
             ReactionKind::MinusOne,
             ReactionKind::Laugh,
             ReactionKind::Hooray,
             ReactionKind::Confused,
-            ReactionKind::Heart,
             ReactionKind::Rocket,
             ReactionKind::Eyes,
+            ReactionKind::Heart,
         ]
     }
 }
@@ -1575,6 +1585,17 @@ fn write_json<T: Serialize>(
     method: reqwest::Method,
     body: &T,
 ) -> Result<(), String> {
+    write_json_returning_body(token, url, method, body).map(|_| ())
+}
+
+/// Same as `write_json` but returns the response body string so the
+/// caller can parse a field (e.g. the new reaction's `id`).
+fn write_json_returning_body<T: Serialize>(
+    token: &str,
+    url: &str,
+    method: reqwest::Method,
+    body: &T,
+) -> Result<String, String> {
     let client = http_client()?;
     let json = serde_json::to_string(body).map_err(|e| format!("encode body: {}", e))?;
     let resp = client
@@ -1586,12 +1607,189 @@ fn write_json<T: Serialize>(
         .send()
         .map_err(|e| format!("GitHub write: {}", e))?;
     if resp.status().is_success() {
-        Ok(())
+        Ok(resp.text().unwrap_or_default())
     } else {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
         Err(humanize_github_error(status, &body))
     }
+}
+
+#[derive(serde::Deserialize)]
+struct ReactionCreatedResponse {
+    id: u64,
+}
+
+/// Add a reaction returning the created reaction's `id` so callers
+/// can later `DELETE` it. Shared by both issue-body and comment paths.
+fn post_reaction_returning_id(token: &str, url: &str, kind: ReactionKind) -> Result<u64, String> {
+    let body = write_json_returning_body(
+        token,
+        url,
+        reqwest::Method::POST,
+        &ReactionBody {
+            content: kind.api_content(),
+        },
+    )?;
+    let parsed: ReactionCreatedResponse =
+        serde_json::from_str(&body).map_err(|e| format!("decode reaction: {}", e))?;
+    Ok(parsed.id)
+}
+
+#[derive(serde::Deserialize)]
+struct ApiReactionEntry {
+    id: u64,
+    content: String,
+    user: Option<ApiReactionUser>,
+}
+
+#[derive(serde::Deserialize)]
+struct ApiReactionUser {
+    login: Option<String>,
+}
+
+fn reaction_kind_from_content(content: &str) -> Option<ReactionKind> {
+    Some(match content {
+        "+1" => ReactionKind::PlusOne,
+        "-1" => ReactionKind::MinusOne,
+        "laugh" => ReactionKind::Laugh,
+        "confused" => ReactionKind::Confused,
+        "heart" => ReactionKind::Heart,
+        "hooray" => ReactionKind::Hooray,
+        "rocket" => ReactionKind::Rocket,
+        "eyes" => ReactionKind::Eyes,
+        _ => return None,
+    })
+}
+
+fn list_my_reactions_at(
+    token: &str,
+    url: &str,
+    me_login: &str,
+) -> Result<Vec<(ReactionKind, u64)>, String> {
+    let client = http_client()?;
+    let resp = client
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("GitHub /reactions: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!(
+            "GitHub /reactions HTTP {}: {}",
+            status,
+            body.lines().next().unwrap_or("")
+        ));
+    }
+    let body = resp
+        .text()
+        .map_err(|e| format!("/reactions read: {}", e))?;
+    let entries: Vec<ApiReactionEntry> =
+        serde_json::from_str(&body).map_err(|e| format!("/reactions JSON: {}", e))?;
+    // GitHub logins are case-insensitive in matching even though
+    // the API echoes the canonical case — compare lowercase to
+    // avoid false negatives when `me_login` differs in casing
+    // from the reaction owner's login on the API response.
+    let me_low = me_login.to_lowercase();
+    Ok(entries
+        .into_iter()
+        .filter(|e| {
+            e.user
+                .as_ref()
+                .and_then(|u| u.login.as_deref())
+                .map_or(false, |l| l.eq_ignore_ascii_case(&me_low))
+        })
+        .filter_map(|e| reaction_kind_from_content(&e.content).map(|k| (k, e.id)))
+        .collect())
+}
+
+/// Reactions placed on the issue / PR body by the authenticated
+/// viewer — returns `(kind, reaction_id)` pairs so a re-click can
+/// `DELETE` them.
+pub fn list_my_issue_reactions(
+    token: &str,
+    coords: &RepoCoords,
+    issue_number: u64,
+    me_login: &str,
+) -> Result<Vec<(ReactionKind, u64)>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/{}/reactions",
+        coords.owner, coords.repo, issue_number
+    );
+    list_my_reactions_at(token, &url, me_login)
+}
+
+pub fn list_my_issue_comment_reactions(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    me_login: &str,
+) -> Result<Vec<(ReactionKind, u64)>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/comments/{}/reactions",
+        coords.owner, coords.repo, comment_id
+    );
+    list_my_reactions_at(token, &url, me_login)
+}
+
+pub fn list_my_review_comment_reactions(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    me_login: &str,
+) -> Result<Vec<(ReactionKind, u64)>, String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/comments/{}/reactions",
+        coords.owner, coords.repo, comment_id
+    );
+    list_my_reactions_at(token, &url, me_login)
+}
+
+/// `DELETE /repos/:owner/:repo/issues/:n/reactions/:rid` — removes
+/// the viewer's reaction from an issue or PR body.
+pub fn delete_issue_reaction(
+    token: &str,
+    coords: &RepoCoords,
+    issue_number: u64,
+    reaction_id: u64,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/{}/reactions/{}",
+        coords.owner, coords.repo, issue_number, reaction_id
+    );
+    delete_request(token, &url)
+}
+
+/// `DELETE /repos/:owner/:repo/issues/comments/:cid/reactions/:rid`
+/// — removes a reaction from an issue or PR top-level comment.
+pub fn delete_issue_comment_reaction(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    reaction_id: u64,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/issues/comments/{}/reactions/{}",
+        coords.owner, coords.repo, comment_id, reaction_id
+    );
+    delete_request(token, &url)
+}
+
+/// `DELETE /repos/:owner/:repo/pulls/comments/:cid/reactions/:rid`
+/// — review-comment variant of the above (file/line inline threads).
+pub fn delete_review_comment_reaction(
+    token: &str,
+    coords: &RepoCoords,
+    comment_id: u64,
+    reaction_id: u64,
+) -> Result<(), String> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/comments/{}/reactions/{}",
+        coords.owner, coords.repo, comment_id, reaction_id
+    );
+    delete_request(token, &url)
 }
 
 fn delete_request(token: &str, url: &str) -> Result<(), String> {
@@ -1687,68 +1885,49 @@ struct ReactionBody<'a> {
 
 /// Add a reaction to an issue / PR top-level comment. GitHub treats
 /// PR description and issue body the same way for this endpoint.
+/// Returns the new reaction's id so the caller can DELETE it later.
 pub fn add_issue_comment_reaction(
     token: &str,
     coords: &RepoCoords,
     comment_id: u64,
     kind: ReactionKind,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/issues/comments/{}/reactions",
         coords.owner, coords.repo, comment_id
     );
-    write_json(
-        token,
-        &url,
-        reqwest::Method::POST,
-        &ReactionBody {
-            content: kind.api_content(),
-        },
-    )
+    post_reaction_returning_id(token, &url, kind)
 }
 
 /// Add a reaction to an inline review comment (the ones threaded
-/// under a specific file/line in the PR diff).
+/// under a specific file/line in the PR diff). Returns the new
+/// reaction's id.
 pub fn add_review_comment_reaction(
     token: &str,
     coords: &RepoCoords,
     comment_id: u64,
     kind: ReactionKind,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/pulls/comments/{}/reactions",
         coords.owner, coords.repo, comment_id
     );
-    write_json(
-        token,
-        &url,
-        reqwest::Method::POST,
-        &ReactionBody {
-            content: kind.api_content(),
-        },
-    )
+    post_reaction_returning_id(token, &url, kind)
 }
 
 /// Add a reaction to the PR / issue body itself (the "opened this PR"
-/// card at the top of the conversation tab).
+/// card at the top of the conversation tab). Returns the id.
 pub fn add_issue_reaction(
     token: &str,
     coords: &RepoCoords,
     issue_number: u64,
     kind: ReactionKind,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/issues/{}/reactions",
         coords.owner, coords.repo, issue_number
     );
-    write_json(
-        token,
-        &url,
-        reqwest::Method::POST,
-        &ReactionBody {
-            content: kind.api_content(),
-        },
-    )
+    post_reaction_returning_id(token, &url, kind)
 }
 
 // ─── PR creation ─────────────────────────────────────────────────

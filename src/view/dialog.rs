@@ -90,8 +90,9 @@ impl<'a> DialogView<'a> {
             DialogKind::IssueLabels { selected, .. } => (selected.clone(), 0),
             DialogKind::IssueAssignees { selected, .. } => (selected.clone(), 0),
             DialogKind::IssueMilestone { selected, all_milestones, .. } => {
-                // Radio-style: one bool per option + "None" at the end.
-                let mut boxes = vec![false; all_milestones.len() + 1];
+                // Radio-style: `dropdown_selected` carries the chosen
+                // slot. Slot N (= `all_milestones.len()`) represents
+                // "no milestone".
                 let chosen = match selected {
                     Some(n) => all_milestones
                         .iter()
@@ -99,12 +100,12 @@ impl<'a> DialogView<'a> {
                         .unwrap_or(all_milestones.len()),
                     None => all_milestones.len(),
                 };
-                if chosen < boxes.len() {
-                    boxes[chosen] = true;
-                }
-                (boxes, chosen)
+                (vec![], chosen)
             }
-            DialogKind::ConfirmCloseIssue { .. } => (vec![true, false], 0),
+            // ConfirmCloseIssue is a 2-option radio (`Completed` /
+            // `Not planned`) — radios use `dropdown_selected`, not
+            // `checkboxes`, so leave the latter empty.
+            DialogKind::ConfirmCloseIssue { .. } => (vec![], 0),
             DialogKind::AddWorktree => (vec![false], 0),
             // Two radio options: 0=Stash, 1=Discard. Default to Stash (safer).
             DialogKind::CheckoutHasLocalChanges { .. } => (vec![], 0),
@@ -125,9 +126,16 @@ impl<'a> DialogView<'a> {
             DialogElement::Input
         } else if matches!(
             kind,
-            DialogKind::Reset { .. } | DialogKind::CheckoutHasLocalChanges { .. }
+            DialogKind::Reset { .. }
+                | DialogKind::CheckoutHasLocalChanges { .. }
+                | DialogKind::ConfirmCloseIssue { .. }
+                | DialogKind::IssueMilestone { .. }
         ) {
             DialogElement::Radio(dropdown_selected)
+        } else if matches!(kind, DialogKind::ConfirmReopenIssue { .. }) {
+            // Reopen has no radio choice — go straight to Validate so
+            // Enter is a one-keystroke confirm.
+            DialogElement::Validate
         } else if !checkboxes.is_empty() {
             DialogElement::Checkbox(0)
         } else {
@@ -196,6 +204,8 @@ impl<'a> DialogView<'a> {
             DialogKind::ChooseRemote { remotes, .. } => remotes.len(),
             DialogKind::SetUpstream { remotes, .. } => remotes.len(),
             DialogKind::CheckoutHasLocalChanges { .. } => 2,
+            DialogKind::ConfirmCloseIssue { .. } => 2,
+            DialogKind::IssueMilestone { all_milestones, .. } => all_milestones.len() + 1,
             _ => 0,
         }
     }
@@ -542,7 +552,20 @@ impl<'a> DialogView<'a> {
                 DialogElement::Cancel => self.tx.send(AppEvent::DialogCancel),
                 DialogElement::Checkbox(i) => self.toggle_checkbox_at(i),
                 DialogElement::Radio(i) => {
+                    // For dialogs with a dedicated Validate button
+                    // (close/reopen confirmation), Enter on a radio row
+                    // only updates the selection — the user must press
+                    // Enter on Validate to actually fire the API. For
+                    // other radio dialogs (Reset, Merge, …) the old
+                    // pick-and-commit behaviour is preserved.
                     self.dropdown_selected = i;
+                    if !matches!(
+                        self.kind,
+                        DialogKind::ConfirmCloseIssue { .. }
+                            | DialogKind::ConfirmReopenIssue { .. }
+                    ) {
+                        self.confirm();
+                    }
                 }
                 DialogElement::BodyExpand => self.insert_body_newline(),
                 DialogElement::Input => {
@@ -555,15 +578,16 @@ impl<'a> DialogView<'a> {
             UserEvent::Cancel => self.tx.send(AppEvent::DialogCancel),
             UserEvent::Close => self.tx.send(AppEvent::DialogCancel),
             UserEvent::NavigateDown => match self.focused {
+                // Radio rows: ↑/↓ moves the focus arrow only — the
+                // selection commits on Enter, not on every cursor
+                // step. Keeps the UX in line with checkbox rows.
                 DialogElement::Radio(i) if i + 1 < self.radio_count() => {
-                    self.dropdown_selected = i + 1;
                     self.focused = DialogElement::Radio(i + 1);
                 }
                 _ => self.focus_next(),
             },
             UserEvent::NavigateUp => match self.focused {
                 DialogElement::Radio(i) if i > 0 => {
-                    self.dropdown_selected = i - 1;
                     self.focused = DialogElement::Radio(i - 1);
                 }
                 _ => self.focus_prev(),
@@ -1378,25 +1402,50 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 for (i, m) in all_milestones.iter().enumerate() {
                     self.radio_rows.push(lines.len());
-                    let glyph = if self.checkboxes.get(i).copied().unwrap_or(false) {
-                        "●"
+                    let is_chosen = i == self.dropdown_selected;
+                    let glyph = if is_chosen { "●" } else { "○" };
+                    let is_focused =
+                        self.is_highlighted(DialogElement::Radio(i));
+                    let row_fg = if is_focused { theme.list_head_fg } else { fg };
+                    let style = if is_focused {
+                        Style::default()
+                            .fg(row_fg)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        "○"
+                        Style::default().fg(row_fg)
                     };
+                    let arrow = if is_focused { "▶ " } else { "  " };
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  {} ", glyph), Style::default().fg(fg)),
-                        Span::styled(m.title.clone(), Style::default().fg(fg)),
+                        Span::styled(
+                            arrow.to_string(),
+                            Style::default()
+                                .fg(theme.list_head_fg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("{} ", glyph), style),
+                        Span::styled(m.title.clone(), style),
                     ]));
                 }
                 let none_i = all_milestones.len();
                 self.radio_rows.push(lines.len());
-                let glyph = if self.checkboxes.get(none_i).copied().unwrap_or(false) {
-                    "●"
+                let is_chosen = none_i == self.dropdown_selected;
+                let glyph = if is_chosen { "●" } else { "○" };
+                let is_focused = self.is_highlighted(DialogElement::Radio(none_i));
+                let row_fg = if is_focused { theme.list_head_fg } else { fg };
+                let style = if is_focused {
+                    Style::default().fg(row_fg).add_modifier(Modifier::BOLD)
                 } else {
-                    "○"
+                    Style::default().fg(row_fg)
                 };
+                let arrow = if is_focused { "▶ " } else { "  " };
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  {} ", glyph), Style::default().fg(fg)),
+                    Span::styled(
+                        arrow.to_string(),
+                        Style::default()
+                            .fg(theme.list_head_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("{} ", glyph), style),
                     Span::styled("(no milestone)".to_string(), Style::default().fg(dim_fg)),
                 ]));
             }
@@ -1418,16 +1467,48 @@ impl<'a> DialogView<'a> {
                     ["Completed", "Not planned (won't fix)"].iter().enumerate()
                 {
                     self.radio_rows.push(lines.len());
-                    let glyph = if self.checkboxes.get(i).copied().unwrap_or(false) {
-                        "●"
+                    let is_chosen = i == self.dropdown_selected;
+                    let glyph = if is_chosen { "●" } else { "○" };
+                    let is_focused =
+                        self.is_highlighted(DialogElement::Radio(i));
+                    let row_fg = if is_focused { theme.list_head_fg } else { fg };
+                    let style = if is_focused {
+                        Style::default()
+                            .fg(row_fg)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        "○"
+                        Style::default().fg(row_fg)
                     };
+                    // `▶` on focused row makes the keyboard cursor
+                    // explicit — same visual treatment as the
+                    // commit list / PR list selection marker.
+                    let arrow = if is_focused { "▶ " } else { "  " };
                     lines.push(Line::from(vec![
-                        Span::styled(format!("  {} ", glyph), Style::default().fg(fg)),
-                        Span::styled(label.to_string(), Style::default().fg(fg)),
+                        Span::styled(
+                            arrow.to_string(),
+                            Style::default()
+                                .fg(theme.list_head_fg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("{} ", glyph), style),
+                        Span::styled(label.to_string(), style),
                     ]));
                 }
+            }
+            DialogKind::ConfirmReopenIssue {
+                issue_number,
+                issue_title,
+            } => {
+                lines.push(issue_header_line(
+                    *issue_number,
+                    issue_title,
+                    &self.ctx.color_theme,
+                ));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Reopen this issue?".to_string(),
+                    Style::default().fg(fg),
+                )));
             }
             DialogKind::AddRemote => {
                 lines.push(label_line("Name:", dim_fg));
@@ -1645,6 +1726,7 @@ impl<'a> DialogView<'a> {
             DialogKind::IssueAssignees { .. } => " Assignees ",
             DialogKind::IssueMilestone { .. } => " Milestone ",
             DialogKind::ConfirmCloseIssue { .. } => " Close Issue ",
+            DialogKind::ConfirmReopenIssue { .. } => " Reopen Issue ",
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
             DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
@@ -1984,7 +2066,12 @@ impl<'a> DialogView<'a> {
                     .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
                     .map(|(_, l)| l.name.clone())
                     .collect();
+                // Send CloseDialog FIRST so the underlying view is
+                // restored before the picker payload lands — the app
+                // handler matches on `View::Issues`, which is only
+                // visible after the dialog wrapper is unwrapped.
                 if *for_compose {
+                    self.tx.send(AppEvent::CloseDialog);
                     self.tx.send(AppEvent::ComposeIssueLabelsPicked {
                         labels: picked_names,
                     });
@@ -1993,8 +2080,8 @@ impl<'a> DialogView<'a> {
                         issue_number: *issue_number,
                         labels: picked_names,
                     });
+                    self.tx.send(AppEvent::CloseDialog);
                 }
-                self.tx.send(AppEvent::CloseDialog);
                 return;
             }
             DialogKind::IssueAssignees {
@@ -2010,6 +2097,7 @@ impl<'a> DialogView<'a> {
                     .map(|(_, u)| u.clone())
                     .collect();
                 if *for_compose {
+                    self.tx.send(AppEvent::CloseDialog);
                     self.tx.send(AppEvent::ComposeIssueAssigneesPicked {
                         assignees: picked,
                     });
@@ -2018,8 +2106,8 @@ impl<'a> DialogView<'a> {
                         issue_number: *issue_number,
                         assignees: picked,
                     });
+                    self.tx.send(AppEvent::CloseDialog);
                 }
-                self.tx.send(AppEvent::CloseDialog);
                 return;
             }
             DialogKind::IssueMilestone {
@@ -2028,15 +2116,12 @@ impl<'a> DialogView<'a> {
                 for_compose,
                 ..
             } => {
-                // Radio: find which slot is true. The "None" slot sits
-                // at `all_milestones.len()`.
-                let chosen_idx = self
-                    .checkboxes
-                    .iter()
-                    .position(|b| *b)
-                    .unwrap_or(all_milestones.len());
+                // Radio: `dropdown_selected` carries the chosen slot.
+                // The "None" slot sits at `all_milestones.len()`.
+                let chosen_idx = self.dropdown_selected.min(all_milestones.len());
                 let picked: Option<u64> = all_milestones.get(chosen_idx).map(|m| m.number);
                 if *for_compose {
+                    self.tx.send(AppEvent::CloseDialog);
                     self.tx
                         .send(AppEvent::ComposeIssueMilestonePicked { milestone: picked });
                 } else {
@@ -2044,13 +2129,15 @@ impl<'a> DialogView<'a> {
                         issue_number: *issue_number,
                         milestone: picked,
                     });
+                    self.tx.send(AppEvent::CloseDialog);
                 }
-                self.tx.send(AppEvent::CloseDialog);
                 return;
             }
             DialogKind::ConfirmCloseIssue { issue_number, .. } => {
-                let chosen_idx = self.checkboxes.iter().position(|b| *b).unwrap_or(0);
-                let reason = if chosen_idx == 1 {
+                // `dropdown_selected` carries the live radio choice
+                // (kept in sync by NavigateUp/Down). 0 → Completed,
+                // 1 → Not planned.
+                let reason = if self.dropdown_selected == 1 {
                     crate::github::issue::IssueStateReason::NotPlanned
                 } else {
                     crate::github::issue::IssueStateReason::Completed
@@ -2058,6 +2145,13 @@ impl<'a> DialogView<'a> {
                 self.tx.send(AppEvent::CloseIssueWithReason {
                     issue_number: *issue_number,
                     reason,
+                });
+                self.tx.send(AppEvent::CloseDialog);
+                return;
+            }
+            DialogKind::ConfirmReopenIssue { issue_number, .. } => {
+                self.tx.send(AppEvent::ReopenIssue {
+                    issue_number: *issue_number,
                 });
                 self.tx.send(AppEvent::CloseDialog);
                 return;
@@ -2214,9 +2308,11 @@ impl<'a> DialogView<'a> {
                         .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
                         .map(|(_, l)| l.clone())
                         .collect();
+                    // CloseDialog first so the underlying PR view is
+                    // restored before the payload reaches the handler.
+                    self.tx.send(AppEvent::CloseDialog);
                     self.tx
                         .send(AppEvent::ComposeLabelsPicked { labels: picked });
-                    self.tx.send(AppEvent::CloseDialog);
                     return;
                 }
                 let labels: Vec<String> = all_labels
@@ -2433,7 +2529,8 @@ impl<'a> DialogView<'a> {
             DialogKind::IssueLabels { .. }
             | DialogKind::IssueAssignees { .. }
             | DialogKind::IssueMilestone { .. }
-            | DialogKind::ConfirmCloseIssue { .. } => unreachable!(),
+            | DialogKind::ConfirmCloseIssue { .. }
+            | DialogKind::ConfirmReopenIssue { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

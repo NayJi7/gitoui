@@ -597,7 +597,7 @@ pub fn add_issue_reaction(
     coords: &RepoCoords,
     number: u64,
     kind: crate::github::pr::ReactionKind,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/issues/{}/reactions",
         coords.owner, coords.repo, number
@@ -611,7 +611,24 @@ pub fn add_issue_reaction(
         },
         "React to issue",
     )?;
-    expect_success(resp, "React to issue")
+    let status = resp.status();
+    let body = resp
+        .text()
+        .map_err(|e| format!("React to issue read: {}", e))?;
+    if !status.is_success() {
+        return Err(format!(
+            "React to issue HTTP {}: {}",
+            status,
+            body.lines().next().unwrap_or("")
+        ));
+    }
+    #[derive(serde::Deserialize)]
+    struct R {
+        id: u64,
+    }
+    let parsed: R =
+        serde_json::from_str(&body).map_err(|e| format!("decode reaction: {}", e))?;
+    Ok(parsed.id)
 }
 
 pub fn create_issue(

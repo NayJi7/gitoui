@@ -233,6 +233,12 @@ pub struct App<'a> {
     /// straight to the commit graph. Empty when no PR drilldown
     /// is in flight.
     pr_nav_stack: Vec<PrNavRestore>,
+    /// Cached result of `RepoCoords::from_repo(self.repository.path())`
+    /// — `true` when this repo has at least one GitHub-hosted remote.
+    /// Computed once at startup since the remote set doesn't change
+    /// during a session; the alternative would be spawning a
+    /// `git remote -v` process on every footer render / keystroke.
+    has_github_remote: bool,
 }
 
 /// One step of the PR-originated drilldown stack — the view kind
@@ -442,6 +448,7 @@ impl<'a> App<'a> {
                     loaded
                 }
             },
+            has_github_remote: crate::github::RepoCoords::from_repo(repository.path()).is_some(),
         };
 
         if let Some(context) = refresh_view_context {
@@ -736,18 +743,23 @@ impl App<'_> {
                         }
                         Some(UserEvent::PullRequests)
                             if !text_input_active
-                                && !matches!(self.view, View::PullRequests(_)) =>
+                                && !matches!(self.view, View::PullRequests(_))
+                                && self.github_features_available() =>
                         {
                             // Global shortcut — open the PR view from
                             // anywhere EXCEPT when we're already inside
                             // it. Inside the PR view, `R` is reserved
                             // for the reply action and must fall through
-                            // to the view's own handle_event.
+                            // to the view's own handle_event. Gated on
+                            // (auth + github-hosted remote) so the key
+                            // is a no-op when the feature can't actually
+                            // work — matches the footer's behaviour.
                             self.ec.send(AppEvent::OpenPullRequests);
                         }
                         Some(UserEvent::Issues)
                             if !text_input_active
-                                && !matches!(self.view, View::Issues(_)) =>
+                                && !matches!(self.view, View::Issues(_))
+                                && self.github_features_available() =>
                         {
                             self.ec.send(AppEvent::OpenIssues);
                         }
@@ -1216,6 +1228,22 @@ impl App<'_> {
                     self.clear_terminal(terminal)?;
                     self.open_pull_requests();
                 }
+                AppEvent::OpenPullRequestDetail { number } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_pull_requests();
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.open_by_number(number);
+                    }
+                }
+                AppEvent::OpenIssueDetail { number } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_issues();
+                    if let View::Issues(ref mut view) = self.view {
+                        view.open_by_number(number);
+                    }
+                }
                 AppEvent::ClosePullRequests => {
                     self.close_pull_requests();
                 }
@@ -1245,6 +1273,72 @@ impl App<'_> {
                 AppEvent::IssueLinkedFetched { number, result } => {
                     if let View::Issues(ref mut view) = self.view {
                         view.on_linked_fetched(number, result);
+                    }
+                }
+                AppEvent::IssueMentionPrsFetched { result } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_mention_prs_fetched(result);
+                    }
+                }
+                AppEvent::PrMentionIssuesFetched { issues } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_mention_issues_fetched(issues);
+                    }
+                }
+                AppEvent::IssueReactionApplied {
+                    issue_number,
+                    target_idx,
+                    kind,
+                    reaction_id,
+                } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_reaction_applied(issue_number, target_idx, kind, reaction_id);
+                    }
+                }
+                AppEvent::IssueReactionRemoved {
+                    issue_number,
+                    target_idx,
+                    kind,
+                } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_reaction_removed(issue_number, target_idx, kind);
+                    }
+                }
+                AppEvent::PrReactionApplied {
+                    pr_number,
+                    target_idx,
+                    kind,
+                    reaction_id,
+                } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_reaction_applied(pr_number, target_idx, kind, reaction_id);
+                    }
+                }
+                AppEvent::PrReactionRemoved {
+                    pr_number,
+                    target_idx,
+                    kind,
+                } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_reaction_removed(pr_number, target_idx, kind);
+                    }
+                }
+                AppEvent::IssueViewerReactionsFetched {
+                    issue_number,
+                    target_idx,
+                    reactions,
+                } => {
+                    if let View::Issues(ref mut view) = self.view {
+                        view.on_viewer_reactions_fetched(issue_number, target_idx, reactions);
+                    }
+                }
+                AppEvent::PrViewerReactionsFetched {
+                    pr_number,
+                    target_idx,
+                    reactions,
+                } => {
+                    if let View::PullRequests(ref mut view) = self.view {
+                        view.on_viewer_reactions_fetched(pr_number, target_idx, reactions);
                     }
                 }
                 AppEvent::OpenIssueLabelsPicker {
@@ -2352,17 +2446,11 @@ impl App<'_> {
                         // `c` / `C` (copy msg / hash) are deliberately kept
                         // functional but omitted from the footer hint to
                         // reduce clutter. They're discoverable via `?:help`.
-                        // `R:PRs` and `I:Issues` only appear when the
-                        // user is logged in to GitHub — otherwise the
-                        // shortcut would just surface a toast asking
-                        // them to auth.
-                        let has_github_auth = self
-                            .ctx
-                            .github_auth_state
-                            .token
-                            .as_ref()
-                            .map_or(false, |t| !t.is_empty());
-                        if has_github_auth {
+                        // `R:PRs` and `I:Issues` only appear when BOTH the
+                        // user is logged in to GitHub AND the repo has a
+                        // GitHub-hosted remote — otherwise the shortcuts
+                        // would point at features that can't open anything.
+                        if self.github_features_available() {
                             "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏R:PRs▕▏I:Issues▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
                                 .into()
                         } else {
@@ -3718,6 +3806,21 @@ impl<'a> App<'a> {
             all_paths,
             repo_path,
         );
+    }
+
+    /// True when both prerequisites for the PR / Issues views are
+    /// satisfied: the user has a valid GitHub auth token AND the
+    /// current repo has at least one GitHub-hosted remote. Drives
+    /// both the global `R`/`I` key dispatch and the footer hint
+    /// surfacing of those shortcuts.
+    fn github_features_available(&self) -> bool {
+        let has_token = self
+            .ctx
+            .github_auth_state
+            .token
+            .as_ref()
+            .map_or(false, |t| !t.is_empty());
+        has_token && self.has_github_remote
     }
 
     fn open_pull_requests(&mut self) {

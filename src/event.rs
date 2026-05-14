@@ -140,6 +140,62 @@ pub enum AppEvent {
     /// Open the GitHub Pull Requests view. App resolves auth + remote
     /// and surfaces an error notification if either is missing.
     OpenPullRequests,
+    /// Open the PR view and jump straight to the given PR's detail —
+    /// dispatched from cross-view navigation (e.g. clicking a `#N`
+    /// reference inside an Issue comment).
+    OpenPullRequestDetail { number: u64 },
+    /// Cross-view nav from a `#N` mention click/Enter — switches
+    /// to the Issues view and opens that issue's detail page.
+    OpenIssueDetail { number: u64 },
+    /// PR view's `#N` resolver / mention popup feed — full issue list
+    /// fetched in the background so PR comments can colour `#N`
+    /// references AND the `#` autocomplete popup has titles to show.
+    PrMentionIssuesFetched {
+        issues: Vec<(u64, String)>,
+    },
+    /// Issue view: reaction add succeeded — carries the new
+    /// reaction's id so the view can record `(kind, id)` against
+    /// `(issue_number, target_idx)` and later DELETE on toggle-off.
+    IssueReactionApplied {
+        issue_number: u64,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+        reaction_id: u64,
+    },
+    /// Issue view: reaction removal succeeded — view drops the
+    /// recorded `(kind, id)` pair.
+    IssueReactionRemoved {
+        issue_number: u64,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+    },
+    /// PR view: reaction add succeeded — same shape as the Issue
+    /// counterpart, just routed to the PR view.
+    PrReactionApplied {
+        pr_number: u64,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+        reaction_id: u64,
+    },
+    PrReactionRemoved {
+        pr_number: u64,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+    },
+    /// Viewer's pre-existing reactions on a comment/body — fetched
+    /// when the reaction picker opens so the chips can be tagged
+    /// with their red "mine" indicator even on a freshly-loaded
+    /// session.
+    IssueViewerReactionsFetched {
+        issue_number: u64,
+        target_idx: usize,
+        reactions: Vec<(crate::github::pr::ReactionKind, u64)>,
+    },
+    PrViewerReactionsFetched {
+        pr_number: u64,
+        target_idx: usize,
+        reactions: Vec<(crate::github::pr::ReactionKind, u64)>,
+    },
     /// Close the PR view, returning to the previous list state.
     ClosePullRequests,
     /// Open the GitHub Issues view (Shift+I from the commit list).
@@ -169,6 +225,12 @@ pub enum AppEvent {
     IssueLinkedFetched {
         number: u64,
         result: Result<Vec<crate::github::issue::LinkedPr>, String>,
+    },
+    /// PR list cached for the `#` autocomplete in the Issues view's
+    /// comment editor. Fetched once lazily when the user types `#`
+    /// for the first time per session.
+    IssueMentionPrsFetched {
+        result: Result<Vec<crate::github::pr::PullRequest>, String>,
     },
     /// User asked to open the issue labels picker. The handler fetches
     /// repo labels in the background and opens the dialog.
@@ -394,6 +456,12 @@ pub enum DialogKind {
     /// Confirmation dialog when closing an issue — lets the user pick
     /// "Completed" vs "Not planned" before firing the write.
     ConfirmCloseIssue {
+        issue_number: u64,
+        issue_title: String,
+    },
+    /// Confirmation dialog when reopening a closed issue — single
+    /// yes/no, no state_reason to pick (GitHub clears it on reopen).
+    ConfirmReopenIssue {
         issue_number: u64,
         issue_title: String,
     },

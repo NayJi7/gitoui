@@ -24,6 +24,14 @@ use rustc_hash::FxHashMap;
 /// github.com so the visual cue is instantly recognizable.
 pub(crate) const MERGED_PURPLE: Color = Color::Rgb(0x89, 0x57, 0xe5);
 
+/// Teal accent reserved for the `owner/repo` identifier in the
+/// top header of the PR + Issues views. Distinct from every other
+/// in-use palette token (orange brand, green/red status, purple
+/// merged, blue branches) so the repo label reads as its own kind
+/// of token instead of being mistaken for a hash, a branch, or a
+/// label chip.
+pub(crate) const REPO_TEAL: Color = Color::Rgb(0x4f, 0xc7, 0xb8);
+
 use crate::{
     app::AppContext,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
@@ -111,6 +119,31 @@ pub struct PullRequestsView<'a> {
     /// `(comment_idx, first_line, last_line)` — captured at render time
     /// so mouse hits and auto-scroll can resolve which card sits where.
     conversation_comment_spans: Vec<(usize, usize, usize)>,
+    /// Clickable `#N` hit-boxes inside the conversation, captured at
+    /// render time. Combined with `conversation_scroll` to resolve
+    /// screen coordinates → ref number.
+    conversation_ref_links: Vec<crate::view::issue::RefLink>,
+    /// Cache of recently-fetched issue numbers for this repo, used to
+    /// resolve `#N` references in PR comments. Populated lazily when
+    /// a PR is opened so the colouring + click hit-test know whether
+    /// a number is an issue or a PR.
+    mention_issue_numbers: rustc_hash::FxHashSet<u64>,
+    /// True once an issue-number fetch has been spawned or completed
+    /// — guards against duplicate background calls.
+    mention_issues_fetched: bool,
+    /// Floating `#` autocomplete popup state, shared shape with the
+    /// Issues view via `crate::view::issue`.
+    mention_popup: Option<crate::view::issue::MentionPopup>,
+    /// Snapshot of issues + PRs (title + number) used to feed the
+    /// mention popup's filter. Built on-demand from `self.items` and
+    /// a separate issue fetch.
+    mention_issue_titles: rustc_hash::FxHashMap<u64, String>,
+    /// In-session log of the viewer's reactions on each conversation
+    /// entry — keyed by `(pr_number, target_idx)`. Same shape as the
+    /// Issues view: stores `(kind, reaction_id)` so the picker can
+    /// highlight my chips red AND a second click can DELETE.
+    viewer_reactions:
+        rustc_hash::FxHashMap<(u64, usize), Vec<(crate::github::pr::ReactionKind, u64)>>,
     /// Computed once per render: how many comments make up the
     /// Conversation tab. Drives the keyboard nav clamping.
     conversation_comment_count: usize,
@@ -642,6 +675,12 @@ impl<'a> PullRequestsView<'a> {
             conversation_selected: 0,
             conversation_scroll_to_selected: true,
             conversation_comment_spans: Vec::new(),
+            conversation_ref_links: Vec::new(),
+            mention_issue_numbers: rustc_hash::FxHashSet::default(),
+            mention_issues_fetched: false,
+            mention_popup: None,
+            mention_issue_titles: rustc_hash::FxHashMap::default(),
+            viewer_reactions: rustc_hash::FxHashMap::default(),
             conversation_comment_count: 1,
             comment_editor: None,
             comment_editor_cursor_pos: None,
@@ -721,6 +760,265 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
+    /// Open the given PR's detail view — dispatched from cross-view
+    /// nav (e.g. clicking a `#N` reference in the Issues view).
+    /// Also re-anchors the list cursor so returning with Esc lands
+    /// the user on the row they navigated through.
+    pub fn open_by_number(&mut self, pr_number: u64) {
+        if let Some(idx) = self.items.iter().position(|p| p.number == pr_number) {
+            self.hovered = idx;
+        }
+        self.opened_pr_number = Some(pr_number);
+        self.mode = Mode::Detail;
+        self.active_tab = Tab::Conversation;
+        self.files_drilldown = None;
+        self.commits_drilldown = None;
+        if !self.detail_cache.contains_key(&pr_number) {
+            self.spawn_detail_fetch(pr_number);
+        }
+        self.spawn_mention_issue_numbers_fetch();
+    }
+
+    /// Background fetch of every issue number in this repo so the
+    /// PR view can resolve `#N` references in comments (issue vs PR).
+    /// Idempotent — once kicked off it never retries.
+    fn spawn_mention_issue_numbers_fetch(&mut self) {
+        if self.mention_issues_fetched {
+            return;
+        }
+        self.mention_issues_fetched = true;
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let issues: Vec<(u64, String)> = crate::github::issue::list_issues(&token, &coords)
+                .map(|v| v.into_iter().map(|i| (i.number, i.title)).collect())
+                .unwrap_or_default();
+            tx.send(AppEvent::PrMentionIssuesFetched { issues });
+        });
+    }
+
+    pub fn on_mention_issues_fetched(&mut self, issues: Vec<(u64, String)>) {
+        self.mention_issue_numbers = issues.iter().map(|(n, _)| *n).collect();
+        self.mention_issue_titles = issues.into_iter().collect();
+    }
+
+    fn mention_universe(&self) -> Vec<crate::view::issue::MentionItem> {
+        use crate::view::issue::{MentionItem, MentionKind};
+        let mut out: Vec<MentionItem> = Vec::new();
+        for (n, title) in &self.mention_issue_titles {
+            out.push(MentionItem {
+                number: *n,
+                title: title.clone(),
+                kind: MentionKind::Issue,
+            });
+        }
+        for pr in &self.items {
+            out.push(MentionItem {
+                number: pr.number,
+                title: pr.title.clone(),
+                kind: MentionKind::Pr,
+            });
+        }
+        out.sort_by(|a, b| b.number.cmp(&a.number));
+        out
+    }
+
+    fn open_mention_popup(&mut self, anchor: usize) {
+        use crate::view::issue::{filter_mention_items_pub, MentionPopup, MentionTarget};
+        self.spawn_mention_issue_numbers_fetch();
+        let universe = self.mention_universe();
+        let filtered = filter_mention_items_pub("", &universe);
+        self.mention_popup = Some(MentionPopup {
+            target: MentionTarget::CommentEditor,
+            anchor,
+            query: String::new(),
+            filtered,
+            hovered: 0,
+            scroll: 0,
+            last_visible: 0,
+            overlay_rect: None,
+            row_rects: Vec::new(),
+        });
+    }
+
+    fn close_mention_popup(&mut self) {
+        self.mention_popup = None;
+    }
+
+    fn refresh_mention_filter(&mut self) {
+        use crate::view::issue::filter_mention_items_pub;
+        let universe = self.mention_universe();
+        if let Some(p) = self.mention_popup.as_mut() {
+            p.filtered = filter_mention_items_pub(&p.query, &universe);
+            if p.hovered >= p.filtered.len() {
+                p.hovered = p.filtered.len().saturating_sub(1);
+            }
+        }
+    }
+
+    fn update_mention_query_from_editor(&mut self) {
+        let (anchor, cursor, buf): (usize, usize, String) = {
+            let Some(p) = self.mention_popup.as_ref() else {
+                return;
+            };
+            let Some(ed) = self.comment_editor.as_ref() else {
+                return;
+            };
+            (p.anchor, ed.cursor, ed.buffer.clone())
+        };
+        // Sanity: the `#` should still be where we anchored.
+        if buf.as_bytes().get(anchor).copied() != Some(b'#') || cursor < anchor {
+            self.close_mention_popup();
+            return;
+        }
+        // Query is the chars between `#` (exclusive) and cursor.
+        let query: String = buf[anchor + 1..cursor.min(buf.len())]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let query_end = anchor + 1 + query.len();
+        if query_end < cursor {
+            // Cursor moved past the typed query — drop the popup.
+            self.close_mention_popup();
+            return;
+        }
+        if let Some(p) = self.mention_popup.as_mut() {
+            p.query = query;
+        }
+        self.refresh_mention_filter();
+    }
+
+    fn pick_mention(&mut self) {
+        let (anchor, query_len, number) = {
+            let Some(p) = self.mention_popup.as_ref() else {
+                return;
+            };
+            let Some(item) = p.filtered.get(p.hovered) else {
+                return;
+            };
+            (p.anchor, p.query.chars().count(), item.number)
+        };
+        self.mention_popup = None;
+        let Some(ed) = self.comment_editor.as_mut() else {
+            return;
+        };
+        let end = anchor + 1 + query_len; // `#` + query chars
+        let end = end.min(ed.buffer.len());
+        let replacement = format!("#{}", number);
+        ed.buffer.replace_range(anchor..end, &replacement);
+        ed.cursor = anchor + replacement.len();
+    }
+
+    fn handle_event_mention_popup(&mut self, key: KeyEvent) {
+        use ratatui::crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Esc => {
+                self.close_mention_popup();
+                return;
+            }
+            KeyCode::Enter => {
+                self.pick_mention();
+                return;
+            }
+            KeyCode::Up => {
+                if let Some(p) = self.mention_popup.as_mut() {
+                    if p.hovered > 0 {
+                        p.hovered -= 1;
+                    }
+                    if p.hovered < p.scroll {
+                        p.scroll = p.hovered;
+                    }
+                }
+                return;
+            }
+            KeyCode::Down => {
+                if let Some(p) = self.mention_popup.as_mut() {
+                    if p.hovered + 1 < p.filtered.len() {
+                        p.hovered += 1;
+                    }
+                    let vis = p.last_visible.max(1) as usize;
+                    if p.hovered >= p.scroll + vis {
+                        p.scroll = p.hovered + 1 - vis;
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+        // Pass-through to editor, then re-derive the query.
+        use ratatui::crossterm::event::KeyModifiers;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Backspace if ctrl => self.editor_delete_word_left(),
+            KeyCode::Backspace => self.editor_delete_left(),
+            KeyCode::Delete => self.editor_delete_right(),
+            KeyCode::Left => self.editor_cursor_left(),
+            KeyCode::Right => self.editor_cursor_right(),
+            KeyCode::Home => self.editor_cursor_home(),
+            KeyCode::End => self.editor_cursor_end(),
+            KeyCode::Char(c) if !ctrl => self.editor_insert_char(c),
+            _ => {}
+        }
+        self.update_mention_query_from_editor();
+    }
+
+    fn mention_popup_scroll(&mut self, delta: i32) {
+        let Some(p) = self.mention_popup.as_mut() else {
+            return;
+        };
+        let vis = p.last_visible.max(1) as usize;
+        let max_scroll = p.filtered.len().saturating_sub(vis);
+        let new = (p.scroll as i32 + delta).max(0) as usize;
+        p.scroll = new.min(max_scroll);
+    }
+
+    /// Resolver-style lookup used during conversation render.
+    /// Returns `Some((colour, is_pr))` if the number is known to
+    /// match a PR or an issue in this repo.
+    fn resolve_hash_ref(&self, n: u64) -> Option<(Color, bool)> {
+        if self.items.iter().any(|p| p.number == n) {
+            return Some((self.ctx.color_theme.list_hash_fg, true));
+        }
+        if self.mention_issue_numbers.contains(&n) {
+            return Some((self.ctx.color_theme.status_success_fg, false));
+        }
+        None
+    }
+
+    /// Find the first captured `#N` reference whose line falls
+    /// inside the currently-selected comment's span and follow it.
+    fn follow_first_ref_in_selected_card(&mut self) {
+        let Some(&(_, first, last)) = self
+            .conversation_comment_spans
+            .iter()
+            .find(|(idx, _, _)| *idx == self.conversation_selected)
+        else {
+            return;
+        };
+        let Some(link) = self
+            .conversation_ref_links
+            .iter()
+            .find(|l| l.line >= first && l.line <= last)
+            .copied()
+        else {
+            return;
+        };
+        self.follow_reference(link.number, link.is_pr);
+    }
+
+    /// Navigate to a `#N` reference — PRs pivot in-place via
+    /// `open_by_number`, issues hop to the Issues view via
+    /// cross-view dispatch.
+    fn follow_reference(&mut self, number: u64, is_pr: bool) {
+        if !is_pr {
+            self.comment_editor = None;
+            self.tx.send(AppEvent::OpenIssueDetail { number });
+            return;
+        }
+        self.open_by_number(number);
+    }
+
     pub fn footer_hint(&self) -> String {
         // When the inline editor is open, the footer is owned by it.
         if self.comment_editor.is_some() {
@@ -759,8 +1057,7 @@ impl<'a> PullRequestsView<'a> {
             }
             return format!(
                 "⌘ {}",
-                ["↑↓:field", "Enter:edit/toggle", "Ctrl+S:create", "Esc:cancel"]
-                    .join("▕▏")
+                ["↑↓:field", "Ctrl+S:create", "Esc:cancel"].join("▕▏")
             );
         }
         let parts: Vec<&str> = match self.mode {
@@ -845,6 +1142,7 @@ impl<'a> PullRequestsView<'a> {
         self.checks_hovered = 0;
         self.files_scroll = 0;
         self.files_hovered = 0;
+        self.spawn_mention_issue_numbers_fetch();
         if self.detail_cache.contains_key(&number) {
             return;
         }
@@ -911,6 +1209,25 @@ impl<'a> PullRequestsView<'a> {
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+        // Mention popup overlays the editor — it intercepts keys
+        // (↑↓/Enter/Esc) and forwards chars/backspaces through so
+        // the query stays in sync with what the user types.
+        if self.mention_popup.is_some() {
+            match event_with_count.event {
+                UserEvent::ScrollUp => {
+                    self.mention_popup_scroll(-1);
+                    return;
+                }
+                UserEvent::ScrollDown => {
+                    self.mention_popup_scroll(1);
+                    return;
+                }
+                _ => {}
+            }
+            self.handle_event_mention_popup(key);
+            return;
+        }
 
         // While the inline editor is open, EVERY key must route to it —
         // no view-level shortcuts (`r` reload, `c` comment, etc.) may
@@ -1279,6 +1596,13 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn enter_drilldown(&mut self) {
+        // Conversation tab: Enter on the selected comment follows
+        // the first `#N` reference inside it, when there is one.
+        // Other tabs keep their existing drilldown semantics.
+        if matches!(self.active_tab, Tab::Conversation) {
+            self.follow_first_ref_in_selected_card();
+            return;
+        }
         match self.active_tab {
             Tab::Files => {
                 let Some(detail) = self.opened_detail() else {
@@ -2348,21 +2672,69 @@ impl<'a> PullRequestsView<'a> {
     /// reactable comment (reviews don't carry reactions).
     fn start_react(&mut self) {
         let target_idx = self.conversation_selected;
-        let Some(entry) = self.selected_conversation_entry() else {
-            return;
+        let (comment_id, is_review) = {
+            let Some(entry) = self.selected_conversation_entry() else {
+                return;
+            };
+            if entry.id.is_none() {
+                return;
+            }
+            (
+                entry.id.unwrap(),
+                matches!(entry.kind, ConversationKind::ReviewComment { .. }),
+            )
         };
-        if entry.id.is_none() {
-            // Reviews + the PR description card aren't reactable
-            // through this flow (PR body would need a separate code
-            // path against `/issues/{n}/reactions`).
-            return;
-        }
         self.reaction_picker = Some(ReactionPicker {
             target_idx,
             hovered: 0,
             overlay_rect: None,
             row_rects: Vec::new(),
         });
+        self.spawn_viewer_reactions_fetch(target_idx, comment_id, is_review);
+    }
+
+    fn spawn_viewer_reactions_fetch(
+        &self,
+        target_idx: usize,
+        comment_id: u64,
+        is_review: bool,
+    ) {
+        let Some(number) = self.opened_number() else {
+            return;
+        };
+        let Some(me) = self.me_login.clone() else {
+            return;
+        };
+        let token = self.token.clone();
+        let coords = self.coords.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let reactions = if is_review {
+                crate::github::pr::list_my_review_comment_reactions(
+                    &token, &coords, comment_id, &me,
+                )
+            } else {
+                crate::github::pr::list_my_issue_comment_reactions(
+                    &token, &coords, comment_id, &me,
+                )
+            }
+            .unwrap_or_default();
+            tx.send(AppEvent::PrViewerReactionsFetched {
+                pr_number: number,
+                target_idx,
+                reactions,
+            });
+        });
+    }
+
+    pub fn on_viewer_reactions_fetched(
+        &mut self,
+        pr_number: u64,
+        target_idx: usize,
+        reactions: Vec<(crate::github::pr::ReactionKind, u64)>,
+    ) {
+        self.viewer_reactions
+            .insert((pr_number, target_idx), reactions);
     }
 
     fn handle_event_reaction_picker(
@@ -2426,6 +2798,37 @@ impl<'a> PullRequestsView<'a> {
         let token = self.token.clone();
         let coords = self.coords.clone();
         let tx = self.tx.clone();
+
+        // Toggle: if the viewer already reacted with this kind on
+        // this entry, DELETE the recorded reaction instead of POSTing
+        // a duplicate (which GitHub rejects with 422 anyway).
+        let existing_id: Option<u64> = self
+            .viewer_reactions
+            .get(&(number, target_idx))
+            .and_then(|v| v.iter().find(|(k, _)| *k == kind).map(|(_, id)| *id));
+        if let Some(rid) = existing_id {
+            std::thread::spawn(move || {
+                let result = if is_review {
+                    crate::github::pr::delete_review_comment_reaction(
+                        &token, &coords, comment_id, rid,
+                    )
+                } else {
+                    crate::github::pr::delete_issue_comment_reaction(
+                        &token, &coords, comment_id, rid,
+                    )
+                };
+                if result.is_ok() {
+                    tx.send(AppEvent::PrReactionRemoved {
+                        pr_number: number,
+                        target_idx,
+                        kind,
+                    });
+                } else if let Err(e) = result {
+                    tx.send(AppEvent::NotifyError(format!("Unreact: {}", e)));
+                }
+            });
+            return;
+        }
         std::thread::spawn(move || {
             let result = if is_review {
                 crate::github::pr::add_review_comment_reaction(
@@ -2436,12 +2839,59 @@ impl<'a> PullRequestsView<'a> {
                     &token, &coords, comment_id, kind,
                 )
             };
-            tx.send(AppEvent::PullRequestActionDone {
-                number,
-                action: format!("Reacted with {}", kind.emoji()),
-                result,
-            });
+            match result {
+                Ok(reaction_id) => {
+                    tx.send(AppEvent::PrReactionApplied {
+                        pr_number: number,
+                        target_idx,
+                        kind,
+                        reaction_id,
+                    });
+                }
+                Err(e) => {
+                    tx.send(AppEvent::NotifyError(format!("React: {}", e)));
+                }
+            }
         });
+    }
+
+    pub fn on_reaction_applied(
+        &mut self,
+        pr_number: u64,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+        reaction_id: u64,
+    ) {
+        self.viewer_reactions
+            .entry((pr_number, target_idx))
+            .or_default()
+            .push((kind, reaction_id));
+        self.spawn_detail_fetch(pr_number);
+    }
+
+    pub fn on_reaction_removed(
+        &mut self,
+        pr_number: u64,
+        target_idx: usize,
+        kind: crate::github::pr::ReactionKind,
+    ) {
+        if let Some(v) = self.viewer_reactions.get_mut(&(pr_number, target_idx)) {
+            v.retain(|(k, _)| *k != kind);
+        }
+        self.spawn_detail_fetch(pr_number);
+    }
+
+    fn viewer_reactions_for(
+        &self,
+        target_idx: usize,
+    ) -> Vec<crate::github::pr::ReactionKind> {
+        let Some(number) = self.opened_number() else {
+            return Vec::new();
+        };
+        self.viewer_reactions
+            .get(&(number, target_idx))
+            .map(|v| v.iter().map(|(k, _)| *k).collect())
+            .unwrap_or_default()
     }
 
     fn confirm_delete_comment(&mut self) {
@@ -2604,10 +3054,21 @@ impl<'a> PullRequestsView<'a> {
     // ────────────────────── Inline-editor key handlers ──────────────────────
 
     fn editor_insert_char(&mut self, c: char) {
+        // Capture the `#` position BEFORE we insert so the popup
+        // anchor points at the freshly-written hash, ready for the
+        // splice on pick.
+        let anchor: Option<usize> = if c == '#' {
+            self.comment_editor.as_ref().map(|ed| ed.cursor)
+        } else {
+            None
+        };
         if let Some(ed) = self.comment_editor.as_mut() {
             let cursor = ed.cursor;
             ed.buffer.insert(cursor, c);
             ed.cursor += c.len_utf8();
+        }
+        if let Some(a) = anchor {
+            self.open_mention_popup(a);
         }
     }
 
@@ -2840,6 +3301,57 @@ impl<'a> PullRequestsView<'a> {
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
+        // Reaction picker is modal: click on a cell fires that
+        // reaction (or toggles it off); click outside closes.
+        if self.reaction_picker.is_some() {
+            let chosen = {
+                let Some(picker) = self.reaction_picker.as_ref() else {
+                    return;
+                };
+                picker
+                    .row_rects
+                    .iter()
+                    .position(|r| rect_contains(Some(*r), col, row))
+            };
+            if let Some(i) = chosen {
+                let kind = crate::github::pr::ReactionKind::all()[i];
+                let target_idx = self.reaction_picker.as_ref().unwrap().target_idx;
+                self.reaction_picker = None;
+                self.submit_reaction(target_idx, kind);
+            } else if !rect_contains(
+                self.reaction_picker.as_ref().and_then(|p| p.overlay_rect),
+                col,
+                row,
+            ) {
+                self.reaction_picker = None;
+            }
+            return;
+        }
+        // Mention popup is modal: clicking a row picks it; clicking
+        // outside closes it (without bubbling to the editor below).
+        if self.mention_popup.is_some() {
+            let hit = {
+                let Some(p) = self.mention_popup.as_ref() else {
+                    return;
+                };
+                p.row_rects
+                    .iter()
+                    .position(|r| rect_contains(Some(*r), col, row))
+            };
+            if let Some(i) = hit {
+                if let Some(p) = self.mention_popup.as_mut() {
+                    p.hovered = i;
+                }
+                self.pick_mention();
+            } else if !rect_contains(
+                self.mention_popup.as_ref().and_then(|p| p.overlay_rect),
+                col,
+                row,
+            ) {
+                self.close_mention_popup();
+            }
+            return;
+        }
         match self.mode {
             Mode::List => {
                 // Filter tab bar click → switch filter.
@@ -2874,6 +3386,31 @@ impl<'a> PullRequestsView<'a> {
                     if rect_contains(Some(*rect), col, row) {
                         self.active_tab = *tab;
                         return;
+                    }
+                }
+                // Conversation refs: hit-test `#N` link rects FIRST so
+                // a click on a coloured mention navigates instead of
+                // just bumping the selected comment.
+                if matches!(self.active_tab, Tab::Conversation) {
+                    if let Some(area) = self.tab_content_area {
+                        if rect_contains(Some(area), col, row) {
+                            let logical_line =
+                                (row.saturating_sub(area.y) as usize)
+                                    + self.conversation_scroll;
+                            if let Some(link) = self
+                                .conversation_ref_links
+                                .iter()
+                                .find(|l| {
+                                    l.line == logical_line
+                                        && (area.x + l.col_start) <= col
+                                        && col < (area.x + l.col_end)
+                                })
+                                .copied()
+                            {
+                                self.follow_reference(link.number, link.is_pr);
+                                return;
+                            }
+                        }
                     }
                 }
                 // Click inside a tab's row-based content → set hovered
@@ -2958,6 +3495,34 @@ impl<'a> PullRequestsView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        // Mention popup is modal: hover inside it highlights the
+        // row under the cursor, hover outside is ignored.
+        if self.mention_popup.is_some() {
+            if let Some(p) = self.mention_popup.as_mut() {
+                if let Some(i) = p
+                    .row_rects
+                    .iter()
+                    .position(|r| rect_contains(Some(*r), col, row))
+                {
+                    p.hovered = i;
+                }
+            }
+            return;
+        }
+        // Reaction picker is modal: hover over a cell updates the
+        // highlighted emoji.
+        if self.reaction_picker.is_some() {
+            if let Some(picker) = self.reaction_picker.as_mut() {
+                if let Some(i) = picker
+                    .row_rects
+                    .iter()
+                    .position(|r| rect_contains(Some(*r), col, row))
+                {
+                    picker.hovered = i;
+                }
+            }
+            return;
+        }
         // While the inline editor is open, the user is typing — mouse
         // drift should not change selection or focus. Block all hover
         // updates until the editor closes.
@@ -3149,11 +3714,16 @@ impl<'a> PullRequestsView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         // Clear hit-test rects from the previous frame so a stale rect
-        // from a different layout never matches a click.
+        // from a different layout never matches a click. Also clear
+        // the terminal cursor position — left over from compose / a
+        // comment editor it would otherwise stick on the screen after
+        // the editor closes (the terminal keeps the cursor wherever
+        // we last positioned it).
         self.list_area = None;
         self.tab_content_area = None;
         self.editor_body_area = None;
         self.tab_bar_rects.clear();
+        self.comment_editor_cursor_pos = None;
 
         let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
             3
@@ -3175,6 +3745,16 @@ impl<'a> PullRequestsView<'a> {
             Mode::List => self.render_list(f, body_area),
             Mode::Detail => self.render_detail_mode(f, body_area),
             Mode::Compose => self.render_compose_mode(f, body_area),
+        }
+
+        // `#` mention popup floats above the comment editor when
+        // open — drawn last so it sits on top of all other content.
+        if self.mention_popup.is_some() {
+            let editor_rect = self.editor_body_area.unwrap_or(body_area);
+            let theme = self.ctx.color_theme.clone();
+            if let Some(p) = self.mention_popup.as_mut() {
+                crate::view::issue::paint_mention_popup(f, body_area, editor_rect, p, &theme);
+            }
         }
 
         // Place the terminal cursor on the inline comment editor when
@@ -3207,14 +3787,12 @@ impl<'a> PullRequestsView<'a> {
                 "Pull Requests ",
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
-            // Repo coords are an identifier, not a branch — use the
-            // hash/identifier token so the name reads as "named ref" and
-            // doesn't compete with the green/red branch convention below.
+            // Repo coords get their own dedicated teal token (REPO_TEAL),
+            // not shared with hash/branch/label palettes — so the name
+            // reads as its own kind of identifier.
             Span::styled(
                 format!("{}/{}", self.coords.owner, self.coords.repo),
-                Style::default()
-                    .fg(theme.list_hash_fg)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(REPO_TEAL).add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
@@ -3767,14 +4345,23 @@ impl<'a> PullRequestsView<'a> {
     /// reactable comment. Keyboard arrows move the highlight, Enter
     /// fires the POST, Esc closes.
     fn render_reaction_picker_overlay(&mut self, f: &mut Frame, area: Rect) {
+        let target_idx = {
+            let Some(picker) = self.reaction_picker.as_ref() else {
+                return;
+            };
+            picker.target_idx
+        };
+        let mine: Vec<crate::github::pr::ReactionKind> =
+            self.viewer_reactions_for(target_idx);
+        let theme = &self.ctx.color_theme;
+        let kinds = crate::github::pr::ReactionKind::all();
+        // Single-Paragraph rendering so ratatui's double-width
+        // continuation markers stay consistent across spans — fixes
+        // 🚀 disappearing into ❤️'s VS16 residue.
+        let cell_width: u16 = 5;
         let Some(picker) = self.reaction_picker.as_mut() else {
             return;
         };
-        let theme = &self.ctx.color_theme;
-        let kinds = crate::github::pr::ReactionKind::all();
-        // One row tall + borders. Width = sum of 5-col cells per
-        // emoji (` X ` padded) + 1 for the gap, plus 2 for borders.
-        let cell_width: u16 = 6;
         let width: u16 = (kinds.len() as u16 * cell_width).saturating_add(2);
         let height: u16 = 3;
         let x = area.x + (area.width.saturating_sub(width)) / 2;
@@ -3795,20 +4382,53 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(block, rect);
         picker.row_rects.clear();
         let mut x_cursor = inner.x;
+        // Manual buffer-level rendering: force the continuation
+        // skip on every emoji's second visual cell so ❤️'s
+        // unicode-width=1 vs terminal=2 mismatch doesn't blank out
+        // the 🚀 next to it.
+        let buf = f.buffer_mut();
         for (i, kind) in kinds.iter().enumerate() {
             let is_selected = i == picker.hovered;
+            let is_mine = mine.contains(kind);
             let cell_rect = Rect::new(x_cursor, inner.y, cell_width, 1);
             picker.row_rects.push(cell_rect);
-            let style = if is_selected {
-                Style::default()
-                    .fg(theme.fg)
-                    .bg(theme.list_selected_bg)
-                    .add_modifier(Modifier::BOLD)
+            // Hover on a chip the user already owns stays red — just
+            // a deeper shade so the focus indicator reads without
+            // erasing the "mine" signal.
+            const MINE_RED: Color = Color::Rgb(0xB0, 0x32, 0x32);
+            const MINE_HOVER_RED: Color = Color::Rgb(0x7A, 0x1F, 0x1F);
+            let (bg, fg, modif) = if is_selected && is_mine {
+                (MINE_HOVER_RED, theme.fg, Modifier::BOLD)
+            } else if is_selected {
+                (theme.list_selected_bg, theme.fg, Modifier::BOLD)
+            } else if is_mine {
+                (MINE_RED, theme.fg, Modifier::BOLD)
             } else {
-                Style::default().fg(theme.fg)
+                (theme.bg, theme.fg, Modifier::empty())
             };
-            let label = Span::styled(format!(" {} ", kind.emoji()), style);
-            f.render_widget(Paragraph::new(Line::from(label)), cell_rect);
+            let cell_style = Style::default().fg(fg).bg(bg).add_modifier(modif);
+            for col in 0..cell_width {
+                let abs_x = x_cursor + col;
+                if abs_x >= buf.area.x + buf.area.width {
+                    break;
+                }
+                let cell = &mut buf[(abs_x, inner.y)];
+                cell.reset();
+                cell.set_symbol(" ");
+                cell.set_style(cell_style);
+                cell.set_skip(false);
+            }
+            if cell_width >= 3 && x_cursor + 1 < buf.area.x + buf.area.width {
+                let emoji_cell = &mut buf[(x_cursor + 1, inner.y)];
+                emoji_cell.set_symbol(kind.emoji());
+                emoji_cell.set_style(cell_style);
+                if x_cursor + 2 < buf.area.x + buf.area.width {
+                    let cont_cell = &mut buf[(x_cursor + 2, inner.y)];
+                    cont_cell.set_symbol("");
+                    cont_cell.set_skip(true);
+                    cont_cell.set_style(cell_style);
+                }
+            }
             x_cursor = x_cursor.saturating_add(cell_width);
         }
     }
@@ -4084,13 +4704,15 @@ impl<'a> PullRequestsView<'a> {
             Rect::new(inner.x, y, inner.width, 1),
         );
         y += 1;
-        // Body block fills remaining vertical space, minus a 2-row
-        // tail for the Draft row.
+        // Body block fills remaining vertical space, leaving room
+        // below for the Labels row, a 1-row gap, and the Draft row.
+        // Without this reservation the Draft line bleeds onto the
+        // Compose Block's bottom border.
         let body_block_height = inner
             .y
             .saturating_add(inner.height)
             .saturating_sub(y)
-            .saturating_sub(2)
+            .saturating_sub(3)
             .max(3);
         let body_block_rect = Rect::new(
             inner.x + INDENT + 2,
@@ -4156,15 +4778,23 @@ impl<'a> PullRequestsView<'a> {
             .push((ComposeField::Labels, labels_rect));
         y += 2;
 
-        // Draft toggle row
+        // Draft toggle row — aligned with the other fields so the
+        // form keeps a consistent `Label:  value` rhythm. The check
+        // glyph sits in the value column where the picker chips /
+        // input text would, and the human-readable suffix follows.
         let draft_focused = state.focused == ComposeField::Draft;
         let draft_rect = Rect::new(inner.x, y, inner.width, 1);
-        let check_glyph = if state.draft { "● " } else { "○ " };
+        let check_glyph = if state.draft { "●" } else { "○" };
         let draft_line = Line::from(vec![
             Span::raw(" ".repeat(INDENT as usize)),
             focus_indicator(draft_focused),
             Span::styled(
-                check_glyph.to_string(),
+                format!("{:<w$}", "Draft:", w = LABEL_WIDTH as usize),
+                label_style,
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} ", check_glyph),
                 Style::default()
                     .fg(if state.draft {
                         theme.status_info_fg
@@ -4174,7 +4804,7 @@ impl<'a> PullRequestsView<'a> {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Create as draft".to_string(),
+                if state.draft { "yes (draft)" } else { "no" }.to_string(),
                 if draft_focused {
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
                 } else {
@@ -4407,6 +5037,7 @@ impl<'a> PullRequestsView<'a> {
         // scroll offset, up to body_height. Wrap is OFF so screen rows
         // map 1:1 with logical rows — keeps cursor positioning trivial.
         let value = Style::default().fg(theme.fg);
+        let mention_fg = theme.list_hash_fg;
         let body_text: Vec<Line<'static>> = if buffer.is_empty() {
             vec![Line::from(Span::styled(
                 match &kind {
@@ -4422,7 +5053,9 @@ impl<'a> PullRequestsView<'a> {
                 .split('\n')
                 .skip(scroll_offset as usize)
                 .take(body_height as usize)
-                .map(|l| Line::from(Span::styled(l.to_string(), value)))
+                .map(|l| {
+                    crate::view::issue::editor_line_with_mentions(l, value, mention_fg)
+                })
                 .collect()
         };
         f.render_widget(Paragraph::new(body_text), body_area);
@@ -4951,6 +5584,39 @@ impl<'a> PullRequestsView<'a> {
             self.conversation_scroll_to_selected = false;
         }
 
+        // Post-process every line to recolour resolvable `#N`
+        // mentions (issue → status_success_fg, PR → list_hash_fg)
+        // with UNDERLINED+BOLD, while capturing click hit-boxes for
+        // the mouse handler. Lines without refs pass through.
+        self.conversation_ref_links.clear();
+        let pr_set: rustc_hash::FxHashSet<u64> =
+            self.items.iter().map(|p| p.number).collect();
+        let issue_set = self.mention_issue_numbers.clone();
+        let issue_fg: Color = self.ctx.color_theme.status_success_fg;
+        let pr_fg: Color = self.ctx.color_theme.list_hash_fg;
+        let mut links: Vec<crate::view::issue::RefLink> = Vec::new();
+        let lines: Vec<Line<'static>> = lines
+            .into_iter()
+            .enumerate()
+            .map(|(line_idx, line)| {
+                crate::view::issue::restyle_and_track_hash_refs(
+                    line_idx,
+                    line,
+                    &|n| {
+                        if pr_set.contains(&n) {
+                            Some((pr_fg, true))
+                        } else if issue_set.contains(&n) {
+                            Some((issue_fg, false))
+                        } else {
+                            None
+                        }
+                    },
+                    &mut links,
+                )
+            })
+            .collect();
+        self.conversation_ref_links = links;
+
         let scroll = self.conversation_scroll.min(lines.len().saturating_sub(1));
         let para = Paragraph::new(lines).scroll((scroll as u16, 0));
         f.render_widget(para, area);
@@ -5051,6 +5717,15 @@ impl<'a> PullRequestsView<'a> {
         // review summary rows (which never carry one).
         if entry.id.is_some() {
             shortcuts.push("+:react");
+        }
+        // `↵:open` chip whenever the body contains a `#N` we can
+        // resolve to an issue or a PR in this repo — clicking on
+        // the chip / pressing Enter follows the first reference.
+        let has_resolvable_ref = crate::view::issue::extract_hash_refs(&entry.body)
+            .into_iter()
+            .any(|n| self.resolve_hash_ref(n).is_some());
+        if has_resolvable_ref {
+            shortcuts.push("↵:open");
         }
         let card_layout = push_comment_card(
             lines,
@@ -6001,6 +6676,9 @@ pub(crate) fn push_comment_card(
     // 1-col gaps between chips.
     if input.reactions.total() > 0 {
         let mut chip_spans: Vec<Span<'static>> = Vec::new();
+        let count_style = Style::default()
+            .fg(theme.detail_label_fg)
+            .add_modifier(Modifier::BOLD);
         for (kind, count) in input
             .reactions
             .iter()
@@ -6010,13 +6688,14 @@ pub(crate) fn push_comment_card(
             if !chip_spans.is_empty() {
                 chip_spans.push(Span::raw("  ".to_string()));
             }
+            // No bg, no brackets — just `emoji count` rendered
+            // plain. The bold muted count keeps the pair readable
+            // without dressing.
             chip_spans.push(Span::styled(
-                format!(" {} {} ", kind.emoji(), count),
-                Style::default()
-                    .fg(theme.fg)
-                    .bg(theme.list_match_bg)
-                    .add_modifier(Modifier::BOLD),
+                format!("{} ", kind.emoji()),
+                Style::default().fg(theme.fg),
             ));
+            chip_spans.push(Span::styled(format!("{}", count), count_style));
         }
         // Measure to compute the trailing pad to the right border.
         let used: usize = chip_spans
