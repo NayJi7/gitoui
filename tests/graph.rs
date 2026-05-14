@@ -1638,15 +1638,13 @@ fn build_graph_row_images(
 ) -> Vec<graph::GraphRowImage> {
     let head_commit_hash: Option<git::CommitHash> = match repository.head() {
         git::Head::Detached { target } => Some(target.clone()),
-        git::Head::Branch { name } => {
-            repository.all_refs().into_iter().find_map(|r| match r {
-                git::Ref::Branch {
-                    name: ref_name,
-                    target,
-                } if ref_name == name => Some(target.clone()),
-                _ => None,
-            })
-        }
+        git::Head::Branch { name } => repository.all_refs().into_iter().find_map(|r| match r {
+            git::Ref::Branch {
+                name: ref_name,
+                target,
+            } if ref_name == name => Some(target.clone()),
+            _ => None,
+        }),
         git::Head::None => None,
     };
 
