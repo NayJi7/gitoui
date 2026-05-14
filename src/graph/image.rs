@@ -277,7 +277,13 @@ impl ImageParams {
     }
 }
 
-fn build_single_graph_row_image(
+// Render one row image with full per-commit context — flags (head /
+// is_stash / is_uncommitted), color, uncommitted lane, and the global
+// branch segments needed for the Smooth style. Public so integration
+// tests can match production rendering exactly; production callers
+// go through `GraphImageManager` which caches the result.
+#[doc(hidden)]
+pub fn build_single_graph_row_image(
     graph: &Graph<'_>,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,

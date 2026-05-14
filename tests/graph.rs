@@ -3,7 +3,6 @@ use std::{path::Path, process::Command};
 use chrono::{DateTime, Days, NaiveDate, TimeZone, Utc};
 use gitoui::{color, config, git, graph};
 use image::{GenericImage, GenericImageView};
-use rustc_hash::FxHashSet;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -29,11 +28,18 @@ fn straight_001() -> TestResult {
 
     git.log();
 
-    let options = &[GenerateGraphOption::new(
-        "straight_001",
-        git::SortCommit::Chronological,
-        graph::GraphStyle::Rounded,
-    )];
+    let options = &[
+        GenerateGraphOption::new(
+            "straight_001",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Rounded,
+        ),
+        GenerateGraphOption::new(
+            "straight_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
+    ];
 
     copy_git_dir(repo_path, "straight_001");
 
@@ -114,6 +120,11 @@ fn branch_001() -> TestResult {
             "branch_001_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "branch_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
         GenerateGraphOption::new(
             "branch_001_max_count",
@@ -203,6 +214,11 @@ fn branch_002() -> TestResult {
             graph::GraphStyle::Angular,
         ),
         GenerateGraphOption::new(
+            "branch_002_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
+        GenerateGraphOption::new(
             "branch_002_max_count",
             git::SortCommit::Chronological,
             graph::GraphStyle::Rounded,
@@ -266,6 +282,11 @@ fn branch_003() -> TestResult {
             "branch_003_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "branch_003_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -361,6 +382,11 @@ fn branch_004() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "branch_004_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "branch_004");
@@ -421,6 +447,11 @@ fn branch_005() -> TestResult {
             "branch_005_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "branch_005_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -502,6 +533,11 @@ fn merge_001() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "merge_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "merge_001");
@@ -563,6 +599,11 @@ fn merge_002() -> TestResult {
             "merge_002_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "merge_002_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -627,6 +668,11 @@ fn merge_003() -> TestResult {
             "merge_003_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "merge_003_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -703,6 +749,11 @@ fn merge_004() -> TestResult {
             "merge_004_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "merge_004_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -786,6 +837,11 @@ fn merge_005() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "merge_005_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "merge_005");
@@ -845,6 +901,11 @@ fn stash_001() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "stash_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "stash_001");
@@ -901,6 +962,11 @@ fn stash_002() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "stash_002_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "stash_002");
@@ -950,6 +1016,11 @@ fn stash_003() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "stash_003_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "stash_003");
@@ -994,6 +1065,11 @@ fn stash_004() -> TestResult {
             "stash_004_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "stash_004_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -1051,6 +1127,11 @@ fn orphan_001() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "orphan_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "orphan_001");
@@ -1107,6 +1188,11 @@ fn orphan_002() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "orphan_002_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "orphan_002");
@@ -1160,6 +1246,11 @@ fn head_001() -> TestResult {
             "head_001_angular",
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "head_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
         ),
     ];
 
@@ -1257,9 +1348,76 @@ fn complex_001() -> TestResult {
             git::SortCommit::Chronological,
             graph::GraphStyle::Angular,
         ),
+        GenerateGraphOption::new(
+            "complex_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
     ];
 
     copy_git_dir(repo_path, "complex_001");
+
+    generate_and_output_graph_images(repo_path, options);
+    assert_graph_images(options);
+
+    Ok(())
+}
+
+/// Working tree with uncommitted changes — gitoui injects a synthetic
+/// "Uncommitted" node above HEAD (hollow grey circle) and connects it
+/// to HEAD with a branch segment styled as `is_uncommitted`. Tests the
+/// rendering of that virtual node + its incoming edge across all three
+/// graph styles. Renders a small linear history + a side branch so the
+/// uncommitted node sits on a non-trivial lane.
+#[test]
+fn uncommitted_001() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let repo_path = dir.path();
+
+    let git = &GitRepository::new(repo_path);
+
+    git.init();
+
+    git.commit("001", "2024-01-01");
+    git.commit("002", "2024-01-02");
+
+    git.checkout_b("feature");
+    git.commit("011", "2024-01-03");
+
+    git.checkout("master");
+    git.commit("003", "2024-01-04");
+
+    // Dirty the working tree without staging — `Repository::load`
+    // detects `git status` non-clean and inserts the synthetic
+    // Uncommitted commit node above HEAD.
+    std::fs::write(repo_path.join("WIP.txt"), "work in progress\n").unwrap();
+
+    git.log();
+
+    let options = &[
+        GenerateGraphOption::new(
+            "uncommitted_001_chrono",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Rounded,
+        ),
+        GenerateGraphOption::new(
+            "uncommitted_001_topo",
+            git::SortCommit::Topological,
+            graph::GraphStyle::Rounded,
+        ),
+        GenerateGraphOption::new(
+            "uncommitted_001_angular",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Angular,
+        ),
+        GenerateGraphOption::new(
+            "uncommitted_001_smooth",
+            git::SortCommit::Chronological,
+            graph::GraphStyle::Smooth,
+        ),
+    ];
+
+    copy_git_dir(repo_path, "uncommitted_001");
 
     generate_and_output_graph_images(repo_path, options);
     assert_graph_images(options);
@@ -1396,7 +1554,13 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
     let graph = graph::calc_graph(&repository);
     let image_params = graph::ImageParams::new(&graph_color_set, cell_width_type);
     let drawing_pixels = graph::DrawingPixels::new(&image_params);
-    let graph_image = build_graph_image(&graph, &image_params, &drawing_pixels, option.style);
+    let graph_row_images = build_graph_row_images(
+        &graph,
+        &repository,
+        &image_params,
+        &drawing_pixels,
+        option.style,
+    );
 
     // Create concatenated image — cell dimensions MUST match
     // `ImageParams::new(_, CellWidthType::Double)` in src/graph/image.rs,
@@ -1412,11 +1576,11 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
     let text_renderer = text_to_png::TextRenderer::default();
     let text_x = (width * (graph.max_pos_x as usize + 1)) as u32;
 
-    for (i, edges) in graph.edges.iter().enumerate() {
+    for (i, _edges) in graph.edges.iter().enumerate() {
         let y = (height * i) as u32;
 
-        // write graph
-        let graph_row_image = &graph_image.images[edges];
+        // write graph — one row image per commit, in graph order
+        let graph_row_image = &graph_row_images[i];
         let image = image::load_from_memory(&graph_row_image.bytes).unwrap();
         img_buf.copy_from(&image, 0, y).unwrap();
 
@@ -1459,47 +1623,49 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
     .unwrap();
 }
 
-fn build_graph_image(
+/// Render one row image PER commit, faithfully matching what production
+/// does via `GraphImageManager::ensure_uploaded` → `build_single_graph_
+/// row_image`. The old version short-circuited via an edges-keyed cache
+/// and passed `&[]` for branch_segments / `false` for the head flag,
+/// which made the Smooth style render blank rows (it iterates
+/// `branch_segments`, not `edges`) and stripped the HEAD-hollow visual.
+fn build_graph_row_images(
     graph: &graph::Graph<'_>,
+    repository: &git::Repository,
     image_params: &graph::ImageParams,
     drawing_pixels: &graph::DrawingPixels,
     graph_style: graph::GraphStyle,
-) -> graph::GraphImage {
-    let graph_row_sources: FxHashSet<(usize, &Vec<graph::Edge>)> = graph
+) -> Vec<graph::GraphRowImage> {
+    let head_commit_hash: Option<git::CommitHash> = match repository.head() {
+        git::Head::Detached { target } => Some(target.clone()),
+        git::Head::Branch { name } => {
+            repository.all_refs().into_iter().find_map(|r| match r {
+                git::Ref::Branch {
+                    name: ref_name,
+                    target,
+                } if ref_name == name => Some(target.clone()),
+                _ => None,
+            })
+        }
+        git::Head::None => None,
+    };
+
+    graph
         .commits
         .iter()
         .map(|commit| {
-            let (pos_x, pos_y) = graph.commit_pos_map[&commit.commit_hash];
-            let edges = &graph.edges[pos_y];
-            (pos_x, edges)
-        })
-        .collect();
-
-    let cell_count = graph.max_pos_x + 1;
-
-    let images = graph_row_sources
-        .into_iter()
-        .map(|(pos_x, edges)| {
-            let graph_row_image = graph::calc_graph_row_image(
-                pos_x,
-                cell_count,
-                edges,
+            let head = head_commit_hash.as_ref() == Some(&commit.commit_hash);
+            graph::build_single_graph_row_image(
+                graph,
                 image_params,
                 drawing_pixels,
                 graph_style,
-                &[],
-                0,
-                false,
-                false,
-                false,
-                image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
-                None,
-            );
-            (edges.clone(), graph_row_image)
+                graph::GraphImageWidthMode::Fixed,
+                &commit.commit_hash,
+                head,
+            )
         })
-        .collect();
-
-    graph::GraphImage { images }
+        .collect()
 }
 
 fn create_output_dirs(path: &str) {
