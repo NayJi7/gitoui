@@ -1398,8 +1398,12 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
     let drawing_pixels = graph::DrawingPixels::new(&image_params);
     let graph_image = build_graph_image(&graph, &image_params, &drawing_pixels, option.style);
 
-    // Create concatenated image
-    let (width, height) = (50, 50);
+    // Create concatenated image — cell dimensions MUST match
+    // `ImageParams::new(_, CellWidthType::Double)` in src/graph/image.rs,
+    // which produces 50×56 cells. Using a smaller height here would
+    // overflow when we `copy_from` each 56-tall row image, panicking
+    // with `DimensionMismatch`.
+    let (width, height) = (50, 56);
     let image_width = ((width * (graph.max_pos_x as usize + 1)) + (width * 7)) as u32;
     let image_height = (height * graph.commits.len()) as u32;
     let mut img_buf: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
