@@ -277,8 +277,7 @@ impl Repository {
         // in the in-memory map — fall back to a one-off `git log -1`
         // so the existing CommitDetail / DiffView still work for them.
         let commit = self.commit(commit_hash).cloned().unwrap_or_else(|| {
-            load_commit_by_hash(&self.path, commit_hash.as_str())
-                .unwrap_or_default()
+            load_commit_by_hash(&self.path, commit_hash.as_str()).unwrap_or_default()
         });
         let changes = if commit.parent_commit_hashes.is_empty() {
             get_initial_commit_additions(&self.path, commit_hash)
@@ -556,10 +555,7 @@ pub fn fetch_pull_request_ref(
     pr_number: u64,
 ) -> std::result::Result<(), String> {
     let url = format!("https://github.com/{}/{}", owner, repo);
-    let refspec = format!(
-        "+refs/pull/{}/head:refs/pull/{}/head",
-        pr_number, pr_number
-    );
+    let refspec = format!("+refs/pull/{}/head:refs/pull/{}/head", pr_number, pr_number);
     let output = Command::new("git")
         .args(["fetch", "--quiet", &url, &refspec])
         .current_dir(path)
@@ -567,7 +563,11 @@ pub fn fetch_pull_request_ref(
         .map_err(|e| format!("git fetch failed: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(stderr.lines().next().unwrap_or("git fetch failed").to_string());
+        return Err(stderr
+            .lines()
+            .next()
+            .unwrap_or("git fetch failed")
+            .to_string());
     }
     Ok(())
 }
@@ -892,7 +892,10 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
             // For renames, key by `newname` so the numstat lookup matches
             // the `oldname => newname` parse below.
             let key = rename_to.clone().unwrap_or_else(|| path_name.clone());
-            status_map.insert(key, (status, Some(path_name).filter(|_| rename_to.is_some())));
+            status_map.insert(
+                key,
+                (status, Some(path_name).filter(|_| rename_to.is_some())),
+            );
             if let Some(to) = rename_to {
                 // Keep an extra entry under `oldname` so a `D`/`R` row that
                 // appeared earlier in the stream isn't shadowed by a stale

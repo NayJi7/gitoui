@@ -10,8 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::pr::{ConversationEntry, ConversationKind, Label, ReactionCounts};
 use super::{http_client, RepoCoords};
-use super::pr::{Label, ReactionCounts, ConversationEntry, ConversationKind};
 
 /// Compact issue summary — populates the list panel.
 #[derive(Debug, Clone)]
@@ -77,10 +77,7 @@ pub struct IssueDetail {
 /// List every issue on the repo, filtering out pull requests
 /// (GitHub's `/issues` endpoint mixes them in by default). Sorted
 /// by `updated` desc to match the web UI's default.
-pub fn list_issues(
-    token: &str,
-    coords: &RepoCoords,
-) -> Result<Vec<Issue>, String> {
+pub fn list_issues(token: &str, coords: &RepoCoords) -> Result<Vec<Issue>, String> {
     let client = http_client()?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/issues?state=all&per_page=50&sort=updated&direction=desc",
@@ -142,8 +139,8 @@ pub fn fetch_issue_detail(
     let issue_body = issue_resp
         .text()
         .map_err(|e| format!("Issue read: {}", e))?;
-    let issue: ApiIssue = serde_json::from_str(&issue_body)
-        .map_err(|e| format!("Issue JSON: {}", e))?;
+    let issue: ApiIssue =
+        serde_json::from_str(&issue_body).map_err(|e| format!("Issue JSON: {}", e))?;
 
     // Comments — pulled even when comment count is 0 because the
     // /issues endpoint doesn't inline them. One call covers a
@@ -173,10 +170,7 @@ pub fn fetch_issue_detail(
         .map(|c| ConversationEntry {
             id: Some(c.id),
             parent_id: None,
-            author: c
-                .user
-                .map(|u| u.login)
-                .unwrap_or_else(|| "?".into()),
+            author: c.user.map(|u| u.login).unwrap_or_else(|| "?".into()),
             when: short_relative(&c.created_at),
             body: c.body.unwrap_or_default(),
             kind: ConversationKind::Comment,
@@ -185,8 +179,7 @@ pub fn fetch_issue_detail(
         .collect();
 
     let opened_when = short_relative(&issue.created_at);
-    let body_reactions: ReactionCounts =
-        issue.reactions.clone().unwrap_or_default().into();
+    let body_reactions: ReactionCounts = issue.reactions.clone().unwrap_or_default().into();
     Ok(IssueDetail {
         number: issue.number,
         title: issue.title.clone(),
@@ -199,11 +192,7 @@ pub fn fetch_issue_detail(
         state_reason: issue.state_reason.as_deref().and_then(parse_state_reason),
         body: issue.body.clone().unwrap_or_default(),
         labels: issue.labels.iter().cloned().map(Into::into).collect(),
-        assignees: issue
-            .assignees
-            .iter()
-            .map(|u| u.login.clone())
-            .collect(),
+        assignees: issue.assignees.iter().map(|u| u.login.clone()).collect(),
         milestone: issue.milestone.as_ref().map(|m| m.title.clone()),
         created_at: issue.created_at.clone(),
         updated_at: issue.updated_at.clone(),
@@ -409,8 +398,7 @@ fn request_json<T: Serialize>(
     label: &str,
 ) -> Result<reqwest::blocking::Response, String> {
     let client = http_client()?;
-    let payload =
-        serde_json::to_string(body).map_err(|e| format!("{} encode: {}", label, e))?;
+    let payload = serde_json::to_string(body).map_err(|e| format!("{} encode: {}", label, e))?;
     client
         .request(method, url)
         .bearer_auth(token)
@@ -508,11 +496,7 @@ pub fn close_issue(
     expect_success(resp, "Close issue")
 }
 
-pub fn reopen_issue(
-    token: &str,
-    coords: &RepoCoords,
-    number: u64,
-) -> Result<(), String> {
+pub fn reopen_issue(token: &str, coords: &RepoCoords, number: u64) -> Result<(), String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/issues/{}",
         coords.owner, coords.repo, number
@@ -626,8 +610,7 @@ pub fn add_issue_reaction(
     struct R {
         id: u64,
     }
-    let parsed: R =
-        serde_json::from_str(&body).map_err(|e| format!("decode reaction: {}", e))?;
+    let parsed: R = serde_json::from_str(&body).map_err(|e| format!("decode reaction: {}", e))?;
     Ok(parsed.id)
 }
 
@@ -666,18 +649,15 @@ pub fn create_issue(
             body_text.lines().next().unwrap_or("")
         ));
     }
-    let created: ApiCreated = serde_json::from_str(&body_text)
-        .map_err(|e| format!("Create issue JSON: {}", e))?;
+    let created: ApiCreated =
+        serde_json::from_str(&body_text).map_err(|e| format!("Create issue JSON: {}", e))?;
     Ok(created.number)
 }
 
 /// List repo labels — drives the labels picker. Same response shape
 /// as the PR module's equivalent call but kept local so issue.rs can
 /// be lifted out independently.
-pub fn list_repo_labels(
-    token: &str,
-    coords: &RepoCoords,
-) -> Result<Vec<Label>, String> {
+pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, String> {
     let client = http_client()?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/labels?per_page=100",
@@ -699,10 +679,7 @@ pub fn list_repo_labels(
 }
 
 /// List candidate assignees (repo collaborators with push access).
-pub fn list_repo_assignees(
-    token: &str,
-    coords: &RepoCoords,
-) -> Result<Vec<String>, String> {
+pub fn list_repo_assignees(token: &str, coords: &RepoCoords) -> Result<Vec<String>, String> {
     let client = http_client()?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/assignees?per_page=100",
@@ -717,9 +694,7 @@ pub fn list_repo_assignees(
     if !resp.status().is_success() {
         return Err(format!("List assignees HTTP {}", resp.status()));
     }
-    let body = resp
-        .text()
-        .map_err(|e| format!("Read assignees: {}", e))?;
+    let body = resp.text().map_err(|e| format!("Read assignees: {}", e))?;
     let raw: Vec<ApiUser> =
         serde_json::from_str(&body).map_err(|e| format!("Assignees JSON: {}", e))?;
     Ok(raw.into_iter().map(|u| u.login).collect())
@@ -727,10 +702,7 @@ pub fn list_repo_assignees(
 
 /// List open milestones — the picker shows only open ones since
 /// closed milestones can't be set on a new issue.
-pub fn list_repo_milestones(
-    token: &str,
-    coords: &RepoCoords,
-) -> Result<Vec<Milestone>, String> {
+pub fn list_repo_milestones(token: &str, coords: &RepoCoords) -> Result<Vec<Milestone>, String> {
     let client = http_client()?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/milestones?state=open&per_page=100",
@@ -745,9 +717,7 @@ pub fn list_repo_milestones(
     if !resp.status().is_success() {
         return Err(format!("List milestones HTTP {}", resp.status()));
     }
-    let body = resp
-        .text()
-        .map_err(|e| format!("Read milestones: {}", e))?;
+    let body = resp.text().map_err(|e| format!("Read milestones: {}", e))?;
     let raw: Vec<ApiMilestoneFull> =
         serde_json::from_str(&body).map_err(|e| format!("Milestones JSON: {}", e))?;
     Ok(raw
@@ -785,9 +755,7 @@ pub fn list_issue_timeline(
     if !resp.status().is_success() {
         return Err(format!("Timeline HTTP {}", resp.status()));
     }
-    let body = resp
-        .text()
-        .map_err(|e| format!("Read timeline: {}", e))?;
+    let body = resp.text().map_err(|e| format!("Read timeline: {}", e))?;
     let raw: Vec<ApiTimelineEvent> =
         serde_json::from_str(&body).map_err(|e| format!("Timeline JSON: {}", e))?;
     Ok(raw.into_iter().filter_map(project_event).collect())
@@ -802,10 +770,7 @@ pub fn list_linked_prs(
     number: u64,
 ) -> Result<Vec<LinkedPr>, String> {
     let client = http_client()?;
-    let q = format!(
-        "repo:{}/{} type:pr {}",
-        coords.owner, coords.repo, number
-    );
+    let q = format!("repo:{}/{} type:pr {}", coords.owner, coords.repo, number);
     let resp = client
         .get("https://api.github.com/search/issues")
         .bearer_auth(token)
@@ -816,9 +781,7 @@ pub fn list_linked_prs(
     if !resp.status().is_success() {
         return Err(format!("Linked PRs HTTP {}", resp.status()));
     }
-    let body = resp
-        .text()
-        .map_err(|e| format!("Read linked: {}", e))?;
+    let body = resp.text().map_err(|e| format!("Read linked: {}", e))?;
     let raw: ApiSearchResults =
         serde_json::from_str(&body).map_err(|e| format!("Linked JSON: {}", e))?;
     Ok(raw
@@ -933,23 +896,47 @@ pub struct TimelineEvent {
 
 #[derive(Debug, Clone)]
 pub enum TimelineKind {
-    Labeled { name: String, color: Option<String> },
-    Unlabeled { name: String, color: Option<String> },
-    Assigned { who: String },
-    Unassigned { who: String },
-    Milestoned { title: String },
-    Demilestoned { title: String },
-    Closed { reason: Option<IssueStateReason> },
+    Labeled {
+        name: String,
+        color: Option<String>,
+    },
+    Unlabeled {
+        name: String,
+        color: Option<String>,
+    },
+    Assigned {
+        who: String,
+    },
+    Unassigned {
+        who: String,
+    },
+    Milestoned {
+        title: String,
+    },
+    Demilestoned {
+        title: String,
+    },
+    Closed {
+        reason: Option<IssueStateReason>,
+    },
     Reopened,
-    Renamed { from: String, to: String },
-    CrossReferenced { issue_number: Option<u64>, title: Option<String> },
+    Renamed {
+        from: String,
+        to: String,
+    },
+    CrossReferenced {
+        issue_number: Option<u64>,
+        title: Option<String>,
+    },
     Mentioned,
     Subscribed,
     Pinned,
     Unpinned,
     /// Catch-all so the renderer can still emit a row for unknown
     /// kinds without losing the timestamp + actor.
-    Other { kind: String },
+    Other {
+        kind: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -962,10 +949,7 @@ pub struct LinkedPr {
 
 // ─── Internal helpers ────────────────────────────────────────────
 
-fn expect_success(
-    resp: reqwest::blocking::Response,
-    label: &str,
-) -> Result<(), String> {
+fn expect_success(resp: reqwest::blocking::Response, label: &str) -> Result<(), String> {
     if resp.status().is_success() {
         Ok(())
     } else {
@@ -1016,7 +1000,11 @@ fn project_event(raw: ApiTimelineEvent) -> Option<TimelineEvent> {
             }
         }
         "cross-referenced" => TimelineKind::CrossReferenced {
-            issue_number: raw.source.as_ref().and_then(|s| s.issue.as_ref()).map(|i| i.number),
+            issue_number: raw
+                .source
+                .as_ref()
+                .and_then(|s| s.issue.as_ref())
+                .map(|i| i.number),
             title: raw
                 .source
                 .as_ref()

@@ -381,19 +381,20 @@ impl<'a> UncommittedWidget<'a> {
             .count();
 
         let (banner_area, content_area) = if conflict_count > 0 {
-            let [b, c] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
-                .areas(scroll_area);
+            let [b, c] =
+                Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(scroll_area);
             (Some(b), c)
         } else {
             (None, scroll_area)
         };
 
         if let Some(banner_area) = banner_area {
-            let noun = if conflict_count == 1 { "conflict" } else { "conflicts" };
-            let banner_text = format!(
-                " ⚠  {} {} — press to resolve",
-                conflict_count, noun
-            );
+            let noun = if conflict_count == 1 {
+                "conflict"
+            } else {
+                "conflicts"
+            };
+            let banner_text = format!(" ⚠  {} {} — press to resolve", conflict_count, noun);
             let banner_line = Line::from(Span::styled(
                 banner_text,
                 Style::default()

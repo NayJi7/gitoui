@@ -53,7 +53,10 @@ fn main() {
     check(
         "list_issues",
         items.as_ref().is_ok_and(|v| !v.is_empty()),
-        &format!("({} non-PR entries)", items.as_ref().map(|v| v.len()).unwrap_or(0)),
+        &format!(
+            "({} non-PR entries)",
+            items.as_ref().map(|v| v.len()).unwrap_or(0)
+        ),
     );
     let items = items.expect("need issue list");
     let target = items.first().expect("at least one issue").number;
@@ -65,8 +68,16 @@ fn main() {
         detail.as_ref().is_ok(),
         &format!(
             "(title={:?}, conv_len={})",
-            detail.as_ref().ok().map(|d| d.title.clone()).unwrap_or_default(),
-            detail.as_ref().ok().map(|d| d.conversation.len()).unwrap_or(0),
+            detail
+                .as_ref()
+                .ok()
+                .map(|d| d.title.clone())
+                .unwrap_or_default(),
+            detail
+                .as_ref()
+                .ok()
+                .map(|d| d.conversation.len())
+                .unwrap_or(0),
         ),
     );
 
@@ -81,21 +92,30 @@ fn main() {
     check(
         "list_repo_assignees",
         users.as_ref().is_ok_and(|v| !v.is_empty()),
-        &format!("({} assignable)", users.as_ref().map(|v| v.len()).unwrap_or(0)),
+        &format!(
+            "({} assignable)",
+            users.as_ref().map(|v| v.len()).unwrap_or(0)
+        ),
     );
 
     let milestones = list_repo_milestones(&token, &coords);
     check(
         "list_repo_milestones",
         milestones.as_ref().is_ok(),
-        &format!("({} open)", milestones.as_ref().map(|v| v.len()).unwrap_or(0)),
+        &format!(
+            "({} open)",
+            milestones.as_ref().map(|v| v.len()).unwrap_or(0)
+        ),
     );
 
     let timeline = list_issue_timeline(&token, &coords, target);
     check(
         "list_issue_timeline",
         timeline.as_ref().is_ok(),
-        &format!("({} events)", timeline.as_ref().map(|v| v.len()).unwrap_or(0)),
+        &format!(
+            "({} events)",
+            timeline.as_ref().map(|v| v.len()).unwrap_or(0)
+        ),
     );
 
     let linked = list_linked_prs(&token, &coords, target);
@@ -144,20 +164,10 @@ fn main() {
     let react = add_issue_reaction(&token, &coords, new_num, ReactionKind::Rocket);
     check("add_issue_reaction (rocket)", react.is_ok(), "");
 
-    let lbl = set_issue_labels(
-        &token,
-        &coords,
-        new_num,
-        &["enhancement".to_string()],
-    );
+    let lbl = set_issue_labels(&token, &coords, new_num, &["enhancement".to_string()]);
     check("set_issue_labels", lbl.is_ok(), "");
 
-    let asn = set_issue_assignees(
-        &token,
-        &coords,
-        new_num,
-        &["NayJi7".to_string()],
-    );
+    let asn = set_issue_assignees(&token, &coords, new_num, &["NayJi7".to_string()]);
     check("set_issue_assignees", asn.is_ok(), "");
 
     let ms = set_issue_milestone(&token, &coords, new_num, None);

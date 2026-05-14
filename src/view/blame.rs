@@ -156,7 +156,9 @@ impl<'a> BlameView<'a> {
     /// recomputed at most once per `RELTIME_TTL` so `Local::now()` is not
     /// called for every visible row on every frame.
     fn cached_relative_time(&mut self, dt: Option<&chrono::DateTime<chrono::Local>>) -> String {
-        let Some(dt) = dt else { return "—".to_string() };
+        let Some(dt) = dt else {
+            return "—".to_string();
+        };
         let key = dt.timestamp();
         if let Some((s, computed_at)) = self.rel_time_cache.get(&key) {
             if computed_at.elapsed() < RELTIME_TTL {
@@ -164,7 +166,8 @@ impl<'a> BlameView<'a> {
             }
         }
         let s = relative_time(Some(dt));
-        self.rel_time_cache.insert(key, (s.clone(), std::time::Instant::now()));
+        self.rel_time_cache
+            .insert(key, (s.clone(), std::time::Instant::now()));
         s
     }
 
@@ -325,7 +328,9 @@ impl<'a> BlameView<'a> {
     }
 
     pub fn handle_click(&mut self, _col: u16, row: u16) {
-        let Some(area) = self.content_area else { return };
+        let Some(area) = self.content_area else {
+            return;
+        };
         if row < area.y || row >= area.y + area.height {
             return;
         }
@@ -344,7 +349,9 @@ impl<'a> BlameView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
-        let Some(area) = self.content_area else { return };
+        let Some(area) = self.content_area else {
+            return;
+        };
         if row < area.y || row >= area.y + area.height {
             if self.hovered_block.is_some() {
                 self.hovered_block = None;
@@ -390,7 +397,10 @@ impl<'a> BlameView<'a> {
                 "Blame ",
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(self.file_path.clone(), Style::default().fg(theme.list_hash_fg)),
+            Span::styled(
+                self.file_path.clone(),
+                Style::default().fg(theme.list_hash_fg),
+            ),
             Span::raw("  "),
             Span::styled(
                 format!("{} lines", self.lines.len()),
@@ -399,10 +409,7 @@ impl<'a> BlameView<'a> {
         ]);
         f.render_widget(Paragraph::new(title_line), title);
 
-        let sep_line = Line::from(
-            "─".repeat(area.width as usize)
-                .fg(theme.divider_fg),
-        );
+        let sep_line = Line::from("─".repeat(area.width as usize).fg(theme.divider_fg));
         f.render_widget(Paragraph::new(sep_line), sep);
 
         self.view_height = content.height as usize;
@@ -441,8 +448,14 @@ impl<'a> BlameView<'a> {
 
         let target_left = total_w / 3;
         // Fixed part of the left column when neither author nor subject is shown.
-        let fixed_left =
-            bar_w + avatar_col_w + hash_w + sep_mid + reltime_w + sep_border + lineno_w + sep_border;
+        let fixed_left = bar_w
+            + avatar_col_w
+            + hash_w
+            + sep_mid
+            + reltime_w
+            + sep_border
+            + lineno_w
+            + sep_border;
         let extra = target_left.saturating_sub(fixed_left);
         let (author_w, subject_w) = if extra >= 14 {
             // Roomy: author + subject share the leftover, author capped at 10.
@@ -472,19 +485,22 @@ impl<'a> BlameView<'a> {
             &self.ctx.core_config.option.syntax_theme,
         );
 
-        let visible_range = self.scroll_offset
-            ..(self.scroll_offset + self.view_height).min(self.lines.len());
+        let visible_range =
+            self.scroll_offset..(self.scroll_offset + self.view_height).min(self.lines.len());
 
         // Extract timestamps into an owned Vec so `&mut self` is free for the
         // cache update below (avoids an aliasing conflict with self.lines).
-        let timestamps: Vec<Option<chrono::DateTime<chrono::Local>>> =
-            visible_range.clone().map(|i| self.lines[i].author_time).collect();
+        let timestamps: Vec<Option<chrono::DateTime<chrono::Local>>> = visible_range
+            .clone()
+            .map(|i| self.lines[i].author_time)
+            .collect();
         let rel_times: Vec<String> = timestamps
             .iter()
             .map(|t| self.cached_relative_time(t.as_ref()))
             .collect();
 
-        let visible_lines: Vec<Line<'static>> = visible_range.clone()
+        let visible_lines: Vec<Line<'static>> = visible_range
+            .clone()
             .enumerate()
             .map(|(j, i)| {
                 let bl = &self.lines[i];
@@ -560,9 +576,10 @@ impl<'a> BlameView<'a> {
 
             if scroll_stable && select_stable {
                 // ── Path 1: nothing changed ──────────────────────────────────
-                for j in 0..self.view_height.min(
-                    self.lines.len().saturating_sub(self.scroll_offset)
-                ) {
+                for j in 0..self
+                    .view_height
+                    .min(self.lines.len().saturating_sub(self.scroll_offset))
+                {
                     let y = content.top() + j as u16;
                     for x in 0..2u16 {
                         buf[(avatar_x + x, y)].set_skip(true);
@@ -577,10 +594,8 @@ impl<'a> BlameView<'a> {
                     let block_idx = self.block_at_line(i);
                     let is_head = self.is_block_head(i);
 
-                    let was_active =
-                        old_active.is_some() && block_idx == old_active;
-                    let is_now_active =
-                        active_block.is_some() && block_idx == active_block;
+                    let was_active = old_active.is_some() && block_idx == old_active;
+                    let is_now_active = active_block.is_some() && block_idx == active_block;
 
                     if !was_active && !is_now_active {
                         // Block state unchanged → preserve image or skip.
@@ -607,8 +622,7 @@ impl<'a> BlameView<'a> {
                     let y = content.top() + j as u16;
                     let is_head = self.is_block_head(i);
                     let block_idx = self.block_at_line(i);
-                    let is_now_active =
-                        active_block.is_some() && block_idx == active_block;
+                    let is_now_active = active_block.is_some() && block_idx == active_block;
                     let row_bg = if is_now_active { sel_bg } else { normal_bg };
 
                     if is_head && !self.lines[i].author_mail.is_empty() {
@@ -727,7 +741,9 @@ impl<'a> BlameView<'a> {
     }
 
     fn open_focused_commit(&self) {
-        let Some(idx) = self.focused_block else { return };
+        let Some(idx) = self.focused_block else {
+            return;
+        };
         if let Some(block) = self.blocks.get(idx) {
             if let Some(bl) = self.lines.get(block.start) {
                 self.tx.send(AppEvent::OpenDetailByHash {
@@ -817,10 +833,7 @@ impl<'a> BlameView<'a> {
         // Paragraph renders (see the avatar image pass in render()). Here we
         // just reserve the space so the following text columns don't overlap.
         if avatars_enabled {
-            spans.push(Span::styled(
-                "   ".to_string(),
-                Style::default().bg(row_bg),
-            ));
+            spans.push(Span::styled("   ".to_string(), Style::default().bg(row_bg)));
         }
 
         if self.is_block_head(idx) {
@@ -832,20 +845,14 @@ impl<'a> BlameView<'a> {
                     .bg(row_bg)
                     .add_modifier(Modifier::BOLD),
             ));
-            spans.push(Span::styled(
-                " ".to_string(),
-                Style::default().bg(row_bg),
-            ));
+            spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
 
             if show_author {
                 spans.push(Span::styled(
                     pad(&truncate(&bl.author, author_w), author_w),
                     Style::default().fg(author_fg).bg(row_bg),
                 ));
-                spans.push(Span::styled(
-                    " ".to_string(),
-                    Style::default().bg(row_bg),
-                ));
+                spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
             }
 
             spans.push(Span::styled(
@@ -859,10 +866,7 @@ impl<'a> BlameView<'a> {
                     pad(&truncate(&bl.summary, subject_w), subject_w),
                     Style::default().fg(subject_fg).bg(row_bg),
                 ));
-                spans.push(Span::styled(
-                    " ".to_string(),
-                    Style::default().bg(row_bg),
-                ));
+                spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
             }
         } else {
             // Continuation of a block — pad the annotation columns blank.
@@ -874,7 +878,10 @@ impl<'a> BlameView<'a> {
                 + 1
                 + subject_w
                 + if show_subject { 1 } else { 0 };
-            spans.push(Span::styled(" ".repeat(blank_w), Style::default().bg(row_bg)));
+            spans.push(Span::styled(
+                " ".repeat(blank_w),
+                Style::default().bg(row_bg),
+            ));
         }
 
         // Separator → lineno → separator → code

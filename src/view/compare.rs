@@ -177,7 +177,11 @@ impl<'a> CompareView<'a> {
         let short = |h: &str| h.chars().take(7).collect::<String>();
         // Title format mirrors the standalone compare-diff title — the
         // status-line / header rendering picks this up to colorize the SHAs.
-        let title = format!("Compare {}..{}", short(&self.older_hash), short(&self.newer_hash));
+        let title = format!(
+            "Compare {}..{}",
+            short(&self.older_hash),
+            short(&self.newer_hash)
+        );
         self.diff_pane = Some(DiffView::new(
             None, // commit list is owned by the CompareView, not the inner DiffView
             vec![entry],
@@ -255,7 +259,11 @@ impl<'a> CompareView<'a> {
         if matches!(event, UserEvent::ScrollUp | UserEvent::ScrollDown) {
             if self.hovered_file_idx.is_some() {
                 let delta = count as isize
-                    * if matches!(event, UserEvent::ScrollUp) { -1 } else { 1 };
+                    * if matches!(event, UserEvent::ScrollUp) {
+                        -1
+                    } else {
+                        1
+                    };
                 self.scroll_files(delta);
                 return;
             }
@@ -348,11 +356,8 @@ impl<'a> CompareView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         // Unified header (title + divider) above the body.
-        let [header_area, body_area] = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Min(0),
-        ])
-        .areas(area);
+        let [header_area, body_area] =
+            Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(area);
 
         self.render_header(f, header_area);
 
@@ -516,12 +521,11 @@ impl<'a> CompareView<'a> {
                 Span::styled(leading.to_string(), leading_style),
                 Span::styled(
                     format!(" {} ", summary.status),
-                    Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    format!(" {}", summary.path),
-                    Style::default().fg(theme_fg),
-                ),
+                Span::styled(format!(" {}", summary.path), Style::default().fg(theme_fg)),
             ];
             if summary.add_count > 0 {
                 spans.push(Span::raw("  "));
@@ -575,7 +579,10 @@ impl<'a> CompareView<'a> {
     pub fn handle_click(&mut self, col: u16, row: u16) {
         // Click in the files pane → select that file and mark the file
         // cursor as active.
-        if self.files_area.contains(ratatui::layout::Position { x: col, y: row }) {
+        if self
+            .files_area
+            .contains(ratatui::layout::Position { x: col, y: row })
+        {
             if row > self.files_area.y {
                 let inner_row = (row - self.files_area.y - 1) as usize;
                 let target = self.files_offset + inner_row;
@@ -593,7 +600,10 @@ impl<'a> CompareView<'a> {
         // Click in the diff pane → forward (the inner DiffView handles
         // show-more buttons + scroll-on-click). Mark the button cursor as
         // active so the next Enter targets the diff pane too.
-        if self.diff_area.contains(ratatui::layout::Position { x: col, y: row }) {
+        if self
+            .diff_area
+            .contains(ratatui::layout::Position { x: col, y: row })
+        {
             if let Some(pane) = &mut self.diff_pane {
                 pane.handle_click(col, row);
             }

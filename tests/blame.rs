@@ -134,7 +134,7 @@ filename a.txt
 \thello
 
 ";
-        let lines = parse_porcelain(sample);
+    let lines = parse_porcelain(sample);
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].content, "hello");
 }

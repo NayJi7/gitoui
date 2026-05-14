@@ -435,10 +435,22 @@ impl<'a> ConfigView<'a> {
                 self.editing_value.push(c);
             }
             KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                while self.editing_value.chars().last().map(|c| !c.is_alphanumeric()).unwrap_or(false) {
+                while self
+                    .editing_value
+                    .chars()
+                    .last()
+                    .map(|c| !c.is_alphanumeric())
+                    .unwrap_or(false)
+                {
                     self.editing_value.pop();
                 }
-                while self.editing_value.chars().last().map(|c| c.is_alphanumeric()).unwrap_or(false) {
+                while self
+                    .editing_value
+                    .chars()
+                    .last()
+                    .map(|c| c.is_alphanumeric())
+                    .unwrap_or(false)
+                {
                     self.editing_value.pop();
                 }
             }
@@ -743,11 +755,7 @@ impl<'a> ConfigView<'a> {
         // `finish_text_edit`. Inserting a new item between existing ones
         // requires shifting indices in all of those places too.
         let items = vec![
-            (
-                "Theme",
-                self.core_config.option.theme.clone(),
-                false,
-            ),
+            ("Theme", self.core_config.option.theme.clone(), false),
             (
                 "Graph Style",
                 graph_style_display(self.core_config.graph_style()),
@@ -1161,7 +1169,9 @@ impl<'a> ConfigView<'a> {
         let labels: [&str; 3] = ["main", "feature", ""];
         let label_styles = [
             Style::default().fg(main_color).add_modifier(Modifier::BOLD),
-            Style::default().fg(feature_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(feature_color)
+                .add_modifier(Modifier::BOLD),
             Style::default(),
         ];
 
@@ -1717,7 +1727,6 @@ fn config_value_display(index: usize, value: &str, editing: bool, editing_value:
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

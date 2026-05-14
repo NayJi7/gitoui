@@ -301,10 +301,7 @@ mod tests {
 
             let set = build_graph_color_set(&theme, &cfg);
 
-            assert_eq!(
-                set.background_color,
-                GraphColor::from_rgb(0xab, 0xcd, 0xef)
-            );
+            assert_eq!(set.background_color, GraphColor::from_rgb(0xab, 0xcd, 0xef));
         }
 
         #[test]

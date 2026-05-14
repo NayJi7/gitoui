@@ -16,13 +16,21 @@ fn recents_file() -> Option<PathBuf> {
     let base = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .map(PathBuf::from)
-        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))?;
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
     Some(base.join("gitoui").join("recents.json"))
 }
 
 pub fn load() -> Vec<PathBuf> {
-    let Some(path) = recents_file() else { return Vec::new() };
-    let Ok(text) = fs::read_to_string(&path) else { return Vec::new() };
+    let Some(path) = recents_file() else {
+        return Vec::new();
+    };
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
     // Minimalist parser: the file is `["/path/a","/path/b",...]`, one entry
     // per element. We avoid pulling serde for this single use case.
     let trimmed = text.trim();
@@ -185,7 +193,10 @@ mod tests {
         }
         assert_eq!(recents.len(), MAX_RECENTS);
         // The 5 oldest must have been dropped; the very last pushed is on top.
-        assert_eq!(recents[0], dirs.last().unwrap().path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            dirs.last().unwrap().path().canonicalize().unwrap()
+        );
     }
 
     #[test]

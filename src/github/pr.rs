@@ -236,16 +236,11 @@ pub enum ConversationKind {
     /// Plain top-level comment (`POST /issues/{n}/comments`).
     Comment,
     /// PR-level review with an aggregate state.
-    Review {
-        state: ReviewState,
-    },
+    Review { state: ReviewState },
     /// Inline review comment on a specific file/line. Top-level review
     /// comments live in the feed; replies (set via `in_reply_to_id`) are
     /// rendered as children of their parent.
-    ReviewComment {
-        file: String,
-        line: Option<u64>,
-    },
+    ReviewComment { file: String, line: Option<u64> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -684,7 +679,9 @@ pub fn list_pull_requests(token: &str, coords: &RepoCoords) -> Result<Vec<PullRe
             body.lines().next().unwrap_or("")
         ));
     }
-    let body = resp.text().map_err(|e| format!("GitHub /pulls read: {}", e))?;
+    let body = resp
+        .text()
+        .map_err(|e| format!("GitHub /pulls read: {}", e))?;
     let raw: Vec<ApiPullSummary> =
         serde_json::from_str(&body).map_err(|e| format!("GitHub /pulls JSON: {}", e))?;
     Ok(raw.into_iter().map(map_summary).collect())
@@ -965,11 +962,7 @@ fn derive_mergeability(
 
 // ---------- Helpers ----------
 
-fn fetch_reviews(
-    client: &reqwest::blocking::Client,
-    token: &str,
-    url: &str,
-) -> ReviewsSummary {
+fn fetch_reviews(client: &reqwest::blocking::Client, token: &str, url: &str) -> ReviewsSummary {
     let mut summary = ReviewsSummary::default();
     let resp = match client
         .get(url)
@@ -997,11 +990,7 @@ fn fetch_reviews(
     summary
 }
 
-fn fetch_files(
-    client: &reqwest::blocking::Client,
-    token: &str,
-    url: &str,
-) -> Vec<PullFile> {
+fn fetch_files(client: &reqwest::blocking::Client, token: &str, url: &str) -> Vec<PullFile> {
     let resp = match client
         .get(url)
         .bearer_auth(token)
@@ -1064,13 +1053,7 @@ fn fetch_pull_commits(
     let raw: Vec<ApiCommitItem> = serde_json::from_str(&body).unwrap_or_default();
     raw.into_iter()
         .map(|c| {
-            let subject = c
-                .commit
-                .message
-                .lines()
-                .next()
-                .unwrap_or("")
-                .to_string();
+            let subject = c.commit.message.lines().next().unwrap_or("").to_string();
             let (author, date) = match c.commit.author {
                 Some(a) => (a.name, short_relative(&a.date)),
                 None => ("?".to_string(), String::new()),
@@ -1234,8 +1217,10 @@ fn fetch_visible_workflow_run_ids(
         return HashSet::new();
     }
     let body = resp.text().unwrap_or_default();
-    let parsed: ApiWorkflowRunsResponse = serde_json::from_str(&body)
-        .unwrap_or(ApiWorkflowRunsResponse { workflow_runs: vec![] });
+    let parsed: ApiWorkflowRunsResponse =
+        serde_json::from_str(&body).unwrap_or(ApiWorkflowRunsResponse {
+            workflow_runs: vec![],
+        });
     parsed
         .workflow_runs
         .into_iter()
@@ -1294,9 +1279,7 @@ fn ci_from_filtered_runs(runs: &[CheckRunDetail]) -> CiSummary {
         match (run.status, run.conclusion) {
             (CheckStatus::Completed, Some(CheckConclusion::Success))
             | (CheckStatus::Completed, Some(CheckConclusion::Neutral))
-            | (CheckStatus::Completed, Some(CheckConclusion::Skipped)) => {
-                summary.success += 1
-            }
+            | (CheckStatus::Completed, Some(CheckConclusion::Skipped)) => summary.success += 1,
             (CheckStatus::Completed, Some(CheckConclusion::Failure))
             | (CheckStatus::Completed, Some(CheckConclusion::Cancelled))
             | (CheckStatus::Completed, Some(CheckConclusion::TimedOut))
@@ -1683,9 +1666,7 @@ fn list_my_reactions_at(
             body.lines().next().unwrap_or("")
         ));
     }
-    let body = resp
-        .text()
-        .map_err(|e| format!("/reactions read: {}", e))?;
+    let body = resp.text().map_err(|e| format!("/reactions read: {}", e))?;
     let entries: Vec<ApiReactionEntry> =
         serde_json::from_str(&body).map_err(|e| format!("/reactions JSON: {}", e))?;
     // GitHub logins are case-insensitive in matching even though
@@ -2034,11 +2015,7 @@ pub fn set_pull_request_state(
 /// Toggle a PR's draft flag. GitHub's REST API does not expose this
 /// — only the GraphQL `convertPullRequestToDraft` / `markPullRequest
 /// ReadyForReview` mutations work, so we POST to `/graphql` directly.
-pub fn set_pull_request_draft(
-    token: &str,
-    node_id: &str,
-    draft: bool,
-) -> Result<(), String> {
+pub fn set_pull_request_draft(token: &str, node_id: &str, draft: bool) -> Result<(), String> {
     let mutation = if draft {
         "convertPullRequestToDraft"
     } else {
@@ -2074,8 +2051,7 @@ pub fn set_pull_request_draft(
     // GraphQL returns 200 even on logical errors — they show up in
     // a top-level `errors` array. Parse and surface the first one.
     let body = resp.text().map_err(|e| format!("GraphQL read: {}", e))?;
-    let parsed: serde_json::Value =
-        serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
+    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
     if let Some(errs) = parsed.get("errors").and_then(|v| v.as_array()) {
         if let Some(first) = errs.first() {
             let msg = first
@@ -2090,10 +2066,7 @@ pub fn set_pull_request_draft(
 
 /// Fetch all labels available on a repo (the picker source). Paginated
 /// at 100 per page — for any sane repo size, one page is enough.
-pub fn list_repo_labels(
-    token: &str,
-    coords: &RepoCoords,
-) -> Result<Vec<Label>, String> {
+pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, String> {
     let client = http_client()?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/labels?per_page=100",
@@ -2138,10 +2111,7 @@ pub fn set_pull_request_labels(
 /// Fetch the list of users that can be assigned / requested as
 /// reviewers on this repo. GitHub's `/assignees` endpoint is the
 /// canonical source for the picker.
-pub fn list_repo_assignees(
-    token: &str,
-    coords: &RepoCoords,
-) -> Result<Vec<String>, String> {
+pub fn list_repo_assignees(token: &str, coords: &RepoCoords) -> Result<Vec<String>, String> {
     let client = http_client()?;
     let url = format!(
         "https://api.github.com/repos/{}/{}/assignees?per_page=100",
@@ -2159,9 +2129,13 @@ pub fn list_repo_assignees(
         return Err(humanize_github_error(status, &body));
     }
     let body = resp.text().map_err(|e| format!("/assignees read: {}", e))?;
-    let raw: Vec<ApiUser> = serde_json::from_str(&body)
-        .map_err(|e| format!("/assignees JSON: {}", e))?;
-    Ok(raw.into_iter().map(|u| u.login).filter(|l| !l.is_empty()).collect())
+    let raw: Vec<ApiUser> =
+        serde_json::from_str(&body).map_err(|e| format!("/assignees JSON: {}", e))?;
+    Ok(raw
+        .into_iter()
+        .map(|u| u.login)
+        .filter(|l| !l.is_empty())
+        .collect())
 }
 
 #[derive(Serialize)]
@@ -2229,8 +2203,7 @@ pub fn remove_pull_request_reviewers(
 /// strings documented in GitHub's REST API reference and fall back to
 /// status-code-specific phrasing when the message is unknown.
 fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
-    let parsed: serde_json::Value =
-        serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+    let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
     let top_message = parsed
         .get("message")
         .and_then(|m| m.as_str())
@@ -2260,8 +2233,7 @@ fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
         return "Cannot approve your own PR (GitHub disallows self-review)".into();
     }
     if scan.contains("request changes on your own pull request") {
-        return "Cannot request changes on your own PR (GitHub disallows self-review)"
-            .into();
+        return "Cannot request changes on your own PR (GitHub disallows self-review)".into();
     }
     // Merge / state guards.
     if scan.contains("pull request is not mergeable")
@@ -2288,8 +2260,7 @@ fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
     if scan.contains("bad credentials") {
         return "GitHub token rejected — sign in again".into();
     }
-    if scan.contains("api rate limit exceeded") || scan.contains("secondary rate limit")
-    {
+    if scan.contains("api rate limit exceeded") || scan.contains("secondary rate limit") {
         return "GitHub rate limit reached — try again later".into();
     }
     if scan.contains("must have admin rights")

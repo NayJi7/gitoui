@@ -234,11 +234,7 @@ impl<'a> UncommittedView<'a> {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let detail_height = if self.commit_list_state.is_some() {
-            crate::view::adaptive_detail_height(
-                area.height,
-                self.ctx.ui_config.detail.height,
-                5,
-            )
+            crate::view::adaptive_detail_height(area.height, self.ctx.ui_config.detail.height, 5)
         } else {
             area.height
         };
@@ -296,11 +292,10 @@ impl<'a> UncommittedView<'a> {
                         .send(AppEvent::OpenDialog(DialogKind::CleanUntracked));
                 } else if action_bar_row == 3 {
                     // Blame the file currently selected in the left-hand list.
-                    if let Some(file) = self.state.selected_file(
-                        &self.unstaged,
-                        &self.staged,
-                        &self.untracked,
-                    ) {
+                    if let Some(file) =
+                        self.state
+                            .selected_file(&self.unstaged, &self.staged, &self.untracked)
+                    {
                         if file.status != StatusType::Deleted {
                             self.tx.send(AppEvent::OpenBlame {
                                 file_path: file.path.clone(),
@@ -316,8 +311,7 @@ impl<'a> UncommittedView<'a> {
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
                 // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + [banner?] + content
                 let banner_offset = if self.has_conflicts() { 1 } else { 0 };
-                let visible_row =
-                    row.saturating_sub(detail_area.y + 4 + banner_offset) as usize;
+                let visible_row = row.saturating_sub(detail_area.y + 4 + banner_offset) as usize;
 
                 // Content layout: each section takes N lines (N=1 if empty, N=len if files)
                 // Separators between sections add 1 line each

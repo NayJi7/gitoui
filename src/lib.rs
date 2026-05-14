@@ -386,7 +386,10 @@ pub fn run() -> Result<()> {
                             .status();
                         match status {
                             Ok(s) if s.success() => {
-                                println!("Initialized repository with branch '{}'.", default_branch);
+                                println!(
+                                    "Initialized repository with branch '{}'.",
+                                    default_branch
+                                );
                             }
                             _ => {
                                 let _ = std::process::Command::new("git").arg("init").status();
@@ -588,11 +591,7 @@ fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     // --- Emit the wordmark ---
     // Restore to (top, 0), then walk right to the wordmark's start column.
     let _ = write!(stdout, "\x1b8");
-    let _ = write!(
-        stdout,
-        "\x1b[{}C",
-        left_margin + logo_w as u16 + gap
-    );
+    let _ = write!(stdout, "\x1b[{}C", left_margin + logo_w as u16 + gap);
     let _ = write!(stdout, "{}", wm_esc);
 
     // Two newlines = one blank separator row before the prompt.

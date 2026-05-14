@@ -94,7 +94,11 @@ impl<'a> DialogView<'a> {
             DialogKind::PullRequestReviewers { selected, .. } => (selected.clone(), 0),
             DialogKind::IssueLabels { selected, .. } => (selected.clone(), 0),
             DialogKind::IssueAssignees { selected, .. } => (selected.clone(), 0),
-            DialogKind::IssueMilestone { selected, all_milestones, .. } => {
+            DialogKind::IssueMilestone {
+                selected,
+                all_milestones,
+                ..
+            } => {
                 // Radio-style: `dropdown_selected` carries the chosen
                 // slot. Slot N (= `all_milestones.len()`) represents
                 // "no milestone".
@@ -175,7 +179,10 @@ impl<'a> DialogView<'a> {
     }
 
     pub fn is_input_focused(&self) -> bool {
-        matches!(self.focused, DialogElement::Input | DialogElement::SecondInput)
+        matches!(
+            self.focused,
+            DialogElement::Input | DialogElement::SecondInput
+        )
     }
 
     fn has_input_for(kind: &DialogKind) -> bool {
@@ -288,7 +295,9 @@ impl<'a> DialogView<'a> {
         let clamped = byte_offset.min(s.len());
         let before = &s[..clamped];
         let line = before.chars().filter(|&c| c == '\n').count();
-        let col = before.rfind('\n').map_or(before.len(), |p| before.len() - p - 1);
+        let col = before
+            .rfind('\n')
+            .map_or(before.len(), |p| before.len() - p - 1);
         (line, col)
     }
 
@@ -323,10 +332,7 @@ impl<'a> DialogView<'a> {
         }
         let next_line = lines[line_idx + 1];
         let target_col = col.min(next_line.len());
-        let next_line_start: usize = lines[..line_idx + 1]
-            .iter()
-            .map(|l| l.len() + 1)
-            .sum();
+        let next_line_start: usize = lines[..line_idx + 1].iter().map(|l| l.len() + 1).sum();
         self.input_cursor = next_line_start + target_col;
     }
 
@@ -468,7 +474,8 @@ impl<'a> DialogView<'a> {
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
                     let new_pos = word_left(&self.second_input_value, self.second_input_cursor);
-                    self.second_input_value.drain(new_pos..self.second_input_cursor);
+                    self.second_input_value
+                        .drain(new_pos..self.second_input_cursor);
                     self.second_input_cursor = new_pos;
                     return;
                 }
@@ -476,7 +483,8 @@ impl<'a> DialogView<'a> {
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
                     let new_pos = word_left(&self.second_input_value, self.second_input_cursor);
-                    self.second_input_value.drain(new_pos..self.second_input_cursor);
+                    self.second_input_value
+                        .drain(new_pos..self.second_input_cursor);
                     self.second_input_cursor = new_pos;
                     return;
                 }
@@ -489,7 +497,8 @@ impl<'a> DialogView<'a> {
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
                     let new_pos = word_left(&self.second_input_value, self.second_input_cursor);
-                    self.second_input_value.drain(new_pos..self.second_input_cursor);
+                    self.second_input_value
+                        .drain(new_pos..self.second_input_cursor);
                     self.second_input_cursor = new_pos;
                     return;
                 }
@@ -504,7 +513,8 @@ impl<'a> DialogView<'a> {
                     if key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
                     let new_pos = word_right(&self.second_input_value, self.second_input_cursor);
-                    self.second_input_value.drain(self.second_input_cursor..new_pos);
+                    self.second_input_value
+                        .drain(self.second_input_cursor..new_pos);
                     return;
                 }
                 ratatui::crossterm::event::KeyCode::Delete => {
@@ -652,7 +662,10 @@ impl<'a> DialogView<'a> {
     fn insert_body_newline(&mut self) {
         // Always append to the end of the first line (subject), regardless
         // of cursor position — the body button always starts a new body.
-        let subject_end = self.input_value.find('\n').unwrap_or(self.input_value.len());
+        let subject_end = self
+            .input_value
+            .find('\n')
+            .unwrap_or(self.input_value.len());
         self.input_value.insert(subject_end, '\n');
         self.input_cursor = subject_end + 1;
         self.focused = DialogElement::Input;
@@ -807,19 +820,11 @@ impl<'a> DialogView<'a> {
             for (login, line_idx, col_offset) in self.assignee_avatar_paints.clone() {
                 let screen_x = inner.x + col_offset;
                 let screen_y = inner.y + line_idx as u16;
-                if screen_x + 2 > inner.x + inner.width
-                    || screen_y >= inner.y + inner.height
-                {
+                if screen_x + 2 > inner.x + inner.width || screen_y >= inner.y + inner.height {
                     continue;
                 }
                 crate::view::pr::paint_login_avatar(
-                    f,
-                    &self.ctx,
-                    &login,
-                    screen_x,
-                    screen_y,
-                    false,
-                    theme_bg,
+                    f, &self.ctx, &login, screen_x, screen_y, false, theme_bg,
                 );
             }
         }
@@ -1005,7 +1010,9 @@ impl<'a> DialogView<'a> {
                 self.radio_rows.push(lines.len());
                 lines.push(self.radio_line(2, "Hard  — Discard all changes"));
             }
-            DialogKind::MergePullRequest { number, pr_title, .. } => {
+            DialogKind::MergePullRequest {
+                number, pr_title, ..
+            } => {
                 lines.push(info_line(
                     "Merge PR:",
                     &format!("#{} {}", number, pr_title),
@@ -1015,15 +1022,11 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("Method:", dim_fg));
                 self.radio_rows.push(lines.len());
-                lines.push(
-                    self.radio_line(0, "Merge commit — keep history of branch"),
-                );
+                lines.push(self.radio_line(0, "Merge commit — keep history of branch"));
                 self.radio_rows.push(lines.len());
                 lines.push(self.radio_line(1, "Squash — collapse into a single commit"));
                 self.radio_rows.push(lines.len());
-                lines.push(
-                    self.radio_line(2, "Rebase — replay each commit onto base"),
-                );
+                lines.push(self.radio_line(2, "Rebase — replay each commit onto base"));
             }
             DialogKind::RenameBranch { branch } => {
                 lines.push(info_line("Current:", branch, dim_fg, yellow));
@@ -1165,23 +1168,16 @@ impl<'a> DialogView<'a> {
                 let avail = (inner_width as usize).saturating_sub(2);
                 const MAX_PREVIEW_LINES: usize = 6;
                 let theme = &self.ctx.color_theme;
-                let rendered = crate::view::pr::render_markdown_body(
-                    body_preview,
-                    theme,
-                    avail.max(1),
-                );
+                let rendered =
+                    crate::view::pr::render_markdown_body(body_preview, theme, avail.max(1));
                 let overflowed = rendered.len() > MAX_PREVIEW_LINES;
                 for line_spans in rendered.into_iter().take(MAX_PREVIEW_LINES) {
-                    let mut row: Vec<Span<'static>> =
-                        vec![Span::raw("  ".to_string())];
+                    let mut row: Vec<Span<'static>> = vec![Span::raw("  ".to_string())];
                     row.extend(line_spans);
                     lines.push(Line::from(row));
                 }
                 if overflowed {
-                    lines.push(Line::from(Span::styled(
-                        "  …",
-                        Style::default().fg(dim_fg),
-                    )));
+                    lines.push(Line::from(Span::styled("  …", Style::default().fg(dim_fg))));
                 }
                 lines.push(Line::from(""));
                 lines.push(warning_line(
@@ -1194,11 +1190,7 @@ impl<'a> DialogView<'a> {
                 pr_title,
                 closing,
             } => {
-                lines.push(pr_header_line(
-                    *pr_number,
-                    pr_title,
-                    &self.ctx.color_theme,
-                ));
+                lines.push(pr_header_line(*pr_number, pr_title, &self.ctx.color_theme));
                 lines.push(Line::from(""));
                 let msg = if *closing {
                     "Close this PR without merging?"
@@ -1216,11 +1208,7 @@ impl<'a> DialogView<'a> {
                 to_draft,
                 ..
             } => {
-                lines.push(pr_header_line(
-                    *pr_number,
-                    pr_title,
-                    &self.ctx.color_theme,
-                ));
+                lines.push(pr_header_line(*pr_number, pr_title, &self.ctx.color_theme));
                 lines.push(Line::from(""));
                 let msg = if *to_draft {
                     "Convert this PR back to a draft? Reviewers will be notified."
@@ -1238,11 +1226,7 @@ impl<'a> DialogView<'a> {
                 all_labels,
                 ..
             } => {
-                lines.push(pr_header_line(
-                    *pr_number,
-                    pr_title,
-                    &self.ctx.color_theme,
-                ));
+                lines.push(pr_header_line(*pr_number, pr_title, &self.ctx.color_theme));
                 lines.push(Line::from(""));
                 if all_labels.is_empty() {
                     lines.push(Line::from(Span::styled(
@@ -1259,8 +1243,7 @@ impl<'a> DialogView<'a> {
                         .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
                         .map(|(_, l)| l)
                         .collect();
-                    let mut chip_row: Vec<Span<'static>> =
-                        vec![Span::raw("  ".to_string())];
+                    let mut chip_row: Vec<Span<'static>> = vec![Span::raw("  ".to_string())];
                     if attached.is_empty() {
                         chip_row.push(Span::styled(
                             "(no labels)".to_string(),
@@ -1280,8 +1263,7 @@ impl<'a> DialogView<'a> {
                         // The clickable row is the first line returned
                         // — continuation rows (long descriptions) sit
                         // below but aren't independently selectable.
-                        let rendered =
-                            self.checkbox_line_labelled(i, lab, inner_width);
+                        let rendered = self.checkbox_line_labelled(i, lab, inner_width);
                         self.checkbox_rows.push(lines.len());
                         for ln in rendered {
                             lines.push(ln);
@@ -1295,11 +1277,7 @@ impl<'a> DialogView<'a> {
                 all_users,
                 ..
             } => {
-                lines.push(pr_header_line(
-                    *pr_number,
-                    pr_title,
-                    &self.ctx.color_theme,
-                ));
+                lines.push(pr_header_line(*pr_number, pr_title, &self.ctx.color_theme));
                 lines.push(Line::from(""));
                 if all_users.is_empty() {
                     lines.push(Line::from(Span::styled(
@@ -1316,8 +1294,7 @@ impl<'a> DialogView<'a> {
                         .filter(|(i, _)| self.checkboxes.get(*i).copied().unwrap_or(false))
                         .map(|(_, u)| u)
                         .collect();
-                    let mut chip_row: Vec<Span<'static>> =
-                        vec![Span::raw("  ".to_string())];
+                    let mut chip_row: Vec<Span<'static>> = vec![Span::raw("  ".to_string())];
                     if requested.is_empty() {
                         chip_row.push(Span::styled(
                             "(no reviewers requested)".to_string(),
@@ -1333,8 +1310,7 @@ impl<'a> DialogView<'a> {
                             }
                             chip_row.push(Span::styled(
                                 format!("@{}", name),
-                                Style::default()
-                                    .fg(self.ctx.color_theme.list_name_fg),
+                                Style::default().fg(self.ctx.color_theme.list_name_fg),
                             ));
                         }
                     }
@@ -1418,14 +1394,11 @@ impl<'a> DialogView<'a> {
                     // renders in `list_name_fg` (green) — same
                     // convention as the author column elsewhere.
                     let theme = &self.ctx.color_theme;
-                    let avatars_on =
-                        self.ctx.avatar_manager.lock().unwrap().is_enabled();
+                    let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
                     for (i, name) in all_users.iter().enumerate() {
                         self.checkbox_rows.push(lines.len());
-                        let checked =
-                            self.checkboxes.get(i).copied().unwrap_or(false);
-                        let pointed =
-                            self.is_pointed_at(DialogElement::Checkbox(i));
+                        let checked = self.checkboxes.get(i).copied().unwrap_or(false);
+                        let pointed = self.is_pointed_at(DialogElement::Checkbox(i));
                         let indicator = if pointed { "▸ " } else { "  " };
                         let check_span = if checked {
                             Span::styled(
@@ -1433,10 +1406,7 @@ impl<'a> DialogView<'a> {
                                 Style::default().fg(theme.status_info_fg),
                             )
                         } else {
-                            Span::styled(
-                                "○ ".to_string(),
-                                Style::default().fg(theme.divider_fg),
-                            )
+                            Span::styled("○ ".to_string(), Style::default().fg(theme.divider_fg))
                         };
                         let label_style = if pointed {
                             Style::default()
@@ -1445,19 +1415,19 @@ impl<'a> DialogView<'a> {
                         } else {
                             Style::default().fg(theme.list_name_fg)
                         };
-                        let mut spans: Vec<Span<'static>> = vec![
-                            Span::raw(indicator.to_string()),
-                            check_span,
-                        ];
-                        let mut avatar_col: u16 = (indicator.chars().count()
-                            + 2) as u16; // indicator + "● "
+                        let mut spans: Vec<Span<'static>> =
+                            vec![Span::raw(indicator.to_string()), check_span];
+                        let mut avatar_col: u16 = (indicator.chars().count() + 2) as u16; // indicator + "● "
                         if avatars_on {
                             // Reserve 3 cells: 2 for the avatar + 1
                             // gap before the login. The paint pass
                             // overlays the avatar on top.
                             spans.push(Span::raw("   ".to_string()));
-                            self.assignee_avatar_paints
-                                .push((name.clone(), lines.len(), avatar_col));
+                            self.assignee_avatar_paints.push((
+                                name.clone(),
+                                lines.len(),
+                                avatar_col,
+                            ));
                             avatar_col = avatar_col.saturating_add(3);
                         }
                         let _ = avatar_col; // silence warning, used implicitly above
@@ -1482,13 +1452,10 @@ impl<'a> DialogView<'a> {
                     self.radio_rows.push(lines.len());
                     let is_chosen = i == self.dropdown_selected;
                     let glyph = if is_chosen { "●" } else { "○" };
-                    let is_focused =
-                        self.is_highlighted(DialogElement::Radio(i));
+                    let is_focused = self.is_highlighted(DialogElement::Radio(i));
                     let row_fg = if is_focused { theme.list_head_fg } else { fg };
                     let style = if is_focused {
-                        Style::default()
-                            .fg(row_fg)
-                            .add_modifier(Modifier::BOLD)
+                        Style::default().fg(row_fg).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(row_fg)
                     };
@@ -1541,19 +1508,14 @@ impl<'a> DialogView<'a> {
                     "Close as:".to_string(),
                     Style::default().fg(dim_fg),
                 )));
-                for (i, label) in
-                    ["Completed", "Not planned (won't fix)"].iter().enumerate()
-                {
+                for (i, label) in ["Completed", "Not planned (won't fix)"].iter().enumerate() {
                     self.radio_rows.push(lines.len());
                     let is_chosen = i == self.dropdown_selected;
                     let glyph = if is_chosen { "●" } else { "○" };
-                    let is_focused =
-                        self.is_highlighted(DialogElement::Radio(i));
+                    let is_focused = self.is_highlighted(DialogElement::Radio(i));
                     let row_fg = if is_focused { theme.list_head_fg } else { fg };
                     let style = if is_focused {
-                        Style::default()
-                            .fg(row_fg)
-                            .add_modifier(Modifier::BOLD)
+                        Style::default().fg(row_fg).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(row_fg)
                     };
@@ -1723,10 +1685,7 @@ impl<'a> DialogView<'a> {
                 self.radio_rows.push(lines.len());
                 lines.push(self.radio_line(1, "Discard changes, then checkout"));
             }
-            DialogKind::ConfirmSwitchWorktree {
-                path,
-                display_name,
-            } => {
+            DialogKind::ConfirmSwitchWorktree { path, display_name } => {
                 lines.push(Line::from(Span::styled(
                     format!("Switch to worktree '{}'?", display_name),
                     Style::default().fg(fg),
@@ -1795,9 +1754,9 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmPullRequestDraftToggle { to_draft: true, .. } => {
                 " Convert to Draft "
             }
-            DialogKind::ConfirmPullRequestDraftToggle { to_draft: false, .. } => {
-                " Mark Ready for Review "
-            }
+            DialogKind::ConfirmPullRequestDraftToggle {
+                to_draft: false, ..
+            } => " Mark Ready for Review ",
             DialogKind::PullRequestLabels { .. } => " Labels ",
             DialogKind::PullRequestReviewers { .. } => " Reviewers ",
             DialogKind::IssueLabels { .. } => " Labels ",
@@ -1900,7 +1859,10 @@ impl<'a> DialogView<'a> {
         result.push(Line::from(vec![
             Span::raw(" "),
             Span::styled(subject_padded, Style::default().fg(text_fg).bg(input_bg)),
-            Span::styled(counter_text, Style::default().fg(counter_color).bg(input_bg)),
+            Span::styled(
+                counter_text,
+                Style::default().fg(counter_color).bg(input_bg),
+            ),
             Span::raw(" "),
         ]));
 
@@ -2010,8 +1972,7 @@ impl<'a> DialogView<'a> {
             + 2 /* gap before description */;
         let avail = (inner_width as usize).saturating_sub(indent).max(1);
 
-        let mut first_row: Vec<Span<'static>> =
-            vec![Span::raw(indicator.to_string()), check_span];
+        let mut first_row: Vec<Span<'static>> = vec![Span::raw(indicator.to_string()), check_span];
         first_row.extend(label_chip_spans(label, theme.fg));
 
         let desc = label.description.as_deref().unwrap_or("").trim();
@@ -2176,9 +2137,8 @@ impl<'a> DialogView<'a> {
                     .collect();
                 if *for_compose {
                     self.tx.send(AppEvent::CloseDialog);
-                    self.tx.send(AppEvent::ComposeIssueAssigneesPicked {
-                        assignees: picked,
-                    });
+                    self.tx
+                        .send(AppEvent::ComposeIssueAssigneesPicked { assignees: picked });
                 } else {
                     self.tx.send(AppEvent::SetIssueAssignees {
                         issue_number: *issue_number,
@@ -2342,9 +2302,7 @@ impl<'a> DialogView<'a> {
                 )
             }
             DialogKind::ConfirmPullRequestStateChange {
-                pr_number,
-                closing,
-                ..
+                pr_number, closing, ..
             } => {
                 let state = if *closing { "closed" } else { "open" };
                 (
@@ -2543,7 +2501,12 @@ impl<'a> DialogView<'a> {
                     .get(self.dropdown_selected)
                     .cloned()
                     .unwrap_or_else(|| remotes[0].clone());
-                (remote, GitAction::PushSetUpstream { branch: branch.clone() })
+                (
+                    remote,
+                    GitAction::PushSetUpstream {
+                        branch: branch.clone(),
+                    },
+                )
             }
             DialogKind::SetUpstream { remotes, branch } => {
                 if remotes.is_empty() {
@@ -2555,7 +2518,12 @@ impl<'a> DialogView<'a> {
                     .get(self.dropdown_selected)
                     .cloned()
                     .unwrap_or_else(|| remotes[0].clone());
-                (remote, GitAction::SetUpstream { branch: branch.clone() })
+                (
+                    remote,
+                    GitAction::SetUpstream {
+                        branch: branch.clone(),
+                    },
+                )
             }
             DialogKind::ConfirmAbortOperation { op_name } => {
                 let action = match op_name.as_str() {
@@ -2589,10 +2557,7 @@ impl<'a> DialogView<'a> {
                     return;
                 }
                 let checkout = self.checkboxes.get(0).copied().unwrap_or(false);
-                (
-                    String::new(),
-                    GitAction::AddWorktree { name, checkout },
-                )
+                (String::new(), GitAction::AddWorktree { name, checkout })
             }
             DialogKind::CheckoutHasLocalChanges { target, .. } => {
                 let action = match self.dropdown_selected {
@@ -2736,10 +2701,7 @@ fn pr_header_line(
 /// Render a single GitHub label as a coloured chip — `bg` is the
 /// label's own colour, `fg` flips to black or white based on a
 /// brightness heuristic so the name stays readable.
-fn label_chip_spans(
-    label: &crate::github::pr::Label,
-    fallback_fg: Color,
-) -> Vec<Span<'static>> {
+fn label_chip_spans(label: &crate::github::pr::Label, fallback_fg: Color) -> Vec<Span<'static>> {
     if let Some((bg, fg)) = label.color.as_deref().and_then(label_chip_colours) {
         vec![Span::styled(
             format!(" {} ", label.name),
@@ -2830,7 +2792,6 @@ fn label_chip_colours(hex: &str) -> Option<(Color, Color)> {
     };
     Some((Color::Rgb(r, g, b), fg))
 }
-
 
 fn label_line(label: &str, color: Color) -> Line<'static> {
     Line::from(Span::styled(

@@ -9,10 +9,9 @@ use crate::{
     view::{
         blame::BlameView, branch_detail::BranchDetailView, compare::CompareView,
         config::ConfigView, conflict::ConflictView, detail::DetailView, dialog::DialogView,
-        diff::DiffView, file_history::FileHistoryView, help::HelpView,
-        issue::IssuesView, list::ListView, pr::PullRequestsView,
-        rebase::InteractiveRebaseView, refs::RefsView, tag_detail::TagDetailView,
-        uncommitted::UncommittedView, user_command::UserCommandView,
+        diff::DiffView, file_history::FileHistoryView, help::HelpView, issue::IssuesView,
+        list::ListView, pr::PullRequestsView, rebase::InteractiveRebaseView, refs::RefsView,
+        tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -283,7 +282,9 @@ impl<'a> View<'a> {
             View::Default => None,
             View::List(view) => view.as_list_state().search_case_fuzzy_regex(),
             View::Detail(view) => view.as_list_state().search_case_fuzzy_regex(),
-            View::Diff(view) => view.as_list_state().and_then(|s| s.search_case_fuzzy_regex()),
+            View::Diff(view) => view
+                .as_list_state()
+                .and_then(|s| s.search_case_fuzzy_regex()),
             View::UserCommand(view) => view.as_list_state().search_case_fuzzy_regex(),
             View::Refs(view) => view.as_list_state().search_case_fuzzy_regex(),
             View::Help(view) => view.search_case_fuzzy_regex(),
@@ -354,7 +355,9 @@ impl<'a> View<'a> {
     /// `selected` is the commit currently under the cursor (may equal `marked`
     /// when the cursor is back on the marked row, and may be `None` when the
     /// cursor sits on the Uncommitted Changes row).
-    pub fn list_compare_pending(&self) -> Option<(crate::git::CommitHash, Option<crate::git::CommitHash>)> {
+    pub fn list_compare_pending(
+        &self,
+    ) -> Option<(crate::git::CommitHash, Option<crate::git::CommitHash>)> {
         match self {
             View::List(view) => {
                 let state = view.as_list_state();

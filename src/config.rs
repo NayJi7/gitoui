@@ -828,11 +828,7 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
     set_nested_bool(&mut doc, &["core", "search", "fuzzy"], core.search.fuzzy);
     set_nested_bool(&mut doc, &["core", "search", "regex"], core.search.regex);
 
-    set_nested_string(
-        &mut doc,
-        &["core", "option", "theme"],
-        &core.option.theme,
-    );
+    set_nested_string(&mut doc, &["core", "option", "theme"], &core.option.theme);
 
     set_nested_string(
         &mut doc,
@@ -1111,8 +1107,7 @@ mod tests {
         expected.ui.user_command.height = 30;
         expected.ui.refs.width = 40;
         expected.graph.row_image_width = GraphImageWidthMode::Fixed;
-        expected.graph.color.branches =
-            vec!["#ff0000".into(), "#00ff00".into(), "#0000ff".into()];
+        expected.graph.color.branches = vec!["#ff0000".into(), "#00ff00".into(), "#0000ff".into()];
         expected.graph.color.edge = "#000000".into();
         expected.graph.color.background = "#ffffff".into();
 

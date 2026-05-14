@@ -270,8 +270,10 @@ impl<'a> ConflictView<'a> {
         if !self.file.is_fully_resolved() {
             let n = self.file.unresolved_count();
             let noun = if n == 1 { "conflict" } else { "conflicts" };
-            self.tx
-                .send(AppEvent::NotifyError(format!("{} {} still unresolved", n, noun)));
+            self.tx.send(AppEvent::NotifyError(format!(
+                "{} {} still unresolved",
+                n, noun
+            )));
             return;
         }
         let content = self.file.render_resolved();
@@ -469,16 +471,25 @@ impl<'a> ConflictView<'a> {
                 "Resolve: ",
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(self.file.path.clone(), Style::default().fg(theme.list_hash_fg)),
+            Span::styled(
+                self.file.path.clone(),
+                Style::default().fg(theme.list_hash_fg),
+            ),
             Span::raw("  "),
             Span::styled(
-                format!("hunk {}/{}", (self.current_hunk + 1).min(total.max(1)), total),
+                format!(
+                    "hunk {}/{}",
+                    (self.current_hunk + 1).min(total.max(1)),
+                    total
+                ),
                 Style::default().fg(theme.detail_label_fg),
             ),
             Span::raw("  "),
             Span::styled(
                 format!("{} unresolved", unresolved),
-                Style::default().fg(progress_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(progress_color)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]);
         let divider = Line::from(Span::styled(
@@ -503,10 +514,7 @@ impl<'a> ConflictView<'a> {
         // - Theirs uses the remote-branch colour ("the branch coming in").
         // - Base falls back to a dim label colour.
         let (title, accent) = match side {
-            Pane::Ours => (
-                self.pane_title(Pane::Ours),
-                theme.list_ref_branch_fg,
-            ),
+            Pane::Ours => (self.pane_title(Pane::Ours), theme.list_ref_branch_fg),
             Pane::Base => ("Base".to_string(), theme.detail_label_fg),
             Pane::Theirs => (
                 self.pane_title(Pane::Theirs),
@@ -814,10 +822,7 @@ impl<'a> ConflictView<'a> {
                                     hunk_idx + 1
                                 )
                             } else {
-                                format!(
-                                    "    ⚠  UNRESOLVED  hunk {}",
-                                    hunk_idx + 1
-                                )
+                                format!("    ⚠  UNRESOLVED  hunk {}", hunk_idx + 1)
                             };
                             out.push(make_annotated_line(
                                 None,
@@ -1076,7 +1081,10 @@ fn make_line(
         Some(s) => s,
         None => vec![Span::styled(raw_content.to_string(), style)],
     };
-    let content_width: usize = content_spans.iter().map(|s| s.content.chars().count()).sum();
+    let content_width: usize = content_spans
+        .iter()
+        .map(|s| s.content.chars().count())
+        .sum();
     let used = 1 + gutter.chars().count() + 2 + content_width;
     let pad = (inner_width as usize).saturating_sub(used);
     spans.extend(content_spans);
@@ -1108,9 +1116,9 @@ fn make_annotated_line(
     if let Some(b) = bg {
         style = style.bg(b);
     }
-    let gutter_style = Style::default().fg(Color::Rgb(0x66, 0x66, 0x66)).bg(
-        bg.unwrap_or(Color::Reset),
-    );
+    let gutter_style = Style::default()
+        .fg(Color::Rgb(0x66, 0x66, 0x66))
+        .bg(bg.unwrap_or(Color::Reset));
     let gutter = match line_number {
         Some(n) => format!(" {:>4} ", n),
         None => "      ".to_string(),
@@ -1130,7 +1138,10 @@ fn make_annotated_line(
         Some(s) => s,
         None => vec![Span::styled(raw_content.to_string(), style)],
     };
-    let content_width: usize = content_spans.iter().map(|s| s.content.chars().count()).sum();
+    let content_width: usize = content_spans
+        .iter()
+        .map(|s| s.content.chars().count())
+        .sum();
     spans.extend(content_spans);
 
     let badge_text = badge.unwrap_or("");
@@ -1210,9 +1221,7 @@ fn blend(fg: Color, bg: Color, alpha: f32) -> Color {
 
 fn is_dark_bg(bg: Color) -> bool {
     match bg {
-        Color::Rgb(r, g, b) => {
-            (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) <= 128.0
-        }
+        Color::Rgb(r, g, b) => (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) <= 128.0,
         _ => true,
     }
 }

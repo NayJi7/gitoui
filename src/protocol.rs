@@ -209,11 +209,9 @@ impl ImageProtocol {
             // Persistent Kitty placements (a=T) render on top of terminal content and stay
             // until explicitly deleted — a bare space does not remove them.  Prefix with
             // a=d,d=C so any ghost image at this cell is evicted before the space is written.
-            ImageProtocol::Kitty => PreparedImageCell::new(
-                "\x1b_Ga=d,d=C;\x1b\\ ".to_string(),
-                Style::default(),
-                false,
-            ),
+            ImageProtocol::Kitty => {
+                PreparedImageCell::new("\x1b_Ga=d,d=C;\x1b\\ ".to_string(), Style::default(), false)
+            }
             // KittyUnicode uses virtual placements driven by placeholder characters; writing
             // a plain space removes the placeholder and the image disappears automatically.
             // Iterm2/Sixel also require no special deletion step.

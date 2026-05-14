@@ -431,8 +431,7 @@ impl AvatarManager {
         thread::spawn(move || {
             let mut found_avatar = false;
 
-            let url =
-                resolve_github_commit_avatar_url(&client, &repos, &commit_hashes, &token);
+            let url = resolve_github_commit_avatar_url(&client, &repos, &commit_hashes, &token);
 
             if let Some(url) = url {
                 match client.get(&url).send() {
@@ -460,11 +459,7 @@ impl AvatarManager {
     }
 }
 
-fn finish_avatar_fetch(
-    fetch_state: &Arc<Mutex<FetchState>>,
-    email_key: &str,
-    found_avatar: bool,
-) {
+fn finish_avatar_fetch(fetch_state: &Arc<Mutex<FetchState>>, email_key: &str, found_avatar: bool) {
     let mut state = fetch_state.lock().unwrap();
     state.in_flight.remove(email_key);
     if !found_avatar {

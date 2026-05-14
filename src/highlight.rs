@@ -1,10 +1,6 @@
 use once_cell::sync::Lazy;
 use ratatui::style::{Color, Style};
-use syntect::{
-    easy::HighlightLines,
-    highlighting::ThemeSet,
-    parsing::SyntaxSet,
-};
+use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 
 static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {
     // two-face provides bat's full syntax collection (200+ languages:

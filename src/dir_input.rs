@@ -270,7 +270,9 @@ impl DirInputState {
     /// preview without committing.
     pub fn scroll_by(&mut self, delta: isize) {
         let max_scroll = self.suggestions.len().saturating_sub(MAX_VISIBLE);
-        let new_scroll = (self.scroll as isize + delta).max(0).min(max_scroll as isize);
+        let new_scroll = (self.scroll as isize + delta)
+            .max(0)
+            .min(max_scroll as isize);
         self.scroll = new_scroll as usize;
     }
 
@@ -479,9 +481,11 @@ fn split_for_completion(text: &str, home: Option<&Path>) -> (PathBuf, String) {
         let parent_raw = &text[..=slash];
         let prefix = text[slash + 1..].to_string();
         let parent = if parent_raw == "~" || parent_raw == "~/" {
-            home.map(|h| h.to_path_buf()).unwrap_or_else(|| PathBuf::from("/"))
+            home.map(|h| h.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("/"))
         } else if let Some(rest) = parent_raw.strip_prefix("~/") {
-            home.map(|h| h.join(rest)).unwrap_or_else(|| PathBuf::from(parent_raw))
+            home.map(|h| h.join(rest))
+                .unwrap_or_else(|| PathBuf::from(parent_raw))
         } else {
             PathBuf::from(parent_raw)
         };
@@ -505,7 +509,8 @@ pub fn resolve_path(text: &str, cwd: &Path) -> PathBuf {
     let base = if text == "~" {
         return home.unwrap_or_else(|| PathBuf::from(text));
     } else if let Some(rest) = text.strip_prefix("~/") {
-        home.map(|h| h.join(rest)).unwrap_or_else(|| PathBuf::from(text))
+        home.map(|h| h.join(rest))
+            .unwrap_or_else(|| PathBuf::from(text))
     } else if text.starts_with('/') {
         PathBuf::from(text)
     } else {
@@ -533,12 +538,30 @@ mod tests {
     #[test]
     fn resolve_handles_tilde_and_relatives() {
         std::env::set_var("HOME", "/home/user");
-        assert_eq!(resolve_path("~", Path::new("/cwd")), PathBuf::from("/home/user"));
-        assert_eq!(resolve_path("~/foo", Path::new("/cwd")), PathBuf::from("/home/user/foo"));
-        assert_eq!(resolve_path("/abs/path", Path::new("/cwd")), PathBuf::from("/abs/path"));
-        assert_eq!(resolve_path("./foo", Path::new("/cwd")), PathBuf::from("/cwd/foo"));
-        assert_eq!(resolve_path("../foo", Path::new("/cwd/sub")), PathBuf::from("/cwd/foo"));
-        assert_eq!(resolve_path("foo", Path::new("/cwd")), PathBuf::from("/cwd/foo"));
+        assert_eq!(
+            resolve_path("~", Path::new("/cwd")),
+            PathBuf::from("/home/user")
+        );
+        assert_eq!(
+            resolve_path("~/foo", Path::new("/cwd")),
+            PathBuf::from("/home/user/foo")
+        );
+        assert_eq!(
+            resolve_path("/abs/path", Path::new("/cwd")),
+            PathBuf::from("/abs/path")
+        );
+        assert_eq!(
+            resolve_path("./foo", Path::new("/cwd")),
+            PathBuf::from("/cwd/foo")
+        );
+        assert_eq!(
+            resolve_path("../foo", Path::new("/cwd/sub")),
+            PathBuf::from("/cwd/foo")
+        );
+        assert_eq!(
+            resolve_path("foo", Path::new("/cwd")),
+            PathBuf::from("/cwd/foo")
+        );
     }
 
     #[test]

@@ -87,10 +87,11 @@ fn accepts_work_tree_root_via_symlink() {
     init_repo(&dir);
     // Create a symlink that points at the repo root — canonicalisation
     // should resolve it back to the toplevel so the check passes.
-    let link = dir.path().parent().unwrap().join(format!(
-        "gitoui-test-link-{}",
-        std::process::id()
-    ));
+    let link = dir
+        .path()
+        .parent()
+        .unwrap()
+        .join(format!("gitoui-test-link-{}", std::process::id()));
     let _ = std::fs::remove_file(&link);
     #[cfg(unix)]
     {

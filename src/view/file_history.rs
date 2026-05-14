@@ -4,7 +4,7 @@ use ratatui::{
     buffer::Buffer,
     crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Rect},
-    style::{Style, Stylize, Modifier},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -160,7 +160,9 @@ impl<'a> FileHistoryView<'a> {
     /// Mirrors the Blame view's click flow — no two-step "select then confirm"
     /// dance.
     pub fn handle_click(&mut self, _col: u16, row: u16) {
-        let Some(area) = self.content_area else { return };
+        let Some(area) = self.content_area else {
+            return;
+        };
         if row < area.y || row >= area.y + area.height {
             return;
         }
@@ -174,7 +176,9 @@ impl<'a> FileHistoryView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, _col: u16, row: u16) {
-        let Some(area) = self.content_area else { return };
+        let Some(area) = self.content_area else {
+            return;
+        };
         if row < area.y || row >= area.y + area.height {
             if self.hovered.is_some() {
                 self.hovered = None;
@@ -182,7 +186,11 @@ impl<'a> FileHistoryView<'a> {
             return;
         }
         let idx = self.scroll_offset + (row - area.y) as usize;
-        let new_hover = if idx < self.entries.len() { Some(idx) } else { None };
+        let new_hover = if idx < self.entries.len() {
+            Some(idx)
+        } else {
+            None
+        };
         if new_hover != self.hovered {
             self.hovered = new_hover;
         }
@@ -276,7 +284,11 @@ impl<'a> FileHistoryView<'a> {
         self.content_area = Some(content_area);
 
         let theme = &self.ctx.color_theme;
-        let commits_word = if self.entries.len() == 1 { "commit" } else { "commits" };
+        let commits_word = if self.entries.len() == 1 {
+            "commit"
+        } else {
+            "commits"
+        };
         let title = Line::from(vec![
             Span::raw("  "),
             Span::styled(
@@ -289,7 +301,10 @@ impl<'a> FileHistoryView<'a> {
                 "File history ",
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(self.file_path.clone(), Style::default().fg(theme.list_hash_fg)),
+            Span::styled(
+                self.file_path.clone(),
+                Style::default().fg(theme.list_hash_fg),
+            ),
             Span::raw("  "),
             Span::styled(
                 format!("{} {}", self.entries.len(), commits_word),
@@ -298,10 +313,7 @@ impl<'a> FileHistoryView<'a> {
         ]);
         f.render_widget(Paragraph::new(title), title_area);
 
-        let separator = Line::from(
-            "─".repeat(area.width as usize)
-                .fg(theme.divider_fg),
-        );
+        let separator = Line::from("─".repeat(area.width as usize).fg(theme.divider_fg));
         f.render_widget(Paragraph::new(separator), sep_area);
 
         self.scroll_to_selected();
@@ -320,7 +332,8 @@ impl<'a> FileHistoryView<'a> {
         let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         // 2 image cells + 1 space before the author name.
         let avatar_col_w: usize = if avatars_enabled { 3 } else { 0 };
-        let fixed_w = PREFIX_W + HASH_W + COL_GAP + COL_GAP + avatar_col_w + AUTHOR_W + COL_GAP + DATE_W;
+        let fixed_w =
+            PREFIX_W + HASH_W + COL_GAP + COL_GAP + avatar_col_w + AUTHOR_W + COL_GAP + DATE_W;
         let subject_w = total_w.saturating_sub(fixed_w).max(10);
 
         let theme = &self.ctx.color_theme;
@@ -457,7 +470,10 @@ impl<'a> FileHistoryView<'a> {
 
             if scroll_stable && select_stable {
                 // ── Path 1: nothing changed ──────────────────────────────────
-                for j in 0..self.view_height.min(self.entries.len().saturating_sub(self.scroll_offset)) {
+                for j in 0..self
+                    .view_height
+                    .min(self.entries.len().saturating_sub(self.scroll_offset))
+                {
                     let y = content_area.top() + j as u16;
                     for x in 0..2u16 {
                         buf[(avatar_x + x, y)].set_skip(true);

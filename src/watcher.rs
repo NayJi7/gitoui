@@ -101,7 +101,9 @@ impl GitFingerprint {
         let refs_root = git_dir.join("refs");
         let mut stack = vec![refs_root.clone()];
         while let Some(dir) = stack.pop() {
-            let Ok(entries) = fs::read_dir(&dir) else { continue };
+            let Ok(entries) = fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 let Ok(meta) = entry.metadata() else { continue };
@@ -121,10 +123,7 @@ impl GitFingerprint {
 /// Spawn the watcher. Returns the debouncer handle: keep it alive (drop it
 /// to stop watching). Returns `None` if the path can't be watched (e.g.
 /// `.git/` doesn't exist yet).
-pub fn start(
-    git_dir: &Path,
-    sender: Sender,
-) -> Option<Debouncer<RecommendedWatcher>> {
+pub fn start(git_dir: &Path, sender: Sender) -> Option<Debouncer<RecommendedWatcher>> {
     if !git_dir.exists() {
         return None;
     }

@@ -233,7 +233,9 @@ fn merge_commit_returns_diff_against_first_parent() {
         "merge commit must surface diff vs first parent, got empty list"
     );
     assert!(
-        changes.iter().any(|c| matches!(c, FileChange::Modify { path, .. } if path == "a.txt")),
+        changes
+            .iter()
+            .any(|c| matches!(c, FileChange::Modify { path, .. } if path == "a.txt")),
         "expected a.txt to appear as Modify, got {:?}",
         changes
     );

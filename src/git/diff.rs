@@ -300,8 +300,7 @@ impl DiffEntry {
         }
 
         // Read the file — detect binary by scanning for null bytes in the first 8KB
-        let content = std::fs::read(&full_path)
-            .map_err(|e| format!("Cannot read file: {}", e))?;
+        let content = std::fs::read(&full_path).map_err(|e| format!("Cannot read file: {}", e))?;
 
         if content.contains(&0u8) {
             return Err("binary".to_string());
@@ -346,13 +345,53 @@ pub fn is_binary_extension(file_path: &str) -> bool {
         .to_lowercase();
     matches!(
         ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" | "webp" | "tiff" | "svg"
-            | "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
-            | "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar"
-            | "exe" | "dll" | "so" | "dylib" | "bin" | "obj" | "o" | "a"
-            | "mp3" | "mp4" | "wav" | "ogg" | "flac" | "avi" | "mkv" | "mov"
-            | "ttf" | "otf" | "woff" | "woff2"
-            | "db" | "sqlite" | "pyc" | "class"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "bmp"
+            | "ico"
+            | "webp"
+            | "tiff"
+            | "svg"
+            | "pdf"
+            | "doc"
+            | "docx"
+            | "xls"
+            | "xlsx"
+            | "ppt"
+            | "pptx"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "bz2"
+            | "xz"
+            | "7z"
+            | "rar"
+            | "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "bin"
+            | "obj"
+            | "o"
+            | "a"
+            | "mp3"
+            | "mp4"
+            | "wav"
+            | "ogg"
+            | "flac"
+            | "avi"
+            | "mkv"
+            | "mov"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "db"
+            | "sqlite"
+            | "pyc"
+            | "class"
     )
 }
 
@@ -529,7 +568,11 @@ fn diff_intra_line(
     }
 
     // Count matching chars from the start.
-    let prefix_chars = old.chars().zip(new.chars()).take_while(|(a, b)| a == b).count();
+    let prefix_chars = old
+        .chars()
+        .zip(new.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
     let prefix_old_bytes: usize = old.chars().take(prefix_chars).map(|c| c.len_utf8()).sum();
     let prefix_new_bytes: usize = new.chars().take(prefix_chars).map(|c| c.len_utf8()).sum();
 
@@ -544,8 +587,18 @@ fn diff_intra_line(
         .take_while(|(a, b)| a == b)
         .count();
 
-    let suffix_old_bytes: usize = old_rest.iter().rev().take(suffix_chars).map(|c| c.len_utf8()).sum();
-    let suffix_new_bytes: usize = new_rest.iter().rev().take(suffix_chars).map(|c| c.len_utf8()).sum();
+    let suffix_old_bytes: usize = old_rest
+        .iter()
+        .rev()
+        .take(suffix_chars)
+        .map(|c| c.len_utf8())
+        .sum();
+    let suffix_new_bytes: usize = new_rest
+        .iter()
+        .rev()
+        .take(suffix_chars)
+        .map(|c| c.len_utf8())
+        .sum();
 
     let old_end = old.len() - suffix_old_bytes;
     let new_end = new.len() - suffix_new_bytes;
@@ -553,8 +606,16 @@ fn diff_intra_line(
     let old_range = prefix_old_bytes..old_end;
     let new_range = prefix_new_bytes..new_end;
 
-    let old_ranges = if !old_range.is_empty() { vec![old_range] } else { vec![] };
-    let new_ranges = if !new_range.is_empty() { vec![new_range] } else { vec![] };
+    let old_ranges = if !old_range.is_empty() {
+        vec![old_range]
+    } else {
+        vec![]
+    };
+    let new_ranges = if !new_range.is_empty() {
+        vec![new_range]
+    } else {
+        vec![]
+    };
 
     (old_ranges, new_ranges)
 }

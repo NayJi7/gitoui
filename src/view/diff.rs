@@ -207,9 +207,7 @@ impl<'a> DiffView<'a> {
         // The uncommitted-combined view sets the title prefix to "Diff: " and
         // is the only place where hunk staging applies. Pull out the file path
         // so click-to-toggle can pipe a patch back to git.
-        let uncommitted_file_path = title
-            .strip_prefix("Diff: ")
-            .map(|p| p.to_string());
+        let uncommitted_file_path = title.strip_prefix("Diff: ").map(|p| p.to_string());
 
         DiffView {
             commit_list_state,
@@ -438,16 +436,14 @@ impl<'a> DiffView<'a> {
                 }
                 KeyCode::Down | KeyCode::Enter => {
                     if !self.search_matches.is_empty() {
-                        self.search_current =
-                            (self.search_current + 1) % self.search_matches.len();
+                        self.search_current = (self.search_current + 1) % self.search_matches.len();
                         self.scroll_to_match(self.search_current);
                     }
                     self.update_search_status_bar();
                     return;
                 }
                 KeyCode::Char(c)
-                    if key.modifiers.is_empty()
-                        || key.modifiers == KeyModifiers::SHIFT =>
+                    if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
                 {
                     self.search_query.insert(self.search_cursor, c);
                     self.search_cursor += c.len_utf8();
@@ -462,8 +458,7 @@ impl<'a> DiffView<'a> {
                 KeyCode::Backspace => {
                     if self.search_cursor > 0 {
                         let before = &self.search_query[..self.search_cursor];
-                        let char_len =
-                            before.chars().last().map(|c| c.len_utf8()).unwrap_or(0);
+                        let char_len = before.chars().last().map(|c| c.len_utf8()).unwrap_or(0);
                         self.search_cursor -= char_len;
                         self.search_query.remove(self.search_cursor);
                         self.update_search_matches();
@@ -579,8 +574,7 @@ impl<'a> DiffView<'a> {
             }
             UserEvent::GoToNext => {
                 if !self.search_matches.is_empty() {
-                    self.search_current =
-                        (self.search_current + 1) % self.search_matches.len();
+                    self.search_current = (self.search_current + 1) % self.search_matches.len();
                     self.scroll_to_match(self.search_current);
                     self.update_search_status_bar();
                 }
@@ -774,14 +768,9 @@ impl<'a> DiffView<'a> {
                 // and we fall back to the hunk closest to the restored
                 // scroll position rather than letting `initial_scroll_origin`
                 // jump to the first hunk of the file's other side.
-                let restored = if let Some((hunk_idx, scroll)) =
-                    self.pending_restore.take()
-                {
+                let restored = if let Some((hunk_idx, scroll)) = self.pending_restore.take() {
                     self.scroll_offset = scroll;
-                    let by_idx = self
-                        .hunk_spans
-                        .iter()
-                        .position(|s| s.hunk_idx == hunk_idx);
+                    let by_idx = self.hunk_spans.iter().position(|s| s.hunk_idx == hunk_idx);
                     let by_scroll = || {
                         // Pick the span whose start row is closest to where
                         // the user was last anchored (top of viewport).
@@ -831,8 +820,7 @@ impl<'a> DiffView<'a> {
                     if self.expand_buttons.is_empty() {
                         self.focused_button = None;
                     } else {
-                        self.focused_button =
-                            Some(idx.min(self.expand_buttons.len() - 1));
+                        self.focused_button = Some(idx.min(self.expand_buttons.len() - 1));
                     }
                 }
                 if let Some(idx) = self.focused_hunk {
@@ -966,10 +954,8 @@ impl<'a> DiffView<'a> {
                     }
                     if used < total_w {
                         let pad = total_w - used;
-                        line.spans.push(Span::styled(
-                            " ".repeat(pad),
-                            Style::default().bg(row_bg),
-                        ));
+                        line.spans
+                            .push(Span::styled(" ".repeat(pad), Style::default().bg(row_bg)));
                     }
                 }
             }
@@ -992,9 +978,8 @@ impl<'a> DiffView<'a> {
                     .copied()
                     .collect();
                 if !line_matches.is_empty() {
-                    let current_start_in_line = current
-                        .filter(|c| c.line_idx == abs_idx)
-                        .map(|c| c.start);
+                    let current_start_in_line =
+                        current.filter(|c| c.line_idx == abs_idx).map(|c| c.start);
                     visible_lines[vis_idx] = highlight_search_matches(
                         &visible_lines[vis_idx],
                         &line_matches,
@@ -1167,26 +1152,25 @@ impl<'a> DiffView<'a> {
         // Push a paired left/right row with the vertical separator. Each side
         // is independently truncated to `half` cells; an empty side renders as
         // pure padding so the separator stays at a fixed column.
-        let push_row =
-            |lines: &mut Vec<Line<'static>>,
-             left: Option<(String, Style)>,
-             right: Option<(String, Style)>| {
-                let left_text = left
-                    .as_ref()
-                    .map(|(t, _)| truncate_to_width(t, half))
-                    .unwrap_or_else(|| pad_to_width("", half));
-                let right_text = right
-                    .as_ref()
-                    .map(|(t, _)| truncate_to_width(t, half))
-                    .unwrap_or_else(|| pad_to_width("", half));
-                let left_style = left.map(|(_, s)| s).unwrap_or_default();
-                let right_style = right.map(|(_, s)| s).unwrap_or_default();
-                lines.push(Line::from(vec![
-                    Span::styled(left_text, left_style),
-                    Span::styled("│", sep_style),
-                    Span::styled(right_text, right_style),
-                ]));
-            };
+        let push_row = |lines: &mut Vec<Line<'static>>,
+                        left: Option<(String, Style)>,
+                        right: Option<(String, Style)>| {
+            let left_text = left
+                .as_ref()
+                .map(|(t, _)| truncate_to_width(t, half))
+                .unwrap_or_else(|| pad_to_width("", half));
+            let right_text = right
+                .as_ref()
+                .map(|(t, _)| truncate_to_width(t, half))
+                .unwrap_or_else(|| pad_to_width("", half));
+            let left_style = left.map(|(_, s)| s).unwrap_or_default();
+            let right_style = right.map(|(_, s)| s).unwrap_or_default();
+            lines.push(Line::from(vec![
+                Span::styled(left_text, left_style),
+                Span::styled("│", sep_style),
+                Span::styled(right_text, right_style),
+            ]));
+        };
 
         let mut sbs_hunk_spans: Vec<HunkRowSpan> = Vec::new();
         for (entry_idx, entry) in self.diff_entries.iter().enumerate() {
@@ -1318,10 +1302,8 @@ impl<'a> DiffView<'a> {
             .as_deref()
             .or(entry.old_path.as_deref())
             .unwrap_or("");
-        let mut highlighter = SyntaxHighlighter::new_with_theme(
-            file_path,
-            &self.ctx.core_config.option.syntax_theme,
-        );
+        let mut highlighter =
+            SyntaxHighlighter::new_with_theme(file_path, &self.ctx.core_config.option.syntax_theme);
 
         // Theme-aware backgrounds — same logic as build_base_lines so the
         // visual feel matches Enhanced exactly.
@@ -1427,20 +1409,21 @@ impl<'a> DiffView<'a> {
         // Render an unchanged context line from `new_file_lines` on both
         // sides (same line number on left and right since the line is shared
         // between old and new).
-        let push_unchanged_context = |lines: &mut Vec<Line<'static>>,
-                                       line_no: usize,
-                                       new_file_lines: &[String],
-                                       hl: &mut Option<SyntaxHighlighter>| {
-            if line_no == 0 || line_no > new_file_lines.len() {
-                return;
-            }
-            let content = new_file_lines[line_no - 1].as_str();
-            let mut row: Vec<Span<'static>> = Vec::new();
-            row.extend(render_half(Some(line_no as u32), content, None, hl));
-            row.push(Span::styled("│", sep_style));
-            row.extend(render_half(Some(line_no as u32), content, None, hl));
-            lines.push(Line::from(row));
-        };
+        let push_unchanged_context =
+            |lines: &mut Vec<Line<'static>>,
+             line_no: usize,
+             new_file_lines: &[String],
+             hl: &mut Option<SyntaxHighlighter>| {
+                if line_no == 0 || line_no > new_file_lines.len() {
+                    return;
+                }
+                let content = new_file_lines[line_no - 1].as_str();
+                let mut row: Vec<Span<'static>> = Vec::new();
+                row.extend(render_half(Some(line_no as u32), content, None, hl));
+                row.push(Span::styled("│", sep_style));
+                row.extend(render_half(Some(line_no as u32), content, None, hl));
+                lines.push(Line::from(row));
+            };
 
         // ── helpers for hunk gap detection (mirrors build_base_lines) ──
         fn hunk_first_new_line(hunk: &crate::git::diff::Hunk) -> Option<u32> {
@@ -1481,8 +1464,16 @@ impl<'a> DiffView<'a> {
             }
             let total = (gap_end - gap_start) as usize;
             let gap_state = gap_states.get(gidx).cloned().unwrap_or(GapState {
-                visible_up: if edge.is_some() { 0 } else { visible_default.min(total) },
-                visible_down: if edge.is_some() { 0 } else { visible_default.min(total) },
+                visible_up: if edge.is_some() {
+                    0
+                } else {
+                    visible_default.min(total)
+                },
+                visible_down: if edge.is_some() {
+                    0
+                } else {
+                    visible_default.min(total)
+                },
                 total,
             });
             let mut visible_up = gap_state.visible_up.min(total);
@@ -1577,14 +1568,7 @@ impl<'a> DiffView<'a> {
                     let curr_start = hunk_first_new_line(hunk);
                     if let (Some(pe), Some(cs)) = (prev_end, curr_start) {
                         if cs > pe + 1 {
-                            render_gap(
-                                &mut lines,
-                                pe + 1,
-                                cs,
-                                gap_idx,
-                                &mut highlighter,
-                                None,
-                            );
+                            render_gap(&mut lines, pe + 1, cs, gap_idx, &mut highlighter, None);
                             gap_idx += 1;
                         }
                     }
@@ -1616,9 +1600,19 @@ impl<'a> DiffView<'a> {
                     }
                     DiffLineType::Context => {
                         let mut row: Vec<Span<'static>> = Vec::new();
-                        row.extend(render_half(l.old_line_no, &l.content, None, &mut highlighter));
+                        row.extend(render_half(
+                            l.old_line_no,
+                            &l.content,
+                            None,
+                            &mut highlighter,
+                        ));
                         row.push(Span::styled("│", sep_style));
-                        row.extend(render_half(l.new_line_no, &l.content, None, &mut highlighter));
+                        row.extend(render_half(
+                            l.new_line_no,
+                            &l.content,
+                            None,
+                            &mut highlighter,
+                        ));
                         lines.push(Line::from(row));
                         i += 1;
                     }
@@ -1640,12 +1634,12 @@ impl<'a> DiffView<'a> {
                         }
                         let max = dels.len().max(adds.len());
                         for j in 0..max {
-                            let l_cell = dels.get(j).map(|d| {
-                                (d.old_line_no, d.content.as_str(), del_bg)
-                            });
-                            let r_cell = adds.get(j).map(|a| {
-                                (a.new_line_no, a.content.as_str(), add_bg)
-                            });
+                            let l_cell = dels
+                                .get(j)
+                                .map(|d| (d.old_line_no, d.content.as_str(), del_bg));
+                            let r_cell = adds
+                                .get(j)
+                                .map(|a| (a.new_line_no, a.content.as_str(), add_bg));
                             push_paired_row(&mut lines, l_cell, r_cell, &mut highlighter);
                         }
                     }
@@ -1749,10 +1743,7 @@ impl<'a> DiffView<'a> {
         active: bool,
     ) -> Option<Line<'static>> {
         let (label, color) = match origin {
-            HunkOrigin::Staged => (
-                " ☑ STAGED ",
-                self.ctx.color_theme.detail_file_change_add_fg,
-            ),
+            HunkOrigin::Staged => (" ☑ STAGED ", self.ctx.color_theme.detail_file_change_add_fg),
             HunkOrigin::Unstaged => (" ☐ UNSTAGED ", self.ctx.color_theme.fg),
             _ => return None,
         };
@@ -1835,8 +1826,11 @@ impl<'a> DiffView<'a> {
                     match diff_line.line_type {
                         DiffLineType::HunkHeader => {
                             // Hunk header keeps the ☑/☐ indicator in place of the gutter.
-                            let prefixed =
-                                format!("{}{}", Self::hunk_indicator(hunk.origin), diff_line.content);
+                            let prefixed = format!(
+                                "{}{}",
+                                Self::hunk_indicator(hunk.origin),
+                                diff_line.content
+                            );
                             for chunk in wrap_text(&prefixed, width) {
                                 lines.push(Line::from(Span::styled(
                                     chunk.to_string(),
@@ -1858,10 +1852,9 @@ impl<'a> DiffView<'a> {
                         }
                         _ => {
                             let (prefix_char, content_style) = match diff_line.line_type {
-                                DiffLineType::Context => (
-                                    ' ',
-                                    Style::default().fg(self.ctx.color_theme.fg),
-                                ),
+                                DiffLineType::Context => {
+                                    (' ', Style::default().fg(self.ctx.color_theme.fg))
+                                }
                                 DiffLineType::Addition => (
                                     '+',
                                     Style::default()
@@ -1950,14 +1943,14 @@ impl<'a> DiffView<'a> {
         };
         // Word-diff strong highlight: significantly more vivid than the line bg.
         let add_strong_bg = if bg_is_light {
-            Color::Rgb(75, 195, 105)  // richer green on light
+            Color::Rgb(75, 195, 105) // richer green on light
         } else {
-            Color::Rgb(60, 145, 80)   // brighter green on dark
+            Color::Rgb(60, 145, 80) // brighter green on dark
         };
         let del_strong_bg = if bg_is_light {
-            Color::Rgb(215, 75, 80)   // richer red on light
+            Color::Rgb(215, 75, 80) // richer red on light
         } else {
-            Color::Rgb(155, 55, 65)   // brighter red on dark
+            Color::Rgb(155, 55, 65) // brighter red on dark
         };
         let ctx_fg = self.ctx.color_theme.fg;
 
@@ -1965,8 +1958,18 @@ impl<'a> DiffView<'a> {
         let del_style = Style::default().bg(del_bg);
         let ctx_style = Style::default().fg(ctx_fg);
 
-        let bar_add = Span::styled("▍", Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg).bg(add_bg));
-        let bar_del = Span::styled("▍", Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg).bg(del_bg));
+        let bar_add = Span::styled(
+            "▍",
+            Style::default()
+                .fg(self.ctx.color_theme.detail_file_change_add_fg)
+                .bg(add_bg),
+        );
+        let bar_del = Span::styled(
+            "▍",
+            Style::default()
+                .fg(self.ctx.color_theme.detail_file_change_delete_fg)
+                .bg(del_bg),
+        );
 
         self.expand_buttons.clear();
         let mut gap_idx = 0usize;
@@ -2119,10 +2122,21 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    h,
+                                    self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
+                                lines.extend(wrap_diff_line(
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    self.ctx.color_theme.divider_fg,
+                                ));
                             }
                         }
                     }
@@ -2136,10 +2150,21 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    h,
+                                    self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
+                                lines.extend(wrap_diff_line(
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    self.ctx.color_theme.divider_fg,
+                                ));
                             }
                         }
                     }
@@ -2188,10 +2213,21 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    h,
+                                    self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
+                                lines.extend(wrap_diff_line(
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    self.ctx.color_theme.divider_fg,
+                                ));
                             }
                         }
                     }
@@ -2264,10 +2300,21 @@ impl<'a> DiffView<'a> {
                             let line_num = format!("{:>4} │ ", line_no);
                             if let Some(ref mut h) = hl {
                                 lines.extend(wrap_diff_line_with_syntax(
-                                    content, &line_num, ctx_style, width, h, self.ctx.color_theme.divider_fg,
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    h,
+                                    self.ctx.color_theme.divider_fg,
                                 ));
                             } else {
-                                lines.extend(wrap_diff_line(content, &line_num, ctx_style, width, self.ctx.color_theme.divider_fg));
+                                lines.extend(wrap_diff_line(
+                                    content,
+                                    &line_num,
+                                    ctx_style,
+                                    width,
+                                    self.ctx.color_theme.divider_fg,
+                                ));
                             }
                         }
                     }
@@ -2912,8 +2959,11 @@ impl<'a> DiffView<'a> {
                     Some(rel) => {
                         let start = pos + rel;
                         let end = start + qlen;
-                        self.search_matches
-                            .push(SearchMatch { line_idx: i, start, end });
+                        self.search_matches.push(SearchMatch {
+                            line_idx: i,
+                            start,
+                            end,
+                        });
                         if end == start {
                             // Empty query guard (shouldn't happen due to qlen check)
                             break;
@@ -3161,15 +3211,9 @@ fn wrap_diff_line_with_syntax(
         };
 
         let num_span = if first {
-            Span::styled(
-                line_num_str.to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg))
         } else {
-            Span::styled(
-                "     │ ".to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled("     │ ".to_string(), Style::default().fg(divider_fg))
         };
 
         let mut spans = vec![num_span];
@@ -3196,10 +3240,7 @@ fn wrap_diff_line(
 
     if content_width == 0 {
         lines.push(Line::from(vec![
-            Span::styled(
-                line_num_str.to_string(),
-                Style::default().fg(divider_fg),
-            ),
+            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg)),
             Span::styled(content.to_string(), content_style),
         ]));
         return lines;
@@ -3225,15 +3266,9 @@ fn wrap_diff_line(
         };
 
         let num_span = if first {
-            Span::styled(
-                line_num_str.to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg))
         } else {
-            Span::styled(
-                "     │ ".to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled("     │ ".to_string(), Style::default().fg(divider_fg))
         };
 
         lines.push(Line::from(vec![
@@ -3271,7 +3306,13 @@ fn wrap_diff_line_with_bar(
         if let Some(bar) = bar_span {
             spans.push(bar);
         }
-        spans.extend(apply_word_diff_to_plain(content, 0, highlight_ranges, content_style, strong_bg));
+        spans.extend(apply_word_diff_to_plain(
+            content,
+            0,
+            highlight_ranges,
+            content_style,
+            strong_bg,
+        ));
         spans.push(Span::styled(" ".repeat(200), content_style));
         lines.push(Line::from(spans));
         return lines;
@@ -3303,22 +3344,22 @@ fn wrap_diff_line_with_bar(
         let chunk_start = chunk.as_ptr() as usize - content.as_ptr() as usize;
 
         let num_span = if first {
-            Span::styled(
-                line_num_str.to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg))
         } else {
-            Span::styled(
-                "     │ ".to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled("     │ ".to_string(), Style::default().fg(divider_fg))
         };
 
         let mut spans = vec![num_span];
         if let Some(ref bar) = bar_span {
             spans.push(bar.clone());
         }
-        spans.extend(apply_word_diff_to_plain(chunk, chunk_start, highlight_ranges, content_style, strong_bg));
+        spans.extend(apply_word_diff_to_plain(
+            chunk,
+            chunk_start,
+            highlight_ranges,
+            content_style,
+            strong_bg,
+        ));
         spans.push(Span::styled(" ".repeat(200), content_style));
         lines.push(Line::from(spans));
 
@@ -3415,7 +3456,10 @@ fn apply_word_diff_to_plain(
             spans.push(Span::styled(chunk[pos..rel_start].to_string(), base_style));
         }
         let strong_style = Style::default().bg(strong_bg);
-        spans.push(Span::styled(chunk[rel_start..rel_end].to_string(), strong_style));
+        spans.push(Span::styled(
+            chunk[rel_start..rel_end].to_string(),
+            strong_style,
+        ));
         pos = rel_end;
     }
 
@@ -3467,10 +3511,7 @@ fn highlight_search_matches(
             let rel_end = ov_end - span_start;
 
             if inner < rel_start && rel_start <= text.len() {
-                new_spans.push(Span::styled(
-                    text[inner..rel_start].to_string(),
-                    span.style,
-                ));
+                new_spans.push(Span::styled(text[inner..rel_start].to_string(), span.style));
             }
 
             let mut modifier = Modifier::BOLD;
@@ -3481,10 +3522,7 @@ fn highlight_search_matches(
             if rel_end <= text.len() {
                 new_spans.push(Span::styled(
                     text[rel_start..rel_end].to_string(),
-                    span.style
-                        .fg(match_fg)
-                        .bg(match_bg)
-                        .add_modifier(modifier),
+                    span.style.fg(match_fg).bg(match_bg).add_modifier(modifier),
                 ));
             }
             inner = rel_end;
@@ -3525,7 +3563,12 @@ fn wrap_diff_line_with_syntax_and_bar(
             spans.push(bar);
         }
         let syntax_spans = highlighter.highlight_line(content, base_style, None);
-        spans.extend(apply_word_diff_to_spans(syntax_spans, 0, highlight_ranges, strong_bg));
+        spans.extend(apply_word_diff_to_spans(
+            syntax_spans,
+            0,
+            highlight_ranges,
+            strong_bg,
+        ));
         spans.push(Span::styled(" ".repeat(200), base_style));
         lines.push(Line::from(spans));
         return lines;
@@ -3557,15 +3600,9 @@ fn wrap_diff_line_with_syntax_and_bar(
         let chunk_start = chunk.as_ptr() as usize - content.as_ptr() as usize;
 
         let num_span = if first {
-            Span::styled(
-                line_num_str.to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg))
         } else {
-            Span::styled(
-                "     │ ".to_string(),
-                Style::default().fg(divider_fg),
-            )
+            Span::styled("     │ ".to_string(), Style::default().fg(divider_fg))
         };
 
         let mut spans = vec![num_span];
@@ -3573,7 +3610,12 @@ fn wrap_diff_line_with_syntax_and_bar(
             spans.push(bar.clone());
         }
         let syntax_spans = highlighter.highlight_line(chunk, base_style, None);
-        spans.extend(apply_word_diff_to_spans(syntax_spans, chunk_start, highlight_ranges, strong_bg));
+        spans.extend(apply_word_diff_to_spans(
+            syntax_spans,
+            chunk_start,
+            highlight_ranges,
+            strong_bg,
+        ));
         spans.push(Span::styled(" ".repeat(200), base_style));
         lines.push(Line::from(spans));
 

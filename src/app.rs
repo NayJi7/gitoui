@@ -19,9 +19,7 @@ use crate::{
     avatar::AvatarManager,
     color::{ColorTheme, GraphColorSet},
     config::{CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
-    event::{
-        AppEvent, DialogKind, EventController, GitAction, UserEvent, UserEventWithCount,
-    },
+    event::{AppEvent, DialogKind, EventController, GitAction, UserEvent, UserEventWithCount},
     external::{
         copy_to_clipboard, exec_user_command, exec_user_command_suspend, open_url,
         ExternalCommandParameters,
@@ -381,7 +379,9 @@ impl<'a> App<'a> {
         let mut brand_pending_uploads = Vec::new();
         let mut prepare_brand = |png: Option<Vec<u8>>, cell_width: usize, image_id: u32| {
             png.map(|bytes| {
-                let mut prepared = ctx.image_protocol.prepare_image(&bytes, cell_width, image_id);
+                let mut prepared = ctx
+                    .image_protocol
+                    .prepare_image(&bytes, cell_width, image_id);
                 if let Some(upload) = prepared.take_upload_data() {
                     brand_pending_uploads.push(upload);
                 }
@@ -406,9 +406,9 @@ impl<'a> App<'a> {
             let mut uploads = Vec::new();
             for (i, png) in pngs.iter().enumerate() {
                 let id = 0x0B_2B_00 + i as u32;
-                let mut prepared = ctx
-                    .image_protocol
-                    .prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
+                let mut prepared =
+                    ctx.image_protocol
+                        .prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
                 if let Some(upload) = prepared.take_upload_data() {
                     uploads.push(upload);
                 }
@@ -518,9 +518,7 @@ impl App<'_> {
                 //           placements regenerate everywhere outside the
                 //           current popup rectangle.
                 if self.dir_input.active {
-                    let height = self.dir_dropdown_area
-                        .map(|a| a.height)
-                        .unwrap_or(0);
+                    let height = self.dir_dropdown_area.map(|a| a.height).unwrap_or(0);
                     if height != self.dir_input.last_rendered_height {
                         // Delete only graph image placements + reset their
                         // manager state — avatars (placed past the popup's
@@ -645,7 +643,8 @@ impl App<'_> {
                             }
                             match std::env::set_current_dir(&target) {
                                 Ok(_) => {
-                                    self.dir_recents = crate::recents::push(&target, &self.dir_recents);
+                                    self.dir_recents =
+                                        crate::recents::push(&target, &self.dir_recents);
                                     self.dir_input.close();
                                     self.app_status.spinner_active = false;
                                     let _ = ratatui::crossterm::execute!(
@@ -669,10 +668,8 @@ impl App<'_> {
                                     }));
                                 }
                                 Err(e) => {
-                                    self.ec.send(AppEvent::NotifyError(format!(
-                                        "cd failed: {}",
-                                        e
-                                    )));
+                                    self.ec
+                                        .send(AppEvent::NotifyError(format!("cd failed: {}", e)));
                                     self.dir_input.close();
                                     self.dir_dropdown_area = None;
                                     self.app_status.spinner_active = false;
@@ -692,9 +689,7 @@ impl App<'_> {
                     }
 
                     match self.app_status.status_line {
-                        StatusLine::None
-                        | StatusLine::Input(_, _, _)
-                        | StatusLine::Spinner(_) => {
+                        StatusLine::None | StatusLine::Input(_, _, _) | StatusLine::Spinner(_) => {
                             // do nothing
                         }
                         StatusLine::NotificationInfo(_)
@@ -726,12 +721,8 @@ impl App<'_> {
                     // True when a text field is actively capturing character
                     // input: dialog Input/SecondInput, config text edit, diff
                     // search, or the list search bar (StatusLine::Input).
-                    let text_input_active =
-                        self.view.is_input_active()
-                            || matches!(
-                                self.app_status.status_line,
-                                StatusLine::Input(_, _, _)
-                            );
+                    let text_input_active = self.view.is_input_active()
+                        || matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
 
                     match user_event {
                         Some(UserEvent::ForceQuit) => {
@@ -1033,13 +1024,10 @@ impl App<'_> {
                     // 3. Don't refresh if a spinner is active — gitoui itself
                     //    is currently running a git command, the post-action
                     //    refresh path will handle the UI update.
-                    const THROTTLE: std::time::Duration =
-                        std::time::Duration::from_secs(2);
+                    const THROTTLE: std::time::Duration = std::time::Duration::from_secs(2);
                     let is_dialog = matches!(self.view, View::Dialog(_));
-                    let is_input = matches!(
-                        self.app_status.status_line,
-                        StatusLine::Input(_, _, _)
-                    );
+                    let is_input =
+                        matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
                     let is_view_input = self.view.is_input_active();
                     let is_spinning = self.app_status.spinner_active;
                     let throttled = self
@@ -1047,14 +1035,8 @@ impl App<'_> {
                         .last_auto_refresh
                         .map(|t| t.elapsed() < THROTTLE)
                         .unwrap_or(false);
-                    if !is_dialog
-                        && !is_input
-                        && !is_view_input
-                        && !is_spinning
-                        && !throttled
-                    {
-                        self.app_status.last_auto_refresh =
-                            Some(std::time::Instant::now());
+                    if !is_dialog && !is_input && !is_view_input && !is_spinning && !throttled {
+                        self.app_status.last_auto_refresh = Some(std::time::Instant::now());
                         self.view.refresh();
                     }
                 }
@@ -1156,8 +1138,7 @@ impl App<'_> {
                         } else {
                             crate::brand::SPINNER_FRAME_COUNT
                         };
-                        self.app_status.spinner_frame =
-                            (self.app_status.spinner_frame + 1) % total;
+                        self.app_status.spinner_frame = (self.app_status.spinner_frame + 1) % total;
                         needs_draw = true;
                     } else {
                         needs_draw = notif_expiring || streaming;
@@ -1274,7 +1255,11 @@ impl App<'_> {
                         view.on_detail_fetched(number, result);
                     }
                 }
-                AppEvent::IssueActionDone { number, action, result } => {
+                AppEvent::IssueActionDone {
+                    number,
+                    action,
+                    result,
+                } => {
                     if let View::Issues(ref mut view) = self.view {
                         view.on_action_done(number, action, result);
                     }
@@ -1433,62 +1418,74 @@ impl App<'_> {
                         view.on_compose_milestone_picked(milestone);
                     }
                 }
-                AppEvent::SetIssueLabels { issue_number, labels } => {
-                    self.spawn_issue_write(
-                        issue_number,
-                        "Labels updated".into(),
-                        move |t, c| crate::github::issue::set_issue_labels(t, c, issue_number, &labels),
-                    );
+                AppEvent::SetIssueLabels {
+                    issue_number,
+                    labels,
+                } => {
+                    self.spawn_issue_write(issue_number, "Labels updated".into(), move |t, c| {
+                        crate::github::issue::set_issue_labels(t, c, issue_number, &labels)
+                    });
                 }
-                AppEvent::SetIssueAssignees { issue_number, assignees } => {
+                AppEvent::SetIssueAssignees {
+                    issue_number,
+                    assignees,
+                } => {
                     self.spawn_issue_write(
                         issue_number,
                         "Assignees updated".into(),
                         move |t, c| {
-                            crate::github::issue::set_issue_assignees(t, c, issue_number, &assignees)
-                        },
-                    );
-                }
-                AppEvent::SetIssueMilestone { issue_number, milestone } => {
-                    self.spawn_issue_write(
-                        issue_number,
-                        "Milestone updated".into(),
-                        move |t, c| {
-                            crate::github::issue::set_issue_milestone(
-                                t, c, issue_number, milestone,
+                            crate::github::issue::set_issue_assignees(
+                                t,
+                                c,
+                                issue_number,
+                                &assignees,
                             )
                         },
                     );
                 }
-                AppEvent::CloseIssueWithReason { issue_number, reason } => {
+                AppEvent::SetIssueMilestone {
+                    issue_number,
+                    milestone,
+                } => {
                     self.spawn_issue_write(
                         issue_number,
-                        "Issue closed".into(),
-                        move |t, c| crate::github::issue::close_issue(t, c, issue_number, reason),
-                    );
-                }
-                AppEvent::ReopenIssue { issue_number } => {
-                    self.spawn_issue_write(
-                        issue_number,
-                        "Issue reopened".into(),
-                        move |t, c| crate::github::issue::reopen_issue(t, c, issue_number),
-                    );
-                }
-                AppEvent::DeleteIssueComment { issue_number, comment_id } => {
-                    self.spawn_issue_write(
-                        issue_number,
-                        "Comment deleted".into(),
+                        "Milestone updated".into(),
                         move |t, c| {
-                            crate::github::issue::delete_issue_comment(t, c, comment_id)
+                            crate::github::issue::set_issue_milestone(t, c, issue_number, milestone)
                         },
                     );
+                }
+                AppEvent::CloseIssueWithReason {
+                    issue_number,
+                    reason,
+                } => {
+                    self.spawn_issue_write(issue_number, "Issue closed".into(), move |t, c| {
+                        crate::github::issue::close_issue(t, c, issue_number, reason)
+                    });
+                }
+                AppEvent::ReopenIssue { issue_number } => {
+                    self.spawn_issue_write(issue_number, "Issue reopened".into(), move |t, c| {
+                        crate::github::issue::reopen_issue(t, c, issue_number)
+                    });
+                }
+                AppEvent::DeleteIssueComment {
+                    issue_number,
+                    comment_id,
+                } => {
+                    self.spawn_issue_write(issue_number, "Comment deleted".into(), move |t, c| {
+                        crate::github::issue::delete_issue_comment(t, c, comment_id)
+                    });
                 }
                 AppEvent::PullRequestDetailFetched { number, result } => {
                     if let View::PullRequests(ref mut view) = self.view {
                         view.on_detail_fetched(number, result);
                     }
                 }
-                AppEvent::PullRequestActionDone { number, action, result } => {
+                AppEvent::PullRequestActionDone {
+                    number,
+                    action,
+                    result,
+                } => {
                     if let View::PullRequests(ref mut view) = self.view {
                         view.on_action_done(number, action, result);
                     }
@@ -1635,7 +1632,10 @@ impl App<'_> {
     /// user pressed Enter on a valid resolution — the caller is responsible
     /// for the actual `set_current_dir` + `Ret::Refresh`. `None` means "stay
     /// in the overlay, redraw on next iteration".
-    fn handle_dir_input_key(&mut self, key: ratatui::crossterm::event::KeyEvent) -> Option<std::path::PathBuf> {
+    fn handle_dir_input_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+    ) -> Option<std::path::PathBuf> {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
         match key.code {
             KeyCode::Esc => {
@@ -1739,9 +1739,7 @@ impl App<'_> {
                 self.dir_input.delete_word_left(&recents);
                 None
             }
-            KeyCode::Char('h')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Ctrl+H is the legacy backspace mapping on a number of
                 // terminals (kitty in particular). Without this arm, the
                 // Char arm below would skip it (CONTROL filter) and the
@@ -1777,10 +1775,8 @@ impl App<'_> {
                 // graph images stayed baked with the previous theme's bg.
                 let ctx = Rc::make_mut(&mut self.ctx);
                 ctx.color_theme = color_theme.clone();
-                ctx.graph_color_set = crate::color::build_graph_color_set(
-                    &color_theme,
-                    &ctx.graph_config.color,
-                );
+                ctx.graph_color_set =
+                    crate::color::build_graph_color_set(&color_theme, &ctx.graph_config.color);
                 self.view.update_color_theme(color_theme);
             }
         }
@@ -1824,7 +1820,9 @@ impl App<'_> {
     }
 
     fn render(&mut self, f: &mut Frame) {
-        let base = Block::default().fg(self.ctx.color_theme.fg).bg(self.ctx.color_theme.bg);
+        let base = Block::default()
+            .fg(self.ctx.color_theme.fg)
+            .bg(self.ctx.color_theme.bg);
         f.render_widget(base, f.area());
 
         let [header_area, view_area, gap_area, status_line_area] =
@@ -1867,9 +1865,8 @@ impl App<'_> {
         // don't rely on it.
         if self.dir_input.active {
             if let Some((anchor_x, anchor_y)) = self.dir_input_cursor_anchor.take() {
-                let before_count = self.dir_input.text[..self.dir_input.cursor]
-                    .chars()
-                    .count() as u16;
+                let before_count =
+                    self.dir_input.text[..self.dir_input.cursor].chars().count() as u16;
                 let cursor_x = anchor_x + 5 + before_count;
                 // Char to highlight: the one to the right of the cursor, or
                 // a space when the cursor is past the end of the input.
@@ -1905,10 +1902,7 @@ impl App<'_> {
     /// row, or outside the rectangle entirely).
     fn dir_dropdown_hit(&self, col: u16, row: u16) -> Option<usize> {
         let area = self.dir_dropdown_area?;
-        if col < area.x
-            || col >= area.x + area.width
-            || row < area.y
-            || row >= area.y + area.height
+        if col < area.x || col >= area.x + area.width || row < area.y || row >= area.y + area.height
         {
             return None;
         }
@@ -2001,7 +1995,11 @@ impl App<'_> {
             .map(|i| {
                 let s = &suggestions[i];
                 let is_active = self.dir_input.selected == Some(i);
-                let bg = if is_active { theme.list_selected_bg } else { theme.bg };
+                let bg = if is_active {
+                    theme.list_selected_bg
+                } else {
+                    theme.bg
+                };
                 // Icon column padded so both kinds line up before the `│`
                 // separator. The clock glyph renders as a single cell on most
                 // terminals while the folder emoji renders as two cells —
@@ -2016,18 +2014,12 @@ impl App<'_> {
                     crate::dir_input::SuggestionKind::Filesystem => theme.list_name_fg,
                 };
                 Line::from(vec![
-                    Span::styled(
-                        kind_prefix.to_string(),
-                        Style::default().fg(kind_fg).bg(bg),
-                    ),
+                    Span::styled(kind_prefix.to_string(), Style::default().fg(kind_fg).bg(bg)),
                     Span::styled(
                         "│ ".to_string(),
                         Style::default().fg(theme.divider_fg).bg(bg),
                     ),
-                    Span::styled(
-                        s.display.clone(),
-                        Style::default().fg(theme.fg).bg(bg),
-                    ),
+                    Span::styled(s.display.clone(), Style::default().fg(theme.fg).bg(bg)),
                 ])
             })
             .collect();
@@ -2040,20 +2032,22 @@ impl App<'_> {
             let position_label = format!(" {}/{} ", end, total);
             // Drop it on the top border so it doesn't compete with content rows.
             if let Some(_) = position_label.chars().next() {
-                let label_x = area.x + area.width.saturating_sub(position_label.chars().count() as u16 + 2);
+                let label_x = area.x
+                    + area
+                        .width
+                        .saturating_sub(position_label.chars().count() as u16 + 2);
                 let label_y = area.y;
                 let mut x = label_x;
                 for c in position_label.chars() {
-                    if x >= area.x + area.width { break; }
-                    f.buffer_mut()
-                        .get_mut(x, label_y)
-                        .set_char(c)
-                        .set_style(
-                            Style::default()
-                                .fg(theme.list_head_fg)
-                                .bg(theme.bg)
-                                .add_modifier(ratatui::style::Modifier::BOLD),
-                        );
+                    if x >= area.x + area.width {
+                        break;
+                    }
+                    f.buffer_mut().get_mut(x, label_y).set_char(c).set_style(
+                        Style::default()
+                            .fg(theme.list_head_fg)
+                            .bg(theme.bg)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    );
                     x += 1;
                 }
             }
@@ -2067,8 +2061,7 @@ impl App<'_> {
         };
 
         // Derive a tilde-relative path from the current working directory.
-        let cwd = std::env::current_dir()
-            .unwrap_or_else(|_| self.repository.path().to_path_buf());
+        let cwd = std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf());
         let home = std::env::var("HOME").unwrap_or_default();
         let display_path = if !home.is_empty() && cwd.starts_with(&home) {
             format!("~{}", &cwd.to_string_lossy()[home.len()..])
@@ -2081,11 +2074,12 @@ impl App<'_> {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        let path_prefix = if display_path.ends_with(&repo_name) && repo_name.len() < display_path.len() {
-            display_path[..display_path.len() - repo_name.len()].to_string()
-        } else {
-            String::new()
-        };
+        let path_prefix =
+            if display_path.ends_with(&repo_name) && repo_name.len() < display_path.len() {
+                display_path[..display_path.len() - repo_name.len()].to_string()
+            } else {
+                String::new()
+            };
 
         // Right icon area: [logo] [gap] [wordmark]  — or text fallback (9 cols).
         let has_brand = self.brand_logo.is_some() && self.brand_wordmark.is_some();
@@ -2165,7 +2159,10 @@ impl App<'_> {
             let mut path_spans = vec![];
             if !path_prefix.is_empty() {
                 let prefix_truncated = if path_prefix.chars().count() > path_width as usize {
-                    let skip = path_prefix.chars().count().saturating_sub(path_width as usize - 1);
+                    let skip = path_prefix
+                        .chars()
+                        .count()
+                        .saturating_sub(path_width as usize - 1);
                     format!("…{}", path_prefix.chars().skip(skip).collect::<String>())
                 } else {
                     path_prefix.clone()
@@ -2184,10 +2181,7 @@ impl App<'_> {
                     .add_modifier(ratatui::style::Modifier::BOLD),
             ));
 
-            f.render_widget(
-                Paragraph::new(Line::from(path_spans)),
-                left_area,
-            );
+            f.render_widget(Paragraph::new(Line::from(path_spans)), left_area);
         }
 
         // Numeric prefix block: "<digits> │ " right before the logo. Rendered
@@ -2207,8 +2201,7 @@ impl App<'_> {
                 ),
             ]);
             f.render_widget(
-                Paragraph::new(prefix_line)
-                    .alignment(ratatui::layout::Alignment::Right),
+                Paragraph::new(prefix_line).alignment(ratatui::layout::Alignment::Right),
                 prefix_area,
             );
         }
@@ -2240,12 +2233,11 @@ impl App<'_> {
 
             // Write logo cells (or just set skip=true to preserve the existing Kitty image).
             {
-                let logo_img: &crate::protocol::PreparedImage =
-                    if let Some(fidx) = logo_id {
-                        &self.spinner_frames[fidx]
-                    } else {
-                        self.brand_logo.as_ref().unwrap()
-                    };
+                let logo_img: &crate::protocol::PreparedImage = if let Some(fidx) = logo_id {
+                    &self.spinner_frames[fidx]
+                } else {
+                    self.brand_logo.as_ref().unwrap()
+                };
                 let buf = f.buffer_mut();
                 for (dx, ic) in logo_img.cells().iter().enumerate() {
                     let x = x_logo + dx as u16;
@@ -2276,8 +2268,12 @@ impl App<'_> {
                 }
             }
             // Persist the rendered state so the next render can skip re-uploading.
-            if !logo_skip { self.header_logo_last = Some(logo_id); }
-            if !wordmark_skip { self.header_wordmark_rendered = true; }
+            if !logo_skip {
+                self.header_logo_last = Some(logo_id);
+            }
+            if !wordmark_skip {
+                self.header_wordmark_rendered = true;
+            }
         } else {
             let icon_line = Line::from(vec![Span::styled(
                 " ◈ gitoui ",
@@ -2293,7 +2289,8 @@ impl App<'_> {
 
         // Separator row: full-width line.
         let sep = Line::from(
-            "─".repeat(area.width as usize)
+            "─"
+                .repeat(area.width as usize)
                 .fg(ratatui::style::Color::White),
         );
         f.render_widget(Paragraph::new(sep), separator_row);
@@ -2341,8 +2338,8 @@ impl App<'_> {
                 // ticked off `spinner_frame` so it matches the header G-logo
                 // animation cadence.
                 const FRAMES: [&str; 10] = [
-                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}",
-                    "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}",
+                    "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
                 ];
                 let frame = FRAMES[self.app_status.spinner_frame % 10];
                 vec![Span::styled(
@@ -2352,85 +2349,85 @@ impl App<'_> {
                         .add_modifier(Modifier::BOLD),
                 )]
             }
-        } else { match &self.app_status.status_line {
-            // Numeric prefix is now rendered in the header (left of the logo),
-            // so the footer's None branch is empty regardless of prefix state.
-            StatusLine::None => vec![],
-            StatusLine::Input(msg, _, transient_msg) => {
-                let msg_w = console::measure_text_width(msg.as_str());
-                if let Some(t_msg) = transient_msg {
-                    let t_msg_w = console::measure_text_width(t_msg.as_str());
-                    let pad_w = area.width as usize - msg_w - t_msg_w - 2;
-                    vec![
-                        Span::styled(
+        } else {
+            match &self.app_status.status_line {
+                // Numeric prefix is now rendered in the header (left of the logo),
+                // so the footer's None branch is empty regardless of prefix state.
+                StatusLine::None => vec![],
+                StatusLine::Input(msg, _, transient_msg) => {
+                    let msg_w = console::measure_text_width(msg.as_str());
+                    if let Some(t_msg) = transient_msg {
+                        let t_msg_w = console::measure_text_width(t_msg.as_str());
+                        let pad_w = area.width as usize - msg_w - t_msg_w - 2;
+                        vec![
+                            Span::styled(
+                                msg.as_str(),
+                                Style::default().fg(self.ctx.color_theme.status_input_fg),
+                            ),
+                            Span::raw(" ".repeat(pad_w)),
+                            Span::styled(
+                                t_msg.as_str(),
+                                Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                            ),
+                        ]
+                    } else {
+                        vec![Span::styled(
                             msg.as_str(),
                             Style::default().fg(self.ctx.color_theme.status_input_fg),
-                        ),
-                        Span::raw(" ".repeat(pad_w)),
-                        Span::styled(
-                            t_msg.as_str(),
-                            Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
-                        ),
-                    ]
-                } else {
+                        )]
+                    }
+                }
+                StatusLine::NotificationInfo(msg) => {
                     vec![Span::styled(
                         msg.as_str(),
-                        Style::default().fg(self.ctx.color_theme.status_input_fg),
+                        Style::default().fg(self.ctx.color_theme.status_info_fg),
+                    )]
+                }
+                StatusLine::NotificationSuccess(msg) => {
+                    vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_success_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+                StatusLine::NotificationWarn(msg) => {
+                    vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_warn_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+                StatusLine::NotificationError(msg) => {
+                    vec![Span::styled(
+                        format!("ERROR: {msg}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_error_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+                StatusLine::Spinner(msg) => {
+                    // The G animation plays in the header logo — status bar is text-only.
+                    const FRAMES: [&str; 10] = [
+                        "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}",
+                        "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+                    ];
+                    let frame = FRAMES[self.app_status.spinner_frame % 10];
+                    vec![Span::styled(
+                        format!("{frame} {msg}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_info_fg)
+                            .add_modifier(Modifier::BOLD),
                     )]
                 }
             }
-            StatusLine::NotificationInfo(msg) => {
-                vec![Span::styled(
-                    msg.as_str(),
-                    Style::default().fg(self.ctx.color_theme.status_info_fg),
-                )]
-            }
-            StatusLine::NotificationSuccess(msg) => {
-                vec![Span::styled(
-                    msg.as_str(),
-                    Style::default()
-                        .fg(self.ctx.color_theme.status_success_fg)
-                        .add_modifier(Modifier::BOLD),
-                )]
-            }
-            StatusLine::NotificationWarn(msg) => {
-                vec![Span::styled(
-                    msg.as_str(),
-                    Style::default()
-                        .fg(self.ctx.color_theme.status_warn_fg)
-                        .add_modifier(Modifier::BOLD),
-                )]
-            }
-            StatusLine::NotificationError(msg) => {
-                vec![Span::styled(
-                    format!("ERROR: {msg}"),
-                    Style::default()
-                        .fg(self.ctx.color_theme.status_error_fg)
-                        .add_modifier(Modifier::BOLD),
-                )]
-            }
-            StatusLine::Spinner(msg) => {
-                // The G animation plays in the header logo — status bar is text-only.
-                const FRAMES: [&str; 10] = [
-                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}",
-                    "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
-                ];
-                let frame = FRAMES[self.app_status.spinner_frame % 10];
-                vec![Span::styled(
-                    format!("{frame} {msg}"),
-                    Style::default()
-                        .fg(self.ctx.color_theme.status_info_fg)
-                        .add_modifier(Modifier::BOLD),
-                )]
-            }
-        }};
+        };
 
         let dim_separator = Style::default().fg(self.ctx.color_theme.divider_fg);
         let dim_text = Style::default().fg(self.ctx.color_theme.list_ref_paren_fg);
-        let show_shortcuts = matches!(
-            &self.app_status.status_line,
-            StatusLine::None
-        ) || is_search_active
+        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None)
+            || is_search_active
             || is_config_active;
         let _is_diff = matches!(&self.view, View::Diff(_));
 
@@ -2520,21 +2517,16 @@ impl App<'_> {
                         .view
                         .interactive_rebase_footer_hint()
                         .unwrap_or_else(|| {
-                            "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏Esc:cancel"
-                                .into()
+                            "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏Esc:cancel".into()
                         }),
                     View::PullRequests(_) => self
                         .view
                         .pull_requests_footer_hint()
-                        .unwrap_or_else(|| {
-                            "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏Esc:close".into()
-                        }),
+                        .unwrap_or_else(|| "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏Esc:close".into()),
                     View::Issues(_) => self
                         .view
                         .issues_footer_hint()
-                        .unwrap_or_else(|| {
-                            "⌘ ↑↓:nav▕▏Enter:open▕▏Tab:filter▕▏Esc:close".into()
-                        }),
+                        .unwrap_or_else(|| "⌘ ↑↓:nav▕▏Enter:open▕▏Tab:filter▕▏Esc:close".into()),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };
@@ -2693,8 +2685,7 @@ impl App<'_> {
                     if behind > 0 {
                         spans.push(Span::styled(
                             format!(" ↓{}", behind),
-                            Style::default()
-                                .fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                            Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
                         ));
                     }
                 }
@@ -2758,11 +2749,8 @@ impl App<'_> {
 const HEADER_HEIGHT: u16 = 2;
 
 fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
-    let [header, rest] = Layout::vertical([
-        Constraint::Length(HEADER_HEIGHT),
-        Constraint::Min(0),
-    ])
-    .areas(area);
+    let [header, rest] =
+        Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(0)]).areas(area);
     let [view, gap, status] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
@@ -3001,7 +2989,9 @@ impl<'a> App<'a> {
         // can't be located (rare — only if hashes drifted out of the loaded
         // window between marking and confirming).
         let (older, newer) = {
-            let from = self.repository.commit(&CommitHash::from(from_hash.as_str()));
+            let from = self
+                .repository
+                .commit(&CommitHash::from(from_hash.as_str()));
             let to = self.repository.commit(&CommitHash::from(to_hash.as_str()));
             match (from, to) {
                 (Some(f), Some(t)) if t.committer_date >= f.committer_date => {
@@ -3107,8 +3097,10 @@ impl<'a> App<'a> {
         let entries = match actions::file_history(&repo_path, &file_path) {
             Ok(e) => e,
             Err(msg) => {
-                self.ec
-                    .send(AppEvent::NotifyError(format!("File history failed: {}", msg)));
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "File history failed: {}",
+                    msg
+                )));
                 return;
             }
         };
@@ -3231,12 +3223,11 @@ impl<'a> App<'a> {
                 // badge stale ("⚠ 1 conflict") even after the file has been
                 // staged. AppEvent::Refresh reloads the repository so the
                 // commit-list badge recomputes from fresh status data.
-                self.ec.send(AppEvent::Refresh(
-                    crate::view::RefreshViewContext::List {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context,
                         pending_notification: None,
-                    },
-                ));
+                    }));
             }
         }
     }
@@ -3260,8 +3251,8 @@ impl<'a> App<'a> {
                 // the collapsed history is rendered. We re-anchor at the
                 // top: the original SHA no longer exists, no point trying
                 // to preserve selection.
-                self.ec.send(AppEvent::Refresh(
-                    crate::view::RefreshViewContext::List {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
                             commit_hash: String::new(),
                             selected: 0,
@@ -3269,8 +3260,7 @@ impl<'a> App<'a> {
                             scroll_to_top: true,
                         },
                         pending_notification: None,
-                    },
-                ));
+                    }));
             }
             Ok(crate::git::rebase::RebaseOutcome::Paused(msg)) => {
                 let head = msg.lines().next().unwrap_or("rebase stopped");
@@ -3300,12 +3290,7 @@ impl<'a> App<'a> {
     /// view picks up the outcome via `PullRequestActionDone` (same
     /// channel as comment posts), which invalidates the cache and
     /// re-fetches the PR detail.
-    fn delete_pr_comment(
-        &mut self,
-        comment_id_str: String,
-        pr_number: u64,
-        is_review: bool,
-    ) {
+    fn delete_pr_comment(&mut self, comment_id_str: String, pr_number: u64, is_review: bool) {
         let token = match &self.ctx.github_auth_state.token {
             Some(t) if !t.is_empty() => t.clone(),
             _ => {
@@ -3375,12 +3360,15 @@ impl<'a> App<'a> {
             return;
         };
         let tx = self.ec.sender();
-        let label = if state == "closed" { "Closed" } else { "Reopened" };
+        let label = if state == "closed" {
+            "Closed"
+        } else {
+            "Reopened"
+        };
         let action_label = label.to_string();
         std::thread::spawn(move || {
-            let result = crate::github::pr::set_pull_request_state(
-                &token, &coords, pr_number, &state,
-            );
+            let result =
+                crate::github::pr::set_pull_request_state(&token, &coords, pr_number, &state);
             tx.send(AppEvent::PullRequestActionDone {
                 number: pr_number,
                 action: action_label,
@@ -3389,12 +3377,7 @@ impl<'a> App<'a> {
         });
     }
 
-    fn set_pull_request_draft(
-        &mut self,
-        pr_number: u64,
-        node_id: String,
-        draft: bool,
-    ) {
+    fn set_pull_request_draft(&mut self, pr_number: u64, node_id: String, draft: bool) {
         let Some((token, _coords)) = self.pr_action_context() else {
             return;
         };
@@ -3420,9 +3403,8 @@ impl<'a> App<'a> {
         };
         let tx = self.ec.sender();
         std::thread::spawn(move || {
-            let result = crate::github::pr::set_pull_request_labels(
-                &token, &coords, pr_number, &labels,
-            );
+            let result =
+                crate::github::pr::set_pull_request_labels(&token, &coords, pr_number, &labels);
             tx.send(AppEvent::PullRequestActionDone {
                 number: pr_number,
                 action: "Labels updated".to_string(),
@@ -3522,12 +3504,7 @@ impl<'a> App<'a> {
     ) -> bool {
         match frame {
             PrNavRestore::PullRequest { pr_number } => {
-                let token = self
-                    .ctx
-                    .github_auth_state
-                    .token
-                    .clone()
-                    .unwrap_or_default();
+                let token = self.ctx.github_auth_state.token.clone().unwrap_or_default();
                 let coords = crate::github::RepoCoords::from_repo(self.repository.path());
                 if token.is_empty() {
                     return false;
@@ -3535,8 +3512,8 @@ impl<'a> App<'a> {
                 let Some(coords) = coords else {
                     return false;
                 };
-                let items = crate::github::pr::list_pull_requests(&token, &coords)
-                    .unwrap_or_default();
+                let items =
+                    crate::github::pr::list_pull_requests(&token, &coords).unwrap_or_default();
                 self.view = View::of_pull_requests(
                     commit_list_state,
                     coords,
@@ -3622,7 +3599,8 @@ impl<'a> App<'a> {
             self.pr_nav_stack.last(),
             Some(PrNavRestore::PullRequest { pr_number: n }) if *n == pr_number
         ) {
-            self.pr_nav_stack.push(PrNavRestore::PullRequest { pr_number });
+            self.pr_nav_stack
+                .push(PrNavRestore::PullRequest { pr_number });
         }
         let repo_path = self.repository.path().to_path_buf();
         let tx = self.ec.sender();
@@ -3643,10 +3621,7 @@ impl<'a> App<'a> {
                 // We can't touch `self.view` from this thread — fire an
                 // event back to the main loop and let it build the
                 // Detail view there.
-                Ok(()) => tx.send(AppEvent::OpenPrCommitDetail {
-                    pr_number,
-                    sha,
-                }),
+                Ok(()) => tx.send(AppEvent::OpenPrCommitDetail { pr_number, sha }),
                 Err(e) => tx.send(AppEvent::NotifyError(format!("PR commit fetch: {}", e))),
             }
         });
@@ -3756,8 +3731,12 @@ impl<'a> App<'a> {
         }
         self.start_spinner("Fetching file…");
         std::thread::spawn(move || {
-            let result =
-                crate::git::fetch_pull_request_ref(&repo_path, &coords.owner, &coords.repo, pr_number);
+            let result = crate::git::fetch_pull_request_ref(
+                &repo_path,
+                &coords.owner,
+                &coords.repo,
+                pr_number,
+            );
             match result {
                 Ok(()) => {
                     // After fetch, kick off the diff-open on the
@@ -3896,8 +3875,8 @@ impl<'a> App<'a> {
                 self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
             } else {
                 // No prior list state — force a fresh refresh.
-                self.ec.send(AppEvent::Refresh(
-                    crate::view::RefreshViewContext::List {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
                             commit_hash: String::new(),
                             selected: 0,
@@ -3905,8 +3884,7 @@ impl<'a> App<'a> {
                             scroll_to_top: true,
                         },
                         pending_notification: None,
-                    },
-                ));
+                    }));
             }
         }
     }
@@ -3960,8 +3938,8 @@ impl<'a> App<'a> {
             if let Some(state) = list_state {
                 self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
             } else {
-                self.ec.send(AppEvent::Refresh(
-                    crate::view::RefreshViewContext::List {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
                             commit_hash: String::new(),
                             selected: 0,
@@ -3969,8 +3947,7 @@ impl<'a> App<'a> {
                             scroll_to_top: true,
                         },
                         pending_notification: None,
-                    },
-                ));
+                    }));
             }
         }
     }
@@ -3995,9 +3972,8 @@ impl<'a> App<'a> {
         let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
             Some(c) => c,
             None => {
-                self.ec.send(AppEvent::NotifyWarn(
-                    "No GitHub remote configured.".into(),
-                ));
+                self.ec
+                    .send(AppEvent::NotifyWarn("No GitHub remote configured.".into()));
                 return;
             }
         };
@@ -4018,8 +3994,8 @@ impl<'a> App<'a> {
         // rebase is in progress (open_dialog short-circuits to this path).
         // We skip the `base..HEAD` load entirely; the view reads
         // .git/rebase-merge itself to render its Continue/Skip/Abort UI.
-        let resume_mode = base_hash.is_empty()
-            && crate::git::rebase::rebase_in_progress(&repo_path);
+        let resume_mode =
+            base_hash.is_empty() && crate::git::rebase::rebase_in_progress(&repo_path);
         let items = if resume_mode {
             Vec::new()
         } else {
@@ -4070,17 +4046,16 @@ impl<'a> App<'a> {
                 // FULL refresh so the new history shows up in the commit
                 // list and any leftover rebase-in-progress state surfaces
                 // via the existing in-progress detection.
-                self.ec.send(AppEvent::Refresh(
-                    crate::view::RefreshViewContext::List {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context,
                         pending_notification: None,
-                    },
-                ));
+                    }));
             } else {
                 // No list state to restore — just trigger a refresh from a
                 // blank list context.
-                self.ec.send(AppEvent::Refresh(
-                    crate::view::RefreshViewContext::List {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
                             commit_hash: String::new(),
                             selected: 0,
@@ -4088,8 +4063,7 @@ impl<'a> App<'a> {
                             scroll_to_top: false,
                         },
                         pending_notification: None,
-                    },
-                ));
+                    }));
             }
         }
     }
@@ -4102,7 +4076,11 @@ impl<'a> App<'a> {
         // present refs. Bail out with a notification instead of panicking in
         // `commit_detail` (which unwraps the in-memory commit map).
         if self.repository.commit(&commit_hash).is_none() {
-            let short = if hash.len() >= 7 { &hash[..7] } else { hash.as_str() };
+            let short = if hash.len() >= 7 {
+                &hash[..7]
+            } else {
+                hash.as_str()
+            };
             self.ec.send(AppEvent::NotifyWarn(format!(
                 "Commit {} is not in the loaded history — press `]` to load more.",
                 short
@@ -4176,10 +4154,7 @@ impl<'a> App<'a> {
         let (commit_list_state, all_files, is_untracked) = match self.view {
             View::Uncommitted(ref mut view) => {
                 let list_state = view.take_list_state();
-                let is_untracked = view
-                    .untracked
-                    .iter()
-                    .any(|f| f.path == file_path);
+                let is_untracked = view.untracked.iter().any(|f| f.path == file_path);
                 let all_files: Vec<(String, bool)> = view
                     .staged
                     .iter()
@@ -4225,14 +4200,13 @@ impl<'a> App<'a> {
                 }
                 Ok(full_entry) => {
                     // Stream the first 200 lines immediately, then the rest via Tick
-                    let total_lines: Vec<_> = full_entry
-                        .hunks
-                        .into_iter()
-                        .flat_map(|h| h.lines)
-                        .collect();
+                    let total_lines: Vec<_> =
+                        full_entry.hunks.into_iter().flat_map(|h| h.lines).collect();
                     let chunk_size = 200.min(total_lines.len());
-                    let (initial, rest): (Vec<_>, Vec<_>) =
-                        total_lines.into_iter().enumerate().partition(|(i, _)| *i < chunk_size);
+                    let (initial, rest): (Vec<_>, Vec<_>) = total_lines
+                        .into_iter()
+                        .enumerate()
+                        .partition(|(i, _)| *i < chunk_size);
                     let initial: Vec<_> = initial.into_iter().map(|(_, l)| l).collect();
                     let rest: Vec<_> = rest.into_iter().map(|(_, l)| l).collect();
 
@@ -4269,11 +4243,7 @@ impl<'a> App<'a> {
         // diff so the view shows every hunk linearly with its own indicator.
         // `is_staged` only drives the initial scroll position so the user
         // lands on the first hunk of the side they clicked from.
-        match DiffEntry::load_combined_uncommitted_for_file(
-            self.repository.path(),
-            &file_path,
-            3,
-        ) {
+        match DiffEntry::load_combined_uncommitted_for_file(self.repository.path(), &file_path, 3) {
             Ok(Some(diff_entry)) => {
                 let title = format!("Diff: {}", file_path);
                 self.view = View::of_uncommitted_diff(
@@ -4295,8 +4265,10 @@ impl<'a> App<'a> {
                 }
             }
             Ok(None) => {
-                self.ec
-                    .send(AppEvent::NotifyWarn(format!("No changes for {}", file_path)));
+                self.ec.send(AppEvent::NotifyWarn(format!(
+                    "No changes for {}",
+                    file_path
+                )));
             }
             Err(err) => {
                 self.ec.send(AppEvent::NotifyError(err));
@@ -4312,30 +4284,28 @@ impl<'a> App<'a> {
     /// If the user has edited the file between the view render and the click,
     /// hunk_idx may no longer line up — in which case `git apply` itself
     /// surfaces an error verbatim.
-    fn toggle_hunk_stage(
-        &mut self,
-        file_path: String,
-        hunk_idx: usize,
-        currently_staged: bool,
-    ) {
+    fn toggle_hunk_stage(&mut self, file_path: String, hunk_idx: usize, currently_staged: bool) {
         let repo_path = self.repository.path().to_path_buf();
-        let combined = match DiffEntry::load_combined_uncommitted_for_file(&repo_path, &file_path, 3) {
-            Ok(Some(d)) => d,
-            Ok(None) => {
-                self.ec
-                    .send(AppEvent::NotifyWarn("No changes to toggle".to_string()));
-                return;
-            }
-            Err(e) => {
-                self.ec.send(AppEvent::NotifyError(e));
-                return;
-            }
-        };
+        let combined =
+            match DiffEntry::load_combined_uncommitted_for_file(&repo_path, &file_path, 3) {
+                Ok(Some(d)) => d,
+                Ok(None) => {
+                    self.ec
+                        .send(AppEvent::NotifyWarn("No changes to toggle".to_string()));
+                    return;
+                }
+                Err(e) => {
+                    self.ec.send(AppEvent::NotifyError(e));
+                    return;
+                }
+            };
         let hunk = match combined.hunks.get(hunk_idx) {
             Some(h) => h,
             None => {
-                self.ec
-                    .send(AppEvent::NotifyError(format!("Hunk {} not found", hunk_idx)));
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "Hunk {} not found",
+                    hunk_idx
+                )));
                 return;
             }
         };
@@ -4612,10 +4582,8 @@ impl<'a> App<'a> {
             // Always rebuild the graph palette from the (possibly theme-
             // overridden) color_theme + user's [graph] config so the
             // returning list view paints with the right bg + branch colours.
-            ctx.graph_color_set = crate::color::build_graph_color_set(
-                &ctx.color_theme,
-                &ctx.graph_config.color,
-            );
+            ctx.graph_color_set =
+                crate::color::build_graph_color_set(&ctx.color_theme, &ctx.graph_config.color);
             ctx.ui_config = ui.clone();
             ctx.github_auth_state = github_auth_state.clone();
             ctx.avatar_manager
@@ -4831,7 +4799,10 @@ impl<'a> App<'a> {
                     self.dir_input.scroll_by(3);
                 } else {
                     self.handle_view_event_clearing_detail_avatar(
-                        crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollDown, 3),
+                        crate::event::UserEventWithCount::new(
+                            crate::event::UserEvent::ScrollDown,
+                            3,
+                        ),
                         ratatui::crossterm::event::KeyEvent::new(
                             ratatui::crossterm::event::KeyCode::Down,
                             ratatui::crossterm::event::KeyModifiers::NONE,
@@ -4849,9 +4820,7 @@ impl<'a> App<'a> {
                 // before pressing Enter. Clicks outside are swallowed so the
                 // underlying commit list can't be interacted with.
                 if self.dir_input.active {
-                    if let Some(idx) =
-                        self.dir_dropdown_hit(mouse.column, mouse.row)
-                    {
+                    if let Some(idx) = self.dir_dropdown_hit(mouse.column, mouse.row) {
                         if let Some(s) = self.dir_input.suggestions.get(idx).cloned() {
                             // Two-step click: first click on a suggestion just
                             // fills the input (Tab semantics). Clicking the
@@ -4883,7 +4852,8 @@ impl<'a> App<'a> {
                                     }
                                     match std::env::set_current_dir(&target) {
                                         Ok(_) => {
-                                            self.dir_recents = crate::recents::push(&target, &self.dir_recents);
+                                            self.dir_recents =
+                                                crate::recents::push(&target, &self.dir_recents);
                                             self.dir_input.close();
                                             self.dir_dropdown_area = None;
                                             self.app_status.spinner_active = false;
@@ -4957,9 +4927,7 @@ impl<'a> App<'a> {
                     // Overlay owns hover: highlight the dropdown row under
                     // the cursor, swallow events that fall outside so the
                     // commit list doesn't react.
-                    if let Some(idx) =
-                        self.dir_dropdown_hit(mouse.column, mouse.row)
-                    {
+                    if let Some(idx) = self.dir_dropdown_hit(mouse.column, mouse.row) {
                         self.dir_input.selected = Some(idx);
                     }
                     return Ok(true);
@@ -4990,7 +4958,7 @@ impl<'a> App<'a> {
     fn stop_spinner(&mut self) {
         self.app_status.spinner_active = false;
         self.header_logo_last = None; // logo switches from animated back to static
-        // status_line will be overwritten by the next NotifySuccess/NotifyError/Refresh
+                                      // status_line will be overwritten by the next NotifySuccess/NotifyError/Refresh
     }
 
     fn info_notification(&mut self, msg: String) {
@@ -5062,7 +5030,11 @@ impl<'a> App<'a> {
             // Also clear avatar prepared images so ratatui re-emits those cells
             // and clears any dialog text residue (image cells have skip=true which
             // would otherwise leave dialog content visible over the avatar area).
-            self.ctx.avatar_manager.lock().unwrap().clear_prepared_images();
+            self.ctx
+                .avatar_manager
+                .lock()
+                .unwrap()
+                .clear_prepared_images();
         }
     }
 
@@ -5091,8 +5063,9 @@ impl<'a> App<'a> {
                 });
             }
             None => {
-                self.ec
-                    .send(AppEvent::NotifyInfo("No rebase or merge in progress".into()));
+                self.ec.send(AppEvent::NotifyInfo(
+                    "No rebase or merge in progress".into(),
+                ));
             }
         }
     }
@@ -5157,9 +5130,8 @@ impl<'a> App<'a> {
         let branch = match self.repository.head() {
             Head::Branch { name } => name.clone(),
             _ => {
-                self.ec.send(AppEvent::NotifyError(
-                    "Cannot pull: not on a branch".into(),
-                ));
+                self.ec
+                    .send(AppEvent::NotifyError("Cannot pull: not on a branch".into()));
                 return;
             }
         };
@@ -5170,8 +5142,8 @@ impl<'a> App<'a> {
         self.start_spinner("Pulling\u{2026}");
         let tx = self.ec.sender();
         let repo_path_buf = repo_path.to_path_buf();
-        thread::spawn(move || {
-            match actions::pull_branch(&repo_path_buf, &remote, &branch) {
+        thread::spawn(
+            move || match actions::pull_branch(&repo_path_buf, &remote, &branch) {
                 Ok(msg) => {
                     let msg = if msg.is_empty() {
                         "Pulled successfully".into()
@@ -5191,8 +5163,8 @@ impl<'a> App<'a> {
                 Err(msg) => {
                     let _ = tx.send(AppEvent::NotifyError(msg));
                 }
-            }
-        });
+            },
+        );
     }
 
     // Phase 2 - Git Actions execution
@@ -5233,7 +5205,13 @@ impl<'a> App<'a> {
         // the action handler will hand off to InteractiveRebaseView via an
         // early-return, and the spinner would otherwise replace the footer
         // shortcuts with the spinner text for the entire editor session.
-        if matches!(&action, GitAction::Rebase { interactive: false, .. }) {
+        if matches!(
+            &action,
+            GitAction::Rebase {
+                interactive: false,
+                ..
+            }
+        ) {
             self.start_spinner("Rebasing\u{2026}");
         }
         if matches!(&action, GitAction::Merge { .. }) {
@@ -5301,8 +5279,9 @@ impl<'a> App<'a> {
                 // todo is edited inside gitoui. The non-interactive path
                 // still runs the plain `git rebase` underneath.
                 if interactive {
-                    self.ec
-                        .send(AppEvent::OpenInteractiveRebase { base_hash: target.clone() });
+                    self.ec.send(AppEvent::OpenInteractiveRebase {
+                        base_hash: target.clone(),
+                    });
                     self.close_dialog();
                     return;
                 }
@@ -5328,7 +5307,10 @@ impl<'a> App<'a> {
                 self.merge_pull_request(target, method);
                 return;
             }
-            GitAction::DeletePrComment { pr_number, is_review } => {
+            GitAction::DeletePrComment {
+                pr_number,
+                is_review,
+            } => {
                 self.close_dialog();
                 self.delete_pr_comment(target, pr_number, is_review);
                 return;
@@ -5373,7 +5355,10 @@ impl<'a> App<'a> {
                     .ok()
                     .and_then(|u| u.split('/').next().map(|s| s.to_string()))
                     .unwrap_or_else(|| "origin".to_string());
-                (actions::push_branch(repo_path, &remote, &target, force), None)
+                (
+                    actions::push_branch(repo_path, &remote, &target, force),
+                    None,
+                )
             }
             GitAction::PullBranch { rebase: _ } => {
                 let remote = actions::branch_upstream(repo_path, &target)
@@ -5416,7 +5401,10 @@ impl<'a> App<'a> {
                 actions::discard_all(repo_path),
                 Some("Discarded all changes".into()),
             ),
-            GitAction::Stash { message, include_untracked } => (
+            GitAction::Stash {
+                message,
+                include_untracked,
+            } => (
                 actions::stash(repo_path, message.as_deref(), include_untracked),
                 Some("Stashed changes".into()),
             ),
@@ -5450,17 +5438,14 @@ impl<'a> App<'a> {
                     .map_err(|e| format!("Failed to create archive: {}", e));
                 (r, None)
             }
-            GitAction::AddRemote { url } => (
-                actions::add_remote(repo_path, &target, &url),
-                None,
-            ),
-            GitAction::RemoveRemote => (
-                actions::remove_remote(repo_path, &target),
-                None,
-            ),
+            GitAction::AddRemote { url } => (actions::add_remote(repo_path, &target, &url), None),
+            GitAction::RemoveRemote => (actions::remove_remote(repo_path, &target), None),
             GitAction::PushSetUpstream { branch } => (
                 actions::push_set_upstream(repo_path, &target, &branch),
-                Some(format!("Pushed and set upstream to '{}/{}'.", target, branch)),
+                Some(format!(
+                    "Pushed and set upstream to '{}/{}'.",
+                    target, branch
+                )),
             ),
             GitAction::SetUpstream { branch } => (
                 actions::set_upstream(repo_path, &target, &branch),
@@ -5505,15 +5490,17 @@ impl<'a> App<'a> {
                             .into_iter()
                             .find(|wt| {
                                 // Match by last path component or suffix
-                                std::path::Path::new(&wt.path)
-                                    .to_string_lossy()
-                                    .ends_with(worktree_raw_path.trim_start_matches("../").trim_start_matches("./"))
-                                    || wt.path == worktree_raw_path
+                                std::path::Path::new(&wt.path).to_string_lossy().ends_with(
+                                    worktree_raw_path
+                                        .trim_start_matches("../")
+                                        .trim_start_matches("./"),
+                                ) || wt.path == worktree_raw_path
                             })
                             .map(|wt| wt.path)
                             .unwrap_or_else(|| {
                                 // Fallback: join with repo_path and normalize manually
-                                repo_path.join(&worktree_raw_path)
+                                repo_path
+                                    .join(&worktree_raw_path)
                                     .to_string_lossy()
                                     .to_string()
                             });
@@ -5546,13 +5533,10 @@ impl<'a> App<'a> {
                         || msg.contains("overwritten by checkout")
                     {
                         self.close_dialog();
-                        let is_branch = !target.chars().all(|c| c.is_ascii_hexdigit())
-                            || target.len() < 7;
+                        let is_branch =
+                            !target.chars().all(|c| c.is_ascii_hexdigit()) || target.len() < 7;
                         self.ec.send(AppEvent::OpenDialog(
-                            crate::event::DialogKind::CheckoutHasLocalChanges {
-                                target,
-                                is_branch,
-                            },
+                            crate::event::DialogKind::CheckoutHasLocalChanges { target, is_branch },
                         ));
                         return;
                     }

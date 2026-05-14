@@ -76,7 +76,12 @@ fn head_hash(repo: &Path) -> String {
 
 fn branch_exists(repo: &Path, name: &str) -> bool {
     Command::new("git")
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{name}")])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ])
         .current_dir(repo)
         .status()
         .expect("spawn git")
@@ -85,7 +90,12 @@ fn branch_exists(repo: &Path, name: &str) -> bool {
 
 fn tag_exists(repo: &Path, name: &str) -> bool {
     Command::new("git")
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/tags/{name}")])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/tags/{name}"),
+        ])
         .current_dir(repo)
         .status()
         .expect("spawn git")
@@ -221,7 +231,10 @@ fn reset_hard_discards_working_tree_and_moves_head() {
 
     assert_eq!(head_hash(dir.path()), first);
     let content = fs::read_to_string(dir.path().join("a.txt")).unwrap();
-    assert_eq!(content, "v1\n", "--hard should restore v1, not the dirty content");
+    assert_eq!(
+        content, "v1\n",
+        "--hard should restore v1, not the dirty content"
+    );
 }
 
 #[test]
@@ -236,7 +249,10 @@ fn reset_soft_keeps_changes_staged() {
     // After --soft to the previous commit, the diff between the index and HEAD
     // should be the changes from "second" — i.e. a.txt should be staged with v2.
     let staged = git_stdout(dir.path(), &["diff", "--cached", "--name-only"]);
-    assert!(staged.contains("a.txt"), "expected a.txt in index, got: {staged}");
+    assert!(
+        staged.contains("a.txt"),
+        "expected a.txt in index, got: {staged}"
+    );
 }
 
 #[test]

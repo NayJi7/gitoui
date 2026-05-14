@@ -340,7 +340,8 @@ impl<'a> DetailView<'a> {
     pub fn update_layout(&mut self, area: Rect) {
         let [list_area, _] = self.split_areas(area);
         self.list_height = list_area.height as usize;
-        self.as_mut_list_state().update_height(list_area.height as usize);
+        self.as_mut_list_state()
+            .update_height(list_area.height as usize);
     }
 
     pub fn prepare_graph_uploads(&mut self) {
@@ -387,11 +388,8 @@ impl<'a> DetailView<'a> {
     }
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
-        let detail_height = crate::view::adaptive_detail_height(
-            area.height,
-            self.ctx.ui_config.detail.height,
-            5,
-        );
+        let detail_height =
+            crate::view::adaptive_detail_height(area.height, self.ctx.ui_config.detail.height, 5);
         Layout::vertical([Constraint::Min(0), Constraint::Length(detail_height)]).areas(area)
     }
 
@@ -449,7 +447,9 @@ impl<'a> DetailView<'a> {
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
         let row = row as usize;
-        let Some(detail_area) = self.detail_area else { return };
+        let Some(detail_area) = self.detail_area else {
+            return;
+        };
         let detail_y = detail_area.y as usize;
 
         if row < detail_y {
@@ -735,9 +735,9 @@ impl<'a> DetailView<'a> {
         }
         count += 1; // divider
         count += 1; // commit message (subject)
-        // Body lines come straight after the subject — no separator row
-        // since commit_message_lines() stopped pushing one. Counting an
-        // empty line here used to push hover detection 1 row off.
+                    // Body lines come straight after the subject — no separator row
+                    // since commit_message_lines() stopped pushing one. Counting an
+                    // empty line here used to push hover detection 1 row off.
         if !self.commit.body.is_empty() {
             count += self.commit.body.lines().count();
         }

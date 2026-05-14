@@ -347,7 +347,11 @@ impl<'a> ListView<'a> {
         let palette = self.ctx.graph_color_set.clone();
         self.as_mut_list_state()
             .invalidate_image_caches_with_palette(&palette);
-        self.ctx.avatar_manager.lock().unwrap().clear_prepared_images();
+        self.ctx
+            .avatar_manager
+            .lock()
+            .unwrap()
+            .clear_prepared_images();
     }
 
     pub fn refresh(&self) {
@@ -403,10 +407,7 @@ impl<'a> ListView<'a> {
             return;
         }
 
-        let marked = self
-            .as_list_state()
-            .marked_compare_commit()
-            .cloned();
+        let marked = self.as_list_state().marked_compare_commit().cloned();
         let selected = self.as_list_state().selected_commit_hash().clone();
 
         match marked {

@@ -152,11 +152,7 @@ impl<'a> InteractiveRebaseView<'a> {
         // Footer adapts: when a row is grabbed, arrows move it; otherwise
         // arrows navigate. The Space hint flips between Grab / Release.
         if self.grabbed {
-            let parts = [
-                "↑↓:move commit",
-                "Space:release",
-                "Esc:cancel",
-            ];
+            let parts = ["↑↓:move commit", "Space:release", "Esc:cancel"];
             format!("⌘ {}", parts.join("▕▏"))
         } else {
             let mut parts: Vec<&str> = vec![
@@ -318,11 +314,7 @@ impl<'a> InteractiveRebaseView<'a> {
         // this run will overwrite it (or stay cleared on success).
         self.last_error = None;
 
-        match crate::git::rebase::apply_rebase(
-            &self.repo_path,
-            &self.base_hash,
-            &self.items,
-        ) {
+        match crate::git::rebase::apply_rebase(&self.repo_path, &self.base_hash, &self.items) {
             Ok(crate::git::rebase::RebaseOutcome::Clean) => {
                 // Only on a fully clean rebase do we close the view — every
                 // other branch keeps the user here so they can see the error
@@ -355,9 +347,7 @@ impl<'a> InteractiveRebaseView<'a> {
                 self.last_error = Some(summary);
             }
             Ok(crate::git::rebase::RebaseOutcome::AlreadyInProgress) => {
-                self.last_error = Some(
-                    "A previous rebase is still in progress.".to_string(),
-                );
+                self.last_error = Some("A previous rebase is still in progress.".to_string());
             }
             Err(e) => {
                 self.last_error = Some(e.to_string());
@@ -420,8 +410,9 @@ impl<'a> InteractiveRebaseView<'a> {
     fn skip_rebase(&mut self) {
         match crate::git::rebase::skip_rebase(&self.repo_path) {
             Ok(crate::git::rebase::RebaseOutcome::Clean) => {
-                self.tx
-                    .send(AppEvent::NotifySuccess("Rebase complete (skipped commit)".into()));
+                self.tx.send(AppEvent::NotifySuccess(
+                    "Rebase complete (skipped commit)".into(),
+                ));
                 self.tx.send(AppEvent::CloseInteractiveRebase);
             }
             Ok(crate::git::rebase::RebaseOutcome::Paused(msg)) => {
@@ -798,8 +789,7 @@ impl<'a> InteractiveRebaseView<'a> {
         // Honour the user's CursorType preference (Native = real terminal
         // cursor, Virtual = paint a glyph in the buffer) so the inline
         // editor behaves like every other text input in the app.
-        if let (Some((buf_x, y)), Some(r)) =
-            (self.reword_screen_pos, self.reword_editing.as_ref())
+        if let (Some((buf_x, y)), Some(r)) = (self.reword_screen_pos, self.reword_editing.as_ref())
         {
             // cursor stores a BYTE index; display column = visible width
             // of the prefix slice.
@@ -811,8 +801,7 @@ impl<'a> InteractiveRebaseView<'a> {
                     f.set_cursor_position((cx, cy));
                 }
                 crate::config::CursorType::Virtual(glyph) => {
-                    let style = Style::default()
-                        .fg(self.ctx.color_theme.virtual_cursor_fg);
+                    let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
                     f.buffer_mut().set_string(cx, cy, glyph, style);
                 }
             }
@@ -858,12 +847,11 @@ impl<'a> InteractiveRebaseView<'a> {
         // Split inner area: body (top, leaving 2 rows at bottom for the
         // blank gutter + hint). If we don't have at least 3 rows we just
         // show the body and skip the hint.
-        let hint_text: &str =
-            if crate::git::rebase::rebase_in_progress(&self.repo_path) {
-                "Press A to abort  •  Esc exits (rebase stays half-applied)"
-            } else {
-                "Adjust the plan and press Enter to retry"
-            };
+        let hint_text: &str = if crate::git::rebase::rebase_in_progress(&self.repo_path) {
+            "Press A to abort  •  Esc exits (rebase stays half-applied)"
+        } else {
+            "Adjust the plan and press Enter to retry"
+        };
 
         if inner.height >= 3 {
             let body_height = inner.height.saturating_sub(2);
@@ -993,10 +981,7 @@ impl<'a> InteractiveRebaseView<'a> {
                     .fg(theme.bg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " continue   ",
-                Style::default().fg(theme.fg),
-            ),
+            Span::styled(" continue   ", Style::default().fg(theme.fg)),
             Span::styled(
                 " S ",
                 Style::default()
@@ -1004,10 +989,7 @@ impl<'a> InteractiveRebaseView<'a> {
                     .fg(theme.bg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " skip current   ",
-                Style::default().fg(theme.fg),
-            ),
+            Span::styled(" skip current   ", Style::default().fg(theme.fg)),
             Span::styled(
                 " A ",
                 Style::default()
@@ -1108,10 +1090,7 @@ impl<'a> InteractiveRebaseView<'a> {
         let start = if total <= visible_height {
             0
         } else {
-            let sel_row = row_screen_rows
-                .get(self.selected)
-                .copied()
-                .unwrap_or(0) as usize;
+            let sel_row = row_screen_rows.get(self.selected).copied().unwrap_or(0) as usize;
             let want = sel_row.saturating_sub(visible_height / 4);
             ((want as i32) + self.scroll_delta)
                 .max(0)
@@ -1197,10 +1176,7 @@ impl<'a> InteractiveRebaseView<'a> {
             0
         } else {
             // Anchor on the selected row.
-            let sel_row = row_screen_rows
-                .get(self.selected)
-                .copied()
-                .unwrap_or(0) as usize;
+            let sel_row = row_screen_rows.get(self.selected).copied().unwrap_or(0) as usize;
             let want = sel_row.saturating_sub(visible_height / 4);
             ((want as i32) + self.scroll_delta)
                 .max(0)
@@ -1249,8 +1225,7 @@ impl<'a> InteractiveRebaseView<'a> {
     /// Layout C — todo list on top + Result preview on the bottom.
     fn render_split(&mut self, f: &mut Frame, area: Rect) {
         let [todo_area, result_area] =
-            Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)])
-                .areas(area);
+            Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).areas(area);
         self.render_compact(f, todo_area);
 
         let theme = &self.ctx.color_theme;
@@ -1279,9 +1254,7 @@ impl<'a> InteractiveRebaseView<'a> {
         if total <= visible_height {
             return 0;
         }
-        let want = self
-            .selected
-            .saturating_sub(visible_height / 4);
+        let want = self.selected.saturating_sub(visible_height / 4);
         ((want as i32) + self.scroll_delta)
             .max(0)
             .min(total.saturating_sub(visible_height) as i32) as usize
@@ -1351,12 +1324,13 @@ impl<'a> InteractiveRebaseView<'a> {
         let mut spans: Vec<Span<'static>> = vec![cursor_span];
         let action_col_start = cursor_glyph.chars().count() as u16;
         spans.push(action_span);
-        let action_col_end =
-            action_col_start + action_text.chars().count() as u16;
+        let action_col_end = action_col_start + action_text.chars().count() as u16;
         spans.push(hash_span);
         spans.push(Span::styled(
             subject.clone(),
-            Style::default().fg(subject_fg).add_modifier(subject_modifier),
+            Style::default()
+                .fg(subject_fg)
+                .add_modifier(subject_modifier),
         ));
         if verbose {
             // Use console::measure_text_width to handle multi-cell glyphs
@@ -1374,10 +1348,8 @@ impl<'a> InteractiveRebaseView<'a> {
             // editor reads like a focused slice of that view.
             let sep = "  ";
             let middot = " · ";
-            let meta_w = measured(sep)
-                + measured(&item.author)
-                + measured(middot)
-                + measured(&item.date);
+            let meta_w =
+                measured(sep) + measured(&item.author) + measured(middot) + measured(&item.date);
             // Reserve at least 1 column on the right so the row never
             // touches the border (which clips wide glyphs).
             let avail = width
@@ -1457,9 +1429,7 @@ impl<'a> InteractiveRebaseView<'a> {
             Span::styled("✎ ", Style::default().fg(theme.status_info_fg)),
             Span::styled(
                 padded,
-                Style::default()
-                    .fg(theme.fg)
-                    .bg(theme.list_selected_bg),
+                Style::default().fg(theme.fg).bg(theme.list_selected_bg),
             ),
         ])
     }

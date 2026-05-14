@@ -140,11 +140,7 @@ mod tests {
     #[test]
     fn build_preview_for_each_style_produces_three_rows() {
         let color_set = GraphColorSet::new(&GraphColorConfig::default());
-        for style in [
-            GraphStyle::Smooth,
-            GraphStyle::Rounded,
-            GraphStyle::Angular,
-        ] {
+        for style in [GraphStyle::Smooth, GraphStyle::Rounded, GraphStyle::Angular] {
             let preview = GraphPreview::build(style, &color_set, ImageProtocol::Iterm2, None);
             assert_eq!(preview.rows.len(), 3, "style={:?}", style);
             assert_eq!(preview.style, style);

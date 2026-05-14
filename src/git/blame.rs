@@ -149,7 +149,9 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
 /// Compact "x ago" formatter — keeps the annotation column narrow. Falls back
 /// to "—" when the timestamp wasn't parsed.
 pub fn relative_time(dt: Option<&DateTime<Local>>) -> String {
-    let Some(dt) = dt else { return "—".to_string() };
+    let Some(dt) = dt else {
+        return "—".to_string();
+    };
     let now = Local::now();
     let delta = now.signed_duration_since(*dt);
     let secs = delta.num_seconds();
@@ -245,7 +247,10 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 3 3
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0].author, "Alice");
         assert_eq!(lines[1].author, "Bob");
-        assert_eq!(lines[2].author, "Alice", "third line reuses Alice's cached header");
+        assert_eq!(
+            lines[2].author, "Alice",
+            "third line reuses Alice's cached header"
+        );
     }
 
     #[test]

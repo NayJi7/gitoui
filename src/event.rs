@@ -143,10 +143,14 @@ pub enum AppEvent {
     /// Open the PR view and jump straight to the given PR's detail —
     /// dispatched from cross-view navigation (e.g. clicking a `#N`
     /// reference inside an Issue comment).
-    OpenPullRequestDetail { number: u64 },
+    OpenPullRequestDetail {
+        number: u64,
+    },
     /// Cross-view nav from a `#N` mention click/Enter — switches
     /// to the Issues view and opens that issue's detail page.
-    OpenIssueDetail { number: u64 },
+    OpenIssueDetail {
+        number: u64,
+    },
     /// PR view's `#N` resolver / mention popup feed — full issue list
     /// fetched in the background so PR comments can colour `#N`
     /// references AND the `#` autocomplete popup has titles to show.
@@ -261,19 +265,39 @@ pub enum AppEvent {
     /// Compose-issue picker dialogs return their selections via these
     /// events — the view captures them into ComposeState rather than
     /// firing a SetIssueX write (no issue exists yet).
-    ComposeIssueLabelsPicked { labels: Vec<String> },
-    ComposeIssueAssigneesPicked { assignees: Vec<String> },
-    ComposeIssueMilestonePicked { milestone: Option<u64> },
+    ComposeIssueLabelsPicked {
+        labels: Vec<String>,
+    },
+    ComposeIssueAssigneesPicked {
+        assignees: Vec<String>,
+    },
+    ComposeIssueMilestonePicked {
+        milestone: Option<u64>,
+    },
     /// Issue write actions dispatched from the issue view / dialogs.
-    SetIssueLabels { issue_number: u64, labels: Vec<String> },
-    SetIssueAssignees { issue_number: u64, assignees: Vec<String> },
-    SetIssueMilestone { issue_number: u64, milestone: Option<u64> },
+    SetIssueLabels {
+        issue_number: u64,
+        labels: Vec<String>,
+    },
+    SetIssueAssignees {
+        issue_number: u64,
+        assignees: Vec<String>,
+    },
+    SetIssueMilestone {
+        issue_number: u64,
+        milestone: Option<u64>,
+    },
     CloseIssueWithReason {
         issue_number: u64,
         reason: crate::github::issue::IssueStateReason,
     },
-    ReopenIssue { issue_number: u64 },
-    DeleteIssueComment { issue_number: u64, comment_id: u64 },
+    ReopenIssue {
+        issue_number: u64,
+    },
+    DeleteIssueComment {
+        issue_number: u64,
+        comment_id: u64,
+    },
     /// Background fetch of a PR's full detail completed — pushed by the
     /// worker thread the PR view spawned. The view updates its cache and
     /// re-renders.
@@ -319,7 +343,10 @@ pub enum AppEvent {
     /// isn't already locally available, then transitions. The PR
     /// number is remembered so `Esc` returns straight to the PR view
     /// instead of dropping to the commit graph.
-    OpenPrCommitDetail { pr_number: u64, sha: String },
+    OpenPrCommitDetail {
+        pr_number: u64,
+        sha: String,
+    },
     /// Open the existing DiffView for a single file in a PR. Same
     /// fetch / return-flow mechanics as `OpenPrCommitDetail`.
     OpenPrFileDiff {
@@ -330,7 +357,9 @@ pub enum AppEvent {
     /// A newly-created PR landed on GitHub — the PR view clears its
     /// compose draft, reloads the list, and opens the freshly
     /// created PR in Detail mode.
-    PrCreated { number: u64 },
+    PrCreated {
+        number: u64,
+    },
     /// Compose form's labels-picker fetch finished — app opens the
     /// multi-select dialog with this payload, and on confirm
     /// dispatches `ComposeLabelsPicked` back to the view.
@@ -340,7 +369,9 @@ pub enum AppEvent {
     },
     /// Labels the user chose in the compose-form picker — pushed
     /// back into the active `ComposeState`.
-    ComposeLabelsPicked { labels: Vec<crate::github::pr::Label> },
+    ComposeLabelsPicked {
+        labels: Vec<crate::github::pr::Label>,
+    },
     OpenDetailByHash {
         hash: String,
     },
@@ -355,18 +386,40 @@ pub enum AppEvent {
 #[derive(Debug, Clone)]
 pub enum DialogKind {
     // Commit actions
-    AddTag { target: String },
-    CreateBranch { target: String },
-    Checkout { target: String, is_branch: bool },
-    CherryPick { target: String },
-    Revert { target: String },
-    Drop { target: String },
-    Merge { target: String, is_branch: bool },
-    Rebase { target: String },
-    Reset { target: String },
+    AddTag {
+        target: String,
+    },
+    CreateBranch {
+        target: String,
+    },
+    Checkout {
+        target: String,
+        is_branch: bool,
+    },
+    CherryPick {
+        target: String,
+    },
+    Revert {
+        target: String,
+    },
+    Drop {
+        target: String,
+    },
+    Merge {
+        target: String,
+        is_branch: bool,
+    },
+    Rebase {
+        target: String,
+    },
+    Reset {
+        target: String,
+    },
     /// Confirm squashing a commit into its parent. No options — just a
     /// confirmation prompt before we run the rebase under the hood.
-    Squash { target: String },
+    Squash {
+        target: String,
+    },
     /// Merge a pull request — radio for merge method + optional title
     /// and message. Confirm runs `PUT /pulls/{n}/merge`.
     MergePullRequest {
@@ -466,43 +519,87 @@ pub enum DialogKind {
         issue_title: String,
     },
     // Branch actions
-    RenameBranch { branch: String },
-    DeleteBranch { branch: String, is_remote: bool },
-    PushBranch { branch: String },
-    PullBranch { branch: String },
+    RenameBranch {
+        branch: String,
+    },
+    DeleteBranch {
+        branch: String,
+        is_remote: bool,
+    },
+    PushBranch {
+        branch: String,
+    },
+    PullBranch {
+        branch: String,
+    },
     // Tag actions
-    DeleteTag { tag: String },
-    PushTag { tag: String },
+    DeleteTag {
+        tag: String,
+    },
+    PushTag {
+        tag: String,
+    },
     // Stash actions
-    CreateBranchFromStash { target: String, stash_ref: String },
+    CreateBranchFromStash {
+        target: String,
+        stash_ref: String,
+    },
     // Uncommitted actions
     StashWithMessage,
     CommitWithMessage,
     CleanUntracked,
     // Confirmations
-    ConfirmDiscardFile { file: String },
+    ConfirmDiscardFile {
+        file: String,
+    },
     ConfirmDiscardAll,
     ConfirmStageAll,
     ConfirmUnstageAll,
-    ConfirmPopStash { stash_ref: String },
-    ConfirmDropStash { stash_ref: String },
+    ConfirmPopStash {
+        stash_ref: String,
+    },
+    ConfirmDropStash {
+        stash_ref: String,
+    },
     // Remote actions
     AddRemote,
-    ConfirmDeleteRemote { name: String },
-    ChooseRemote { remotes: Vec<String>, branch: String },
-    SetUpstream { remotes: Vec<String>, branch: String },
+    ConfirmDeleteRemote {
+        name: String,
+    },
+    ChooseRemote {
+        remotes: Vec<String>,
+        branch: String,
+    },
+    SetUpstream {
+        remotes: Vec<String>,
+        branch: String,
+    },
     // Abort in-progress operation confirmation
-    ConfirmAbortOperation { op_name: String },
+    ConfirmAbortOperation {
+        op_name: String,
+    },
     // Amend HEAD commit message
-    AmendMessage { current_message: String },
+    AmendMessage {
+        current_message: String,
+    },
     // Worktree switch confirmation
-    ConfirmSwitchWorktree { path: String, display_name: String },
+    ConfirmSwitchWorktree {
+        path: String,
+        display_name: String,
+    },
     // Worktree delete confirmation
-    ConfirmDeleteWorktree { path: String, display_name: String, is_dirty: bool },
+    ConfirmDeleteWorktree {
+        path: String,
+        display_name: String,
+        is_dirty: bool,
+    },
     // Add new worktree
     AddWorktree,
     // Checkout blocked by local changes — pick a resolution path.
-    CheckoutHasLocalChanges { target: String, is_branch: bool },
+    CheckoutHasLocalChanges {
+        target: String,
+        is_branch: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -541,17 +638,32 @@ pub enum GitAction {
     SquashWithParent,
     /// Merge a PR via the GitHub API. `method` is "merge" / "squash" /
     /// "rebase" (matches GitHub's `merge_method` body field).
-    MergePullRequest { method: String },
+    MergePullRequest {
+        method: String,
+    },
     /// Delete a PR comment after user confirmation. `target` carries
     /// the comment id; `is_review` picks between the issue-comments
     /// and pulls-comments endpoint.
-    DeletePrComment { pr_number: u64, is_review: bool },
+    DeletePrComment {
+        pr_number: u64,
+        is_review: bool,
+    },
     /// Close (without merge) or reopen a PR via REST PATCH.
-    SetPullRequestState { pr_number: u64, state: String },
+    SetPullRequestState {
+        pr_number: u64,
+        state: String,
+    },
     /// Flip the draft flag on a PR. Uses GraphQL.
-    SetPullRequestDraft { pr_number: u64, node_id: String, draft: bool },
+    SetPullRequestDraft {
+        pr_number: u64,
+        node_id: String,
+        draft: bool,
+    },
     /// Replace the PR's full label set.
-    SetPullRequestLabels { pr_number: u64, labels: Vec<String> },
+    SetPullRequestLabels {
+        pr_number: u64,
+        labels: Vec<String>,
+    },
     /// Add and/or remove reviewers on the PR.
     SetPullRequestReviewers {
         pr_number: u64,
@@ -614,10 +726,16 @@ pub enum GitAction {
     AbortMerge,
     AbortCherryPick,
     // Remote actions
-    AddRemote { url: String },  // remote name comes from `target` in execute_git_action
-    RemoveRemote,               // remote name comes from `target`
-    PushSetUpstream { branch: String }, // target = remote name
-    SetUpstream { branch: String }, // target = remote name
+    AddRemote {
+        url: String,
+    }, // remote name comes from `target` in execute_git_action
+    RemoveRemote, // remote name comes from `target`
+    PushSetUpstream {
+        branch: String,
+    }, // target = remote name
+    SetUpstream {
+        branch: String,
+    }, // target = remote name
     AddWorktree {
         name: String,
         checkout: bool,
@@ -663,7 +781,10 @@ impl Receiver {
         self.rx.recv().unwrap()
     }
 
-    fn recv_timeout(&self, timeout: std::time::Duration) -> Result<AppEvent, mpsc::RecvTimeoutError> {
+    fn recv_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<AppEvent, mpsc::RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
     }
 }
@@ -703,35 +824,31 @@ impl EventController {
         self.stop.store(false, Ordering::Relaxed);
         let stop = self.stop.clone();
         let tx = self.tx.clone();
-        let handle = thread::spawn(move || {
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                match ratatui::crossterm::event::poll(std::time::Duration::from_millis(50)) {
-                    Ok(true) => {
-                        match ratatui::crossterm::event::read() {
-                            Ok(e) => match e {
-                                ratatui::crossterm::event::Event::Key(key) => {
-                                    tx.send(AppEvent::Key(key));
-                                }
-                                ratatui::crossterm::event::Event::Mouse(mouse) => {
-                                    tx.send(AppEvent::Mouse(mouse));
-                                }
-                                ratatui::crossterm::event::Event::Resize(w, h) => {
-                                    tx.send(AppEvent::Resize(w as usize, h as usize));
-                                }
-                                _ => {}
-                            },
-                            Err(e) => {
-                                panic!("Failed to read event: {e}");
-                            }
+        let handle = thread::spawn(move || loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match ratatui::crossterm::event::poll(std::time::Duration::from_millis(50)) {
+                Ok(true) => match ratatui::crossterm::event::read() {
+                    Ok(e) => match e {
+                        ratatui::crossterm::event::Event::Key(key) => {
+                            tx.send(AppEvent::Key(key));
                         }
-                    }
-                    Ok(false) => {}
+                        ratatui::crossterm::event::Event::Mouse(mouse) => {
+                            tx.send(AppEvent::Mouse(mouse));
+                        }
+                        ratatui::crossterm::event::Event::Resize(w, h) => {
+                            tx.send(AppEvent::Resize(w as usize, h as usize));
+                        }
+                        _ => {}
+                    },
                     Err(e) => {
-                        panic!("Failed to poll event: {e}");
+                        panic!("Failed to read event: {e}");
                     }
+                },
+                Ok(false) => {}
+                Err(e) => {
+                    panic!("Failed to poll event: {e}");
                 }
             }
         });

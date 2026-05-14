@@ -51,8 +51,7 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     if lower.contains("your local changes to the following files would be overwritten")
         || lower.contains("would be overwritten by")
     {
-        return "Uncommitted local changes block this — commit or stash first."
-            .to_string();
+        return "Uncommitted local changes block this — commit or stash first.".to_string();
     }
     if lower.contains("please commit your changes or stash them") {
         return "Working tree isn't clean — commit or stash changes first.".into();
@@ -74,12 +73,9 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     {
         return match subcommand {
             "cherry-pick" => {
-                "Cherry-pick conflict — resolve in the conflict editor, then continue."
-                    .into()
+                "Cherry-pick conflict — resolve in the conflict editor, then continue.".into()
             }
-            "rebase" => {
-                "Rebase conflict — resolve in the conflict editor, then continue.".into()
-            }
+            "rebase" => "Rebase conflict — resolve in the conflict editor, then continue.".into(),
             "merge" => "Merge conflict — resolve in the conflict editor, then commit.".into(),
             "revert" => "Revert conflict — resolve in the conflict editor, then continue.".into(),
             _ => "Conflict — resolve manually then continue.".into(),
@@ -88,14 +84,16 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     if lower.contains("could not apply") {
         return format!(
             "Couldn't apply commit cleanly{}",
-            if subcommand.is_empty() { "" } else { " (likely a conflict)" }
+            if subcommand.is_empty() {
+                ""
+            } else {
+                " (likely a conflict)"
+            }
         );
     }
 
     // ── In-progress operation conflicts ────────────────────────────
-    if lower.contains("rebase in progress")
-        || lower.contains("you are currently rebasing")
-    {
+    if lower.contains("rebase in progress") || lower.contains("you are currently rebasing") {
         return "A rebase is already in progress — finish or abort it first.".into();
     }
     if lower.contains("you are currently cherry-picking")
@@ -124,9 +122,7 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     if lower.contains("refusing to merge unrelated histories") {
         return "Refusing to merge unrelated histories — branches have no common ancestor.".into();
     }
-    if lower.contains("not a tree object")
-        || lower.contains("is not a commit")
-    {
+    if lower.contains("not a tree object") || lower.contains("is not a commit") {
         return "Object isn't a commit — wrong kind of git reference.".into();
     }
     if subcommand == "rebase" && (lower.contains("no such") || lower.contains("nothing to do")) {
@@ -169,9 +165,7 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     {
         return "Blame: file isn't in the target commit.".into();
     }
-    if subcommand == "log"
-        && (lower.contains("no such path") || lower.contains("did not match"))
-    {
+    if subcommand == "log" && (lower.contains("no such path") || lower.contains("did not match")) {
         return "File history: file isn't in this commit's tree.".into();
     }
     if lower.contains("pathspec") && lower.contains("did not match") {
@@ -190,10 +184,7 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     if lower.contains("repository not found") {
         return "Remote repository not found — check the URL/permissions.".into();
     }
-    if lower.contains("non-fast-forward")
-        || lower.contains("rejected")
-        && subcommand == "push"
-    {
+    if lower.contains("non-fast-forward") || lower.contains("rejected") && subcommand == "push" {
         return "Push rejected — remote has commits you don't have. Pull/rebase first.".into();
     }
     if lower.contains("couldn't find remote ref") {
@@ -211,9 +202,7 @@ fn humanize_git_error(args: &[&str], stderr: &str) -> String {
     }
 
     // ── Last-resort fallback: clean up git's prefix + first line. ──
-    let cleaned = first_line
-        .trim_end_matches('.')
-        .trim_end_matches(';');
+    let cleaned = first_line.trim_end_matches('.').trim_end_matches(';');
     if cleaned.is_empty() {
         return format!("git {} failed.", subcommand);
     }
@@ -515,8 +504,7 @@ pub fn commit(path: &Path, message: &str, amend: bool) -> GitResult {
     // preserved exactly — git commit -m can swallow embedded newlines on
     // some platforms, whereas -F always reads the file verbatim.
     let tmp = path.join(".git").join("GITOUI_COMMIT_MSG_TMP");
-    std::fs::write(&tmp, message)
-        .map_err(|e| format!("Failed to write commit message: {}", e))?;
+    std::fs::write(&tmp, message).map_err(|e| format!("Failed to write commit message: {}", e))?;
     let tmp_str = tmp.to_string_lossy().into_owned();
     let result = if amend {
         run_git(path, &["commit", "--amend", "-F", &tmp_str])
@@ -652,11 +640,21 @@ pub fn branch_behind_count(path: &Path, branch: &str) -> GitResult {
     )
 }
 
-pub fn branch_ahead_behind_vs(path: &Path, branch: &str, vs: &str) -> Result<(String, String), String> {
-    let ahead = run_git(path, &["rev-list", "--count", &format!("{}..{}", vs, branch)])
-        .unwrap_or_else(|_| "0".to_string());
-    let behind = run_git(path, &["rev-list", "--count", &format!("{}..{}", branch, vs)])
-        .unwrap_or_else(|_| "0".to_string());
+pub fn branch_ahead_behind_vs(
+    path: &Path,
+    branch: &str,
+    vs: &str,
+) -> Result<(String, String), String> {
+    let ahead = run_git(
+        path,
+        &["rev-list", "--count", &format!("{}..{}", vs, branch)],
+    )
+    .unwrap_or_else(|_| "0".to_string());
+    let behind = run_git(
+        path,
+        &["rev-list", "--count", &format!("{}..{}", branch, vs)],
+    )
+    .unwrap_or_else(|_| "0".to_string());
     Ok((ahead.trim().to_string(), behind.trim().to_string()))
 }
 
@@ -854,7 +852,11 @@ mod remote_tests {
     #[test]
     fn add_remote_produces_valid_command_args() {
         let _ = std::panic::catch_unwind(|| {
-            let _ = add_remote(std::path::Path::new("/nonexistent"), "origin", "https://example.com");
+            let _ = add_remote(
+                std::path::Path::new("/nonexistent"),
+                "origin",
+                "https://example.com",
+            );
         });
     }
 

@@ -293,17 +293,15 @@ fn build_ref_tree_items(
     let branch_items = branch_tree_nodes_to_tree_items(branch_nodes, branch_color_map, color_theme);
     let mut remote_items =
         remote_tree_nodes_to_tree_items(remote_nodes, branch_color_map, color_theme, 0);
-    remote_items.push(
-        TreeItem::new_leaf(
-            ADD_REMOTE_IDENT.to_string(),
-            ratatui::text::Line::from(vec![ratatui::text::Span::styled(
-                "+ Add remote",
-                ratatui::style::Style::default()
-                    .fg(color_theme.status_info_fg)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )]),
-        ),
-    );
+    remote_items.push(TreeItem::new_leaf(
+        ADD_REMOTE_IDENT.to_string(),
+        ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+            "+ Add remote",
+            ratatui::style::Style::default()
+                .fg(color_theme.status_info_fg)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )]),
+    ));
     let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme);
     let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
@@ -343,14 +341,12 @@ fn build_ref_tree_items(
             let label = format!("{}{}", prefix, branch_short);
             let hint = format!(" ({})", short_path);
 
-            let mut spans = vec![
-                ratatui::text::Span::styled(
-                    label,
-                    ratatui::style::Style::default()
-                        .fg(color)
-                        .add_modifier(ratatui::style::Modifier::BOLD),
-                ),
-            ];
+            let mut spans = vec![ratatui::text::Span::styled(
+                label,
+                ratatui::style::Style::default()
+                    .fg(color)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )];
             if wt.is_dirty {
                 spans.push(ratatui::text::Span::styled(
                     " *",
@@ -368,17 +364,15 @@ fn build_ref_tree_items(
         })
         .collect();
 
-    worktree_items.push(
-        TreeItem::new_leaf(
-            ADD_WORKTREE_IDENT.to_string(),
-            ratatui::text::Line::from(vec![ratatui::text::Span::styled(
-                "+ Add worktree",
-                ratatui::style::Style::default()
-                    .fg(color_theme.status_info_fg)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )]),
-        ),
-    );
+    worktree_items.push(TreeItem::new_leaf(
+        ADD_WORKTREE_IDENT.to_string(),
+        ratatui::text::Line::from(vec![ratatui::text::Span::styled(
+            "+ Add worktree",
+            ratatui::style::Style::default()
+                .fg(color_theme.status_info_fg)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )]),
+    ));
 
     let mut result = vec![
         tree_item(

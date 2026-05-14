@@ -7,14 +7,14 @@ static WORDMARK_SVG: &[u8] = include_bytes!("../assets/brand/wordmark-nobg.svg")
 // SVG viewBox: 0 0 809 1008.  The y=601 on cells 12/15/16 is the 1-px fix that
 // eliminates the seam visible at fade-out in the animated version.
 const CELLS: [(&str, &str); 16] = [
-    ("M604 0H804V199H604V0Z",     "#F05133"), //  1 R1C4 — spiral start (top-right)
-    ("M404 0H604V199H404V0Z",     "#F05133"), //  2 R1C3
-    ("M205 0H405V199H205V0Z",     "#F05133"), //  3 R1C2
-    ("M5 0H205V199H5V0Z",         "#F05133"), //  4 R1C1 — top-left
-    ("M4 199H204V404H4V199Z",     "#F05133"), //  5 R2C1
-    ("M4 404H204V603H4V404Z",     "#F05133"), //  6 R3C1
-    ("M4 603H204V799H4V603Z",     "#F05133"), //  7 R4C1
-    ("M5 799H204V998H5V799Z",     "#F05133"), //  8 R5C1 — bottom-left
+    ("M604 0H804V199H604V0Z", "#F05133"), //  1 R1C4 — spiral start (top-right)
+    ("M404 0H604V199H404V0Z", "#F05133"), //  2 R1C3
+    ("M205 0H405V199H205V0Z", "#F05133"), //  3 R1C2
+    ("M5 0H205V199H5V0Z", "#F05133"),     //  4 R1C1 — top-left
+    ("M4 199H204V404H4V199Z", "#F05133"), //  5 R2C1
+    ("M4 404H204V603H4V404Z", "#F05133"), //  6 R3C1
+    ("M4 603H204V799H4V603Z", "#F05133"), //  7 R4C1
+    ("M5 799H204V998H5V799Z", "#F05133"), //  8 R5C1 — bottom-left
     ("M204 799H404V998H204V799Z", "#F05133"), //  9 R5C2
     ("M404 799H604V998H404V799Z", "#F05133"), // 10 R5C3
     ("M604 799H805V998H604V799Z", "#F05133"), // 11 R5C4 — bottom-right

@@ -217,8 +217,7 @@ impl StatefulWidget for CommitDetail<'_> {
             .map(|n| format!(" · PR #{}", n))
             .unwrap_or_default();
         let title_text = "Commit Details";
-        let visible_text_len =
-            (title_text.chars().count() + pr_suffix.chars().count()) as u16;
+        let visible_text_len = (title_text.chars().count() + pr_suffix.chars().count()) as u16;
         let title_pad = content_title_area.width.saturating_sub(visible_text_len);
         let title_left = title_pad / 2;
         let mut title_spans: Vec<Span<'_>> = vec![
@@ -410,12 +409,11 @@ impl CommitDetail<'_> {
             // re-labels to "Resume rebase" (yellow) and dispatches into the
             // resume view. Same `e` key — the action just means something
             // different in this state.
-            let (effective_label, label_color) =
-                if rebasing && *label == "Rebase current on" {
-                    ("Resume rebase", Some(self.ctx.color_theme.status_warn_fg))
-                } else {
-                    (*label, None)
-                };
+            let (effective_label, label_color) = if rebasing && *label == "Rebase current on" {
+                ("Resume rebase", Some(self.ctx.color_theme.status_warn_fg))
+            } else {
+                (*label, None)
+            };
             let mut style = if is_hovered {
                 Style::default().add_modifier(Modifier::REVERSED)
             } else {
@@ -458,8 +456,7 @@ impl CommitDetail<'_> {
             || self.commit.author_email != self.commit.committer_email
             || self.commit.author_date != self.commit.committer_date
         {
-            label_lines
-                .push(Line::from("Committer: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("Committer: ").fg(self.ctx.color_theme.detail_label_fg));
             value_lines.push(self.committer_line());
             label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
             value_lines.push(self.committer_date_line());
@@ -495,8 +492,7 @@ impl CommitDetail<'_> {
         // row, then empty labels for continuation rows so the divider below
         // stays aligned in both columns.
         if msg_len > 1 {
-            label_lines
-                .push(Line::from("     Body: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("     Body: ").fg(self.ctx.color_theme.detail_label_fg));
             for _ in 2..msg_len {
                 label_lines.push(Line::from(""));
             }

@@ -294,7 +294,9 @@ impl<'a> BranchDetailView<'a> {
                 5 => self.tx.send(AppEvent::OpenDialog(DialogKind::PushBranch {
                     branch: name,
                 })),
-                6 => self.tx.send(AppEvent::OpenSetUpstreamDialog { branch: name }),
+                6 => self
+                    .tx
+                    .send(AppEvent::OpenSetUpstreamDialog { branch: name }),
                 7 => self.tx.send(AppEvent::ExecuteGitAction {
                     target: name,
                     action: GitAction::CreateArchive,

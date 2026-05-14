@@ -56,7 +56,10 @@ impl FileTreeState {
 
 impl<'a> FileTree<'a> {
     pub fn new(changes: &'a [FileChange], color_theme: &'a ColorTheme) -> Self {
-        Self { changes, color_theme }
+        Self {
+            changes,
+            color_theme,
+        }
     }
 }
 

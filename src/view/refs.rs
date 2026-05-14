@@ -113,12 +113,11 @@ impl<'a> RefsView<'a> {
                         .and_then(|b| b.strip_prefix("refs/heads/"))
                         .unwrap_or(&wt_path)
                         .to_string();
-                    self.tx.send(AppEvent::OpenDialog(
-                        DialogKind::ConfirmSwitchWorktree {
+                    self.tx
+                        .send(AppEvent::OpenDialog(DialogKind::ConfirmSwitchWorktree {
                             path: wt_path,
                             display_name,
-                        },
-                    ));
+                        }));
                 } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
                     self.tx.send(AppEvent::OpenBranchDetail { branch_name });
                 } else if let Some(tag_name) = self.ref_list_state.selected_tag() {
@@ -144,13 +143,12 @@ impl<'a> RefsView<'a> {
                                 .and_then(|b| b.strip_prefix("refs/heads/"))
                                 .unwrap_or(&wt.path)
                                 .to_string();
-                            self.tx.send(AppEvent::OpenDialog(
-                                DialogKind::ConfirmDeleteWorktree {
+                            self.tx
+                                .send(AppEvent::OpenDialog(DialogKind::ConfirmDeleteWorktree {
                                     path: wt_path,
                                     display_name,
                                     is_dirty: wt.is_dirty,
-                                },
-                            ));
+                                }));
                         }
                     }
                 }
@@ -331,12 +329,11 @@ impl<'a> RefsView<'a> {
                 .and_then(|b| b.strip_prefix("refs/heads/"))
                 .unwrap_or(&wt_path)
                 .to_string();
-            self.tx.send(AppEvent::OpenDialog(
-                DialogKind::ConfirmSwitchWorktree {
+            self.tx
+                .send(AppEvent::OpenDialog(DialogKind::ConfirmSwitchWorktree {
                     path: wt_path,
                     display_name,
-                },
-            ));
+                }));
         } else if let Some(branch_name) = self.ref_list_state.selected_branch() {
             self.tx.send(AppEvent::OpenBranchDetail { branch_name });
         } else if let Some(tag_name) = self.ref_list_state.selected_tag() {

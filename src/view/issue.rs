@@ -437,9 +437,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    pub fn take_list_state(
-        &mut self,
-    ) -> Option<crate::widget::commit_list::CommitListState<'a>> {
+    pub fn take_list_state(&mut self) -> Option<crate::widget::commit_list::CommitListState<'a>> {
         self.commit_list_state.take()
     }
 
@@ -458,11 +456,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    pub fn on_timeline_fetched(
-        &mut self,
-        number: u64,
-        result: Result<Vec<TimelineEvent>, String>,
-    ) {
+    pub fn on_timeline_fetched(&mut self, number: u64, result: Result<Vec<TimelineEvent>, String>) {
         if self.loading_timeline_for == Some(number) {
             self.loading_timeline_for = None;
         }
@@ -476,11 +470,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    pub fn on_linked_fetched(
-        &mut self,
-        number: u64,
-        result: Result<Vec<LinkedPr>, String>,
-    ) {
+    pub fn on_linked_fetched(&mut self, number: u64, result: Result<Vec<LinkedPr>, String>) {
         if self.loading_linked_for == Some(number) {
             self.loading_linked_for = None;
         }
@@ -494,12 +484,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    pub fn on_action_done(
-        &mut self,
-        number: u64,
-        action: String,
-        result: Result<(), String>,
-    ) {
+    pub fn on_action_done(&mut self, number: u64, action: String, result: Result<(), String>) {
         if let Some(ed) = self.comment_editor.as_mut() {
             ed.submitting = false;
         }
@@ -601,12 +586,7 @@ impl<'a> IssuesView<'a> {
                 // `e:edit`, `d:delete`, `↵:open ref`) live in the
                 // selected comment's top border now — keeps the
                 // footer scannable and parity with PR view.
-                let mut parts = vec![
-                    "c:comment",
-                    "l:labels",
-                    "a:assignees",
-                    "m:milestone",
-                ];
+                let mut parts = vec!["c:comment", "l:labels", "a:assignees", "m:milestone"];
                 if !mutate.is_empty() {
                     parts.push(mutate);
                 }
@@ -806,8 +786,7 @@ impl<'a> IssuesView<'a> {
                 return;
             }
             (Mode::Detail, UserEvent::GoToBottom) => {
-                self.conversation_selected =
-                    self.conversation_comment_count.saturating_sub(1);
+                self.conversation_selected = self.conversation_comment_count.saturating_sub(1);
                 self.conversation_scroll_to_selected = true;
                 return;
             }
@@ -831,15 +810,11 @@ impl<'a> IssuesView<'a> {
             // the raw key being an arrow so the `l` and `h` letter
             // bindings still reach `handle_event_detail` for the
             // labels picker etc.
-            (Mode::Detail, UserEvent::NavigateLeft)
-                if matches!(key.code, KeyCode::Left) =>
-            {
+            (Mode::Detail, UserEvent::NavigateLeft) if matches!(key.code, KeyCode::Left) => {
                 self.cycle_tab(-1);
                 return;
             }
-            (Mode::Detail, UserEvent::NavigateRight)
-                if matches!(key.code, KeyCode::Right) =>
-            {
+            (Mode::Detail, UserEvent::NavigateRight) if matches!(key.code, KeyCode::Right) => {
                 self.cycle_tab(1);
                 return;
             }
@@ -1773,7 +1748,10 @@ impl<'a> IssuesView<'a> {
 
     fn editor_cursor_home(&mut self) {
         if let Some(ed) = self.comment_editor.as_mut() {
-            ed.cursor = ed.buffer[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            ed.cursor = ed.buffer[..ed.cursor]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
         }
     }
 
@@ -1906,10 +1884,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    pub fn on_mention_prs_fetched(
-        &mut self,
-        result: Result<Vec<PullRequest>, String>,
-    ) {
+    pub fn on_mention_prs_fetched(&mut self, result: Result<Vec<PullRequest>, String>) {
         self.mention_pr_loading = false;
         if let Ok(prs) = result {
             self.mention_pr_cache = prs;
@@ -2139,10 +2114,7 @@ impl<'a> IssuesView<'a> {
             let editor_cursor = cursor_val;
             // Bail out if the anchor lost its `#` (user backspaced
             // through it) or the cursor moved before the anchor.
-            if anchor >= buf.len()
-                || !buf[anchor..].starts_with('#')
-                || editor_cursor <= anchor
-            {
+            if anchor >= buf.len() || !buf[anchor..].starts_with('#') || editor_cursor <= anchor {
                 (String::new(), true)
             } else {
                 let slice = &buf[anchor + 1..editor_cursor.min(buf.len())];
@@ -2237,14 +2209,10 @@ impl<'a> IssuesView<'a> {
         if !self.detail_cache.contains_key(&number) && self.loading_for != Some(number) {
             self.spawn_detail_fetch(number);
         }
-        if !self.timeline_cache.contains_key(&number)
-            && self.loading_timeline_for != Some(number)
-        {
+        if !self.timeline_cache.contains_key(&number) && self.loading_timeline_for != Some(number) {
             self.spawn_timeline_fetch(number);
         }
-        if !self.linked_cache.contains_key(&number)
-            && self.loading_linked_for != Some(number)
-        {
+        if !self.linked_cache.contains_key(&number) && self.loading_linked_for != Some(number) {
             self.spawn_linked_fetch(number);
         }
     }
@@ -2276,10 +2244,9 @@ impl<'a> IssuesView<'a> {
         let tx = self.tx.clone();
         if target_idx == 0 {
             std::thread::spawn(move || {
-                let reactions = crate::github::pr::list_my_issue_reactions(
-                    &token, &coords, number, &me,
-                )
-                .unwrap_or_default();
+                let reactions =
+                    crate::github::pr::list_my_issue_reactions(&token, &coords, number, &me)
+                        .unwrap_or_default();
                 tx.send(AppEvent::IssueViewerReactionsFetched {
                     issue_number: number,
                     target_idx,
@@ -2297,10 +2264,9 @@ impl<'a> IssuesView<'a> {
             return;
         };
         std::thread::spawn(move || {
-            let reactions = crate::github::pr::list_my_issue_comment_reactions(
-                &token, &coords, cid, &me,
-            )
-            .unwrap_or_default();
+            let reactions =
+                crate::github::pr::list_my_issue_comment_reactions(&token, &coords, cid, &me)
+                    .unwrap_or_default();
             tx.send(AppEvent::IssueViewerReactionsFetched {
                 issue_number: number,
                 target_idx,
@@ -2324,10 +2290,7 @@ impl<'a> IssuesView<'a> {
     /// otherwise comment index `target_idx - 1`). Backed by the
     /// in-session `viewer_reactions` map populated by
     /// `submit_reaction`.
-    fn viewer_reactions_for(
-        &self,
-        target_idx: usize,
-    ) -> Vec<crate::github::pr::ReactionKind> {
+    fn viewer_reactions_for(&self, target_idx: usize) -> Vec<crate::github::pr::ReactionKind> {
         let Some(number) = self.opened_issue_number else {
             return Vec::new();
         };
@@ -2337,11 +2300,7 @@ impl<'a> IssuesView<'a> {
             .unwrap_or_default()
     }
 
-    fn submit_reaction(
-        &mut self,
-        target_idx: usize,
-        kind: crate::github::pr::ReactionKind,
-    ) {
+    fn submit_reaction(&mut self, target_idx: usize, kind: crate::github::pr::ReactionKind) {
         let Some(number) = self.opened_issue_number else {
             return;
         };
@@ -2361,9 +2320,8 @@ impl<'a> IssuesView<'a> {
         if target_idx == 0 {
             if let Some(rid) = existing_id {
                 std::thread::spawn(move || {
-                    let result = crate::github::pr::delete_issue_reaction(
-                        &token, &coords, number, rid,
-                    );
+                    let result =
+                        crate::github::pr::delete_issue_reaction(&token, &coords, number, rid);
                     if result.is_ok() {
                         tx.send(AppEvent::IssueReactionRemoved {
                             issue_number: number,
@@ -2377,8 +2335,7 @@ impl<'a> IssuesView<'a> {
                 return;
             }
             std::thread::spawn(move || {
-                match crate::github::issue::add_issue_reaction(&token, &coords, number, kind)
-                {
+                match crate::github::issue::add_issue_reaction(&token, &coords, number, kind) {
                     Ok(reaction_id) => {
                         tx.send(AppEvent::IssueReactionApplied {
                             issue_number: number,
@@ -2422,8 +2379,7 @@ impl<'a> IssuesView<'a> {
             return;
         }
         std::thread::spawn(move || {
-            match crate::github::pr::add_issue_comment_reaction(&token, &coords, comment_id, kind)
-            {
+            match crate::github::pr::add_issue_comment_reaction(&token, &coords, comment_id, kind) {
                 Ok(reaction_id) => {
                     tx.send(AppEvent::IssueReactionApplied {
                         issue_number: number,
@@ -2490,10 +2446,7 @@ impl<'a> IssuesView<'a> {
         let (author, body) = if self.conversation_selected == 0 {
             (detail.author.clone(), detail.body.clone())
         } else {
-            let Some(entry) = detail
-                .conversation
-                .get(self.conversation_selected - 1)
-            else {
+            let Some(entry) = detail.conversation.get(self.conversation_selected - 1) else {
                 return;
             };
             (entry.author.clone(), entry.body.clone())
@@ -2703,10 +2656,7 @@ impl<'a> IssuesView<'a> {
                 }
             };
             let (title, currently): (String, Vec<String>) = match detail {
-                Some(d) => (
-                    d.title,
-                    d.labels.iter().map(|l| l.name.clone()).collect(),
-                ),
+                Some(d) => (d.title, d.labels.iter().map(|l| l.name.clone()).collect()),
                 None => (String::new(), Vec::new()),
             };
             tx.send(AppEvent::OpenIssueLabelsPicker {
@@ -2756,25 +2706,21 @@ impl<'a> IssuesView<'a> {
         let coords = self.coords.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let all_milestones =
-                match crate::github::issue::list_repo_milestones(&token, &coords) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        tx.send(AppEvent::NotifyError(format!("Milestones: {}", e)));
-                        return;
-                    }
-                };
+            let all_milestones = match crate::github::issue::list_repo_milestones(&token, &coords) {
+                Ok(v) => v,
+                Err(e) => {
+                    tx.send(AppEvent::NotifyError(format!("Milestones: {}", e)));
+                    return;
+                }
+            };
             let (title, currently): (String, Option<u64>) = match detail {
                 Some(d) => {
-                    let cur = d
-                        .milestone
-                        .as_ref()
-                        .and_then(|m_title| {
-                            all_milestones
-                                .iter()
-                                .find(|m| &m.title == m_title)
-                                .map(|m| m.number)
-                        });
+                    let cur = d.milestone.as_ref().and_then(|m_title| {
+                        all_milestones
+                            .iter()
+                            .find(|m| &m.title == m_title)
+                            .map(|m| m.number)
+                    });
                     (d.title, cur)
                 }
                 None => (String::new(), None),
@@ -2806,8 +2752,7 @@ impl<'a> IssuesView<'a> {
         let (orig_author, source_body) = if self.conversation_selected == 0 {
             (detail.author.clone(), detail.body.clone())
         } else {
-            let Some(entry) = detail.conversation.get(self.conversation_selected - 1)
-            else {
+            let Some(entry) = detail.conversation.get(self.conversation_selected - 1) else {
                 return;
             };
             (entry.author.clone(), entry.body.clone())
@@ -2836,8 +2781,7 @@ impl<'a> IssuesView<'a> {
         // assignees / milestone are ready without an extra wait.
         let token = self.token.clone();
         let coords = self.coords.clone();
-        let labels =
-            crate::github::issue::list_repo_labels(&token, &coords).unwrap_or_default();
+        let labels = crate::github::issue::list_repo_labels(&token, &coords).unwrap_or_default();
         let assignees =
             crate::github::issue::list_repo_assignees(&token, &coords).unwrap_or_default();
         let milestones =
@@ -3036,9 +2980,7 @@ impl<'a> IssuesView<'a> {
         // Conversation tab. Resolve the screen (col, row) back to a
         // logical (line, col) inside the Paragraph buffer and check
         // if any captured link covers that position.
-        if matches!(self.mode, Mode::Detail)
-            && matches!(self.active_tab, Tab::Conversation)
-        {
+        if matches!(self.mode, Mode::Detail) && matches!(self.active_tab, Tab::Conversation) {
             if let Some(area) = self.tab_content_area {
                 if rect_contains(Some(area), col, row) {
                     let logical_line =
@@ -3064,9 +3006,7 @@ impl<'a> IssuesView<'a> {
         // (or click on already-selected) follows. Matches the way
         // double-clicks would behave on a list widget while still
         // working over a single click for power users.
-        if matches!(self.mode, Mode::Detail)
-            && matches!(self.active_tab, Tab::References)
-        {
+        if matches!(self.mode, Mode::Detail) && matches!(self.active_tab, Tab::References) {
             let hit = self
                 .references_row_rects
                 .iter()
@@ -3201,9 +3141,7 @@ impl<'a> IssuesView<'a> {
         }
         // Detail mode + References tab: hover updates the selected
         // row so the user can navigate by mouse without clicking.
-        if matches!(self.mode, Mode::Detail)
-            && matches!(self.active_tab, Tab::References)
-        {
+        if matches!(self.mode, Mode::Detail) && matches!(self.active_tab, Tab::References) {
             if let Some(i) = self
                 .references_row_rects
                 .iter()
@@ -3216,13 +3154,10 @@ impl<'a> IssuesView<'a> {
         // bumps the selection to that card, matching PR's UX.
         // Hovering deliberately does NOT auto-scroll — the user
         // expects mouse hover to leave the viewport alone.
-        if matches!(self.mode, Mode::Detail)
-            && matches!(self.active_tab, Tab::Conversation)
-        {
+        if matches!(self.mode, Mode::Detail) && matches!(self.active_tab, Tab::Conversation) {
             if let Some(area) = self.tab_content_area {
                 if rect_contains(Some(area), col, row) {
-                    let logical = (row.saturating_sub(area.y) as usize)
-                        + self.conversation_scroll;
+                    let logical = (row.saturating_sub(area.y) as usize) + self.conversation_scroll;
                     for &(idx, first, last) in &self.conversation_comment_spans {
                         if logical >= first && logical <= last {
                             self.conversation_selected = idx;
@@ -3284,14 +3219,10 @@ impl<'a> IssuesView<'a> {
         if !self.detail_cache.contains_key(&number) && self.loading_for != Some(number) {
             self.spawn_detail_fetch(number);
         }
-        if !self.timeline_cache.contains_key(&number)
-            && self.loading_timeline_for != Some(number)
-        {
+        if !self.timeline_cache.contains_key(&number) && self.loading_timeline_for != Some(number) {
             self.spawn_timeline_fetch(number);
         }
-        if !self.linked_cache.contains_key(&number)
-            && self.loading_linked_for != Some(number)
-        {
+        if !self.linked_cache.contains_key(&number) && self.loading_linked_for != Some(number) {
             self.spawn_linked_fetch(number);
         }
         self.spawn_mention_prs_fetch();
@@ -3371,8 +3302,11 @@ impl<'a> IssuesView<'a> {
         // (title + divider), optional 3-row error banner, then the
         // body — which is either the bordered list panel or the
         // detail layout.
-        let banner_height: u16 =
-            if self.last_error.is_some() && area.height > 6 { 3 } else { 0 };
+        let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
+            3
+        } else {
+            0
+        };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -3535,10 +3469,7 @@ impl<'a> IssuesView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
-        f.render_widget(
-            Paragraph::new(vec![Line::from(left), divider]),
-            area,
-        );
+        f.render_widget(Paragraph::new(vec![Line::from(left), divider]), area);
     }
 
     fn render_error_banner(&self, f: &mut Frame, area: Rect) {
@@ -3568,10 +3499,7 @@ impl<'a> IssuesView<'a> {
     /// the Issues list panel — strict mirror of PR's
     /// `build_filter_title`. Returns styled spans + per-tab screen
     /// rects for click hit-testing.
-    fn build_filter_title(
-        &self,
-        area: Rect,
-    ) -> (Vec<Span<'static>>, Vec<(IssueListFilter, Rect)>) {
+    fn build_filter_title(&self, area: Rect) -> (Vec<Span<'static>>, Vec<(IssueListFilter, Rect)>) {
         let theme = &self.ctx.color_theme;
         let filters = [
             IssueListFilter::Open,
@@ -3580,12 +3508,7 @@ impl<'a> IssuesView<'a> {
         ];
         let counts: Vec<usize> = filters
             .iter()
-            .map(|f| {
-                self.items
-                    .iter()
-                    .filter(|i| f.matches(i.state))
-                    .count()
-            })
+            .map(|f| self.items.iter().filter(|i| f.matches(i.state)).count())
             .collect();
         const TAB_GAP: u16 = 3;
         let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
@@ -3645,10 +3568,7 @@ impl<'a> IssuesView<'a> {
         let theme = &self.ctx.color_theme;
 
         let filtered_indices = self.filtered_indices();
-        let filtered: Vec<&Issue> = filtered_indices
-            .iter()
-            .map(|i| &self.items[*i])
-            .collect();
+        let filtered: Vec<&Issue> = filtered_indices.iter().map(|i| &self.items[*i]).collect();
 
         if filtered.is_empty() {
             self.list_scroll_offset = 0;
@@ -3717,8 +3637,7 @@ impl<'a> IssuesView<'a> {
         *state.offset_mut() = self.list_scroll_offset;
         // No widget-level highlight — `format_issue_row` paints the
         // selection bg per-span so label chips keep their colours.
-        let list = List::new(items)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD));
         f.render_stateful_widget(list, body_area, &mut state);
 
         // Push issue-list avatar intents into the per-frame
@@ -3833,12 +3752,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    fn render_issue_sub_header(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        detail: Option<&IssueDetail>,
-    ) {
+    fn render_issue_sub_header(&mut self, f: &mut Frame, area: Rect, detail: Option<&IssueDetail>) {
         let theme = &self.ctx.color_theme;
         let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut spans: Vec<Span<'static>> = Vec::new();
@@ -3871,7 +3785,10 @@ impl<'a> IssuesView<'a> {
                     0
                 } else {
                     "  ·  assigned: ".len()
-                        + d.assignees.iter().map(|a| a.chars().count() + pad).sum::<usize>()
+                        + d.assignees
+                            .iter()
+                            .map(|a| a.chars().count() + pad)
+                            .sum::<usize>()
                         + (d.assignees.len().saturating_sub(1)) * 2
                 }
                 + d.milestone
@@ -3883,9 +3800,7 @@ impl<'a> IssuesView<'a> {
                 .map(|s| s.content.chars().count())
                 .sum::<usize>();
             let avail = area.width as usize;
-            let title_budget = avail
-                .saturating_sub(fixed + meta_estimate + 4)
-                .max(10);
+            let title_budget = avail.saturating_sub(fixed + meta_estimate + 4).max(10);
             spans.push(Span::styled(
                 fit_cell(&d.title, title_budget),
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
@@ -3895,10 +3810,7 @@ impl<'a> IssuesView<'a> {
             let dim = Style::default().fg(theme.detail_label_fg);
             spans.push(Span::styled("opened by ".to_string(), dim));
             if avatars_on {
-                let author_col: u16 = spans
-                    .iter()
-                    .map(|s| s.content.chars().count() as u16)
-                    .sum();
+                let author_col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
                 spans.push(Span::raw("   "));
                 avatar_paints.push((d.author.clone(), author_col));
             }
@@ -3921,10 +3833,7 @@ impl<'a> IssuesView<'a> {
                         spans.push(Span::styled(", ".to_string(), dim));
                     }
                     if avatars_on {
-                        let col: u16 = spans
-                            .iter()
-                            .map(|s| s.content.chars().count() as u16)
-                            .sum();
+                        let col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
                         spans.push(Span::raw("   "));
                         avatar_paints.push((a.clone(), col));
                     }
@@ -3959,12 +3868,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    fn render_issue_labels_row(
-        &self,
-        f: &mut Frame,
-        area: Rect,
-        detail: Option<&IssueDetail>,
-    ) {
+    fn render_issue_labels_row(&self, f: &mut Frame, area: Rect, detail: Option<&IssueDetail>) {
         let Some(d) = detail else {
             return;
         };
@@ -4048,10 +3952,7 @@ impl<'a> IssuesView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
-        f.render_widget(
-            Paragraph::new(vec![Line::from(spans), divider]),
-            area,
-        );
+        f.render_widget(Paragraph::new(vec![Line::from(spans), divider]), area);
     }
 
     fn render_tab_conversation(&mut self, f: &mut Frame, area: Rect, detail: &IssueDetail) {
@@ -4065,15 +3966,12 @@ impl<'a> IssuesView<'a> {
         self.conversation_avatar_slots.clear();
         let me_login = self.me_login.clone();
 
-        let is_me_top = me_login
-            .as_deref()
-            .map_or(false, |me| me == detail.author);
+        let is_me_top = me_login.as_deref().map_or(false, |me| me == detail.author);
         let idx0_first = lines.len();
         // Pre-compute whether the body has at least one resolvable
         // `#N` ref so we can advertise the `↵:open ref` shortcut on the
         // selected card.
-        let issue_set: rustc_hash::FxHashSet<u64> =
-            self.items.iter().map(|i| i.number).collect();
+        let issue_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|i| i.number).collect();
         let pr_set: rustc_hash::FxHashSet<u64> =
             self.mention_pr_cache.iter().map(|p| p.number).collect();
         let body_has_ref = extract_hash_refs(&detail.body)
@@ -4138,9 +4036,7 @@ impl<'a> IssuesView<'a> {
                     lines.push(Line::from(""));
                 }
                 let first = lines.len();
-                let is_me = me_login
-                    .as_deref()
-                    .map_or(false, |me| me == c.author);
+                let is_me = me_login.as_deref().map_or(false, |me| me == c.author);
                 let selected = self.conversation_selected == idx;
                 let mut shortcuts: Vec<&'static str> = Vec::new();
                 if selected {
@@ -4150,8 +4046,7 @@ impl<'a> IssuesView<'a> {
                     shortcuts.push("R:quote reply");
                     shortcuts.push("+:react");
                     let has_ref = extract_hash_refs(&c.body).into_iter().any(|n| {
-                        n != detail.number
-                            && (issue_set.contains(&n) || pr_set.contains(&n))
+                        n != detail.number && (issue_set.contains(&n) || pr_set.contains(&n))
                     });
                     if has_ref {
                         shortcuts.push("↵:open ref");
@@ -4176,11 +4071,7 @@ impl<'a> IssuesView<'a> {
                         is_me,
                         inline_shortcuts: shortcuts,
                         reactions: c.reactions.clone(),
-                        avatar_login: if avatars_on {
-                            Some(&c.author)
-                        } else {
-                            None
-                        },
+                        avatar_login: if avatars_on { Some(&c.author) } else { None },
                     },
                 );
                 if let Some(col) = layout.avatar_slot {
@@ -4208,8 +4099,7 @@ impl<'a> IssuesView<'a> {
         // resolve to a known issue or PR in our local caches and
         // also capture the click hit-boxes — GitHub web renders
         // these as underlined hyperlinks.
-        let issue_set: rustc_hash::FxHashSet<u64> =
-            self.items.iter().map(|i| i.number).collect();
+        let issue_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|i| i.number).collect();
         let pr_set: rustc_hash::FxHashSet<u64> =
             self.mention_pr_cache.iter().map(|p| p.number).collect();
         let issue_fg: Color = self.ctx.color_theme.status_success_fg;
@@ -4332,8 +4222,7 @@ impl<'a> IssuesView<'a> {
     /// Deduplicated by (number, is_pr). Returned in a stable order:
     /// references first sorted by number descending.
     fn collect_references(&self, number: u64) -> Vec<ReferenceRow> {
-        let mut seen: rustc_hash::FxHashSet<(u64, bool)> =
-            rustc_hash::FxHashSet::default();
+        let mut seen: rustc_hash::FxHashSet<(u64, bool)> = rustc_hash::FxHashSet::default();
         let mut out: Vec<ReferenceRow> = Vec::new();
 
         // Forward refs: parse the issue body + every comment for
@@ -4398,8 +4287,7 @@ impl<'a> IssuesView<'a> {
                     if *n == number {
                         continue;
                     }
-                    let is_pr =
-                        self.mention_pr_cache.iter().any(|p| p.number == *n);
+                    let is_pr = self.mention_pr_cache.iter().any(|p| p.number == *n);
                     if seen.insert((*n, is_pr)) {
                         let state_label = if is_pr {
                             self.mention_pr_cache
@@ -4469,7 +4357,11 @@ impl<'a> IssuesView<'a> {
         }
         self.references_count = refs.len();
 
-        let max_num_w = refs.iter().map(|r| digits_count(r.number)).max().unwrap_or(1);
+        let max_num_w = refs
+            .iter()
+            .map(|r| digits_count(r.number))
+            .max()
+            .unwrap_or(1);
         let mut lines: Vec<Line<'static>> = Vec::new();
         let mut row_rects: Vec<Rect> = Vec::new();
         for (i, r) in refs.iter().enumerate() {
@@ -4522,15 +4414,20 @@ impl<'a> IssuesView<'a> {
                 ),
                 Span::raw("  "),
             ];
-            let fixed = spans.iter().map(|s| s.content.chars().count()).sum::<usize>()
+            let fixed = spans
+                .iter()
+                .map(|s| s.content.chars().count())
+                .sum::<usize>()
                 + dir_tooltip.chars().count()
                 + 4;
             let title_budget = (area.width as usize).saturating_sub(fixed).max(10);
             spans.push(Span::styled(
                 fit_cell(&r.title, title_budget),
-                Style::default()
-                    .fg(theme.fg)
-                    .add_modifier(if is_sel { Modifier::BOLD } else { Modifier::empty() }),
+                Style::default().fg(theme.fg).add_modifier(if is_sel {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
             ));
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
@@ -4666,8 +4563,7 @@ impl<'a> IssuesView<'a> {
             };
             picker.target_idx
         };
-        let mine: Vec<crate::github::pr::ReactionKind> =
-            self.viewer_reactions_for(target_idx);
+        let mine: Vec<crate::github::pr::ReactionKind> = self.viewer_reactions_for(target_idx);
         let theme = &self.ctx.color_theme;
         let kinds = crate::github::pr::ReactionKind::all();
         // Pick the worst-case visible width across all eight emoji
@@ -4787,8 +4683,8 @@ impl<'a> IssuesView<'a> {
         const MAX_VISIBLE: u16 = 8;
         let rows = (popup.filtered.len() as u16).min(MAX_VISIBLE);
         let height = rows + 2; // borders
-        // Width budget: 4 cells for the kind + " #N  " + truncated
-        // title. Cap at 60 to keep the popup compact.
+                               // Width budget: 4 cells for the kind + " #N  " + truncated
+                               // title. Cap at 60 to keep the popup compact.
         let max_title_w: u16 = popup
             .filtered
             .iter()
@@ -4801,25 +4697,23 @@ impl<'a> IssuesView<'a> {
             .map(|m| (m.number.to_string().chars().count() + 1) as u16)
             .max()
             .unwrap_or(3);
-        let want_width =
-            2 + 5 /*[ISS]/[PR ]*/ + 1 + widest_num + 2 + max_title_w + 2 + 2;
+        let want_width = 2 + 5 /*[ISS]/[PR ]*/ + 1 + widest_num + 2 + max_title_w + 2 + 2;
         let width = want_width.min(60).min(area.width.saturating_sub(2));
         // Anchor near the editor. Without a precise cursor rect
         // exposed here, place the popup centered horizontally over
         // the editor area but vertically above the editor body so
         // the user can still see what they're typing.
         let editor_rect = self.editor_body_area.unwrap_or(area);
-        let x = editor_rect.x.saturating_add(2).min(
-            area.x + area.width.saturating_sub(width),
-        );
+        let x = editor_rect
+            .x
+            .saturating_add(2)
+            .min(area.x + area.width.saturating_sub(width));
         // Prefer ABOVE the editor — `editor_rect.y` minus our
         // height. Fall back to BELOW if there's no room above.
         let y = if editor_rect.y >= height {
             editor_rect.y - height
         } else {
-            (editor_rect.y + editor_rect.height).min(
-                area.y + area.height.saturating_sub(height),
-            )
+            (editor_rect.y + editor_rect.height).min(area.y + area.height.saturating_sub(height))
         };
         let rect = Rect::new(x, y, width, height);
         f.render_widget(ratatui::widgets::Clear, rect);
@@ -4848,12 +4742,7 @@ impl<'a> IssuesView<'a> {
             .take(visible)
             .enumerate()
         {
-            let row_rect = Rect::new(
-                inner.x,
-                inner.y + visible_idx as u16,
-                inner.width,
-                1,
-            );
+            let row_rect = Rect::new(inner.x, inner.y + visible_idx as u16, inner.width, 1);
             // Stored at logical index `i` so the click handler can
             // still map a clicked rect to the underlying item even
             // when scrolled. We pad earlier rects with zero-size to
@@ -4879,18 +4768,15 @@ impl<'a> IssuesView<'a> {
             let title_budget = (inner.width as usize).saturating_sub(used + 2).max(4);
             let title = fit_cell(&item.title, title_budget);
             let spans = vec![
-                Span::styled(
-                    " ",
-                    Style::default().bg(bg),
-                ),
+                Span::styled(" ", Style::default().bg(bg)),
                 Span::styled(
                     kind_label.to_string(),
-                    Style::default().fg(kind_fg).bg(bg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(kind_fg)
+                        .bg(bg)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    " ",
-                    Style::default().bg(bg),
-                ),
+                Span::styled(" ", Style::default().bg(bg)),
                 Span::styled(
                     num,
                     Style::default()
@@ -4898,14 +4784,8 @@ impl<'a> IssuesView<'a> {
                         .bg(bg)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    "  ".to_string(),
-                    Style::default().bg(bg),
-                ),
-                Span::styled(
-                    title,
-                    Style::default().fg(theme.fg).bg(bg),
-                ),
+                Span::styled("  ".to_string(), Style::default().bg(bg)),
+                Span::styled(title, Style::default().fg(theme.fg).bg(bg)),
             ];
             f.render_widget(
                 Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
@@ -5008,23 +4888,27 @@ impl<'a> IssuesView<'a> {
 
         // Generic single-row Label:value render. Used for Title,
         // Labels, Assignees, Milestone. Returns (rect, value_start_x).
-        let render_row =
-            |f: &mut Frame, y: u16, focused: bool, label: &'static str, value: Vec<Span<'static>>| -> (Rect, u16) {
-                let rect = Rect::new(inner.x, y, inner.width, 1);
-                let value_x = inner.x + INDENT + 2 + LABEL_WIDTH + 1;
-                let mut spans = vec![
-                    Span::raw(" ".repeat(INDENT as usize)),
-                    focus_indicator(focused),
-                    Span::styled(
-                        format!("{:<w$}", label, w = LABEL_WIDTH as usize),
-                        label_style,
-                    ),
-                    Span::raw(" "),
-                ];
-                spans.extend(value);
-                f.render_widget(Paragraph::new(Line::from(spans)), rect);
-                (rect, value_x)
-            };
+        let render_row = |f: &mut Frame,
+                          y: u16,
+                          focused: bool,
+                          label: &'static str,
+                          value: Vec<Span<'static>>|
+         -> (Rect, u16) {
+            let rect = Rect::new(inner.x, y, inner.width, 1);
+            let value_x = inner.x + INDENT + 2 + LABEL_WIDTH + 1;
+            let mut spans = vec![
+                Span::raw(" ".repeat(INDENT as usize)),
+                focus_indicator(focused),
+                Span::styled(
+                    format!("{:<w$}", label, w = LABEL_WIDTH as usize),
+                    label_style,
+                ),
+                Span::raw(" "),
+            ];
+            spans.extend(value);
+            f.render_widget(Paragraph::new(Line::from(spans)), rect);
+            (rect, value_x)
+        };
 
         let mut y = inner.y;
 
@@ -5041,17 +4925,14 @@ impl<'a> IssuesView<'a> {
                 Style::default().fg(theme.fg),
             )]
         };
-        let (title_rect, title_value_x) =
-            render_row(f, y, title_focused, "Title:", title_value);
+        let (title_rect, title_value_x) = render_row(f, y, title_focused, "Title:", title_value);
         self.compose_field_rects
             .push((ComposeField::Title, title_rect));
         // Underline under the typed text when focused — same trick
         // PR uses for its title input.
         if title_focused {
             let underline_y = (title_rect.y + 1).min(inner.y + inner.height - 1);
-            let underline_w = inner
-                .width
-                .saturating_sub(INDENT + 2 + LABEL_WIDTH + 1 + 2);
+            let underline_w = inner.width.saturating_sub(INDENT + 2 + LABEL_WIDTH + 1 + 2);
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     "─".repeat(underline_w as usize),
@@ -5127,8 +5008,7 @@ impl<'a> IssuesView<'a> {
                     a.clone(),
                     Style::default().fg(theme.list_name_fg),
                 ));
-                col_in_value =
-                    col_in_value.saturating_add(a.chars().count() as u16);
+                col_in_value = col_in_value.saturating_add(a.chars().count() as u16);
             }
             spans
         };
@@ -5155,15 +5035,8 @@ impl<'a> IssuesView<'a> {
         // ── Milestone row — single selected value or "(none)".
         let milestone_focused = matches!(state.field, ComposeField::Milestone);
         let milestone_value: Vec<Span<'static>> = match state.milestone {
-            Some(n) => match state
-                .available_milestones
-                .iter()
-                .find(|m| m.number == n)
-            {
-                Some(m) => vec![Span::styled(
-                    m.title.clone(),
-                    Style::default().fg(theme.fg),
-                )],
+            Some(n) => match state.available_milestones.iter().find(|m| m.number == n) {
+                Some(m) => vec![Span::styled(m.title.clone(), Style::default().fg(theme.fg))],
                 None => vec![Span::styled(
                     format!("#{}", n),
                     Style::default().fg(theme.detail_label_fg),
@@ -5278,9 +5151,7 @@ impl<'a> IssuesView<'a> {
                 // cursor visually jump to row 0 of the body whenever
                 // we scroll past it, which the user perceives as
                 // "the scroll moved my cursor".
-                if cursor_row >= scroll
-                    && cursor_row < scroll + body_inner.height
-                {
+                if cursor_row >= scroll && cursor_row < scroll + body_inner.height {
                     let cx = body_inner.x + cursor_col;
                     let cy = body_inner.y + (cursor_row - scroll);
                     if cx < body_inner.x + body_inner.width {
@@ -5350,8 +5221,7 @@ pub(crate) fn extract_hash_refs(text: &str) -> Vec<u64> {
             let left_ok = i == 0
                 || matches!(
                     bytes[i - 1],
-                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b','
-                        | b'.' | b':' | b';' | b'<' | b'>'
+                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b',' | b'.' | b':' | b';' | b'<' | b'>'
                 );
             if left_ok {
                 let mut j = i + 1;
@@ -5359,8 +5229,7 @@ pub(crate) fn extract_hash_refs(text: &str) -> Vec<u64> {
                     j += 1;
                 }
                 if j > i + 1 {
-                    let right_ok =
-                        j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
+                    let right_ok = j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
                     if right_ok {
                         if let Ok(n) = text[i + 1..j].parse::<u64>() {
                             if seen.insert(n) {
@@ -5400,12 +5269,7 @@ where
     for span in line.spans {
         let span_text = span.content.to_string();
         let mut new_spans = restyle_hash_refs_in_span_collect(
-            &span_text,
-            span.style,
-            resolver,
-            line_idx,
-            col,
-            links,
+            &span_text, span.style, resolver, line_idx, col, links,
         );
         for s in new_spans.drain(..) {
             col = col.saturating_add(s.content.chars().count() as u16);
@@ -5439,8 +5303,7 @@ where
             let left_ok = i == 0
                 || matches!(
                     bytes[i - 1],
-                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b','
-                        | b'.' | b':' | b';' | b'<' | b'>'
+                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b',' | b'.' | b':' | b';' | b'<' | b'>'
                 );
             if left_ok {
                 let mut j = i + 1;
@@ -5448,8 +5311,7 @@ where
                     j += 1;
                 }
                 if j > i + 1 {
-                    let right_ok =
-                        j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
+                    let right_ok = j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
                     if right_ok {
                         if let Ok(n) = text[i + 1..j].parse::<u64>() {
                             if let Some((color, is_pr)) = resolver(n) {
@@ -5457,10 +5319,7 @@ where
                                 if i > chunk_start {
                                     let pre = &text[chunk_start..i];
                                     let pre_chars = pre.chars().count() as u16;
-                                    out.push(Span::styled(
-                                        pre.to_string(),
-                                        original,
-                                    ));
+                                    out.push(Span::styled(pre.to_string(), original));
                                     cur_col = cur_col.saturating_add(pre_chars);
                                 }
                                 // Capture the link rect — col_end is
@@ -5479,9 +5338,7 @@ where
                                     ref_text.to_string(),
                                     Style::default()
                                         .fg(color)
-                                        .add_modifier(
-                                            Modifier::BOLD | Modifier::UNDERLINED,
-                                        ),
+                                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                                 ));
                                 cur_col = cur_col.saturating_add(ref_chars);
                                 chunk_start = j;
@@ -5512,10 +5369,7 @@ where
 /// `restyle_hash_refs_in_span_collect` — no link tracking, no
 /// resolver: it colours every well-formed `#N` because the editor
 /// can't know yet if the reference will resolve.
-pub(crate) fn filter_mention_items_pub(
-    query: &str,
-    all: &[MentionItem],
-) -> Vec<MentionItem> {
+pub(crate) fn filter_mention_items_pub(query: &str, all: &[MentionItem]) -> Vec<MentionItem> {
     const MAX_ITEMS: usize = 10;
     if query.is_empty() {
         let mut issues: Vec<MentionItem> = all
@@ -5622,8 +5476,7 @@ pub(crate) fn paint_mention_popup(
     let y = if editor_rect.y >= height {
         editor_rect.y - height
     } else {
-        (editor_rect.y + editor_rect.height)
-            .min(area.y + area.height.saturating_sub(height))
+        (editor_rect.y + editor_rect.height).min(area.y + area.height.saturating_sub(height))
     };
     let rect = Rect::new(x, y, width, height);
     // Clear ONE extra column to the left of the popup before
@@ -5672,7 +5525,11 @@ pub(crate) fn paint_mention_popup(
             MentionKind::Issue => ("ISS", theme.status_success_fg),
             MentionKind::Pr => ("PR ", theme.list_hash_fg),
         };
-        let bg = if is_hovered { theme.list_selected_bg } else { theme.bg };
+        let bg = if is_hovered {
+            theme.list_selected_bg
+        } else {
+            theme.bg
+        };
         let num = format!("#{}", item.number);
         let used = 1 + 3 + 1 + num.chars().count() + 2;
         let title_budget = (inner.width as usize).saturating_sub(used + 2).max(4);
@@ -5681,7 +5538,10 @@ pub(crate) fn paint_mention_popup(
             Span::styled(" ", Style::default().bg(bg)),
             Span::styled(
                 kind_label.to_string(),
-                Style::default().fg(kind_fg).bg(bg).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(kind_fg)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" ", Style::default().bg(bg)),
             Span::styled(
@@ -5718,8 +5578,7 @@ pub(crate) fn editor_line_with_mentions(
             let left_ok = i == 0
                 || matches!(
                     bytes[i - 1],
-                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b','
-                        | b'.' | b':' | b';' | b'<' | b'>'
+                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b',' | b'.' | b':' | b';' | b'<' | b'>'
                 );
             if left_ok {
                 let mut j = i + 1;
@@ -5727,14 +5586,10 @@ pub(crate) fn editor_line_with_mentions(
                     j += 1;
                 }
                 if j > i + 1 {
-                    let right_ok =
-                        j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
+                    let right_ok = j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
                     if right_ok {
                         if i > chunk_start {
-                            spans.push(Span::styled(
-                                text[chunk_start..i].to_string(),
-                                base,
-                            ));
+                            spans.push(Span::styled(text[chunk_start..i].to_string(), base));
                         }
                         spans.push(Span::styled(
                             text[i..j].to_string(),
@@ -5830,7 +5685,13 @@ impl IssueListColumns {
             + COMMENTS_COL;
         let remaining = available_width.saturating_sub(fixed);
         let title = remaining.min(max_title.max(1)).max(1);
-        Self { state, number, title, labels, author }
+        Self {
+            state,
+            number,
+            title,
+            labels,
+            author,
+        }
     }
 }
 
@@ -5855,7 +5716,9 @@ fn format_issue_row(
     };
     let state_span = Span::styled(
         fit_cell(state_text, cols.state),
-        Style::default().fg(state_color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(state_color)
+            .add_modifier(Modifier::BOLD),
     );
     let marker = if is_selected {
         Span::styled(
@@ -5899,10 +5762,7 @@ fn format_issue_row(
     // the caller to paint the avatar after the List renders.
     row.push(Span::raw("  "));
     let avatar_col: Option<u16> = if avatars_on {
-        let pos: u16 = row
-            .iter()
-            .map(|s| s.content.chars().count() as u16)
-            .sum();
+        let pos: u16 = row.iter().map(|s| s.content.chars().count() as u16).sum();
         row.push(Span::raw("   "));
         Some(pos)
     } else {
@@ -5928,10 +5788,7 @@ fn format_issue_row(
                 span.style = span.style.bg(sel_bg);
             }
         }
-        let content_width: usize = row
-            .iter()
-            .map(|s| s.content.chars().count())
-            .sum();
+        let content_width: usize = row.iter().map(|s| s.content.chars().count()).sum();
         if content_width < row_width {
             row.push(Span::styled(
                 " ".repeat(row_width - content_width),
@@ -5999,9 +5856,7 @@ fn timeline_event_line(
     let actor = ev.actor.clone().unwrap_or_else(|| "?".into());
     let mut spans: Vec<Span<'static>> = Vec::new();
     let (icon, fg) = match &ev.kind {
-        TimelineKind::Labeled { .. } | TimelineKind::Unlabeled { .. } => {
-            ("🏷", theme.list_head_fg)
-        }
+        TimelineKind::Labeled { .. } | TimelineKind::Unlabeled { .. } => ("🏷", theme.list_head_fg),
         TimelineKind::Assigned { .. } | TimelineKind::Unassigned { .. } => {
             ("👤", theme.list_name_fg)
         }
@@ -6098,7 +5953,9 @@ fn timeline_event_line(
         TimelineKind::Reopened => "reopened this issue".to_string(),
         TimelineKind::Renamed { from, to } => format!("renamed '{}' → '{}'", from, to),
         TimelineKind::CrossReferenced {
-            issue_number, title, ..
+            issue_number,
+            title,
+            ..
         } => match (issue_number, title) {
             (Some(n), Some(t)) => format!("cross-referenced #{} ({})", n, t),
             (Some(n), None) => format!("cross-referenced #{}", n),

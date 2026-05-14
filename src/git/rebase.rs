@@ -282,11 +282,9 @@ pub fn squash_with_parent(repo: &Path, target_hash: &str) -> Result<RebaseOutcom
     let grandparent = match rev_parse(repo, &format!("{}^^", target_hash)) {
         Ok(h) => h,
         Err(_) => {
-            return Err(
-                "Cannot squash into the root commit yet — \
+            return Err("Cannot squash into the root commit yet — \
                  use the interactive rebase editor for this case."
-                    .into(),
-            );
+                .into());
         }
     };
     let mut items = load_rebase_items(repo, &grandparent)?;
@@ -488,8 +486,7 @@ pub fn apply_rebase(
 
     // 1. Todo file
     let todo_path = scratch.join("todo");
-    std::fs::write(&todo_path, serialise_todo(items))
-        .map_err(|e| format!("write todo: {}", e))?;
+    std::fs::write(&todo_path, serialise_todo(items)).map_err(|e| format!("write todo: {}", e))?;
 
     // 2. Index reword messages by their position among "prompting" actions.
     //
@@ -506,11 +503,8 @@ pub fn apply_rebase(
             RebaseAction::Reword => {
                 prompt_idx += 1;
                 if let Some(msg) = &it.new_message {
-                    std::fs::write(
-                        scratch.join(format!("prompt_{}.txt", prompt_idx)),
-                        msg,
-                    )
-                    .map_err(|e| format!("write reword msg: {}", e))?;
+                    std::fs::write(scratch.join(format!("prompt_{}.txt", prompt_idx)), msg)
+                        .map_err(|e| format!("write reword msg: {}", e))?;
                 }
             }
             RebaseAction::Squash => {

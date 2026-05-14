@@ -367,7 +367,12 @@ theirs text
         assert_eq!(theirs(h), vec!["theirs text"]);
         assert!(h.base.is_some());
         assert_eq!(
-            h.base.as_ref().unwrap().iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            h.base
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
             vec!["base text"]
         );
     }

@@ -738,11 +738,7 @@ impl<'a> PullRequestsView<'a> {
 
     /// Receive a background fetch result and update the cache. The view's
     /// next render picks up the new data automatically.
-    pub fn on_detail_fetched(
-        &mut self,
-        number: u64,
-        result: Result<PullRequestDetail, String>,
-    ) {
+    pub fn on_detail_fetched(&mut self, number: u64, result: Result<PullRequestDetail, String>) {
         if self.loading_for == Some(number) {
             self.loading_for = None;
         }
@@ -757,9 +753,7 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
-    pub fn take_list_state(
-        &mut self,
-    ) -> Option<crate::widget::commit_list::CommitListState<'a>> {
+    pub fn take_list_state(&mut self) -> Option<crate::widget::commit_list::CommitListState<'a>> {
         self.commit_list_state.take()
     }
 
@@ -1107,11 +1101,7 @@ impl<'a> PullRequestsView<'a> {
     pub fn footer_hint(&self) -> String {
         // When the inline editor is open, the footer is owned by it.
         if self.comment_editor.is_some() {
-            let parts = if self
-                .comment_editor
-                .as_ref()
-                .map_or(false, |e| e.submitting)
-            {
+            let parts = if self.comment_editor.as_ref().map_or(false, |e| e.submitting) {
                 vec!["Sending…", "Esc:cancel"]
             } else {
                 vec!["Ctrl+S:send", "Esc:cancel"]
@@ -1127,18 +1117,12 @@ impl<'a> PullRequestsView<'a> {
         // cancel. The branch picker, when open, narrows it further
         // to just nav + select + cancel.
         if matches!(self.mode, Mode::Compose) {
-            let submitting = self
-                .compose
-                .as_ref()
-                .map_or(false, |c| c.submitting);
+            let submitting = self.compose.as_ref().map_or(false, |c| c.submitting);
             if submitting {
                 return format!("⌘ {}", ["Submitting…", "Esc:cancel"].join("▕▏"));
             }
             if self.branch_picker.is_some() {
-                return format!(
-                    "⌘ {}",
-                    ["↑↓:select", "Enter:pick", "Esc:close"].join("▕▏")
-                );
+                return format!("⌘ {}", ["↑↓:select", "Enter:pick", "Esc:close"].join("▕▏"));
             }
             return format!(
                 "⌘ {}",
@@ -1151,9 +1135,7 @@ impl<'a> PullRequestsView<'a> {
             Mode::Detail => {
                 // Inside a drill-down the footer collapses to just
                 // Esc — every other shortcut belongs to the list view.
-                if self.files_drilldown.is_some()
-                    || self.commits_drilldown.is_some()
-                {
+                if self.files_drilldown.is_some() || self.commits_drilldown.is_some() {
                     return format!("⌘ {}", "Esc:back");
                 }
                 // Hold the footer until the PR detail has fully
@@ -1249,9 +1231,7 @@ impl<'a> PullRequestsView<'a> {
         let coords = self.coords.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = crate::github::pr::fetch_pull_request_detail(
-                &token, &coords, number,
-            );
+            let result = crate::github::pr::fetch_pull_request_detail(&token, &coords, number);
             tx.send(AppEvent::PullRequestDetailFetched { number, result });
         });
     }
@@ -1267,8 +1247,8 @@ impl<'a> PullRequestsView<'a> {
                 self.items = items;
                 // Keep the opened PR by NUMBER — survives filter changes
                 // and list re-orders. If the PR no longer exists, clear.
-                self.opened_pr_number = prev_number
-                    .filter(|n| self.items.iter().any(|p| p.number == *n));
+                self.opened_pr_number =
+                    prev_number.filter(|n| self.items.iter().any(|p| p.number == *n));
                 self.clamp_hovered();
                 self.detail_cache.clear();
                 self.loading_for = None;
@@ -1349,11 +1329,7 @@ impl<'a> PullRequestsView<'a> {
         let _ = KeyModifiers::NONE;
     }
 
-    fn handle_event_list(
-        &mut self,
-        event_with_count: UserEventWithCount,
-        key: KeyEvent,
-    ) {
+    fn handle_event_list(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
         // `n` opens the compose-new-PR view — keep it before the
         // UserEvent dispatch since `n` doesn't map to any standard
@@ -1392,22 +1368,14 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
-    fn handle_event_detail(
-        &mut self,
-        event_with_count: UserEventWithCount,
-        key: KeyEvent,
-    ) {
+    fn handle_event_detail(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
         // ── Inline comment editor takes all input until Ctrl+Enter / Esc.
         if self.comment_editor.is_some() {
             // While a submission is in flight, only Esc cancels — every
             // other key is swallowed.
-            if self
-                .comment_editor
-                .as_ref()
-                .map_or(false, |e| e.submitting)
-            {
+            if self.comment_editor.as_ref().map_or(false, |e| e.submitting) {
                 if matches!(key.code, KeyCode::Esc) {
                     self.comment_editor = None;
                 }
@@ -1656,8 +1624,7 @@ impl<'a> PullRequestsView<'a> {
             UserEvent::Confirm => self.enter_drilldown(),
             // Left/Right move between tabs (in addition to 1-4 hotkeys).
             UserEvent::NavigateLeft => {
-                let prev =
-                    (self.active_tab.index() + Tab::all().len() - 1) % Tab::all().len();
+                let prev = (self.active_tab.index() + Tab::all().len() - 1) % Tab::all().len();
                 if let Some(t) = Tab::from_index(prev) {
                     self.active_tab = t;
                 }
@@ -1730,20 +1697,17 @@ impl<'a> PullRequestsView<'a> {
         // While drilled in on a file or commit, ↑↓/PgUp/Dn scroll the
         // diff content directly — there's no row cursor to track.
         if self.active_tab == Tab::Files && self.files_drilldown.is_some() {
-            self.files_drilldown_scroll =
-                adjust_scroll(self.files_drilldown_scroll, delta);
+            self.files_drilldown_scroll = adjust_scroll(self.files_drilldown_scroll, delta);
             return;
         }
         if self.active_tab == Tab::Commits && self.commits_drilldown.is_some() {
-            self.commits_drilldown_scroll =
-                adjust_scroll(self.commits_drilldown_scroll, delta);
+            self.commits_drilldown_scroll = adjust_scroll(self.commits_drilldown_scroll, delta);
             return;
         }
         match self.active_tab {
             Tab::Conversation => {
                 let max = self.conversation_comment_count.saturating_sub(1);
-                self.conversation_selected =
-                    adjust_index(self.conversation_selected, delta, max);
+                self.conversation_selected = adjust_index(self.conversation_selected, delta, max);
                 self.conversation_scroll_to_selected = true;
             }
             Tab::Commits => {
@@ -1766,13 +1730,11 @@ impl<'a> PullRequestsView<'a> {
         // visible window (or scrolls the body for the Conversation tab
         // which has no hovered cursor).
         if self.active_tab == Tab::Files && self.files_drilldown.is_some() {
-            self.files_drilldown_scroll =
-                adjust_scroll(self.files_drilldown_scroll, delta);
+            self.files_drilldown_scroll = adjust_scroll(self.files_drilldown_scroll, delta);
             return;
         }
         if self.active_tab == Tab::Commits && self.commits_drilldown.is_some() {
-            self.commits_drilldown_scroll =
-                adjust_scroll(self.commits_drilldown_scroll, delta);
+            self.commits_drilldown_scroll = adjust_scroll(self.commits_drilldown_scroll, delta);
             return;
         }
         match self.active_tab {
@@ -1810,8 +1772,7 @@ impl<'a> PullRequestsView<'a> {
     fn tab_goto_bottom(&mut self) {
         match self.active_tab {
             Tab::Conversation => {
-                self.conversation_selected =
-                    self.conversation_comment_count.saturating_sub(1);
+                self.conversation_selected = self.conversation_comment_count.saturating_sub(1);
                 self.conversation_scroll_to_selected = true;
             }
             Tab::Commits => self.commits_hovered = self.opened_commits_len().saturating_sub(1),
@@ -1821,10 +1782,14 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn opened_commits_len(&self) -> usize {
-        self.opened_detail().map(|d| d.commit_list.len()).unwrap_or(0)
+        self.opened_detail()
+            .map(|d| d.commit_list.len())
+            .unwrap_or(0)
     }
     fn opened_checks_len(&self) -> usize {
-        self.opened_detail().map(|d| d.check_runs.len()).unwrap_or(0)
+        self.opened_detail()
+            .map(|d| d.check_runs.len())
+            .unwrap_or(0)
     }
     fn opened_files_len(&self) -> usize {
         self.opened_detail().map(|d| d.files.len()).unwrap_or(0)
@@ -1843,7 +1808,13 @@ impl<'a> PullRequestsView<'a> {
         self.items
             .iter()
             .enumerate()
-            .filter_map(|(i, pr)| if self.list_filter.matches(pr) { Some(i) } else { None })
+            .filter_map(|(i, pr)| {
+                if self.list_filter.matches(pr) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
@@ -1951,9 +1922,8 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
         let Some(entry) = self.selected_conversation_entry() else {
-            self.tx.send(AppEvent::NotifyInfo(
-                "Select a comment to reply to.".into(),
-            ));
+            self.tx
+                .send(AppEvent::NotifyInfo("Select a comment to reply to.".into()));
             return;
         };
         // Two flavours:
@@ -2031,9 +2001,9 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
         let kind = match (&entry.kind, entry.id) {
-            (ConversationKind::Comment, Some(id)) => CommentEditorKind::EditIssue {
-                comment_id: id,
-            },
+            (ConversationKind::Comment, Some(id)) => {
+                CommentEditorKind::EditIssue { comment_id: id }
+            }
             (ConversationKind::ReviewComment { .. }, Some(id)) => {
                 CommentEditorKind::EditReview { comment_id: id }
             }
@@ -2118,12 +2088,13 @@ impl<'a> PullRequestsView<'a> {
         if !matches!(detail.state, PullState::Open) {
             return;
         }
-        self.tx
-            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmPullRequestStateChange {
+        self.tx.send(AppEvent::OpenDialog(
+            crate::event::DialogKind::ConfirmPullRequestStateChange {
                 pr_number: detail.number,
                 pr_title: detail.title.clone(),
                 closing: true,
-            }));
+            },
+        ));
     }
 
     fn confirm_reopen_pr(&mut self) {
@@ -2133,12 +2104,13 @@ impl<'a> PullRequestsView<'a> {
         if !matches!(detail.state, PullState::Closed) {
             return;
         }
-        self.tx
-            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmPullRequestStateChange {
+        self.tx.send(AppEvent::OpenDialog(
+            crate::event::DialogKind::ConfirmPullRequestStateChange {
                 pr_number: detail.number,
                 pr_title: detail.title.clone(),
                 closing: false,
-            }));
+            },
+        ));
     }
 
     fn confirm_toggle_draft(&mut self) {
@@ -2149,13 +2121,14 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
         let to_draft = !detail.draft;
-        self.tx
-            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmPullRequestDraftToggle {
+        self.tx.send(AppEvent::OpenDialog(
+            crate::event::DialogKind::ConfirmPullRequestDraftToggle {
                 pr_number: detail.number,
                 pr_title: detail.title.clone(),
                 node_id: detail.node_id.clone(),
                 to_draft,
-            }));
+            },
+        ));
     }
 
     fn start_labels_picker(&mut self) {
@@ -2164,15 +2137,14 @@ impl<'a> PullRequestsView<'a> {
         };
         let pr_number = detail.number;
         let pr_title = detail.title.clone();
-        let currently_on_pr: Vec<String> =
-            detail.labels.iter().map(|l| l.name.clone()).collect();
+        let currently_on_pr: Vec<String> = detail.labels.iter().map(|l| l.name.clone()).collect();
         let token = self.token.clone();
         let coords = self.coords.clone();
         let tx = self.tx.clone();
         // Fetch the repo's full label set in the background — when it
         // returns we re-enter the main loop with the picker open.
-        std::thread::spawn(move || {
-            match crate::github::pr::list_repo_labels(&token, &coords) {
+        std::thread::spawn(
+            move || match crate::github::pr::list_repo_labels(&token, &coords) {
                 Ok(labels) => {
                     tx.send(AppEvent::OpenPrLabelsPicker {
                         pr_number,
@@ -2182,8 +2154,8 @@ impl<'a> PullRequestsView<'a> {
                     });
                 }
                 Err(e) => tx.send(AppEvent::NotifyError(format!("Labels: {}", e))),
-            }
-        });
+            },
+        );
     }
 
     fn start_reviewers_picker(&mut self) {
@@ -2239,8 +2211,7 @@ impl<'a> PullRequestsView<'a> {
         let sha = commit.sha.clone();
         self.commits_drilldown = Some(sha.clone());
         self.commits_drilldown_scroll = 0;
-        if self.commit_detail_cache.contains_key(&sha)
-            || self.commit_detail_loading.contains(&sha)
+        if self.commit_detail_cache.contains_key(&sha) || self.commit_detail_loading.contains(&sha)
         {
             return;
         }
@@ -2292,8 +2263,7 @@ impl<'a> PullRequestsView<'a> {
         // Mirror GitHub web's lookup order — `.github/`, `docs/`, and
         // the repo root — covering the three locations the platform
         // recognises.
-        let body =
-            crate::github::pr::load_pr_template(&repo_path).unwrap_or_default();
+        let body = crate::github::pr::load_pr_template(&repo_path).unwrap_or_default();
         let cursor = body.len();
         self.compose = Some(ComposeState {
             head,
@@ -2326,11 +2296,7 @@ impl<'a> PullRequestsView<'a> {
     /// current `base..head` and feed the result into the preview
     /// pane. Cheap enough to run synchronously on each field edit
     /// for typical PR sizes; spawn it off if it ever feels slow.
-    fn handle_event_compose(
-        &mut self,
-        event_with_count: UserEventWithCount,
-        key: KeyEvent,
-    ) {
+    fn handle_event_compose(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -2354,10 +2320,7 @@ impl<'a> PullRequestsView<'a> {
 
         // Submission spinner: only Esc cancels, everything else
         // is swallowed.
-        let submitting = self
-            .compose
-            .as_ref()
-            .map_or(false, |c| c.submitting);
+        let submitting = self.compose.as_ref().map_or(false, |c| c.submitting);
         if submitting {
             if matches!(key.code, KeyCode::Esc) {
                 self.compose = None;
@@ -2391,8 +2354,9 @@ impl<'a> PullRequestsView<'a> {
                 };
                 if matches!(state.focused, ComposeField::Body) {
                     let going_up = matches!(key.code, KeyCode::Up);
-                    let at_first =
-                        state.body[..state.cursor.min(state.body.len())].find('\n').is_none();
+                    let at_first = state.body[..state.cursor.min(state.body.len())]
+                        .find('\n')
+                        .is_none();
                     let at_last = state.body[state.cursor.min(state.body.len())..]
                         .find('\n')
                         .is_none();
@@ -2475,9 +2439,7 @@ impl<'a> PullRequestsView<'a> {
                 // Capture the `#` position BEFORE insertion so the
                 // popup anchor points at the freshly-written hash.
                 let mention_anchor: Option<usize> = match key.code {
-                    KeyCode::Char('#') if !ctrl => {
-                        self.compose.as_ref().map(|c| c.cursor)
-                    }
+                    KeyCode::Char('#') if !ctrl => self.compose.as_ref().map(|c| c.cursor),
                     _ => None,
                 };
                 {
@@ -2519,10 +2481,7 @@ impl<'a> PullRequestsView<'a> {
                 // intercepted earlier — so wheel scroll stays sticky.
                 self.compose_body_anchor_to_cursor();
                 if let Some(a) = mention_anchor {
-                    self.open_mention_popup(
-                        a,
-                        crate::view::issue::MentionTarget::ComposeBody,
-                    );
+                    self.open_mention_popup(a, crate::view::issue::MentionTarget::ComposeBody);
                 }
             }
         }
@@ -2715,25 +2674,22 @@ impl<'a> PullRequestsView<'a> {
             .as_ref()
             .map(|c| c.labels.iter().map(|l| l.name.clone()).collect())
             .unwrap_or_default();
-        std::thread::spawn(move || {
-            match crate::github::pr::list_repo_labels(&token, &coords) {
+        std::thread::spawn(
+            move || match crate::github::pr::list_repo_labels(&token, &coords) {
                 Ok(labels) => tx.send(AppEvent::OpenComposeLabelsPicker {
                     all_labels: labels,
                     currently_selected: initial,
                 }),
                 Err(e) => tx.send(AppEvent::NotifyError(format!("Labels: {}", e))),
-            }
-        });
+            },
+        );
     }
 
     /// Handler called from the app when the user confirms the
     /// compose-labels picker — stores the chosen subset on the
     /// compose state so the next render shows them, and so the
     /// submit step can apply them after PR creation.
-    pub fn on_compose_labels_picked(
-        &mut self,
-        labels: Vec<crate::github::pr::Label>,
-    ) {
+    pub fn on_compose_labels_picked(&mut self, labels: Vec<crate::github::pr::Label>) {
         if let Some(s) = self.compose.as_mut() {
             s.labels = labels;
         }
@@ -2778,9 +2734,8 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
         if state.title.trim().is_empty() {
-            self.tx.send(AppEvent::NotifyWarn(
-                "Title cannot be empty.".into(),
-            ));
+            self.tx
+                .send(AppEvent::NotifyWarn("Title cannot be empty.".into()));
             return;
         }
         let head = state.head.clone();
@@ -2911,12 +2866,7 @@ impl<'a> PullRequestsView<'a> {
         self.spawn_viewer_reactions_fetch(target_idx, comment_id, is_review);
     }
 
-    fn spawn_viewer_reactions_fetch(
-        &self,
-        target_idx: usize,
-        comment_id: u64,
-        is_review: bool,
-    ) {
+    fn spawn_viewer_reactions_fetch(&self, target_idx: usize, comment_id: u64, is_review: bool) {
         let Some(number) = self.opened_number() else {
             return;
         };
@@ -2932,9 +2882,7 @@ impl<'a> PullRequestsView<'a> {
                     &token, &coords, comment_id, &me,
                 )
             } else {
-                crate::github::pr::list_my_issue_comment_reactions(
-                    &token, &coords, comment_id, &me,
-                )
+                crate::github::pr::list_my_issue_comment_reactions(&token, &coords, comment_id, &me)
             }
             .unwrap_or_default();
             tx.send(AppEvent::PrViewerReactionsFetched {
@@ -2955,10 +2903,7 @@ impl<'a> PullRequestsView<'a> {
             .insert((pr_number, target_idx), reactions);
     }
 
-    fn handle_event_reaction_picker(
-        &mut self,
-        key: ratatui::crossterm::event::KeyEvent,
-    ) {
+    fn handle_event_reaction_picker(&mut self, key: ratatui::crossterm::event::KeyEvent) {
         use ratatui::crossterm::event::KeyCode;
         let Some(picker) = self.reaction_picker.as_mut() else {
             return;
@@ -2993,11 +2938,7 @@ impl<'a> PullRequestsView<'a> {
     /// Fire the reaction POST in a background thread. The PR view's
     /// detail cache is invalidated on success so the next render
     /// re-fetches and surfaces the updated chip row.
-    fn submit_reaction(
-        &mut self,
-        target_idx: usize,
-        kind: crate::github::pr::ReactionKind,
-    ) {
+    fn submit_reaction(&mut self, target_idx: usize, kind: crate::github::pr::ReactionKind) {
         let prev_selected = self.conversation_selected;
         self.conversation_selected = target_idx;
         let entry_data = self.selected_conversation_entry().map(|e| {
@@ -3049,13 +2990,9 @@ impl<'a> PullRequestsView<'a> {
         }
         std::thread::spawn(move || {
             let result = if is_review {
-                crate::github::pr::add_review_comment_reaction(
-                    &token, &coords, comment_id, kind,
-                )
+                crate::github::pr::add_review_comment_reaction(&token, &coords, comment_id, kind)
             } else {
-                crate::github::pr::add_issue_comment_reaction(
-                    &token, &coords, comment_id, kind,
-                )
+                crate::github::pr::add_issue_comment_reaction(&token, &coords, comment_id, kind)
             };
             match result {
                 Ok(reaction_id) => {
@@ -3099,10 +3036,7 @@ impl<'a> PullRequestsView<'a> {
         self.spawn_detail_fetch(pr_number);
     }
 
-    fn viewer_reactions_for(
-        &self,
-        target_idx: usize,
-    ) -> Vec<crate::github::pr::ReactionKind> {
+    fn viewer_reactions_for(&self, target_idx: usize) -> Vec<crate::github::pr::ReactionKind> {
         let Some(number) = self.opened_number() else {
             return Vec::new();
         };
@@ -3193,8 +3127,7 @@ impl<'a> PullRequestsView<'a> {
                 // Both new-comment and quote-reply post to the same
                 // issue-comments endpoint — quote reply is just a
                 // pre-filled body convenience.
-                CommentEditorKind::NewTopLevel
-                | CommentEditorKind::QuoteReply { .. } => {
+                CommentEditorKind::NewTopLevel | CommentEditorKind::QuoteReply { .. } => {
                     crate::github::pr::post_issue_comment(&token, &coords, number, &body)
                 }
                 CommentEditorKind::Reply { parent_id } => {
@@ -3222,15 +3155,13 @@ impl<'a> PullRequestsView<'a> {
                         body_opt,
                     )
                 }
-                CommentEditorKind::RequestChangesReview => {
-                    crate::github::pr::submit_review(
-                        &token,
-                        &coords,
-                        number,
-                        crate::github::pr::ReviewVerdict::RequestChanges,
-                        Some(body.as_str()),
-                    )
-                }
+                CommentEditorKind::RequestChangesReview => crate::github::pr::submit_review(
+                    &token,
+                    &coords,
+                    number,
+                    crate::github::pr::ReviewVerdict::RequestChanges,
+                    Some(body.as_str()),
+                ),
             };
             tx.send(AppEvent::PullRequestActionDone {
                 number,
@@ -3243,12 +3174,7 @@ impl<'a> PullRequestsView<'a> {
     /// Called when a background write action returns. Closes the editor
     /// on success, surfaces the message via toast, and invalidates the
     /// per-PR detail cache so a refresh picks up the new state.
-    pub fn on_action_done(
-        &mut self,
-        number: u64,
-        action: String,
-        result: Result<(), String>,
-    ) {
+    pub fn on_action_done(&mut self, number: u64, action: String, result: Result<(), String>) {
         match result {
             Ok(()) => {
                 self.tx.send(AppEvent::NotifySuccess(action));
@@ -3401,7 +3327,10 @@ impl<'a> PullRequestsView<'a> {
 
     fn editor_cursor_home(&mut self) {
         if let Some(ed) = self.comment_editor.as_mut() {
-            ed.cursor = ed.buffer[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            ed.cursor = ed.buffer[..ed.cursor]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
         }
     }
 
@@ -3593,9 +3522,7 @@ impl<'a> PullRequestsView<'a> {
                 // Inline editor click → reposition the buffer cursor.
                 // Routed first because the editor sits on top of the
                 // conversation pane.
-                if self.comment_editor.is_some()
-                    && rect_contains(self.editor_body_area, col, row)
-                {
+                if self.comment_editor.is_some() && rect_contains(self.editor_body_area, col, row) {
                     self.editor_move_cursor_to_click(col, row);
                     return;
                 }
@@ -3613,8 +3540,7 @@ impl<'a> PullRequestsView<'a> {
                     if let Some(area) = self.tab_content_area {
                         if rect_contains(Some(area), col, row) {
                             let logical_line =
-                                (row.saturating_sub(area.y) as usize)
-                                    + self.conversation_scroll;
+                                (row.saturating_sub(area.y) as usize) + self.conversation_scroll;
                             if let Some(link) = self
                                 .conversation_ref_links
                                 .iter()
@@ -4030,8 +3956,7 @@ impl<'a> PullRequestsView<'a> {
                     .any(|r| rect_contains(Some(*r), pa.screen_x, pa.screen_y))
             })
             .collect();
-        self.prev_painted_avatars =
-            paint_avatars_with_diff(f, &self.ctx, &prev, pending);
+        self.prev_painted_avatars = paint_avatars_with_diff(f, &self.ctx, &prev, pending);
 
         // Place the terminal cursor on the inline comment editor when
         // it's the active input surface — same convention as the rebase
@@ -4077,7 +4002,9 @@ impl<'a> PullRequestsView<'a> {
             // PR brand colour.
             Span::styled(
                 "⋔ ",
-                Style::default().fg(MERGED_PURPLE).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(MERGED_PURPLE)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Pull Requests ",
@@ -4223,8 +4150,7 @@ impl<'a> PullRequestsView<'a> {
         // so the highlight reaches the border edge.
         const RIGHT_MARGIN: usize = 4;
         let col_budget = (body_area.width as usize).saturating_sub(RIGHT_MARGIN);
-        let owned_filtered: Vec<PullRequest> =
-            filtered.iter().map(|pr| (*pr).clone()).collect();
+        let owned_filtered: Vec<PullRequest> = filtered.iter().map(|pr| (*pr).clone()).collect();
         let cols = PrListColumns::compute(&owned_filtered, col_budget);
         let row_width = body_area.width as usize;
         self.list_avatar_slots.clear();
@@ -4264,9 +4190,7 @@ impl<'a> PullRequestsView<'a> {
         // List highlight_style would patch over them. We paint the
         // selection bg manually per-span in `format_pr_row` instead,
         // so chips keep their colours intact.
-        let list = List::new(items).highlight_style(
-            Style::default().add_modifier(Modifier::BOLD),
-        );
+        let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD));
         f.render_stateful_widget(list, body_area, &mut state);
 
         // Push slot intents into the per-frame accumulator. The
@@ -4301,10 +4225,7 @@ impl<'a> PullRequestsView<'a> {
     /// `Block::title`) plus per-tab screen rects (for click
     /// hit-testing). Left-aligned titles in ratatui start at
     /// `area.x + 1` (just after the rounded corner).
-    fn build_filter_title(
-        &self,
-        area: Rect,
-    ) -> (Vec<Span<'static>>, Vec<(PrListFilter, Rect)>) {
+    fn build_filter_title(&self, area: Rect) -> (Vec<Span<'static>>, Vec<(PrListFilter, Rect)>) {
         let theme = &self.ctx.color_theme;
         let counts: Vec<usize> = PrListFilter::all()
             .iter()
@@ -4370,7 +4291,9 @@ impl<'a> PullRequestsView<'a> {
         };
         let state_span = Span::styled(
             fit_cell(state_text, cols.state),
-            Style::default().fg(state_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(state_color)
+                .add_modifier(Modifier::BOLD),
         );
         // Leading `▶` flags the PR whose detail is currently shown.
         let marker = if is_opened {
@@ -4494,11 +4417,11 @@ impl<'a> PullRequestsView<'a> {
         (Line::from(row), avatar_col)
     }
 
-
     fn render_detail_mode(&mut self, f: &mut Frame, area: Rect) {
         let current_number = self.opened_number();
-        let cached_detail =
-            current_number.and_then(|n| self.detail_cache.get(&n)).cloned();
+        let cached_detail = current_number
+            .and_then(|n| self.detail_cache.get(&n))
+            .cloned();
         let theme_label_fg = self.ctx.color_theme.detail_label_fg;
 
         // ── Layout: info ─ [labels chips] ─ divider ─ tabs ─ tab
@@ -4510,20 +4433,15 @@ impl<'a> PullRequestsView<'a> {
             .map(|d| !d.labels.is_empty())
             .unwrap_or(false);
         let labels_height: u16 = if has_labels { 1 } else { 0 };
-        let [
-            sub_header_area,
-            labels_area,
-            header_divider_area,
-            tab_bar_area,
-            tab_content_area,
-        ] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(labels_height),
-            Constraint::Length(1),
-            Constraint::Length(2),
-            Constraint::Min(0),
-        ])
-        .areas(area);
+        let [sub_header_area, labels_area, header_divider_area, tab_bar_area, tab_content_area] =
+            Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(labels_height),
+                Constraint::Length(1),
+                Constraint::Length(2),
+                Constraint::Min(0),
+            ])
+            .areas(area);
         self.tab_content_area = Some(tab_content_area);
 
         self.render_pr_sub_header(f, sub_header_area, cached_detail.as_ref(), current_number);
@@ -4544,17 +4462,12 @@ impl<'a> PullRequestsView<'a> {
         self.render_tab_bar(f, tab_bar_area);
 
         let Some(detail) = cached_detail.as_ref() else {
-            let label = if current_number.is_some()
-                && self.loading_for == current_number
-            {
+            let label = if current_number.is_some() && self.loading_for == current_number {
                 "  Fetching from GitHub…"
             } else {
                 "  No PR opened."
             };
-            let p = Paragraph::new(Span::styled(
-                label,
-                Style::default().fg(theme_label_fg),
-            ));
+            let p = Paragraph::new(Span::styled(label, Style::default().fg(theme_label_fg)));
             f.render_widget(p, tab_content_area);
             return;
         };
@@ -4634,10 +4547,7 @@ impl<'a> PullRequestsView<'a> {
                     .add_modifier(Modifier::BOLD),
             ));
         }
-        f.render_widget(
-            Paragraph::new(Line::from(header_spans)),
-            sub_header_area,
-        );
+        f.render_widget(Paragraph::new(Line::from(header_spans)), sub_header_area);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "─".repeat(divider_area.width as usize),
@@ -4650,11 +4560,9 @@ impl<'a> PullRequestsView<'a> {
         // Form gets ~60% so the multi-line Body editor has room to
         // breathe without crowding labels/draft rows. Preview pane
         // still has enough width for commit subjects + file paths.
-        let [form_area, preview_area] = Layout::horizontal([
-            Constraint::Percentage(60),
-            Constraint::Percentage(40),
-        ])
-        .areas(body_area);
+        let [form_area, preview_area] =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(body_area);
         self.render_compose_form(f, form_area);
         self.render_compose_preview(f, preview_area);
 
@@ -4679,8 +4587,7 @@ impl<'a> PullRequestsView<'a> {
             };
             picker.target_idx
         };
-        let mine: Vec<crate::github::pr::ReactionKind> =
-            self.viewer_reactions_for(target_idx);
+        let mine: Vec<crate::github::pr::ReactionKind> = self.viewer_reactions_for(target_idx);
         let theme = &self.ctx.color_theme;
         let kinds = crate::github::pr::ReactionKind::all();
         // Single-Paragraph rendering so ratatui's double-width
@@ -4827,11 +4734,9 @@ impl<'a> PullRequestsView<'a> {
                 Span::styled("○ ".to_string(), Style::default().fg(theme.divider_fg))
             };
             let name_color = match entry.kind {
-                BranchKind::Local => branch_color_from_graph_palette(
-                    theme,
-                    &self.ctx.graph_color_set,
-                    &entry.name,
-                ),
+                BranchKind::Local => {
+                    branch_color_from_graph_palette(theme, &self.ctx.graph_color_set, &entry.name)
+                }
                 BranchKind::Remote => theme.list_ref_remote_branch_fg,
             };
             let name_style = Style::default().fg(name_color).add_modifier(Modifier::BOLD);
@@ -4911,7 +4816,10 @@ impl<'a> PullRequestsView<'a> {
             let line = Line::from(vec![
                 Span::raw(" ".repeat(INDENT as usize)),
                 focus_indicator(focused),
-                Span::styled(format!("{:<w$}", label, w = LABEL_WIDTH as usize), label_style),
+                Span::styled(
+                    format!("{:<w$}", label, w = LABEL_WIDTH as usize),
+                    label_style,
+                ),
                 Span::raw(" "),
                 value_span,
                 Span::styled(
@@ -4939,13 +4847,14 @@ impl<'a> PullRequestsView<'a> {
             let focused = state.focused == field;
             let row = Rect::new(inner.x, y_pos, inner.width, 1);
             let value_start_x = inner.x + INDENT + 2 + LABEL_WIDTH + 1;
-            let value_width = inner
-                .width
-                .saturating_sub(INDENT + 2 + LABEL_WIDTH + 1 + 2);
+            let value_width = inner.width.saturating_sub(INDENT + 2 + LABEL_WIDTH + 1 + 2);
             let mut spans = vec![
                 Span::raw(" ".repeat(INDENT as usize)),
                 focus_indicator(focused),
-                Span::styled(format!("{:<w$}", label, w = LABEL_WIDTH as usize), label_style),
+                Span::styled(
+                    format!("{:<w$}", label, w = LABEL_WIDTH as usize),
+                    label_style,
+                ),
                 Span::raw(" "),
             ];
             if value.is_empty() {
@@ -4980,43 +4889,28 @@ impl<'a> PullRequestsView<'a> {
 
         // Head row — colour from the graph palette so each branch
         // gets the same hue as in the commit graph view.
-        let head_color = branch_color_from_graph_palette(
-            theme,
-            &self.ctx.graph_color_set,
-            &state.head,
-        );
-        let head_rect = render_branch_row(
-            f,
-            y,
-            ComposeField::Head,
-            "Head:",
-            &state.head,
-            head_color,
-        );
-        self.compose_field_rects.push((ComposeField::Head, head_rect));
+        let head_color =
+            branch_color_from_graph_palette(theme, &self.ctx.graph_color_set, &state.head);
+        let head_rect =
+            render_branch_row(f, y, ComposeField::Head, "Head:", &state.head, head_color);
+        self.compose_field_rects
+            .push((ComposeField::Head, head_rect));
         y += 2;
 
         // Base row
-        let base_color = branch_color_from_graph_palette(
-            theme,
-            &self.ctx.graph_color_set,
-            &state.base,
-        );
-        let base_rect = render_branch_row(
-            f,
-            y,
-            ComposeField::Base,
-            "Base:",
-            &state.base,
-            base_color,
-        );
-        self.compose_field_rects.push((ComposeField::Base, base_rect));
+        let base_color =
+            branch_color_from_graph_palette(theme, &self.ctx.graph_color_set, &state.base);
+        let base_rect =
+            render_branch_row(f, y, ComposeField::Base, "Base:", &state.base, base_color);
+        self.compose_field_rects
+            .push((ComposeField::Base, base_rect));
         y += 2;
 
         // Title row
         let (title_rect, title_value_x) =
             render_text_input_row(f, y, ComposeField::Title, "Title:", &state.title);
-        self.compose_field_rects.push((ComposeField::Title, title_rect));
+        self.compose_field_rects
+            .push((ComposeField::Title, title_rect));
         y += 2;
 
         // Body block — uses a Block with a tinted bg so it reads as
@@ -5095,9 +4989,7 @@ impl<'a> PullRequestsView<'a> {
                 .split('\n')
                 .skip(scroll as usize)
                 .take(body_inner.height as usize)
-                .map(|l| {
-                    crate::view::issue::editor_line_with_mentions(l, base_style, mention_fg)
-                })
+                .map(|l| crate::view::issue::editor_line_with_mentions(l, base_style, mention_fg))
                 .collect()
         };
         f.render_widget(Paragraph::new(body_lines), body_inner);
@@ -5117,7 +5009,10 @@ impl<'a> PullRequestsView<'a> {
         let mut labels_line_spans = vec![
             Span::raw(" ".repeat(INDENT as usize)),
             focus_indicator(labels_focused),
-            Span::styled(format!("{:<w$}", "Labels:", w = LABEL_WIDTH as usize), label_style),
+            Span::styled(
+                format!("{:<w$}", "Labels:", w = LABEL_WIDTH as usize),
+                label_style,
+            ),
             Span::raw(" "),
         ];
         if state.labels.is_empty() {
@@ -5242,9 +5137,7 @@ impl<'a> PullRequestsView<'a> {
                 preview.files.len(),
                 if preview.files.len() == 1 { "" } else { "s" },
             ),
-            Style::default()
-                .fg(theme.fg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(""));
         if preview.commits.is_empty() {
@@ -5318,14 +5211,12 @@ impl<'a> PullRequestsView<'a> {
             )
         };
         let parent_author_owned: Option<String> = match &kind {
-            CommentEditorKind::Reply { parent_id } => self
-                .opened_detail()
-                .and_then(|d| {
-                    d.conversation
-                        .iter()
-                        .find(|e| e.id == Some(*parent_id))
-                        .map(|e| e.author.clone())
-                }),
+            CommentEditorKind::Reply { parent_id } => self.opened_detail().and_then(|d| {
+                d.conversation
+                    .iter()
+                    .find(|e| e.id == Some(*parent_id))
+                    .map(|e| e.author.clone())
+            }),
             _ => None,
         };
         let title = kind.header(parent_author_owned.as_deref());
@@ -5421,9 +5312,7 @@ impl<'a> PullRequestsView<'a> {
                 .split('\n')
                 .skip(scroll_offset as usize)
                 .take(body_height as usize)
-                .map(|l| {
-                    crate::view::issue::editor_line_with_mentions(l, value, mention_fg)
-                })
+                .map(|l| crate::view::issue::editor_line_with_mentions(l, value, mention_fg))
                 .collect()
         };
         f.render_widget(Paragraph::new(body_text), body_area);
@@ -5446,9 +5335,7 @@ impl<'a> PullRequestsView<'a> {
         let visible_row = cursor_row.saturating_sub(scroll_offset);
         let cx = body_area.x + cursor_col;
         let cy = body_area.y + visible_row;
-        if !submitting
-            && cx < body_area.x + body_area.width
-            && cy < body_area.y + body_area.height
+        if !submitting && cx < body_area.x + body_area.width && cy < body_area.y + body_area.height
         {
             self.comment_editor_cursor_pos = Some((cx, cy));
         }
@@ -5488,10 +5375,7 @@ impl<'a> PullRequestsView<'a> {
                     .fg(theme.list_hash_fg)
                     .add_modifier(Modifier::BOLD),
             );
-            let by_span = Span::styled(
-                "by ",
-                Style::default().fg(theme.detail_label_fg),
-            );
+            let by_span = Span::styled("by ", Style::default().fg(theme.detail_label_fg));
             let author_span = Span::styled(
                 detail.author.clone(),
                 Style::default().fg(theme.list_name_fg),
@@ -5504,8 +5388,7 @@ impl<'a> PullRequestsView<'a> {
                     .fg(theme.list_ref_branch_fg)
                     .add_modifier(Modifier::BOLD),
             );
-            let arrow_span =
-                Span::styled(" → ", Style::default().fg(theme.detail_label_fg));
+            let arrow_span = Span::styled(" → ", Style::default().fg(theme.detail_label_fg));
             let base_span = Span::styled(
                 detail.base_ref.clone(),
                 Style::default()
@@ -5544,9 +5427,7 @@ impl<'a> PullRequestsView<'a> {
             let title_budget = (area.width as usize).saturating_sub(fixed_overhead).max(8);
             let title_truncated = truncate(&detail.title, title_budget);
 
-            let dot_sep = || {
-                Span::styled(" · ", Style::default().fg(theme.detail_label_fg))
-            };
+            let dot_sep = || Span::styled(" · ", Style::default().fg(theme.detail_label_fg));
 
             spans.push(state_span);
             spans.push(Span::raw("  "));
@@ -5606,10 +5487,7 @@ impl<'a> PullRequestsView<'a> {
         // a dedicated row for it that sits below the optional labels
         // chip row, so the order on screen is always:
         //   info → [labels] → divider → tabs → divider → content.
-        f.render_widget(
-            Paragraph::new(Line::from(spans)),
-            area,
-        );
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
         if let Some((login, col)) = avatar_paint {
             self.pending_avatar_paints.push((
                 PaintedAvatar {
@@ -5627,12 +5505,7 @@ impl<'a> PullRequestsView<'a> {
     /// GitHub-style coloured chips. Sits between the sub-header info
     /// row and the tab bar — only rendered when the PR actually has
     /// labels (otherwise the row is collapsed by the layout).
-    fn render_pr_labels_row(
-        &self,
-        f: &mut Frame,
-        area: Rect,
-        detail: Option<&PullRequestDetail>,
-    ) {
+    fn render_pr_labels_row(&self, f: &mut Frame, area: Rect, detail: Option<&PullRequestDetail>) {
         let Some(detail) = detail else { return };
         let mut spans: Vec<Span<'static>> = vec![Span::raw("  ")];
         for (i, lab) in detail.labels.iter().enumerate() {
@@ -5731,20 +5604,14 @@ impl<'a> PullRequestsView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
-        f.render_widget(
-            Paragraph::new(vec![Line::from(spans), divider]),
-            area,
-        );
+        f.render_widget(Paragraph::new(vec![Line::from(spans), divider]), area);
     }
 
     /// Build the right-side "Manage" shortcut spans for the tab bar.
     /// Picks state-changing keys that depend on the PR's current
     /// flags (Ctrl+X close ↔ Ctrl+O reopen, Ctrl+D to draft ↔
     /// mark ready) so we never advertise no-op shortcuts.
-    fn manage_shortcut_spans(
-        &self,
-        detail: Option<&PullRequestDetail>,
-    ) -> Vec<Span<'static>> {
+    fn manage_shortcut_spans(&self, detail: Option<&PullRequestDetail>) -> Vec<Span<'static>> {
         let theme = &self.ctx.color_theme;
         let is_open = detail
             .map(|d| matches!(d.state, PullState::Open))
@@ -5787,12 +5654,7 @@ impl<'a> PullRequestsView<'a> {
         spans
     }
 
-    fn render_tab_conversation(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        detail: &PullRequestDetail,
-    ) {
+    fn render_tab_conversation(&mut self, f: &mut Frame, area: Rect, detail: &PullRequestDetail) {
         // Snapshot once so every card uses the same decision — and
         // we don't churn the mutex per push.
         let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
@@ -5940,8 +5802,7 @@ impl<'a> PullRequestsView<'a> {
         }
         // Clamp selection if comments shrank below the previous index.
         if self.conversation_selected >= self.conversation_comment_count {
-            self.conversation_selected =
-                self.conversation_comment_count.saturating_sub(1);
+            self.conversation_selected = self.conversation_comment_count.saturating_sub(1);
         }
         // Auto-scroll the viewport only when the selection moved via
         // keyboard (or programmatic action). Mouse hover changes the
@@ -5957,8 +5818,7 @@ impl<'a> PullRequestsView<'a> {
         // with UNDERLINED+BOLD, while capturing click hit-boxes for
         // the mouse handler. Lines without refs pass through.
         self.conversation_ref_links.clear();
-        let pr_set: rustc_hash::FxHashSet<u64> =
-            self.items.iter().map(|p| p.number).collect();
+        let pr_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|p| p.number).collect();
         let issue_set = self.mention_issue_numbers.clone();
         let issue_fg: Color = self.ctx.color_theme.status_success_fg;
         let pr_fg: Color = self.ctx.color_theme.list_hash_fg;
@@ -6036,12 +5896,10 @@ impl<'a> PullRequestsView<'a> {
         let action = match &entry.kind {
             ConversationKind::Comment => CommentAction::Commented,
             ConversationKind::Review { state } => CommentAction::Review(*state),
-            ConversationKind::ReviewComment { file, line } => {
-                CommentAction::ReviewComment {
-                    file: file.clone(),
-                    line: *line,
-                }
-            }
+            ConversationKind::ReviewComment { file, line } => CommentAction::ReviewComment {
+                file: file.clone(),
+                line: *line,
+            },
         };
         let replies = entry
             .id
@@ -6063,10 +5921,7 @@ impl<'a> PullRequestsView<'a> {
         //  - edit / delete only for own editable kinds (review entries
         //    aren't editable from the API).
         let mut shortcuts: Vec<&'static str> = Vec::new();
-        let is_review_comment = matches!(
-            entry.kind,
-            ConversationKind::ReviewComment { .. }
-        );
+        let is_review_comment = matches!(entry.kind, ConversationKind::ReviewComment { .. });
         if is_review_comment {
             shortcuts.push("R:reply");
         } else {
@@ -6176,12 +6031,7 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
-    fn render_tab_commits(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        detail: &PullRequestDetail,
-    ) {
+    fn render_tab_commits(&mut self, f: &mut Frame, area: Rect, detail: &PullRequestDetail) {
         let theme = &self.ctx.color_theme;
         // Drill-down: render the commit's full message + per-file diff
         // instead of the list. Esc clears `commits_drilldown` and
@@ -6221,9 +6071,7 @@ impl<'a> PullRequestsView<'a> {
             .map(|(i, c)| {
                 let (line, avatar_col) = commit_row(theme, c, &cols, avatars_on);
                 if let Some(col) = avatar_col {
-                    if i >= self.commits_scroll
-                        && visible > 0
-                        && i < self.commits_scroll + visible
+                    if i >= self.commits_scroll && visible > 0 && i < self.commits_scroll + visible
                     {
                         paints.push((
                             c.author_login.clone(),
@@ -6268,12 +6116,7 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
-    fn render_tab_checks(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        detail: &PullRequestDetail,
-    ) {
+    fn render_tab_checks(&mut self, f: &mut Frame, area: Rect, detail: &PullRequestDetail) {
         let theme = &self.ctx.color_theme;
         if detail.check_runs.is_empty() {
             let p = Paragraph::new(Span::styled(
@@ -6309,12 +6152,7 @@ impl<'a> PullRequestsView<'a> {
         f.render_stateful_widget(list, area, &mut state);
     }
 
-    fn render_tab_files(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        detail: &PullRequestDetail,
-    ) {
+    fn render_tab_files(&mut self, f: &mut Frame, area: Rect, detail: &PullRequestDetail) {
         let theme = &self.ctx.color_theme;
         // Drill-down — replace the list with the file's patch.
         if let Some(idx) = self.files_drilldown {
@@ -6372,11 +6210,8 @@ impl<'a> PullRequestsView<'a> {
 
         // Layout = header card (fixed height) + body (scrollable diff).
         let header_height = self.commit_header_height(&commit, area.width);
-        let [header_area, body_area] = Layout::vertical([
-            Constraint::Length(header_height),
-            Constraint::Min(0),
-        ])
-        .areas(area);
+        let [header_area, body_area] =
+            Layout::vertical([Constraint::Length(header_height), Constraint::Min(0)]).areas(area);
         self.render_commit_header_card(f, header_area, &commit);
 
         // Body = files + patches, rendered through the active mode.
@@ -6399,12 +6234,8 @@ impl<'a> PullRequestsView<'a> {
                 )));
                 if let Some(patch) = &file.patch {
                     let hunks = parse_patch(patch);
-                    let rendered = render_patch_lines(
-                        &hunks,
-                        diff_mode,
-                        theme,
-                        body_area.width as usize,
-                    );
+                    let rendered =
+                        render_patch_lines(&hunks, diff_mode, theme, body_area.width as usize);
                     body_lines.extend(rendered);
                 } else {
                     body_lines.push(Line::from(Span::styled(
@@ -6419,8 +6250,7 @@ impl<'a> PullRequestsView<'a> {
             self.commits_drilldown_scroll = max_scroll;
         }
         f.render_widget(
-            Paragraph::new(body_lines)
-                .scroll((self.commits_drilldown_scroll as u16, 0)),
+            Paragraph::new(body_lines).scroll((self.commits_drilldown_scroll as u16, 0)),
             body_area,
         );
     }
@@ -6429,11 +6259,7 @@ impl<'a> PullRequestsView<'a> {
     /// rows (sha/author/date/stats line, then the commit message
     /// split on `\n`). Capped to area.height / 2 so a giant commit
     /// message never eats the whole screen.
-    fn commit_header_height(
-        &self,
-        commit: &crate::github::pr::CommitDetail,
-        _width: u16,
-    ) -> u16 {
+    fn commit_header_height(&self, commit: &crate::github::pr::CommitDetail, _width: u16) -> u16 {
         let msg_rows = commit.message.lines().count().max(1) as u16;
         // 1 meta row + 1 blank separator + msg + 2 border rows.
         (1 + 1 + msg_rows + 2).min(12)
@@ -6473,7 +6299,10 @@ impl<'a> PullRequestsView<'a> {
             ),
             Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
             Span::styled("by ", Style::default().fg(theme.detail_label_fg)),
-            Span::styled(commit.author.clone(), Style::default().fg(theme.list_name_fg)),
+            Span::styled(
+                commit.author.clone(),
+                Style::default().fg(theme.list_name_fg),
+            ),
             Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(commit.date.clone(), Style::default().fg(theme.list_date_fg)),
             Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),
@@ -6552,8 +6381,7 @@ impl<'a> PullRequestsView<'a> {
             self.files_drilldown_scroll = max_scroll;
         }
         f.render_widget(
-            Paragraph::new(body_lines)
-                .scroll((self.files_drilldown_scroll as u16, 0)),
+            Paragraph::new(body_lines).scroll((self.files_drilldown_scroll as u16, 0)),
             body_area,
         );
     }
@@ -6681,7 +6509,10 @@ pub(crate) enum CommentAction {
     #[allow(dead_code)]
     Review(ReviewState),
     #[allow(dead_code)]
-    ReviewComment { file: String, line: Option<u64> },
+    ReviewComment {
+        file: String,
+        line: Option<u64>,
+    },
 }
 
 /// Column width of one tree level (`┊   `): dashed gutter + 3-space pad.
@@ -7049,10 +6880,7 @@ pub(crate) fn push_comment_card(
         .iter()
         .map(|s| console::measure_text_width(s.content.as_ref()) as u16)
         .sum();
-    let want_avatar = input
-        .avatar_login
-        .map(|s| !s.is_empty())
-        .unwrap_or(false);
+    let want_avatar = input.avatar_login.map(|s| !s.is_empty()).unwrap_or(false);
     let (border_open_str, avatar_slot_x): (&str, Option<u16>) = if want_avatar {
         // `"┌─ "` + 2 reserved cells + extra space → `┌─ AV `
         // where AV is the painted avatar. Total prefix width = 6.
@@ -7203,10 +7031,7 @@ pub(crate) fn push_comment_card(
 /// right edge of the PR sub-header. Mirrors the colour cues GitHub uses
 /// in its own merge-box: green for ready, red for blockers, yellow for
 /// warnings, grey for terminal / unknown states.
-fn mergeability_badge(
-    theme: &crate::color::ColorTheme,
-    state: Mergeability,
-) -> Vec<Span<'static>> {
+fn mergeability_badge(theme: &crate::color::ColorTheme, state: Mergeability) -> Vec<Span<'static>> {
     let (label, fg) = match state {
         Mergeability::Ready => ("● Ready to merge", theme.status_success_fg),
         Mergeability::ChecksFailing => ("● Checks failing", theme.status_error_fg),
@@ -7366,25 +7191,23 @@ fn commit_row(
     (Line::from(spans), avatar_col)
 }
 
-fn check_row(theme: &crate::color::ColorTheme, c: &crate::github::pr::CheckRunDetail) -> Line<'static> {
+fn check_row(
+    theme: &crate::color::ColorTheme,
+    c: &crate::github::pr::CheckRunDetail,
+) -> Line<'static> {
     let (icon, color) = match (c.status, c.conclusion) {
         (CheckStatus::Completed, Some(CheckConclusion::Success))
         | (CheckStatus::Completed, Some(CheckConclusion::Neutral))
-        | (CheckStatus::Completed, Some(CheckConclusion::Skipped)) => (
-            "✓",
-            theme.status_success_fg,
-        ),
+        | (CheckStatus::Completed, Some(CheckConclusion::Skipped)) => {
+            ("✓", theme.status_success_fg)
+        }
         (CheckStatus::Completed, Some(CheckConclusion::Failure))
         | (CheckStatus::Completed, Some(CheckConclusion::TimedOut))
         | (CheckStatus::Completed, Some(CheckConclusion::Cancelled))
-        | (CheckStatus::Completed, Some(CheckConclusion::ActionRequired)) => (
-            "✗",
-            theme.status_error_fg,
-        ),
-        (CheckStatus::Queued, _) | (CheckStatus::InProgress, _) => (
-            "⏳",
-            theme.status_warn_fg,
-        ),
+        | (CheckStatus::Completed, Some(CheckConclusion::ActionRequired)) => {
+            ("✗", theme.status_error_fg)
+        }
+        (CheckStatus::Queued, _) | (CheckStatus::InProgress, _) => ("⏳", theme.status_warn_fg),
         _ => ("?", theme.detail_label_fg),
     };
     Line::from(vec![
@@ -7398,7 +7221,10 @@ fn check_row(theme: &crate::color::ColorTheme, c: &crate::github::pr::CheckRunDe
     ])
 }
 
-fn ci_summary_spans(theme: &crate::color::ColorTheme, ci: &crate::github::pr::CiSummary) -> Span<'static> {
+fn ci_summary_spans(
+    theme: &crate::color::ColorTheme,
+    ci: &crate::github::pr::CiSummary,
+) -> Span<'static> {
     if ci.total == 0 {
         return Span::styled(
             "— no checks".to_string(),
@@ -7500,14 +7326,8 @@ fn file_line(
 /// flipping foreground between black and white based on the label
 /// colour's perceived luminance. Falls back to plain dim text when
 /// the API didn't return a hex colour.
-pub(crate) fn label_chip_spans_local(
-    label: &crate::github::pr::Label,
-) -> Vec<Span<'static>> {
-    if let Some((r, g, b)) = label
-        .color
-        .as_deref()
-        .and_then(parse_hex_color)
-    {
+pub(crate) fn label_chip_spans_local(label: &crate::github::pr::Label) -> Vec<Span<'static>> {
+    if let Some((r, g, b)) = label.color.as_deref().and_then(parse_hex_color) {
         let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
         let fg = if luminance > 140.0 {
             Color::Rgb(0, 0, 0)
@@ -7531,9 +7351,7 @@ pub(crate) fn label_chip_spans_local(
 /// painted in the label's background colour. Two letters are picked
 /// from the start of the label name, uppercased so it reads as a
 /// badge rather than a word fragment.
-pub(crate) fn short_label_chip_spans(
-    label: &crate::github::pr::Label,
-) -> Vec<Span<'static>> {
+pub(crate) fn short_label_chip_spans(label: &crate::github::pr::Label) -> Vec<Span<'static>> {
     let abbr: String = label
         .name
         .chars()
@@ -7707,9 +7525,7 @@ struct EnhancedDiffPalette {
 impl EnhancedDiffPalette {
     fn for_theme(theme: &crate::color::ColorTheme) -> Self {
         let bg_is_light = match theme.bg {
-            Color::Rgb(r, g, b) => {
-                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) > 128.0
-            }
+            Color::Rgb(r, g, b) => (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) > 128.0,
             _ => false,
         };
         if bg_is_light {
@@ -7738,9 +7554,7 @@ fn render_patch_lines(
     match mode {
         crate::config::DiffMode::Raw => render_patch_raw(hunks, theme),
         crate::config::DiffMode::Enhanced => render_patch_enhanced(hunks, theme),
-        crate::config::DiffMode::SideBySide => {
-            render_patch_split(hunks, theme, width, false)
-        }
+        crate::config::DiffMode::SideBySide => render_patch_split(hunks, theme, width, false),
         crate::config::DiffMode::SideBySideEnhanced => {
             render_patch_split(hunks, theme, width, true)
         }
@@ -7749,10 +7563,7 @@ fn render_patch_lines(
 
 /// Raw mode — closest to the unified-diff text on the wire. Each
 /// line keeps its leading marker and is fg-coloured by kind.
-fn render_patch_raw(
-    hunks: &[PatchHunk],
-    theme: &crate::color::ColorTheme,
-) -> Vec<Line<'static>> {
+fn render_patch_raw(hunks: &[PatchHunk], theme: &crate::color::ColorTheme) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
     for hunk in hunks {
         out.push(Line::from(Span::styled(
@@ -7766,14 +7577,10 @@ fn render_patch_raw(
         )));
         for line in &hunk.lines {
             let (marker, style) = match line.kind {
-                PatchLineKind::Add => (
-                    "+",
-                    Style::default().fg(theme.detail_file_change_add_fg),
-                ),
-                PatchLineKind::Delete => (
-                    "-",
-                    Style::default().fg(theme.detail_file_change_delete_fg),
-                ),
+                PatchLineKind::Add => ("+", Style::default().fg(theme.detail_file_change_add_fg)),
+                PatchLineKind::Delete => {
+                    ("-", Style::default().fg(theme.detail_file_change_delete_fg))
+                }
                 PatchLineKind::Context => (" ", Style::default().fg(theme.fg)),
             };
             out.push(Line::from(Span::styled(
@@ -7925,7 +7732,10 @@ fn render_patch_split(
     let mut out: Vec<Line<'static>> = Vec::new();
     for hunk in hunks {
         out.push(Line::from(Span::styled(
-            format!("@@ -{} +{} @@ {}", hunk.old_start, hunk.new_start, hunk.header_extra),
+            format!(
+                "@@ -{} +{} @@ {}",
+                hunk.old_start, hunk.new_start, hunk.header_extra
+            ),
             Style::default()
                 .fg(theme.list_head_fg)
                 .add_modifier(Modifier::BOLD),
@@ -7962,9 +7772,7 @@ fn render_patch_split(
                         dels.push(&hunk.lines[i].text);
                         i += 1;
                     }
-                    while i < hunk.lines.len()
-                        && matches!(hunk.lines[i].kind, PatchLineKind::Add)
-                    {
+                    while i < hunk.lines.len() && matches!(hunk.lines[i].kind, PatchLineKind::Add) {
                         adds.push(&hunk.lines[i].text);
                         i += 1;
                     }
@@ -8011,17 +7819,17 @@ fn split_row(
             .map(|(n, t)| (format!("{:>w$}", n, w = gutter_width), t.to_string()))
             .unwrap_or_else(|| (" ".repeat(gutter_width), String::new()));
         let truncated: String = if text.chars().count() > text_side_width {
-            let cut: String = text.chars().take(text_side_width.saturating_sub(1)).collect();
+            let cut: String = text
+                .chars()
+                .take(text_side_width.saturating_sub(1))
+                .collect();
             format!("{}…", cut)
         } else {
             format!("{:<w$}", text, w = text_side_width)
         };
         if enhanced {
             vec![
-                Span::styled(
-                    format!("{} ", lineno),
-                    base.fg(theme.detail_label_fg),
-                ),
+                Span::styled(format!("{} ", lineno), base.fg(theme.detail_label_fg)),
                 Span::styled(truncated, base.fg(theme.fg)),
             ]
         } else {
@@ -8207,9 +8015,7 @@ pub(crate) fn render_markdown_body(
     let h2_style = Style::default()
         .fg(theme.list_head_fg)
         .add_modifier(Modifier::BOLD);
-    let h3_style = Style::default()
-        .fg(theme.fg)
-        .add_modifier(Modifier::BOLD);
+    let h3_style = Style::default().fg(theme.fg).add_modifier(Modifier::BOLD);
     let h_other_style = Style::default()
         .fg(theme.detail_label_fg)
         .add_modifier(Modifier::BOLD);
@@ -8233,10 +8039,7 @@ pub(crate) fn render_markdown_body(
             return;
         }
         if let Some(last) = out.last() {
-            if last
-                .iter()
-                .all(|s| s.content.as_ref().trim().is_empty())
-            {
+            if last.iter().all(|s| s.content.as_ref().trim().is_empty()) {
                 return;
             }
         }
@@ -8290,8 +8093,7 @@ pub(crate) fn render_markdown_body(
             if inline.is_empty() {
                 return;
             }
-            let first_prefix =
-                build_first_prefix(bq_depth, list_stack, pending_marker);
+            let first_prefix = build_first_prefix(bq_depth, list_stack, pending_marker);
             let cont_prefix = build_cont_prefix(bq_depth, list_stack.len());
             let avail = inner_width.saturating_sub(measure_prefix(&first_prefix));
             let wrapped = wrap_styled_spans(std::mem::take(inline), avail.max(1));
@@ -8420,9 +8222,7 @@ pub(crate) fn render_markdown_body(
                 TagEnd::CodeBlock => {
                     let buf = std::mem::take(&mut code_buf);
                     let prefix = build_cont_prefix(bq_depth, list_stack.len());
-                    let avail = inner_width
-                        .saturating_sub(measure_prefix(&prefix))
-                        .max(1);
+                    let avail = inner_width.saturating_sub(measure_prefix(&prefix)).max(1);
                     for raw_line in buf.lines() {
                         let wrapped = wrap_styled_spans(
                             vec![Span::styled(raw_line.to_string(), code_style)],
@@ -8456,10 +8256,7 @@ pub(crate) fn render_markdown_body(
                     }
                     pending_marker = None;
                 }
-                TagEnd::Emphasis
-                | TagEnd::Strong
-                | TagEnd::Strikethrough
-                | TagEnd::Link => {
+                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => {
                     style_stack.pop();
                 }
                 TagEnd::Image => {
@@ -8508,10 +8305,7 @@ pub(crate) fn render_markdown_body(
             }
             Event::Rule => {
                 let divider = Style::default().fg(theme.divider_fg);
-                out.push(vec![Span::styled(
-                    "─".repeat(inner_width.max(4)),
-                    divider,
-                )]);
+                out.push(vec![Span::styled("─".repeat(inner_width.max(4)), divider)]);
             }
             Event::TaskListMarker(checked) => {
                 let (text, style) = if checked {
@@ -8521,9 +8315,7 @@ pub(crate) fn render_markdown_body(
                 };
                 inline.push(Span::styled(text, style));
             }
-            Event::FootnoteReference(_)
-            | Event::InlineMath(_)
-            | Event::DisplayMath(_) => {}
+            Event::FootnoteReference(_) | Event::InlineMath(_) | Event::DisplayMath(_) => {}
         }
     }
 
@@ -8539,8 +8331,7 @@ pub(crate) fn render_markdown_body(
 
     // Trim trailing blank rows for cleaner cards.
     while out.last().map_or(false, |row| {
-        row.iter()
-            .all(|s| s.content.as_ref().trim().is_empty())
+        row.iter().all(|s| s.content.as_ref().trim().is_empty())
     }) {
         out.pop();
     }
@@ -8602,10 +8393,7 @@ pub(crate) fn wrap_styled_spans(
                 }
                 if !piece.is_empty() {
                     cur_w += piece_w;
-                    lines
-                        .last_mut()
-                        .unwrap()
-                        .push(Span::styled(piece, style));
+                    lines.last_mut().unwrap().push(Span::styled(piece, style));
                 }
             } else {
                 lines.last_mut().unwrap().push(Span::styled(token, style));
@@ -8753,10 +8541,7 @@ fn compose_field_cursor_end(state: &mut ComposeState) {
         .unwrap_or(buf.len());
 }
 
-fn compose_body_cursor_vertical(
-    state: &mut ComposeState,
-    key: ratatui::crossterm::event::KeyCode,
-) {
+fn compose_body_cursor_vertical(state: &mut ComposeState, key: ratatui::crossterm::event::KeyCode) {
     use ratatui::crossterm::event::KeyCode;
     if !matches!(state.focused, ComposeField::Body) {
         return;
@@ -8775,10 +8560,7 @@ fn compose_body_cursor_vertical(
                 return;
             }
             let prev_end = line_start - 1;
-            let prev_start = buf[..prev_end]
-                .rfind('\n')
-                .map(|i| i + 1)
-                .unwrap_or(0);
+            let prev_start = buf[..prev_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
             let prev_line_len = prev_end - prev_start;
             state.cursor = prev_start + col.min(prev_line_len);
         }
@@ -8844,11 +8626,7 @@ fn branch_color_from_graph_palette(
 fn load_local_and_remote_branches(repo_path: &std::path::Path) -> Vec<BranchPickerEntry> {
     let mut out: Vec<BranchPickerEntry> = Vec::new();
     let _ = std::process::Command::new("git")
-        .args([
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads",
-        ])
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
         .current_dir(repo_path)
         .output()
         .map(|o| {
@@ -8863,11 +8641,7 @@ fn load_local_and_remote_branches(repo_path: &std::path::Path) -> Vec<BranchPick
             }
         });
     let _ = std::process::Command::new("git")
-        .args([
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/remotes",
-        ])
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/remotes"])
         .current_dir(repo_path)
         .output()
         .map(|o| {
@@ -8939,7 +8713,12 @@ fn compose_preview_commits(
 ) -> Vec<crate::github::pr::PullCommit> {
     let range = format!("{}..{}", base, head);
     let output = match std::process::Command::new("git")
-        .args(["log", "--reverse", "--pretty=%H%x1f%h%x1f%an%x1f%aI%x1f%s", &range])
+        .args([
+            "log",
+            "--reverse",
+            "--pretty=%H%x1f%h%x1f%an%x1f%aI%x1f%s",
+            &range,
+        ])
         .current_dir(repo_path)
         .output()
     {

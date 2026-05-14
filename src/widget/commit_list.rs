@@ -7,7 +7,6 @@ use std::{
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use laurier::highlight::highlight_matched_text;
 use once_cell::sync::Lazy;
-use regex::RegexBuilder;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{Event, KeyEvent},
@@ -16,6 +15,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{List, ListItem, Paragraph, StatefulWidget, Widget},
 };
+use regex::RegexBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tui_input::{backend::crossterm::EventHandler, Input};
 
@@ -479,9 +479,7 @@ impl<'a> CommitListState<'a> {
                     let hashes: Vec<String> = self
                         .commits
                         .iter()
-                        .filter(|ci| {
-                            !ci.is_uncommitted && ci.commit.author_email == *email
-                        })
+                        .filter(|ci| !ci.is_uncommitted && ci.commit.author_email == *email)
                         .map(|ci| ci.commit.commit_hash.as_str().to_string())
                         .take(8)
                         .collect();
@@ -1335,7 +1333,13 @@ impl CommitList<'_> {
         state.update_height(area.height as usize);
     }
 
-    fn render_header(&self, buf: &mut Buffer, area: Rect, state: &CommitListState, avatars_enabled: bool) {
+    fn render_header(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        state: &CommitListState,
+        avatars_enabled: bool,
+    ) {
         let widths = self.content_column_widths(area.width, state, avatars_enabled);
         let constraints = calc_cell_widths(
             area.width,
@@ -1358,7 +1362,6 @@ impl CommitList<'_> {
                 para.render(text_area, buf);
             }
         }
-
     }
 
     fn render_graph(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState) {
@@ -1381,7 +1384,8 @@ impl CommitList<'_> {
                 if pad_x < area.right() {
                     let pad_cell = &mut buf[(pad_x, y)];
                     pad_cell.set_symbol(" ");
-                    pad_cell.set_style(ratatui::style::Style::default().bg(self.ctx.color_theme.bg));
+                    pad_cell
+                        .set_style(ratatui::style::Style::default().bg(self.ctx.color_theme.bg));
                     pad_cell.set_skip(false);
                     // Skip the image cells
                     for x in area.left()..pad_x {
@@ -1402,7 +1406,9 @@ impl CommitList<'_> {
             let max_graph_width = area.width.saturating_sub(1) as usize;
             self.rendering_commit_info_iter(state_ref)
                 .for_each(|(i, commit_info)| {
-                    let Some(prepared_image) = state_ref.prepared_image(commit_info, i) else { return; };
+                    let Some(prepared_image) = state_ref.prepared_image(commit_info, i) else {
+                        return;
+                    };
                     let y = area.top() + i as u16;
                     let is_selected = i == state_ref.selected
                         && state_ref.hovered_branch.is_none()
@@ -1423,7 +1429,9 @@ impl CommitList<'_> {
                     if pad_x < area.right() {
                         let cell = &mut buf[(pad_x, y)];
                         cell.set_symbol(" ");
-                        cell.set_style(ratatui::style::Style::default().bg(self.ctx.color_theme.bg));
+                        cell.set_style(
+                            ratatui::style::Style::default().bg(self.ctx.color_theme.bg),
+                        );
                         cell.set_skip(false);
                     }
                 });
@@ -1453,7 +1461,13 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf)
     }
 
-    fn render_commit_message(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState, _avatars_enabled: bool) {
+    fn render_commit_message(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        state: &mut CommitListState,
+        _avatars_enabled: bool,
+    ) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
@@ -1533,7 +1547,13 @@ impl CommitList<'_> {
         Widget::render(List::new(items), area, buf);
     }
 
-    fn render_name(&self, buf: &mut Buffer, area: Rect, state: &mut CommitListState, avatars_enabled: bool) {
+    fn render_name(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        state: &mut CommitListState,
+        avatars_enabled: bool,
+    ) {
         let max_width = (area.width as usize).saturating_sub(2);
         if area.is_empty() || max_width == 0 {
             return;
@@ -1615,7 +1635,10 @@ impl CommitList<'_> {
                 }
                 let email = &commit_info.commit.author_email;
                 email.hash(&mut h);
-                avatar_manager.prepared_image(email.as_str(), 1, false).is_some().hash(&mut h);
+                avatar_manager
+                    .prepared_image(email.as_str(), 1, false)
+                    .is_some()
+                    .hash(&mut h);
             }
             h.finish()
         };
@@ -1631,8 +1654,12 @@ impl CommitList<'_> {
                 }
                 let email = &commit_info.commit.author_email;
                 let is_selected = i == state.selected;
-                if avatar_manager.prepared_image(email.as_str(), 1, is_selected).is_some()
-                    || avatar_manager.prepared_image(email.as_str(), 1, false).is_some()
+                if avatar_manager
+                    .prepared_image(email.as_str(), 1, is_selected)
+                    .is_some()
+                    || avatar_manager
+                        .prepared_image(email.as_str(), 1, false)
+                        .is_some()
                 {
                     let y = area.top() + i as u16;
                     for x in 0..2 {
@@ -1686,7 +1713,10 @@ impl CommitList<'_> {
                     }
                 } else {
                     // Unchanged row — preserve terminal state
-                    if avatar_manager.prepared_image(email.as_str(), 1, false).is_some() {
+                    if avatar_manager
+                        .prepared_image(email.as_str(), 1, false)
+                        .is_some()
+                    {
                         let y = area.top() + i as u16;
                         for x in 0..2 {
                             buf[(area.left() + x as u16 + 1, y)].set_skip(true);
@@ -1861,7 +1891,11 @@ impl CommitList<'_> {
         // Conflict badge — visible directly on the commit list so the user
         // knows there's a merge in progress without opening Uncommitted Details.
         if unmerged > 0 {
-            let noun = if unmerged == 1 { "conflict" } else { "conflicts" };
+            let noun = if unmerged == 1 {
+                "conflict"
+            } else {
+                "conflicts"
+            };
             spans.push(
                 Span::raw(format!("  ⚠ {} {}", unmerged, noun))
                     .fg(self.ctx.color_theme.status_error_fg)

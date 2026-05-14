@@ -272,8 +272,16 @@ impl BranchDetail<'_> {
                     Style::default().fg(self.ctx.color_theme.status_success_fg),
                 )));
             } else {
-                let ahead_num = if ahead_zero { "0" } else { self.metadata.ahead.as_str() };
-                let behind_num = if behind_zero { "0" } else { self.metadata.behind.as_str() };
+                let ahead_num = if ahead_zero {
+                    "0"
+                } else {
+                    self.metadata.ahead.as_str()
+                };
+                let behind_num = if behind_zero {
+                    "0"
+                } else {
+                    self.metadata.behind.as_str()
+                };
                 value_lines.push(Line::from(vec![
                     Span::styled(
                         format!("\u{2191} {}", ahead_num),
@@ -288,7 +296,8 @@ impl BranchDetail<'_> {
             }
 
             if !self.metadata.comparison_label.is_empty() {
-                label_lines.push(Line::from("       vs: ").fg(self.ctx.color_theme.detail_label_fg));
+                label_lines
+                    .push(Line::from("       vs: ").fg(self.ctx.color_theme.detail_label_fg));
                 value_lines.push(Line::from(self.metadata.comparison_label.as_str()));
             }
         }
