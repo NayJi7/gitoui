@@ -28,7 +28,7 @@ use clap::{Parser, ValueEnum};
 use graph::GraphImageManager;
 use serde::Deserialize;
 
-/// Gitoui - Interactive Git client for the terminal
+/// Gitoui - Say oui to the most complete git terminal youser interface
 #[derive(Parser)]
 #[command(version)]
 struct Args {

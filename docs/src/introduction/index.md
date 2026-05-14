@@ -1,6 +1,6 @@
 # Introduction
 
-**Gitoui** ([`/zéːriə/`](https://nayji7.github.io/gitoui/faq/index.html#how-do-i-pronounce-gitoui)) is a TUI application that uses the terminal emulators' image display protocol to render commit graphs like `git log --graph --all`.
+**Gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/index.html#how-do-i-pronounce-gitoui)) says oui to the most complete git terminal youser interface.
 
 <img src="https://raw.githubusercontent.com/NayJi7/gitoui/master/img/demo.gif">
 

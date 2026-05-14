@@ -499,6 +499,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.handle_click(col, row),
             View::PullRequests(view) => view.handle_click(col, row),
             View::Issues(view) => view.handle_click(col, row),
+            View::Help(view) => view.handle_click(col, row),
             _ => {}
         }
     }
@@ -570,6 +571,10 @@ impl<'a> View<'a> {
                 true
             }
             View::Issues(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Help(view) => {
                 view.handle_mouse_move(col, row);
                 true
             }

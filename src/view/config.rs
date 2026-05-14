@@ -875,6 +875,18 @@ impl<'a> ConfigView<'a> {
             };
             let value_fg = if is_grayed {
                 dim_fg
+            } else if i == GITHUB_AUTH_INDEX {
+                // GitHub Auth state drives its own color so the button
+                // reads as "ok / neutral / busy" rather than always
+                // warn-yellow: green when signed in, plain fg when the
+                // user still needs to authenticate, warn while pending.
+                if self.github_auth_pending {
+                    self.ctx.color_theme.status_warn_fg
+                } else if self.github_auth_state.is_authenticated() {
+                    self.ctx.color_theme.status_success_fg
+                } else {
+                    self.ctx.color_theme.fg
+                }
             } else {
                 config_value_fg(config_value_kind(i), &self.ctx.color_theme)
             };

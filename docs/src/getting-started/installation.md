@@ -3,7 +3,7 @@
 ### One-line installer (Linux / macOS)
 
 ```
-$ curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
 ```
 
 Auto-detects your OS + architecture, downloads the matching release tarball
@@ -13,7 +13,7 @@ to update to the latest release.
 Override the install directory or pin a specific version:
 
 ```
-$ INSTALL_DIR=$HOME/bin GITOUI_VERSION=v0.1.0 \
+INSTALL_DIR=$HOME/bin GITOUI_VERSION=v0.1.0 \
     curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
 ```
 

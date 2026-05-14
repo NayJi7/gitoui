@@ -50,8 +50,7 @@ pub fn load() -> Vec<PathBuf> {
         .collect()
 }
 
-pub fn save(entries: &[PathBuf]) {
-    let Some(path) = recents_file() else { return };
+fn save_at(path: &Path, entries: &[PathBuf]) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -67,7 +66,7 @@ pub fn save(entries: &[PathBuf]) {
         out.push('"');
     }
     out.push(']');
-    if let Err(e) = fs::write(&path, out) {
+    if let Err(e) = fs::write(path, out) {
         eprintln!("gitoui: failed to write recents.json: {}", e);
     }
 }
@@ -87,7 +86,16 @@ pub fn push(path: &Path, current: &[PathBuf]) -> Vec<PathBuf> {
     recents.insert(0, canonical);
     recents.truncate(MAX_RECENTS);
     let to_save = recents.clone();
-    std::thread::spawn(move || save(&to_save));
+    // Capture the destination path eagerly so a background save that
+    // wakes up after the env (XDG_CONFIG_HOME) has shifted — common in
+    // the parallel test suite — still writes to the file the caller
+    // expects.
+    let dest = recents_file();
+    std::thread::spawn(move || {
+        if let Some(path) = dest {
+            save_at(&path, &to_save);
+        }
+    });
     recents
 }
 
@@ -208,8 +216,10 @@ mod tests {
         let weird = base.path().join("with \" quote and \\ slash");
         std::fs::create_dir(&weird).unwrap();
         let recents = push(&weird, &[]);
-        // Flush the background write synchronously by calling save directly.
-        save(&recents);
+        // Flush the background write synchronously by calling save_at
+        // directly. Captures the destination path explicitly so the
+        // (now-non-existent) lazy XDG re-read can't drift the file.
+        save_at(&recents_file().unwrap(), &recents);
         let loaded = load();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], weird.canonicalize().unwrap());
