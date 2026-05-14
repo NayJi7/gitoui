@@ -4188,11 +4188,16 @@ impl<'a> PullRequestsView<'a> {
             self.list_scroll_offset = max_offset;
         }
 
-        // Reserve 2 cols on the right for the row margin — the row's
-        // trailing `Span::raw("  ")` lands there, and the List widget
-        // also paints the selection bg into it, so the highlight
-        // extends visually to the panel border.
-        const RIGHT_MARGIN: usize = 2;
+        // Reserve 4 cols on the right of the title budget so the base
+        // branch (`→ main`) always lands at least 2 cells INSIDE the
+        // panel's right border. Without this, worst-case rows (longest
+        // head branch) push `base` flush against the border because the
+        // row's actual content has more overhead than `fixed` accounts
+        // for (avatar gap + pre-author pad + trailing pad). The title
+        // shrinks by 2 extra cells to absorb the difference, but the
+        // selection bg is still painted to `row_width = body_area.width`
+        // so the highlight reaches the border edge.
+        const RIGHT_MARGIN: usize = 4;
         let col_budget = (body_area.width as usize).saturating_sub(RIGHT_MARGIN);
         let owned_filtered: Vec<PullRequest> =
             filtered.iter().map(|pr| (*pr).clone()).collect();

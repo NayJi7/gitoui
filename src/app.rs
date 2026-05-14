@@ -1568,6 +1568,13 @@ impl App<'_> {
                     }
                 }
                 AppEvent::OpenPrCommitDetail { pr_number, sha } => {
+                    // Wipe lingering Kitty/iTerm2/Sixel placements so
+                    // the PR view's avatars (header by-line, commit
+                    // rows, …) don't ghost on top of the CommitDetail
+                    // / Graph view we're about to render. Same routine
+                    // ClosePullRequests / OpenPullRequestDetail use.
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
                     self.open_pr_commit_detail(pr_number, sha);
                 }
                 AppEvent::OpenPrFileDiff {
@@ -1575,6 +1582,8 @@ impl App<'_> {
                     sha,
                     file_path,
                 } => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
                     self.open_pr_file_diff(pr_number, sha, file_path);
                 }
                 AppEvent::CloseInteractiveRebase => {
