@@ -1792,7 +1792,7 @@ impl App<'_> {
         self.view.handle_event(event_with_count, key);
         // Apply theme live when cycling in config view.
         if let View::Config(ref view) = self.view {
-            if let Some(def) = crate::themes::get_theme(&view.core_config().option.theme) {
+            if let Ok(def) = crate::themes::resolve_or_load(&view.core_config().option.theme) {
                 let color_theme = def.color_theme;
                 // Rebuild the graph palette from the new theme + current
                 // `[graph.color]` config so the preview row in the config
@@ -4688,9 +4688,9 @@ impl<'a> App<'a> {
             let github_avatars = core.github_avatars();
             let ctx = Rc::make_mut(&mut self.ctx);
             ctx.core_config = core;
-            if let Some(def) = crate::themes::get_theme(&ctx.core_config.option.theme) {
+            if let Ok(def) = crate::themes::resolve_or_load(&ctx.core_config.option.theme) {
                 ctx.color_theme = def.color_theme;
-                ctx.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                ctx.core_config.option.syntax_theme = def.syntax_theme;
             }
             // Always rebuild the graph palette from the (possibly theme-
             // overridden) color_theme + user's [graph] config so the

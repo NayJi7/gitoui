@@ -1,10 +1,11 @@
 use crate::color::ColorTheme;
 use ratatui::style::Color;
 
+#[derive(Debug)]
 pub struct ThemeDefinition {
     pub color_theme: ColorTheme,
     /// Name of the syntect syntax theme to use for diff highlighting.
-    pub syntax_theme: &'static str,
+    pub syntax_theme: String,
 }
 
 pub fn list_themes() -> &'static [&'static str] {
@@ -20,6 +21,49 @@ pub fn list_themes() -> &'static [&'static str] {
         "One Dark",
         "Monokai Pro",
     ]
+}
+
+/// Names of every custom theme file found under `<config_dir>/themes/`.
+/// Returns the file stems (no `.toml`), sorted case-insensitively.
+/// Silently returns an empty vec if the dir doesn't exist, isn't readable,
+/// or there's no config dir at all — the config view treats this as
+/// "no custom themes available", same as the empty built-ins case.
+pub fn discover_custom_themes() -> Vec<String> {
+    let Some(config_path) = crate::config::resolve_config_file_path() else {
+        return Vec::new();
+    };
+    let Some(dir) = config_path.parent().map(|p| p.join(THEMES_DIR_NAME)) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let builtins: std::collections::HashSet<&str> = list_themes().iter().copied().collect();
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("toml"))
+        .filter_map(|e| {
+            e.path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_owned)
+        })
+        // Built-in names take precedence — a custom file shadowing a
+        // built-in name would be confusing in the cycle.
+        .filter(|n| !builtins.contains(n.as_str()))
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+}
+
+/// Built-ins + custom themes, in a stable order suitable for the
+/// config view's ←/→ cycle: built-ins first (as listed), then custom
+/// themes sorted alphabetically. Empty vec is never returned — even
+/// without custom files we get the 10 built-ins.
+pub fn list_all_themes() -> Vec<String> {
+    let mut all: Vec<String> = list_themes().iter().map(|&s| s.to_string()).collect();
+    all.extend(discover_custom_themes());
+    all
 }
 
 pub fn get_theme(name: &str) -> Option<ThemeDefinition> {
@@ -51,7 +95,7 @@ fn graph_palette(hex: &[&str]) -> Vec<String> {
 
 fn tokyo_night() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "base16-ocean.dark",
+        syntax_theme: "base16-ocean.dark".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x1a, 0x1b, 0x26),
             fg: rgb(0xa9, 0xb1, 0xd6),
@@ -105,7 +149,7 @@ fn tokyo_night() -> ThemeDefinition {
 
 fn dracula() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "Dracula",
+        syntax_theme: "Dracula".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x28, 0x2a, 0x36),
             fg: rgb(0xf8, 0xf8, 0xf2),
@@ -159,7 +203,7 @@ fn dracula() -> ThemeDefinition {
 
 fn catppuccin_mocha() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "base16-ocean.dark",
+        syntax_theme: "base16-ocean.dark".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x1e, 0x1e, 0x2e),
             fg: rgb(0xcd, 0xd6, 0xf4),
@@ -213,7 +257,7 @@ fn catppuccin_mocha() -> ThemeDefinition {
 
 fn catppuccin_latte() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "Solarized (light)",
+        syntax_theme: "Solarized (light)".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0xef, 0xf1, 0xf5),
             fg: rgb(0x4c, 0x4f, 0x69),
@@ -267,7 +311,7 @@ fn catppuccin_latte() -> ThemeDefinition {
 
 fn gruvbox_dark() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "base16-mocha.dark",
+        syntax_theme: "base16-mocha.dark".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x28, 0x28, 0x28),
             fg: rgb(0xeb, 0xdb, 0xb2),
@@ -321,7 +365,7 @@ fn gruvbox_dark() -> ThemeDefinition {
 
 fn nord() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "base16-ocean.dark",
+        syntax_theme: "base16-ocean.dark".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x2e, 0x34, 0x40),
             fg: rgb(0xe5, 0xe9, 0xf0),
@@ -375,7 +419,7 @@ fn nord() -> ThemeDefinition {
 
 fn solarized_dark() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "Solarized (dark)",
+        syntax_theme: "Solarized (dark)".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x00, 0x2b, 0x36),
             fg: rgb(0x83, 0x94, 0x96),
@@ -429,7 +473,7 @@ fn solarized_dark() -> ThemeDefinition {
 
 fn solarized_light() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "Solarized (light)",
+        syntax_theme: "Solarized (light)".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0xfd, 0xf6, 0xe3),
             fg: rgb(0x65, 0x7b, 0x83),
@@ -483,7 +527,7 @@ fn solarized_light() -> ThemeDefinition {
 
 fn one_dark() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "base16-eighties.dark",
+        syntax_theme: "base16-eighties.dark".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x28, 0x2c, 0x34),
             fg: rgb(0xab, 0xb2, 0xbf),
@@ -537,7 +581,7 @@ fn one_dark() -> ThemeDefinition {
 
 fn monokai_pro() -> ThemeDefinition {
     ThemeDefinition {
-        syntax_theme: "Monokai",
+        syntax_theme: "Monokai".to_string(),
         color_theme: ColorTheme {
             bg: rgb(0x2d, 0x2a, 0x2e),
             fg: rgb(0xfc, 0xfc, 0xfa),
@@ -589,6 +633,196 @@ fn monokai_pro() -> ThemeDefinition {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Custom theme files on disk
+//
+// Users can drop a `<name>.toml` in `~/.config/gitoui/themes/` and
+// reference it via `core.option.theme = "<name>"`. The file is a flat
+// TOML with the same color tokens as the `[color]` section of the
+// main config + two optional metadata fields:
+//
+//     base = "Dracula"          # optional, inherit unset tokens
+//     syntax_theme = "Dracula"  # optional syntect palette name
+//     fg = "#abc"               # any subset of ColorTheme tokens
+//     bg = "#123"
+//     # …
+//
+// Missing tokens fall back to the `base` theme's values; if no `base`
+// is set, they use ColorTheme::default(). This lets the user write a
+// 4-line file to recolor just the accent + keep everything else from
+// Dracula intact.
+// ─────────────────────────────────────────────────────────────────────
+
+use std::path::{Path, PathBuf};
+
+/// Things that can go wrong loading a custom theme file. Surfaced
+/// to the user via `ConfigDiagnostic::from_theme_load_error`.
+#[derive(Debug)]
+pub enum ThemeLoadError {
+    /// Name isn't a built-in AND no file at `<config>/themes/<name>.toml`.
+    /// `searched` is the expected disk path so the message can point
+    /// the user at where to drop the file.
+    NotFound { name: String, searched: PathBuf },
+    /// `<config>/themes/<name>.toml` exists but TOML parsing failed.
+    /// Catches both syntax errors and bad hex values (ratatui's Color
+    /// deserializer rejects malformed `#rrggbb` strings).
+    BadFile {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+    /// User specified `base = "X"` in their theme file but X isn't a
+    /// known built-in theme name.
+    UnknownBase {
+        path: PathBuf,
+        name: String,
+        base: String,
+    },
+    /// I/O error reading the file (permissions, etc.).
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+/// Default sub-directory under the config dir where custom themes
+/// live. Kept public so the config view's "where to put a theme"
+/// hint stays in sync.
+pub const THEMES_DIR_NAME: &str = "themes";
+
+/// Resolve the expected on-disk path for a custom theme named `name`.
+/// Returns `None` if we can't even determine a config dir (no $HOME
+/// + no $XDG_CONFIG_HOME on a system without a home directory).
+pub fn custom_theme_path(name: &str) -> Option<PathBuf> {
+    let base = crate::config::resolve_config_file_path()?;
+    base.parent()
+        .map(|p| p.join(THEMES_DIR_NAME).join(format!("{name}.toml")))
+}
+
+/// Built-in lookup first, disk fall-back second. The fall-back path
+/// is `<config_dir>/themes/<name>.toml`. Empty `name` is treated as
+/// "no theme picked" — same convention as `core.option.theme = ""`
+/// in the main config — and returns `Ok(default)`.
+pub fn resolve_or_load(name: &str) -> Result<ThemeDefinition, ThemeLoadError> {
+    if name.is_empty() {
+        return Ok(default_theme_definition());
+    }
+    if let Some(def) = get_theme(name) {
+        return Ok(def);
+    }
+    // Built-in lookup missed — try disk.
+    let Some(path) = custom_theme_path(name) else {
+        return Err(ThemeLoadError::NotFound {
+            name: name.to_string(),
+            searched: PathBuf::from(format!("<config>/{THEMES_DIR_NAME}/{name}.toml")),
+        });
+    };
+    if !path.exists() {
+        return Err(ThemeLoadError::NotFound {
+            name: name.to_string(),
+            searched: path,
+        });
+    }
+    load_theme_from_path(&path)
+}
+
+fn default_theme_definition() -> ThemeDefinition {
+    ThemeDefinition {
+        color_theme: ColorTheme::default(),
+        syntax_theme: "base16-ocean.dark".to_string(),
+    }
+}
+
+/// Per-file schema. `#[serde(flatten)]` lifts every OptionalColorTheme
+/// field to the top level so users write `fg = "#abc"` not
+/// `[colors] fg = "#abc"`.
+#[derive(Default, serde::Deserialize)]
+struct CustomThemeFile {
+    base: Option<String>,
+    syntax_theme: Option<String>,
+    #[serde(flatten)]
+    colors: crate::color::OptionalColorTheme,
+}
+
+fn load_theme_from_path(path: &Path) -> Result<ThemeDefinition, ThemeLoadError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ThemeLoadError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let file: CustomThemeFile =
+        toml::from_str(&content).map_err(|source| ThemeLoadError::BadFile {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    // Start from the explicit `base = "..."` if any, else from the
+    // built-in defaults. Theme inheritance is single-level (no chain)
+    // to keep load behaviour predictable.
+    let base_def = match file.base.as_deref() {
+        Some(base_name) => get_theme(base_name).ok_or_else(|| ThemeLoadError::UnknownBase {
+            path: path.to_path_buf(),
+            name: file_stem(path),
+            base: base_name.to_string(),
+        })?,
+        None => default_theme_definition(),
+    };
+
+    let user_set_syntax = file.syntax_theme.is_some();
+    let mut color_theme = base_def.color_theme;
+    file.colors.merge_into(&mut color_theme);
+
+    // Pick a syntax theme:
+    //  1. explicit `syntax_theme = "..."` in the file wins.
+    //  2. else, auto-detect from the resolved bg's luminance — overriding
+    //     the inherited base. The user can override `bg` to a light color
+    //     while keeping `base = "Tokyo Night"`; we don't want the dark
+    //     base's syntax then. If they DO want the base's syntax verbatim
+    //     they can set it explicitly.
+    let syntax_theme = if user_set_syntax {
+        file.syntax_theme.unwrap()
+    } else {
+        auto_pick_syntax_theme(&color_theme)
+    };
+
+    Ok(ThemeDefinition {
+        color_theme,
+        syntax_theme,
+    })
+}
+
+/// Choose a sensible default `syntax_theme` based on a `ColorTheme`'s bg
+/// luminance. Returns the name of a syntax theme that always ships with
+/// gitoui (either bundled via `embed_theme!` or part of syntect's
+/// `load_defaults()`), so the lookup at render time never misses.
+fn auto_pick_syntax_theme(theme: &ColorTheme) -> String {
+    if is_dark_color(theme.bg) {
+        "base16-ocean.dark".to_string()
+    } else {
+        "InspiredGitHub".to_string()
+    }
+}
+
+/// Quick light/dark check on a ratatui `Color`. Uses the perceived
+/// luminance formula (rec. 601 coefficients) for RGB; named colors
+/// fall back to a hard-coded best-guess. Unknown / `Reset` is treated
+/// as dark since terminals overwhelmingly default to a dark background.
+fn is_dark_color(c: Color) -> bool {
+    match c {
+        Color::Rgb(r, g, b) => {
+            let lum = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+            lum < 128.0
+        }
+        Color::White | Color::Gray | Color::LightYellow => false,
+        _ => true,
+    }
+}
+
+fn file_stem(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("?")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,5 +842,116 @@ mod tests {
     #[test]
     fn get_theme_returns_none_for_unknown() {
         assert!(get_theme("not-a-theme").is_none());
+    }
+
+    fn write_tmp_theme(name: &str, body: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("gitoui-test-themes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.toml"));
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn load_theme_inherits_base_and_overrides() {
+        let path = write_tmp_theme(
+            "load_inherits",
+            r##"
+base = "Tokyo Night"
+fg = { Rgb = [255, 0, 100] }
+bg = { Rgb = [10, 10, 10] }
+graph_branches = ["#f05133", "#8b2a12"]
+"##,
+        );
+        let def = load_theme_from_path(&path).unwrap();
+        let base = tokyo_night().color_theme;
+        // overridden tokens take user values
+        assert_eq!(def.color_theme.fg, Color::Rgb(255, 0, 100));
+        assert_eq!(def.color_theme.bg, Color::Rgb(10, 10, 10));
+        // non-overridden tokens stay on the inherited base
+        assert_eq!(def.color_theme.list_selected_fg, base.list_selected_fg);
+        assert_eq!(def.color_theme.list_hash_fg, base.list_hash_fg);
+        // graph palette is fully replaced when user supplies one
+        assert_eq!(def.color_theme.graph_branches.len(), 2);
+        assert_eq!(def.color_theme.graph_branches[0], "#f05133");
+    }
+
+    #[test]
+    fn load_theme_rejects_unknown_base() {
+        let path = write_tmp_theme(
+            "bad_base",
+            r#"
+base = "NotARealTheme"
+fg = { Rgb = [1, 2, 3] }
+"#,
+        );
+        let err = load_theme_from_path(&path).unwrap_err();
+        match err {
+            ThemeLoadError::UnknownBase { base, .. } => assert_eq!(base, "NotARealTheme"),
+            other => panic!("expected UnknownBase, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_theme_rejects_bad_toml() {
+        let path = write_tmp_theme("bad_toml", "this is = not valid = toml ===");
+        let err = load_theme_from_path(&path).unwrap_err();
+        assert!(matches!(err, ThemeLoadError::BadFile { .. }));
+    }
+
+    #[test]
+    fn resolve_or_load_built_in_name() {
+        let def = resolve_or_load("Tokyo Night").unwrap();
+        // sanity: matches the built-in definition
+        assert_eq!(def.color_theme.bg, tokyo_night().color_theme.bg);
+    }
+
+    #[test]
+    fn resolve_or_load_empty_returns_default() {
+        // Empty name = "no theme picked", same as `core.option.theme = ""`.
+        let def = resolve_or_load("").unwrap();
+        assert_eq!(def.color_theme, ColorTheme::default());
+    }
+
+    #[test]
+    fn auto_pick_syntax_theme_light_bg() {
+        let path = write_tmp_theme(
+            "auto_light",
+            r##"
+base = "Tokyo Night"
+bg = "#ffffff"
+"##,
+        );
+        let def = load_theme_from_path(&path).unwrap();
+        // Light bg + no explicit syntax_theme → light syntect theme.
+        assert_eq!(def.syntax_theme, "InspiredGitHub");
+    }
+
+    #[test]
+    fn auto_pick_syntax_theme_dark_bg() {
+        let path = write_tmp_theme(
+            "auto_dark",
+            r##"
+base = "Tokyo Night"
+bg = "#0a0a0a"
+"##,
+        );
+        let def = load_theme_from_path(&path).unwrap();
+        assert_eq!(def.syntax_theme, "base16-ocean.dark");
+    }
+
+    #[test]
+    fn explicit_syntax_theme_wins_over_auto() {
+        let path = write_tmp_theme(
+            "explicit_syntax",
+            r##"
+base = "Tokyo Night"
+bg = "#ffffff"
+syntax_theme = "Dracula"
+"##,
+        );
+        let def = load_theme_from_path(&path).unwrap();
+        // Light bg would auto-pick InspiredGitHub, but explicit wins.
+        assert_eq!(def.syntax_theme, "Dracula");
     }
 }

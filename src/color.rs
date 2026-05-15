@@ -5,7 +5,7 @@ use umbra::optional;
 
 use crate::config::GraphColorConfig;
 
-#[optional(derives = [Deserialize], visibility = pub)]
+#[optional(derives = [Deserialize, Default], visibility = pub)]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct ColorTheme {
     #[default(RatatuiColor::Rgb(0xc0, 0xca, 0xf5))]
@@ -111,6 +111,45 @@ pub struct ColorTheme {
     /// can specify their own palette by listing hex strings here.
     #[default(Vec::<String>::new())]
     pub graph_branches: Vec<String>,
+}
+
+impl OptionalColorTheme {
+    /// Merge user-provided partial overrides onto an already-built base
+    /// `ColorTheme` (the inherited theme, NOT the default). Every token
+    /// is listed explicitly so adding a new color to `ColorTheme` shows
+    /// up as a compile error instead of silently falling back at runtime.
+    pub fn merge_into(self, theme: &mut ColorTheme) {
+        macro_rules! merge {
+            ($($field:ident),+ $(,)?) => { $(
+                if let Some(v) = self.$field { theme.$field = v; }
+            )+ };
+        }
+        merge! {
+            fg, bg,
+            list_selected_fg, list_selected_bg,
+            list_compare_marked_fg, list_compare_marked_bg,
+            list_ref_paren_fg, list_ref_branch_fg, list_ref_remote_branch_fg,
+            list_ref_tag_fg, list_ref_stash_fg, list_head_fg,
+            list_commit_message_fg, list_name_fg, list_hash_fg, list_date_fg,
+            list_match_fg, list_match_bg,
+            detail_label_fg, detail_name_fg, detail_date_fg, detail_email_fg,
+            detail_hash_fg, detail_ref_branch_fg, detail_ref_remote_branch_fg,
+            detail_ref_tag_fg,
+            detail_file_change_add_fg, detail_file_change_modify_fg,
+            detail_file_change_delete_fg, detail_file_change_move_fg,
+            ref_selected_fg, ref_selected_bg,
+            help_block_title_fg, help_key_fg,
+            virtual_cursor_fg,
+            status_input_fg, status_input_transient_fg,
+            status_info_fg, status_success_fg, status_warn_fg, status_error_fg,
+            divider_fg,
+        }
+        if let Some(branches) = self.graph_branches {
+            if !branches.is_empty() {
+                theme.graph_branches = branches;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -945,6 +945,278 @@ fn set_nested_option_string(doc: &mut toml::Table, keys: &[&str], value: &Option
     }
 }
 
+/// Load the config from disk and surface ANY problem (parse, schema
+/// validation, unknown theme, …) as a structured `ConfigDiagnostic`
+/// instead of the legacy `Error::Config(String)` blob. Used at boot
+/// time so the entry point can render the failure as a styled `--help`
+/// -like error block and exit cleanly instead of dumping a Debug
+/// stack.
+///
+/// Returns the same tuple shape as `load()` so the boot loop can use
+/// it as a drop-in replacement for the first iteration.
+#[allow(clippy::type_complexity)]
+pub fn load_or_diagnose() -> std::result::Result<
+    (
+        CoreConfig,
+        UiConfig,
+        GraphConfig,
+        ColorTheme,
+        Option<KeyBind>,
+    ),
+    ConfigDiagnostic,
+> {
+    // Resolve which file to read — env var beats default path. If
+    // GITOUI_CONFIG_FILE is set but missing → hard fail; everything
+    // else (no env var, default path missing) gracefully uses the
+    // built-in defaults.
+    let (chosen_path, must_exist) = match config_file_path_from_env() {
+        Some(p) => (Some(p), true),
+        None => (config_file_path(), false),
+    };
+
+    let raw_config = if let Some(path) = chosen_path.as_ref() {
+        if !path.exists() {
+            if must_exist {
+                return Err(ConfigDiagnostic::from_message(
+                    format!(
+                        "Config file specified by ${CONFIG_FILE_ENV_NAME} \
+                         environment variable not found"
+                    ),
+                    Some(path.clone()),
+                ));
+            }
+            Config::default()
+        } else {
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                ConfigDiagnostic::from_message(format!("read: {e}"), Some(path.clone()))
+            })?;
+            let parsed: OptionalConfig = toml::from_str(&content)
+                .map_err(|e| ConfigDiagnostic::from_toml(e, path.clone()))?;
+            parsed.into()
+        }
+    } else {
+        Config::default()
+    };
+
+    raw_config
+        .validate()
+        .map_err(|e| ConfigDiagnostic::from_validation(&e, chosen_path.clone()))?;
+
+    // Theme name check — empty string means "use the built-in
+    // default palette", which is allowed. A non-empty string MUST
+    // resolve to a known built-in OR a `~/.config/gitoui/themes/<name>.toml`
+    // file; otherwise we'd silently fall back to defaults and the user
+    // would never know their typo.
+    let theme_name = &raw_config.core.option.theme;
+    if !theme_name.is_empty() {
+        crate::themes::resolve_or_load(theme_name)
+            .map_err(ConfigDiagnostic::from_theme_load_error)?;
+    }
+
+    Ok((
+        raw_config.core,
+        raw_config.ui,
+        raw_config.graph,
+        raw_config.color,
+        raw_config.keybind,
+    ))
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Config diagnostics — pretty error path for invalid user configs.
+//
+// When `gitoui::run()` boots, the first `config::load()` call may fail
+// for a handful of reasons: a TOML syntax error, an unknown field, a
+// keybind conflict, an invalid hex color, an unknown named theme, …
+// We render those as a single styled error block (brand splash on
+// top, red title, dim path, the raw cause, then a docs hint) and exit
+// instead of letting Rust's default `Error: ...` dump leak into the
+// terminal. Mirrors the `--help` entry point so users see a coherent
+// "we couldn't start" page instead of a stack trace.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Structured description of a config-load failure. Built from
+/// concrete error types as we catch them, then rendered to stderr by
+/// `write_to_stderr` at the very top of the boot flow.
+#[derive(Debug, Clone)]
+pub struct ConfigDiagnostic {
+    /// Short headline shown in red. Always something like
+    /// "configuration error" or "theme not found".
+    pub title: &'static str,
+    /// One-line summary of what went wrong.
+    pub summary: String,
+    /// Optional multi-line body — verbatim TOML parse output, a list
+    /// of valid options, the offending key, etc.
+    pub details: Vec<String>,
+    /// Offending file. None for synthetic errors (e.g. CLI args).
+    pub path: Option<PathBuf>,
+    /// Tail line in dim — typically a docs URL or a quick remedy.
+    pub hint: Option<String>,
+}
+
+impl ConfigDiagnostic {
+    /// Wrap a `toml::de::Error` (parse failure) — TOML's own message
+    /// already includes "expected" details + a line/col context, so
+    /// we drop it in verbatim under the title.
+    pub fn from_toml(err: toml::de::Error, path: PathBuf) -> Self {
+        Self {
+            title: "configuration error",
+            summary: "Could not parse config TOML".to_string(),
+            details: err.to_string().lines().map(str::to_string).collect(),
+            path: Some(path),
+            hint: Some(
+                "Docs: https://nayji7.github.io/gitoui/configurations/config-file-format.html"
+                    .to_string(),
+            ),
+        }
+    }
+
+    /// `garde::Report` carries one or more field-level validation
+    /// failures (range, regex, custom predicates). We flatten the
+    /// report into one line per failed field.
+    pub fn from_validation(err: &garde::Report, path: Option<PathBuf>) -> Self {
+        let details = err
+            .iter()
+            .map(|(field, e)| format!("[{field}] {e}"))
+            .collect();
+        Self {
+            title: "configuration error",
+            summary: "Some config values are out of range".to_string(),
+            details,
+            path,
+            hint: Some(
+                "Docs: https://nayji7.github.io/gitoui/configurations/config-file-format.html"
+                    .to_string(),
+            ),
+        }
+    }
+
+    /// Surface a `ThemeLoadError` (raised when resolving
+    /// `core.option.theme` against built-ins + the user's themes/
+    /// directory) as a structured diagnostic.
+    pub fn from_theme_load_error(err: crate::themes::ThemeLoadError) -> Self {
+        use crate::themes::ThemeLoadError;
+        match err {
+            ThemeLoadError::NotFound { name, searched } => Self {
+                title: "theme not found",
+                summary: format!("Unknown theme: {name:?}"),
+                details: {
+                    let mut d = vec!["Built-in themes:".to_string()];
+                    for chunk in crate::themes::list_themes().chunks(4) {
+                        d.push(format!("  {}", chunk.join(", ")));
+                    }
+                    d.push(String::new());
+                    d.push(format!(
+                        "Custom themes would be loaded from: {}",
+                        searched.display()
+                    ));
+                    d
+                },
+                path: None,
+                hint: Some(
+                    "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+                ),
+            },
+            ThemeLoadError::BadFile { path, source } => Self {
+                title: "theme file invalid",
+                summary: "Could not parse the custom theme TOML".to_string(),
+                details: source.to_string().lines().map(str::to_string).collect(),
+                path: Some(path),
+                hint: Some(
+                    "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+                ),
+            },
+            ThemeLoadError::UnknownBase { path, name, base } => Self {
+                title: "theme inherits unknown base",
+                summary: format!("`{name}` sets base = {base:?} (not a built-in)"),
+                details: {
+                    let mut d = vec!["Valid base names:".to_string()];
+                    for chunk in crate::themes::list_themes().chunks(4) {
+                        d.push(format!("  {}", chunk.join(", ")));
+                    }
+                    d
+                },
+                path: Some(path),
+                hint: Some(
+                    "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+                ),
+            },
+            ThemeLoadError::Io { path, source } => Self {
+                title: "theme file unreadable",
+                summary: source.to_string(),
+                details: Vec::new(),
+                path: Some(path),
+                hint: None,
+            },
+        }
+    }
+
+    /// Raised when `core.option.theme = "X"` and X is neither a
+    /// built-in name nor a file at `~/.config/gitoui/themes/X.toml`.
+    /// (Kept around for callers that pre-date the ThemeLoadError plumbing.)
+    pub fn unknown_theme(name: &str, builtins: &[&str]) -> Self {
+        let mut details = vec!["Built-in themes:".to_string()];
+        for chunk in builtins.chunks(4) {
+            details.push(format!("  {}", chunk.join(", ")));
+        }
+        details.push(String::new());
+        details.push("Set `core.option.theme` to one of the above, or drop a".to_string());
+        details.push("TOML file at ~/.config/gitoui/themes/<name>.toml.".to_string());
+        Self {
+            title: "theme not found",
+            summary: format!("Unknown theme: {name:?}"),
+            details,
+            path: None,
+            hint: Some(
+                "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+            ),
+        }
+    }
+
+    /// Wrap any other config error from the legacy `Error::Config`
+    /// path so it goes through the same pretty printer.
+    pub fn from_message(msg: impl Into<String>, path: Option<PathBuf>) -> Self {
+        Self {
+            title: "configuration error",
+            summary: msg.into(),
+            details: Vec::new(),
+            path,
+            hint: Some(
+                "Docs: https://nayji7.github.io/gitoui/configurations/config-file-format.html"
+                    .to_string(),
+            ),
+        }
+    }
+
+    /// Write the diagnostic to stderr with ANSI styling when the
+    /// stream is a TTY; raw text otherwise. The caller is expected
+    /// to have rendered the brand splash beforehand (so the error
+    /// reads as a continuation of the `gitoui --help` look).
+    pub fn write_to_stderr(&self) {
+        use std::io::IsTerminal;
+        let tty = std::io::stderr().is_terminal();
+        // Brand orange #F05133 for the title — matches the splash.
+        let red = if tty { "\x1b[1;38;2;240;81;51m" } else { "" };
+        let dim = if tty { "\x1b[2m" } else { "" };
+        let reset = if tty { "\x1b[0m" } else { "" };
+
+        eprintln!();
+        eprintln!("  {red}gitoui: {}{reset} — {}", self.title, self.summary);
+        if let Some(path) = &self.path {
+            eprintln!("  {dim}{}{reset}", path.display());
+        }
+        eprintln!();
+        for line in &self.details {
+            eprintln!("    {line}");
+        }
+        if let Some(hint) = &self.hint {
+            eprintln!();
+            eprintln!("  {dim}{hint}{reset}");
+        }
+        eprintln!();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

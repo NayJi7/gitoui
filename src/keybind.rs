@@ -77,13 +77,20 @@ impl<'de> Deserialize<'de> for KeyBind {
                 let key_event = match parse_key_event(&key_event_str) {
                     Ok(e) => e,
                     Err(s) => {
-                        let msg = format!("{key_event_str:?} is not a valid key event: {s:}");
+                        let msg = format!("invalid key {key_event_str:?}: {s}");
                         return Err(serde::de::Error::custom(msg));
                     }
                 };
                 if let Some(conflict_user_event) = key_map.insert(key_event, user_event) {
+                    // Render both events + the conflicting key as
+                    // user-facing strings instead of `KeyEvent { ... }`
+                    // Debug noise — the diagnostic prints this
+                    // message verbatim under the brand splash.
                     let msg = format!(
-                        "{key_event:?} map to multiple events: {user_event:?}, {conflict_user_event:?}"
+                        "key {:?} is bound to both `{:?}` and `{:?}` — only one event per key",
+                        key_event_to_string(key_event),
+                        user_event,
+                        conflict_user_event,
                     );
                     return Err(serde::de::Error::custom(msg));
                 }

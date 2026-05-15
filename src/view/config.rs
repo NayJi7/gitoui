@@ -492,15 +492,15 @@ impl<'a> ConfigView<'a> {
     fn cycle_option_prev(&mut self) {
         match self.selected {
             0 => {
-                let themes = crate::themes::list_themes();
+                let themes = crate::themes::list_all_themes();
                 let current = self.core_config.option.theme.as_str();
-                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
+                let idx = themes.iter().position(|t| t == current).unwrap_or(0);
                 let prev_idx = if idx == 0 { themes.len() - 1 } else { idx - 1 };
-                let new_theme = themes[prev_idx];
-                self.core_config.option.theme = new_theme.to_string();
-                if let Some(def) = crate::themes::get_theme(new_theme) {
-                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                let new_theme = themes[prev_idx].clone();
+                if let Ok(def) = crate::themes::resolve_or_load(&new_theme) {
+                    self.core_config.option.syntax_theme = def.syntax_theme;
                 }
+                self.core_config.option.theme = new_theme;
                 self.theme_preview = None;
             }
             1 => {
@@ -593,15 +593,15 @@ impl<'a> ConfigView<'a> {
     fn cycle_option(&mut self) {
         match self.selected {
             0 => {
-                let themes = crate::themes::list_themes();
+                let themes = crate::themes::list_all_themes();
                 let current = self.core_config.option.theme.as_str();
-                let idx = themes.iter().position(|&t| t == current).unwrap_or(0);
+                let idx = themes.iter().position(|t| t == current).unwrap_or(0);
                 let next_idx = (idx + 1) % themes.len();
-                let new_theme = themes[next_idx];
-                self.core_config.option.theme = new_theme.to_string();
-                if let Some(def) = crate::themes::get_theme(new_theme) {
-                    self.core_config.option.syntax_theme = def.syntax_theme.to_owned();
+                let new_theme = themes[next_idx].clone();
+                if let Ok(def) = crate::themes::resolve_or_load(&new_theme) {
+                    self.core_config.option.syntax_theme = def.syntax_theme;
                 }
+                self.core_config.option.theme = new_theme;
                 self.theme_preview = None;
             }
             1 => {

@@ -241,24 +241,47 @@ pub fn run() -> Result<()> {
     let mut _git_watcher: Option<_> = None;
 
     let ret = loop {
+        // First iteration uses the diagnostic-bearing loader so any
+        // failure renders as a styled --help-style error block and
+        // exits cleanly. Subsequent reloads (config reopened from
+        // inside the app) go through the legacy `config::load()` and
+        // log the error to stderr — the running session shouldn't
+        // crash because the user typo'd a hex code mid-edit.
         let (mut core_config, ui_config, mut graph_config, mut color_theme, keybind_patch) =
-            match config::load() {
-                Ok(config) => config,
-                Err(e) if terminal.is_none() => break Err(e),
-                Err(e) => {
-                    eprintln!("Failed to reload config: {}", e);
-                    continue;
+            if terminal.is_none() {
+                match config::load_or_diagnose() {
+                    Ok(config) => config,
+                    Err(diag) => {
+                        let proto = protocol::auto_detect();
+                        print_no_repo_splash(proto);
+                        diag.write_to_stderr();
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                match config::load() {
+                    Ok(config) => config,
+                    Err(e) => {
+                        eprintln!("Failed to reload config: {e}");
+                        continue;
+                    }
                 }
             };
-        if let Some(def) = crate::themes::get_theme(&core_config.option.theme) {
-            color_theme = def.color_theme;
-            core_config.option.syntax_theme = def.syntax_theme.to_owned();
-            // Theme-tinted graph palette wins over the generic config default
-            // — but only if the theme actually shipped one. An empty Vec means
-            // "the theme didn't customize the graph", so we leave the user's
-            // `[graph.color.branches]` setting alone.
-            if !color_theme.graph_branches.is_empty() {
-                graph_config.color.branches = color_theme.graph_branches.clone();
+        // Resolve the configured theme: built-in name OR a user file at
+        // `~/.config/gitoui/themes/<name>.toml`. The loader path already
+        // validated this returns Ok at boot, so any error here would be from
+        // a config-reload mid-session — fall back silently in that case.
+        if !core_config.option.theme.is_empty() {
+            if let Ok(def) = crate::themes::resolve_or_load(&core_config.option.theme) {
+                color_theme = def.color_theme;
+                core_config.option.syntax_theme = def.syntax_theme;
+                // Theme-tinted graph palette wins over the generic config default
+                // — but only if the theme actually shipped one. An empty Vec means
+                // "the theme didn't customize the graph", so we leave the user's
+                // `[graph.color.branches]` setting alone.
+                if !color_theme.graph_branches.is_empty() {
+                    graph_config.color.branches = color_theme.graph_branches.clone();
+                }
             }
         }
         let keybind = keybind::KeyBind::new(keybind_patch);
