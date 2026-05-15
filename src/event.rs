@@ -69,6 +69,20 @@ pub enum AppEvent {
     NotifySuccess(String),
     NotifyWarn(String),
     NotifyError(String),
+    /// Persistent footer message — bypasses the 2 s auto-clear timer.
+    /// Used by the commit-list search-applied state to keep the
+    /// "Match X of Y (query)" hint visible the whole time the search
+    /// is active. `warn = true` switches to the warn color (zero
+    /// matches).
+    SetSearchStatus {
+        msg: String,
+        warn: bool,
+    },
+    /// Open the user's `config.toml` in `$EDITOR` (suspending the TUI
+    /// for the duration). Triggered by `o` in the Configuration view.
+    /// Creates the file if it doesn't exist yet. On resume, the app
+    /// reloads its config so edits take effect immediately.
+    OpenConfigFile,
     PushCurrentBranch,
     PullCurrentBranch,
     CheckAbortOperation,

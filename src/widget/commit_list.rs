@@ -32,11 +32,6 @@ static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default(
 
 const ELLIPSIS: &str = "...";
 
-#[allow(dead_code)]
-pub fn uncommitted_commit_hash() -> CommitHash {
-    CommitHash::from("0000000000000000000000000000000000000000")
-}
-
 #[derive(Debug)]
 pub struct CommitInfo<'a> {
     pub commit: &'a Commit,
@@ -710,6 +705,27 @@ impl<'a> CommitListState<'a> {
 
     pub fn select_prev_match(&mut self) {
         self.select_prev_match_index(self.current_selected_index());
+    }
+
+    /// Refresh `match_index` from the currently-selected row so the
+    /// "Match X of Y" footer follows arrow-key / mouse navigation
+    /// instead of staying frozen on the last cycle target. No-op when
+    /// the selected row isn't a match (keeps the last visited index
+    /// visible — vim-like "anchor" behaviour) or when search isn't
+    /// applied at all.
+    pub fn sync_match_index_to_selected(&mut self) {
+        if !matches!(self.search_state, SearchState::Applied { .. }) {
+            return;
+        }
+        let idx = self.current_selected_index();
+        if idx >= self.search_matches.len() {
+            return;
+        }
+        let m = &self.search_matches[idx];
+        if m.matched() {
+            let new_index = m.match_index;
+            self.search_state.update_match_index(new_index);
+        }
     }
 
     pub fn selected_commit_hash(&self) -> &CommitHash {

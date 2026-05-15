@@ -551,7 +551,6 @@ fn fallback_avatar_png(seed: &str) -> Vec<u8> {
     out.into_inner()
 }
 
-#[allow(dead_code)]
 fn ratatui_color_to_rgba(color: Color) -> [u8; 4] {
     match color {
         Color::Rgb(r, g, b) => [r, g, b, 255],

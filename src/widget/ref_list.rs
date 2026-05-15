@@ -127,22 +127,6 @@ impl RefListState {
         }
     }
 
-    /// Returns the remote name when the selected item is a top-level remote
-    /// node (e.g. `origin`) directly under the remotes root, but not the
-    /// special `[+ Add remote]` entry.
-    #[allow(dead_code)]
-    pub fn selected_remote_name(&self) -> Option<String> {
-        let selected = self.tree_state.selected();
-        if selected.len() == 2
-            && selected[0] == TREE_REMOTE_ROOT_IDENT
-            && selected.last().map(String::as_str) != Some(ADD_REMOTE_IDENT)
-        {
-            selected.last().cloned()
-        } else {
-            None
-        }
-    }
-
     /// Returns the worktree path if a worktree leaf is selected (but not the add-worktree sentinel).
     pub fn selected_worktree_path(&self) -> Option<String> {
         let selected = self.tree_state.selected();
@@ -659,35 +643,4 @@ fn tree_item_with_line(
     children: Vec<TreeItem<'static, String>>,
 ) -> TreeItem<'static, String> {
     TreeItem::new(identifier, line, children).unwrap()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn selected_remote_name_returns_name_for_remote_node() {
-        let path: Vec<String> = vec![TREE_REMOTE_ROOT_IDENT.into(), "origin".into()];
-        let result = if path.len() == 2 && path[0] == TREE_REMOTE_ROOT_IDENT {
-            Some(path[1].clone())
-        } else {
-            None
-        };
-        assert_eq!(result, Some("origin".to_string()));
-    }
-
-    #[test]
-    fn selected_remote_name_returns_none_for_branch_under_remote() {
-        let path: Vec<String> = vec![
-            TREE_REMOTE_ROOT_IDENT.into(),
-            "origin".into(),
-            "main".into(),
-        ];
-        let result = if path.len() == 2 && path[0] == TREE_REMOTE_ROOT_IDENT {
-            Some(path[1].clone())
-        } else {
-            None
-        };
-        assert_eq!(result, None);
-    }
 }

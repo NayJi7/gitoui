@@ -45,7 +45,7 @@ We welcome pull requests, but please note that they are not guaranteed to be acc
 
 We use [GitHub Actions](https://github.com/NayJi7/gitoui/blob/master/.github/workflows/build.yml) to perform basic checks:
 
-- Run both stable and MSRV versions of Rust.
+- Run stable Rust.
 - Run build, test, format, and lint.
 
 ### Improving the Commit Graph

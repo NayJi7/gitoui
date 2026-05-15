@@ -17,7 +17,7 @@
 
 <p align="center">
   <!-- ▶ demo GIF — full app walkthrough -->
-  <img src="./img/demo.gif" alt="gitoui demo" width="900">
+  <img src="./assets/readme/demo.gif" alt="gitoui demo" width="900">
 </p>
 
 **gitoui** (pronounced `/ʒi.tu.i/` — *gi-tou-i*) is a friendly little TUI that brings the depth of a desktop git client right into your terminal: rendered commit graphs, GitHub PRs and issues, hunk staging, blame, stash, and more — all keyboard-driven, all themable.

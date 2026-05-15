@@ -274,6 +274,14 @@ impl<'a> ConfigView<'a> {
             UserEvent::Cancel | UserEvent::Close | UserEvent::Config => {
                 self.tx.send(AppEvent::CloseConfig);
             }
+            // `o` opens the user's `~/.config/gitoui/config.toml` in
+            // `$EDITOR`. When the editor exits, the app reloads its
+            // config so the change is live immediately. Re-uses
+            // UserEvent::Checkout (the `o` key in the default keymap)
+            // since Checkout has no other meaning inside this view.
+            UserEvent::Checkout => {
+                self.tx.send(AppEvent::OpenConfigFile);
+            }
             UserEvent::PageDown => {
                 for _ in 0..count {
                     if self.selected + 1 < CONFIG_ITEM_COUNT {
@@ -1653,24 +1661,32 @@ fn github_avatars_description(state: &GithubAuthState, _enabled: bool) -> String
 }
 
 fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -> String {
-    if selected == GITHUB_AUTH_INDEX {
+    // `o:open config file` is always available — let the user pop the config
+    // into $EDITOR from any row. Prepended to the per-row hint with
+    // the same `▕▏` separator the app footer uses elsewhere.
+    let row_hint = if selected == GITHUB_AUTH_INDEX {
         if pending {
-            "Enter:re-copy".into()
+            "Enter:re-copy"
         } else if state.is_authenticated() {
-            "Enter:logout".into()
+            "Enter:logout"
         } else {
-            "Enter:auth".into()
+            "Enter:auth"
         }
     } else if selected == GITHUB_AVATARS_INDEX {
         if state.is_authenticated() {
-            "Enter/⇆:toggle".into()
+            "Enter/⇆:toggle"
         } else {
-            String::new()
+            ""
         }
     } else if selected >= TEXT_EDIT_START_INDEX {
-        "Enter:edit".into()
+        "Enter:edit"
     } else {
-        "Enter/⇆:cycle".into()
+        "Enter/⇆:cycle"
+    };
+    if row_hint.is_empty() {
+        "o:open config file".into()
+    } else {
+        format!("{row_hint}▕▏o:open config file")
     }
 }
 
@@ -1810,7 +1826,7 @@ mod tests {
     fn config_footer_prompts_auth_for_github_auth_row_when_logged_out() {
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), false),
-            "Enter:auth"
+            "Enter:auth▕▏o:open config file"
         );
     }
 
@@ -1824,7 +1840,7 @@ mod tests {
 
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &state, false),
-            "Enter:logout"
+            "Enter:logout▕▏o:open config file"
         );
     }
 
@@ -1832,7 +1848,7 @@ mod tests {
     fn config_footer_prompts_recopy_during_pending_auth() {
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), true),
-            "Enter:re-copy"
+            "Enter:re-copy▕▏o:open config file"
         );
     }
 

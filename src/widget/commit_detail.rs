@@ -65,20 +65,8 @@ impl CommitDetailState {
         self.selected_file = 0;
     }
 
-    #[allow(dead_code)]
-    pub fn select_first_file(&mut self) {
-        self.selected_file = 0;
-    }
-
     pub fn select_last(&mut self) {
         self.offset = usize::MAX;
-    }
-
-    #[allow(dead_code)]
-    pub fn select_last_file(&mut self, total: usize) {
-        if total > 0 {
-            self.selected_file = total - 1;
-        }
     }
 
     pub fn select_next_file(&mut self, total: usize) {
@@ -802,11 +790,11 @@ mod tests {
             .unwrap();
         Commit {
             commit_hash: "281d15fa8de043a2ee72d0971f5739ebf4335ba6".into(),
-            author_name: "Adam".into(),
-            author_email: "adamterraka@gmail.com".into(),
+            author_name: "Alice".into(),
+            author_email: "alice@example.com".into(),
             author_date: date,
-            committer_name: "Adam".into(),
-            committer_email: "adamterraka@gmail.com".into(),
+            committer_name: "Alice".into(),
+            committer_email: "alice@example.com".into(),
             committer_date: date,
             commit_message: "feat: fixed author header".into(),
             body: String::new(),
@@ -844,8 +832,8 @@ mod tests {
             .join("\n");
 
         assert!(labels.contains("Author"));
-        assert!(values.contains("Adam"));
-        assert!(values.contains("adamterraka@gmail.com"));
+        assert!(values.contains("Alice"));
+        assert!(values.contains("alice@example.com"));
     }
 
     #[test]

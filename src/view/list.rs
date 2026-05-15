@@ -183,11 +183,16 @@ impl<'a> ListView<'a> {
 
         if let SearchState::Applied { .. } = self.as_list_state().search_state() {
             match event {
-                UserEvent::GoToNext => {
+                // Cycling through matches uses Left / Right arrows
+                // (or h / l in the global keymap) — replaces the old
+                // n / Shift+N vim-style bindings, which now leave the
+                // commit-list search alone and stay free for future
+                // global use.
+                UserEvent::NavigateRight => {
                     self.as_mut_list_state().select_next_match();
                     self.update_matched_message();
                 }
-                UserEvent::GoToPrevious => {
+                UserEvent::NavigateLeft => {
                     self.as_mut_list_state().select_prev_match();
                     self.update_matched_message();
                 }
@@ -239,6 +244,12 @@ impl<'a> ListView<'a> {
             }
             // Do not return here
         }
+
+        // Re-anchor the "Match X of Y" footer to whatever the cursor
+        // landed on after this event. Cheap (single index lookup) +
+        // gated to SearchState::Applied inside the helper, so it's a
+        // no-op outside search mode.
+        self.maybe_sync_search_status();
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
@@ -313,13 +324,29 @@ impl<'a> ListView<'a> {
 
     fn update_matched_message(&self) {
         if let Some((msg, matched)) = self.as_list_state().matched_query_string() {
-            if matched {
-                self.tx.send(AppEvent::NotifyInfo(msg));
-            } else {
-                self.tx.send(AppEvent::NotifyWarn(msg));
-            }
+            // Sticky variant — stays visible the entire time search is
+            // applied, not just for the 2 s notification window.
+            self.tx.send(AppEvent::SetSearchStatus {
+                msg,
+                warn: !matched,
+            });
         } else {
             self.tx.send(AppEvent::ClearStatusLine);
+        }
+    }
+
+    /// Re-anchor the "Match X of Y" footer to the currently-selected
+    /// row, then re-emit it. Used as a hook after every navigation
+    /// event (arrows, page jumps, mouse hover) so the index follows
+    /// the cursor instead of trailing the last cycle. No-op outside
+    /// SearchState::Applied.
+    fn maybe_sync_search_status(&mut self) {
+        if matches!(
+            self.as_list_state().search_state(),
+            SearchState::Applied { .. }
+        ) {
+            self.as_mut_list_state().sync_match_index_to_selected();
+            self.update_matched_message();
         }
     }
 
@@ -524,9 +551,18 @@ impl<'a> ListView<'a> {
         }
 
         let (new_selected, new_offset, _) = list_state.current_list_status();
-        prev_selected != new_selected
+        let changed = prev_selected != new_selected
             || prev_offset != new_offset
             || list_state.hovered_branch != prev_branch
-            || list_state.hovered_tag != prev_tag
+            || list_state.hovered_tag != prev_tag;
+
+        // Mouse-hover changed the selected commit while search is
+        // applied — refresh the sticky "Match X of Y" footer so it
+        // tracks the cursor instead of trailing the last cycle.
+        if prev_selected != new_selected {
+            self.maybe_sync_search_status();
+        }
+
+        changed
     }
 }

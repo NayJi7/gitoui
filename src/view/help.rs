@@ -600,12 +600,8 @@ fn sections() -> Vec<HelpSection> {
                     action: "Cancel search / clear compare mark",
                 },
                 Shortcut {
-                    key: "n",
-                    action: "Jump to next match",
-                },
-                Shortcut {
-                    key: "Shift+N",
-                    action: "Jump to previous match",
+                    key: "← / →",
+                    action: "Cycle to previous / next match",
                 },
                 Shortcut {
                     key: "s",

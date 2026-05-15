@@ -28,10 +28,9 @@ use crate::{
     github::pr::PullRequest,
     github::RepoCoords,
     view::pr::{
-        build_body_prefix, build_junction_prefix, cursor_screen_pos, fit_cell,
-        label_chip_spans_local, parse_hex_color, push_comment_card, render_markdown_body,
-        short_label_chip_spans, word_left_boundary, word_right_boundary, wrap_styled_spans,
-        AvatarSlot, CommentAction, CommentCardInput, MERGED_PURPLE, TREE_LEVEL_WIDTH,
+        cursor_screen_pos, fit_cell, label_chip_spans_local, parse_hex_color, push_comment_card,
+        short_label_chip_spans, word_left_boundary, word_right_boundary, AvatarSlot, CommentAction,
+        CommentCardInput, MERGED_PURPLE,
     },
 };
 
@@ -4655,136 +4654,6 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    #[allow(dead_code)]
-    fn render_mention_popup_legacy(&mut self, f: &mut Frame, area: Rect) {
-        let Some(popup) = self.mention_popup.as_ref() else {
-            return;
-        };
-        if popup.filtered.is_empty() {
-            return;
-        }
-        let theme = &self.ctx.color_theme;
-        // Cap visible rows so a giant repo doesn't blow the popup
-        // off-screen. Scroll handles the rest.
-        const MAX_VISIBLE: u16 = 8;
-        let rows = (popup.filtered.len() as u16).min(MAX_VISIBLE);
-        let height = rows + 2; // borders
-                               // Width budget: 4 cells for the kind + " #N  " + truncated
-                               // title. Cap at 60 to keep the popup compact.
-        let max_title_w: u16 = popup
-            .filtered
-            .iter()
-            .map(|m| m.title.chars().count() as u16)
-            .max()
-            .unwrap_or(20);
-        let widest_num = popup
-            .filtered
-            .iter()
-            .map(|m| (m.number.to_string().chars().count() + 1) as u16)
-            .max()
-            .unwrap_or(3);
-        let want_width = 2 + 5 /*[ISS]/[PR ]*/ + 1 + widest_num + 2 + max_title_w + 2 + 2;
-        let width = want_width.min(60).min(area.width.saturating_sub(2));
-        // Anchor near the editor. Without a precise cursor rect
-        // exposed here, place the popup centered horizontally over
-        // the editor area but vertically above the editor body so
-        // the user can still see what they're typing.
-        let editor_rect = self.editor_body_area.unwrap_or(area);
-        let x = editor_rect
-            .x
-            .saturating_add(2)
-            .min(area.x + area.width.saturating_sub(width));
-        // Prefer ABOVE the editor — `editor_rect.y` minus our
-        // height. Fall back to BELOW if there's no room above.
-        let y = if editor_rect.y >= height {
-            editor_rect.y - height
-        } else {
-            (editor_rect.y + editor_rect.height).min(area.y + area.height.saturating_sub(height))
-        };
-        let rect = Rect::new(x, y, width, height);
-        f.render_widget(ratatui::widgets::Clear, rect);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.list_head_fg))
-            .title(Line::from(Span::styled(
-                " Mention ".to_string(),
-                Style::default()
-                    .fg(theme.list_head_fg)
-                    .add_modifier(Modifier::BOLD),
-            )));
-        let inner = block.inner(rect);
-        f.render_widget(block, rect);
-
-        // Reset stored hit-test rects + the overlay rect so a click
-        // outside the popup doesn't accidentally hit a stale entry.
-        let mut row_rects: Vec<Rect> = Vec::new();
-        let scroll = popup.scroll.min(popup.filtered.len().saturating_sub(1));
-        let visible = rows as usize;
-        for (visible_idx, (i, item)) in popup
-            .filtered
-            .iter()
-            .enumerate()
-            .skip(scroll)
-            .take(visible)
-            .enumerate()
-        {
-            let row_rect = Rect::new(inner.x, inner.y + visible_idx as u16, inner.width, 1);
-            // Stored at logical index `i` so the click handler can
-            // still map a clicked rect to the underlying item even
-            // when scrolled. We pad earlier rects with zero-size to
-            // keep `row_rects[i]` aligned.
-            while row_rects.len() < i {
-                row_rects.push(Rect::new(0, 0, 0, 0));
-            }
-            row_rects.push(row_rect);
-            let is_hovered = i == popup.hovered;
-            let (kind_label, kind_fg) = match item.kind {
-                MentionKind::Issue => ("ISS", theme.status_success_fg),
-                MentionKind::Pr => ("PR ", theme.list_hash_fg),
-            };
-            let bg = if is_hovered {
-                theme.list_selected_bg
-            } else {
-                theme.bg
-            };
-            let num = format!("#{}", item.number);
-            // fit_cell-style truncation on title to keep the row
-            // inside `inner.width`.
-            let used = 1 + 3 + 1 + num.chars().count() + 2;
-            let title_budget = (inner.width as usize).saturating_sub(used + 2).max(4);
-            let title = fit_cell(&item.title, title_budget);
-            let spans = vec![
-                Span::styled(" ", Style::default().bg(bg)),
-                Span::styled(
-                    kind_label.to_string(),
-                    Style::default()
-                        .fg(kind_fg)
-                        .bg(bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" ", Style::default().bg(bg)),
-                Span::styled(
-                    num,
-                    Style::default()
-                        .fg(theme.list_hash_fg)
-                        .bg(bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("  ".to_string(), Style::default().bg(bg)),
-                Span::styled(title, Style::default().fg(theme.fg).bg(bg)),
-            ];
-            f.render_widget(
-                Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
-                row_rect,
-            );
-        }
-        if let Some(p) = self.mention_popup.as_mut() {
-            p.overlay_rect = Some(rect);
-            p.row_rects = row_rects;
-            p.last_visible = rows;
-        }
-    }
-
     /// Full-screen "Create new Issue" form — mirrors the PR
     /// `render_compose_mode` layout exactly so the two pages share
     /// the same visual rhythm (sub-header / divider / single-pane
@@ -5951,15 +5820,4 @@ fn timeline_event_line(
         Style::default().fg(theme.list_date_fg),
     ));
     (Line::from(spans), actor_col)
-}
-
-// Reserved imports for future polish — keeps the slice lean while
-// signalling what's next.
-#[allow(dead_code)]
-fn _i_future() {
-    let _ = render_markdown_body;
-    let _ = wrap_styled_spans;
-    let _ = build_body_prefix;
-    let _ = build_junction_prefix;
-    let _ = TREE_LEVEL_WIDTH;
 }

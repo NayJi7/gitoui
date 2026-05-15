@@ -230,20 +230,6 @@ impl UncommittedState {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn total_in_section(
-        &self,
-        unstaged_len: usize,
-        staged_len: usize,
-        untracked_len: usize,
-    ) -> usize {
-        match self.section {
-            UncommittedSection::Unstaged => unstaged_len,
-            UncommittedSection::Staged => staged_len,
-            UncommittedSection::Untracked => untracked_len,
-        }
-    }
-
     pub fn selected_global_line(
         &self,
         staged_len: usize,

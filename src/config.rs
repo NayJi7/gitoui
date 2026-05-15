@@ -164,6 +164,15 @@ pub fn load() -> Result<(
     ))
 }
 
+/// Resolve the config file path that `load()` reads from.
+/// `$GITOUI_CONFIG_FILE` first, then `$XDG_CONFIG_HOME/gitoui/config.toml`
+/// (defaulting to `~/.config/gitoui/config.toml`). Returns the path even
+/// if the file doesn't exist yet — callers (e.g. the in-app `o:open file`
+/// shortcut) use it to seed a new config on first edit.
+pub fn resolve_config_file_path() -> Option<PathBuf> {
+    config_file_path_from_env().or_else(config_file_path)
+}
+
 fn config_file_path_from_env() -> Option<PathBuf> {
     env::var(CONFIG_FILE_ENV_NAME).ok().map(PathBuf::from)
 }

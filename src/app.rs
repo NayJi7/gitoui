@@ -49,6 +49,14 @@ enum StatusLine {
     NotificationSuccess(String),
     NotificationWarn(String),
     NotificationError(String),
+    /// Persistent search-match status. Stays on screen as long as the
+    /// list view's search is applied — never auto-clears via the 2 s
+    /// notification timer. `warn` = true picks the warn color (used
+    /// when the current query has zero matches).
+    SearchStatus {
+        msg: String,
+        warn: bool,
+    },
     Spinner(String),
 }
 
@@ -701,6 +709,11 @@ impl App<'_> {
                                 self.clear_status_line();
                             }
                         }
+                        StatusLine::SearchStatus { .. } => {
+                            // Sticky — stays the whole search-applied
+                            // session. The list view clears it itself
+                            // on cancel_search / clear_search_query.
+                        }
                         StatusLine::NotificationError(_) => {
                             // Clear message and cancel key input
                             self.clear_status_line();
@@ -950,6 +963,11 @@ impl App<'_> {
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
                 }
+                AppEvent::OpenConfigFile => {
+                    self.clear_image(Some(terminal))?;
+                    self.clear_terminal(terminal)?;
+                    self.open_config_file_in_editor();
+                }
                 AppEvent::GithubAuthFinished(state) => {
                     self.finish_github_auth(state);
                 }
@@ -1062,6 +1080,14 @@ impl App<'_> {
                 AppEvent::NotifyError(msg) => {
                     self.stop_spinner();
                     self.error_notification(msg);
+                }
+                AppEvent::SetSearchStatus { msg, warn } => {
+                    self.stop_spinner();
+                    // No timestamp — auto-clear loop skips this variant
+                    // entirely so the message persists as long as
+                    // search-applied state is on.
+                    self.app_status.status_line = StatusLine::SearchStatus { msg, warn };
+                    self.app_status.notification_timestamp = None;
                 }
                 AppEvent::PushCurrentBranch => {
                     self.execute_push_current_branch();
@@ -2381,6 +2407,18 @@ impl App<'_> {
                         Style::default().fg(self.ctx.color_theme.status_info_fg),
                     )]
                 }
+                StatusLine::SearchStatus { msg, warn } => {
+                    // Same color tokens as NotificationInfo / NotificationWarn,
+                    // but the variant is excluded from the 2 s auto-clear loop
+                    // so the "Match X of Y" footer stays visible for as long
+                    // as the search is applied.
+                    let color = if *warn {
+                        self.ctx.color_theme.status_warn_fg
+                    } else {
+                        self.ctx.color_theme.status_info_fg
+                    };
+                    vec![Span::styled(msg.as_str(), Style::default().fg(color))]
+                }
                 StatusLine::NotificationSuccess(msg) => {
                     vec![Span::styled(
                         msg.as_str(),
@@ -2447,7 +2485,7 @@ impl App<'_> {
                 let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
                 let regex_str = if regex { "[ON]" } else { "[OFF]" };
                 format!(
-                    "⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏x:regex{regex_str}▕▏n:next▕▏N:prev▕▏Esc:clear"
+                    "⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏x:regex{regex_str}▕▏⇆:cycle▕▏Esc:clear"
                 )
             } else if is_config_active {
                 self.view
@@ -4558,6 +4596,86 @@ impl<'a> App<'a> {
     fn open_config(&mut self) {
         let before = std::mem::take(&mut self.view);
         self.view = View::of_config(before, self.ctx.clone(), self.ec.sender());
+    }
+
+    /// Suspend the TUI, open `~/.config/gitoui/config.toml` in `$EDITOR`
+    /// (with a sensible fallback chain), then resume. The file is
+    /// created on first use so the editor always lands on a valid path.
+    /// The reload-on-Refresh path picks up any edits when the user
+    /// quits the editor — no app restart needed.
+    fn open_config_file_in_editor(&mut self) {
+        let Some(path) = crate::config::resolve_config_file_path() else {
+            self.ec.send(AppEvent::NotifyError(
+                "Could not resolve config path".into(),
+            ));
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("create config dir: {e}")));
+                return;
+            }
+        }
+        if !path.exists() {
+            // Seed with a header so the editor opens on something
+            // meaningful instead of a blank file.
+            let seed = "# gitoui config — see https://nayji7.github.io/gitoui/configurations/\n";
+            if let Err(e) = std::fs::write(&path, seed) {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("create config file: {e}")));
+                return;
+            }
+        }
+        // Resolve the editor. `$VISUAL` wins over `$EDITOR` per the
+        // long-standing UNIX convention; fall back to common defaults.
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| "vi".to_string());
+        // Split the editor string into command + args (e.g. "code -w").
+        let mut parts = editor.split_whitespace();
+        let Some(bin) = parts.next() else {
+            self.ec
+                .send(AppEvent::NotifyError("$EDITOR is empty".into()));
+            return;
+        };
+        let args: Vec<&str> = parts.collect();
+
+        self.ec.suspend();
+        let exec_result = std::process::Command::new(bin)
+            .args(&args)
+            .arg(&path)
+            .status();
+        self.ec.resume();
+
+        match exec_result {
+            Ok(s) if s.success() => {
+                // Bubble a Refresh up via the pending_refresh slot —
+                // same pattern as the directory-switch flow. The main
+                // run() loop drains it and re-enters lib::run, which
+                // reloads the config from disk so edits take effect
+                // without a quit/restart.
+                self.pending_refresh = Some(RefreshRequest {
+                    context: crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: Some("Config reloaded".into()),
+                    },
+                });
+            }
+            Ok(s) => {
+                self.ec
+                    .send(AppEvent::NotifyWarn(format!("editor exited: {s}")));
+            }
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("launch {bin}: {e}")));
+            }
+        }
     }
 
     fn close_config(&mut self) {

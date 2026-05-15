@@ -955,24 +955,6 @@ fn draw_uncommitted_overlay(
     }
 }
 
-#[allow(dead_code)]
-fn ratatui_color_to_rgba(color: ratatui::style::Color) -> image::Rgba<u8> {
-    match color {
-        ratatui::style::Color::Rgb(r, g, b) => image::Rgba([r, g, b, 0xff]),
-        ratatui::style::Color::Gray => image::Rgba([0x80, 0x80, 0x80, 0xff]),
-        ratatui::style::Color::DarkGray => image::Rgba([0x40, 0x40, 0x40, 0xff]),
-        ratatui::style::Color::White => image::Rgba([0xff, 0xff, 0xff, 0xff]),
-        ratatui::style::Color::Black => image::Rgba([0x00, 0x00, 0x00, 0xff]),
-        ratatui::style::Color::Red => image::Rgba([0xff, 0x00, 0x00, 0xff]),
-        ratatui::style::Color::Green => image::Rgba([0x00, 0xff, 0x00, 0xff]),
-        ratatui::style::Color::Yellow => image::Rgba([0xff, 0xff, 0x00, 0xff]),
-        ratatui::style::Color::Blue => image::Rgba([0x00, 0x00, 0xff, 0xff]),
-        ratatui::style::Color::Magenta => image::Rgba([0xff, 0x00, 0xff, 0xff]),
-        ratatui::style::Color::Cyan => image::Rgba([0x00, 0xff, 0xff, 0xff]),
-        _ => image::Rgba([0xc0, 0xca, 0xf5, 0xff]),
-    }
-}
-
 fn draw_stash_commit(
     img_buf: &mut image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
     commit_pos_x: usize,

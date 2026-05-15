@@ -12,7 +12,7 @@ categories = ["command-line-utilities"]
 edition = "2021"
 rust-version = "1.88.0"
 
-exclude = ["/.github", "/img"]
+exclude = ["/.github", "/assets/readme"]
 
 [dependencies]
 ansi-to-tui = "8.0.1"

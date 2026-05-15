@@ -3,9 +3,9 @@
 //! Layout (single column, full terminal width):
 //! ```text
 //! ─── Blame: src/app.rs @ master ─────────────────────────────────── (N lines)
-//! ▎ 9c44072 NayJi7      2d ago  chore: prune unused files… │   42 │ pub fn open(
+//! ▎ 9c44072 alice       2d ago  chore: prune unused files… │   42 │ pub fn open(
 //! ▎                                                        │   43 │     ctx: &Ctx,
-//! ▎ 5d8c91a NayJi7      3w ago  feat: error handling       │   44 │ ) -> Result {
+//! ▎ 5d8c91a alice       3w ago  feat: error handling       │   44 │ ) -> Result {
 //! ```
 //! Each commit gets a cycled color on the leftmost bar `▎` so contiguous
 //! authorship blocks pop visually. The hash + author + relative time +
