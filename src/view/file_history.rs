@@ -542,17 +542,26 @@ impl<'a> FileHistoryView<'a> {
     pub fn update_layout(&mut self, _area: Rect) {}
 
     pub fn footer_hint(&self) -> String {
-        let mut parts: Vec<&str> = Vec::new();
+        let kb = &self.ctx.keybind;
+        let global = |event: crate::event::UserEvent, label: &str| -> String {
+            let k = kb.primary_global_key(event);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+        let mut parts: Vec<String> = Vec::new();
         if self.entries.len() > 1 {
-            parts.push("↑↓:navigate");
+            parts.push("↑↓:navigate".into());
         }
         if !self.entries.is_empty() {
-            parts.push("Enter:open commit");
-            parts.push("c:msg");
-            parts.push("C:hash");
+            parts.push("Enter:open commit".into());
+            parts.push(global(crate::event::UserEvent::FullCopy, "msg"));
+            parts.push(global(crate::event::UserEvent::ShortCopy, "hash"));
         }
-        parts.push("b:blame");
-        parts.push("r:refresh");
+        parts.push(global(crate::event::UserEvent::Blame, "blame"));
+        parts.push(global(crate::event::UserEvent::Refresh, "refresh"));
         format!("⌘ {}", parts.join("▕▏"))
     }
 

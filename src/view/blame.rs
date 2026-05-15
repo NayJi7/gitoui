@@ -645,16 +645,25 @@ impl<'a> BlameView<'a> {
     pub fn update_layout(&mut self, _area: Rect) {}
 
     pub fn footer_hint(&self) -> String {
-        let mut parts: Vec<&str> = Vec::new();
-        parts.push("↑↓:scroll");
+        let kb = &self.ctx.keybind;
+        let global = |event: crate::event::UserEvent, label: &str| -> String {
+            let k = kb.primary_global_key(event);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+        let mut parts: Vec<String> = Vec::new();
+        parts.push("↑↓:scroll".into());
         if self.blocks.len() > 1 {
-            parts.push("←→:prev/next block");
+            parts.push("←→:prev/next block".into());
         }
         if !self.blocks.is_empty() {
-            parts.push("Enter:open commit");
+            parts.push("Enter:open commit".into());
         }
-        parts.push("H:history");
-        parts.push("r:refresh");
+        parts.push(global(crate::event::UserEvent::FileHistory, "history"));
+        parts.push(global(crate::event::UserEvent::Refresh, "refresh"));
         format!("⌘ {}", parts.join("▕▏"))
     }
 

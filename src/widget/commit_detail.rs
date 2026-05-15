@@ -138,25 +138,29 @@ impl<'a> CommitDetail<'a> {
     }
 }
 
-pub const COMMIT_ACTIONS: &[(&str, &str)] = &[
-    ("Add Tag", "t"),
-    ("Blame", "b"),
-    ("Create Branch", "B"),
-    ("Checkout", "o"),
-    ("Cherry Pick", "P"),
-    ("Revert", "v"),
-    ("Drop", "d"),
-    ("Merge into current", "m"),
-    ("Rebase current on", "e"),
-    ("Reset current to", "S"),
-    ("Squash with parent", "Ctrl+S"),
-    ("Amend", "Ctrl+M"),
+/// Display label + the global `UserEvent` it dispatches. The on-screen
+/// key glyph is looked up from `KeyBinds` at render time so a rebind
+/// in the user's config shows up in the panel automatically — no need
+/// to keep these strings in sync with `assets/default-keybind.toml`.
+pub const COMMIT_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
+    ("Add Tag", crate::event::UserEvent::AddTag),
+    ("Blame", crate::event::UserEvent::Blame),
+    ("Create Branch", crate::event::UserEvent::CreateBranch),
+    ("Checkout", crate::event::UserEvent::Checkout),
+    ("Cherry Pick", crate::event::UserEvent::CherryPick),
+    ("Revert", crate::event::UserEvent::Revert),
+    ("Drop", crate::event::UserEvent::Drop),
+    ("Merge into current", crate::event::UserEvent::Merge),
+    ("Rebase current on", crate::event::UserEvent::Rebase),
+    ("Reset current to", crate::event::UserEvent::Reset),
+    ("Squash with parent", crate::event::UserEvent::Squash),
+    ("Amend", crate::event::UserEvent::AmendCommit),
 ];
 
 /// Actions slice to use: HEAD commit gets Amend, others don't.
 /// Squash is available for every non-initial commit (parent existence
 /// checked at apply-time), so it's part of the shared prefix.
-pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, &'static str)] {
+pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, crate::event::UserEvent)] {
     if is_head_commit {
         COMMIT_ACTIONS
     } else {
@@ -164,13 +168,16 @@ pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, &'static
     }
 }
 
-pub const STASH_ACTIONS: &[(&str, &str)] = &[
-    ("Apply Stash", "y"),
-    ("Pop Stash", "Ctrl+P"),
-    ("Drop Stash", "Ctrl+X"),
-    ("Create Branch from Stash", "Ctrl+N"),
-    ("Copy Stash Name", "Ctrl+I"),
-    ("Copy Stash Hash", "Ctrl+O"),
+pub const STASH_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
+    ("Apply Stash", crate::event::UserEvent::ApplyStash),
+    ("Pop Stash", crate::event::UserEvent::PopStash),
+    ("Drop Stash", crate::event::UserEvent::DropStash),
+    (
+        "Create Branch from Stash",
+        crate::event::UserEvent::CreateBranchFromStash,
+    ),
+    ("Copy Stash Name", crate::event::UserEvent::CopyStashName),
+    ("Copy Stash Hash", crate::event::UserEvent::CopyStashHash),
 ];
 
 impl StatefulWidget for CommitDetail<'_> {
@@ -391,12 +398,12 @@ impl CommitDetail<'_> {
             && crate::git::rebase::rebase_in_progress(&self.ctx.repo_path);
 
         let mut lines = Vec::new();
-        for (i, (label, key)) in actions.iter().enumerate() {
+        for (i, (label, event)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             // While a rebase is in progress, the "Rebase current on" slot
             // re-labels to "Resume rebase" (yellow) and dispatches into the
-            // resume view. Same `e` key — the action just means something
-            // different in this state.
+            // resume view. The bound key still drives both — the action
+            // just means something different in this state.
             let (effective_label, label_color) = if rebasing && *label == "Rebase current on" {
                 ("Resume rebase", Some(self.ctx.color_theme.status_warn_fg))
             } else {
@@ -411,6 +418,7 @@ impl CommitDetail<'_> {
                 style = style.fg(c).add_modifier(Modifier::BOLD);
             }
             let key_style = style.add_modifier(Modifier::BOLD);
+            let key = self.ctx.keybind.primary_global_key(*event);
             let mut spans = vec![Span::styled(effective_label.to_string(), style)];
             if !key.is_empty() {
                 spans.push(Span::styled(format!(" ({})", key), key_style));

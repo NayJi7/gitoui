@@ -14,7 +14,7 @@ use umbra::optional;
 use crate::{
     color::{ColorTheme, OptionalColorTheme},
     graph::GraphImageWidthMode,
-    keybind::KeyBind,
+    keybind::KeyBinds,
     CommitOrderType, GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection, Result,
 };
 
@@ -128,7 +128,7 @@ pub fn load() -> Result<(
     UiConfig,
     GraphConfig,
     ColorTheme,
-    Option<KeyBind>,
+    Option<KeyBinds>,
 )> {
     let config = match config_file_path_from_env() {
         Some(user_path) => {
@@ -208,7 +208,7 @@ struct Config {
     color: ColorTheme,
     // The user customed keybinds, please ref `assets/default-keybind.toml`
     #[garde(skip)]
-    keybind: Option<KeyBind>,
+    keybind: Option<KeyBinds>,
 }
 
 #[optional(derives = [Deserialize])]
@@ -961,7 +961,7 @@ pub fn load_or_diagnose() -> std::result::Result<
         UiConfig,
         GraphConfig,
         ColorTheme,
-        Option<KeyBind>,
+        Option<KeyBinds>,
     ),
     ConfigDiagnostic,
 > {

@@ -589,6 +589,40 @@ impl<'a> CommitListState<'a> {
         }
     }
 
+    /// Scroll to and select the commit that HEAD points at, vertically
+    /// centered in the viewport. No-op when the list has no commits,
+    /// when HEAD is detached without a matching row (e.g. orphan), or
+    /// when the HEAD commit isn't in the currently loaded slice
+    /// (lazy-load: user can `]` more then retry).
+    pub fn select_head_commit(&mut self) {
+        let Some(target) = self.head_commit_hash.as_ref() else {
+            return;
+        };
+        let Some(index) = self
+            .commits
+            .iter()
+            .position(|c| &c.commit.commit_hash == target)
+        else {
+            return;
+        };
+        if self.height == 0 {
+            return;
+        }
+        if self.total <= self.height {
+            // Everything fits on screen — no scroll, just move the cursor.
+            self.selected = index;
+            return;
+        }
+        // Aim for the middle row; clamp so we don't scroll past either end.
+        let max_offset = self.total - self.height;
+        let half = self.height / 2;
+        let ideal_offset = index.saturating_sub(half);
+        let offset = ideal_offset.min(max_offset);
+        self.selected = index - offset;
+        self.offset = offset;
+        self.avatars_fully_prepared = false;
+    }
+
     pub fn scroll_down(&mut self) {
         let max_offset = self.total.saturating_sub(self.height);
         if self.offset < max_offset {

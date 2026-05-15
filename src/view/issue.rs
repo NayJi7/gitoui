@@ -555,44 +555,61 @@ impl<'a> IssuesView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
+        let kb = &self.ctx.keybind;
+        let scoped = |scope: &[&str], action: &str, label: &str| -> String {
+            let k = kb.primary_scoped_key(scope, action);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+
         if self.mention_popup.is_some() {
             return "⌘ ↑↓:nav▕▏↵:pick▕▏Esc:cancel".into();
         }
         if self.comment_editor.is_some() {
-            return "⌘ #:mention▕▏Ctrl+S:send▕▏Esc:cancel".into();
+            let submit = scoped(&["compose"], "submit", "send");
+            return format!("⌘ #:mention▕▏{submit}▕▏Esc:cancel");
         }
         if self.reaction_picker.is_some() {
             return "⌘ ←→:nav▕▏↵:react▕▏Esc:cancel".into();
         }
         match self.mode {
-            Mode::List => "⌘ n:new▕▏r:reload".into(),
+            Mode::List => {
+                let n = scoped(&["issues", "list"], "new_issue", "new");
+                let r = scoped(&["issues"], "reload", "reload");
+                format!("⌘ {n}▕▏{r}")
+            }
             Mode::Detail => {
-                // `x` is now the unified state-change key (close
-                // when open, reopen when closed) — mirrors the PR
-                // view's `Ctrl+X`/`x` convention. `o` is freed up
-                // for "open in web".
                 let state = self
                     .opened_issue_number
                     .and_then(|n| self.detail_cache.get(&n))
                     .map(|d| d.state);
                 let mutate = match state {
-                    Some(IssueState::Open) => "x:close",
-                    Some(IssueState::Closed) => "x:reopen",
-                    None => "",
+                    Some(IssueState::Open) => Some(scoped(&["issues"], "close_or_reopen", "close")),
+                    Some(IssueState::Closed) => {
+                        Some(scoped(&["issues"], "close_or_reopen", "reopen"))
+                    }
+                    None => None,
                 };
-                // Card-local actions (`R:quote reply`, `+:react`,
-                // `e:edit`, `d:delete`, `↵:open ref`) live in the
-                // selected comment's top border now — keeps the
-                // footer scannable and parity with PR view.
-                let mut parts = vec!["c:comment", "l:labels", "a:assignees", "m:milestone"];
-                if !mutate.is_empty() {
-                    parts.push(mutate);
+                let mut parts: Vec<String> = vec![
+                    scoped(&["issues", "detail"], "new_comment", "comment"),
+                    scoped(&["issues"], "labels_picker", "labels"),
+                    scoped(&["issues"], "assignees_picker", "assignees"),
+                    scoped(&["issues"], "milestone_picker", "milestone"),
+                ];
+                if let Some(m) = mutate {
+                    parts.push(m);
                 }
-                parts.push("o:open in web");
-                parts.push("r:reload");
+                parts.push(scoped(&["issues"], "open_in_browser", "open in web"));
+                parts.push(scoped(&["issues"], "reload", "reload"));
                 format!("⌘ {}", parts.join("▕▏"))
             }
-            Mode::Compose => "⌘ ↑↓:field▕▏↵:edit/pick▕▏Ctrl+S:submit".into(),
+            Mode::Compose => {
+                let submit = scoped(&["compose"], "submit", "submit");
+                format!("⌘ ↑↓:field▕▏↵:edit/pick▕▏{submit}")
+            }
         }
     }
 
@@ -635,6 +652,22 @@ impl<'a> IssuesView<'a> {
     // ─── Event dispatch ──────────────────────────────────────────
 
     pub fn handle_event(&mut self, evt: UserEventWithCount, key: KeyEvent) {
+        // `reload` is an Issues-wide action — works in list AND detail.
+        // Resolved through [scope.issues]; the inner handlers do their
+        // own scoped lookup afterwards for mode-specific actions.
+        // Reaction picker / mention popup take over before us though
+        // — checked just below.
+        if self.mention_popup.is_none()
+            && self.reaction_picker.is_none()
+            && self.comment_editor.is_none()
+            && !matches!(self.mode, Mode::Compose)
+        {
+            if let Some("reload") = self.ctx.keybind.resolve_scoped(&["issues"], key) {
+                self.refresh();
+                return;
+            }
+        }
+
         // Mention popup intercepts keys before the editor — its own
         // handler passes char/backspace through to update the query.
         if self.mention_popup.is_some() {
@@ -796,6 +829,18 @@ impl<'a> IssuesView<'a> {
                 self.conversation_scroll = self.conversation_scroll.saturating_add(n as usize);
                 return;
             }
+            // Ctrl+U / Ctrl+D globally — scroll the conversation half a
+            // viewport (~5 lines). Previously these were hardcoded char
+            // matches; routing through UserEvent lets a user rebind
+            // `half_page_*` globally and have it apply here too.
+            (Mode::Detail, UserEvent::HalfPageUp) => {
+                self.conversation_scroll = self.conversation_scroll.saturating_sub(5);
+                return;
+            }
+            (Mode::Detail, UserEvent::HalfPageDown) => {
+                self.conversation_scroll = self.conversation_scroll.saturating_add(5);
+                return;
+            }
             (Mode::Detail, UserEvent::Cancel) => {
                 self.mode = Mode::List;
                 self.opened_issue_number = None;
@@ -861,60 +906,100 @@ impl<'a> IssuesView<'a> {
     }
 
     fn handle_event_list(&mut self, key: KeyEvent) {
-        let filtered_len = self.filtered_indices().len();
+        // Scoped list-only actions. Resolves through [scope.issues.list]
+        // → [scope.issues] → no match. Only `new_issue` lives in this
+        // leaf; reload was already handled by the outer dispatcher.
+        if let Some("new_issue") = self.ctx.keybind.resolve_scoped(&["issues", "list"], key) {
+            self.start_compose();
+            return;
+        }
+
+        // Navigation (j/k/g/G/Up/Down/Home/End) is already handled by
+        // the outer UserEvent dispatch — drop the per-key duplicates so
+        // users who rebind navigate_up etc. in the global section see
+        // their custom keys take effect here too.
         match key.code {
             KeyCode::Esc => {
                 self.tx.send(AppEvent::CloseIssues);
-            }
-            KeyCode::Up | KeyCode::Char('k') if self.hovered > 0 => {
-                self.hovered -= 1;
-            }
-            KeyCode::Down | KeyCode::Char('j') if self.hovered + 1 < filtered_len => {
-                self.hovered += 1;
-            }
-            KeyCode::Home | KeyCode::Char('g') => self.hovered = 0,
-            KeyCode::End | KeyCode::Char('G') if filtered_len > 0 => {
-                self.hovered = filtered_len - 1;
             }
             // Tab no longer cycles filter — ←/→ owns that (via the
             // UserEvent dispatch in `handle_event` above). Tab can
             // be reused for ref-list or whatever the global binding
             // says, falling through here unhandled.
             KeyCode::Enter => self.open_hovered(),
-            KeyCode::Char('n') => self.start_compose(),
             _ => {}
         }
     }
 
     fn handle_event_detail(&mut self, key: KeyEvent) {
         let comment_count = self.conversation_comment_count.max(1);
+
+        // Scoped detail actions — walks [scope.issues.detail] then
+        // [scope.issues] for inherited actions (labels/assignees/etc).
+        // `reload` was already claimed by the outer dispatcher.
+        if let Some(action) = self.ctx.keybind.resolve_scoped(&["issues", "detail"], key) {
+            match action {
+                // Detail-only conversation actions.
+                "new_comment" => {
+                    self.start_new_comment();
+                    return;
+                }
+                "quote_reply" => {
+                    self.start_quote_reply();
+                    return;
+                }
+                "reference_in_new_issue" => {
+                    self.start_reference_in_new_issue();
+                    return;
+                }
+                "edit_own" => {
+                    self.start_edit_own_comment();
+                    return;
+                }
+                "delete_own" => {
+                    self.confirm_delete_own_comment();
+                    return;
+                }
+                "react" => {
+                    self.start_react();
+                    return;
+                }
+                // Inherited Issues-wide actions.
+                "labels_picker" => {
+                    self.start_labels_picker();
+                    return;
+                }
+                "assignees_picker" => {
+                    self.start_assignees_picker();
+                    return;
+                }
+                "milestone_picker" => {
+                    self.start_milestone_picker();
+                    return;
+                }
+                "close_or_reopen" => {
+                    self.start_close_or_reopen();
+                    return;
+                }
+                "open_in_browser" => {
+                    self.open_in_browser();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // Conversation nav (j/k/g/G/Up/Down/Home/End) AND half-page
+        // scroll (Ctrl+D / Ctrl+U) are now handled by the outer
+        // UserEvent dispatch (NavigateUp/Down/GoToTop/GoToBottom +
+        // HalfPageUp/HalfPageDown). Rebindable through the global
+        // section of the user's config.
+        let _ = comment_count; // outer dispatch reads it via detail_move_selected
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::List;
                 self.opened_issue_number = None;
                 self.active_tab = Tab::Conversation;
-            }
-            KeyCode::Up | KeyCode::Char('k')
-                if matches!(self.active_tab, Tab::Conversation)
-                    && self.conversation_selected > 0 =>
-            {
-                self.conversation_selected -= 1;
-                self.conversation_scroll_to_selected = true;
-            }
-            KeyCode::Down | KeyCode::Char('j')
-                if matches!(self.active_tab, Tab::Conversation)
-                    && self.conversation_selected + 1 < comment_count =>
-            {
-                self.conversation_selected += 1;
-                self.conversation_scroll_to_selected = true;
-            }
-            KeyCode::Home | KeyCode::Char('g') if matches!(self.active_tab, Tab::Conversation) => {
-                self.conversation_selected = 0;
-                self.conversation_scroll_to_selected = true;
-            }
-            KeyCode::End | KeyCode::Char('G') if matches!(self.active_tab, Tab::Conversation) => {
-                self.conversation_selected = comment_count.saturating_sub(1);
-                self.conversation_scroll_to_selected = true;
             }
             KeyCode::PageDown => {
                 self.conversation_scroll = self.conversation_scroll.saturating_add(10);
@@ -922,23 +1007,6 @@ impl<'a> IssuesView<'a> {
             KeyCode::PageUp => {
                 self.conversation_scroll = self.conversation_scroll.saturating_sub(10);
             }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.conversation_scroll = self.conversation_scroll.saturating_add(5);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.conversation_scroll = self.conversation_scroll.saturating_sub(5);
-            }
-            // Tab switching is mouse-click only — no keyboard binding.
-            KeyCode::Char('c') => self.start_new_comment(),
-            // `r` reloads the detail (parity with the PR view).
-            // `R` (Shift+R) is the quote-reply binding — same
-            // convention as the PR conversation cards.
-            KeyCode::Char('r') => self.refresh(),
-            KeyCode::Char('R') => self.start_quote_reply(),
-            // Shift+N: open Compose pre-filled with a back-reference
-            // to the currently-selected entry. Mirrors GitHub's
-            // "Reference in new issue" sub-menu action.
-            KeyCode::Char('N') => self.start_reference_in_new_issue(),
             // Enter on the Conversation tab follows the FIRST `#N`
             // reference inside the currently-selected comment card.
             // Click on a specific ref also works for picking among
@@ -951,21 +1019,6 @@ impl<'a> IssuesView<'a> {
             KeyCode::Enter if matches!(self.active_tab, Tab::References) => {
                 self.follow_selected_reference();
             }
-            KeyCode::Char('e') => self.start_edit_own_comment(),
-            KeyCode::Char('d') => self.confirm_delete_own_comment(),
-            KeyCode::Char('+') => self.start_react(),
-            // Lowercase letter actions for label/assignee/milestone.
-            // `l` (= navigate_right global binding) and `a` (= stage)
-            // both reach us as raw chars because they fired
-            // UserEvents that the dispatch above no longer claims.
-            KeyCode::Char('l') => self.start_labels_picker(),
-            KeyCode::Char('a') => self.start_assignees_picker(),
-            KeyCode::Char('m') => self.start_milestone_picker(),
-            // `x` unifies close + reopen — picks the right one from
-            // the currently-opened issue's state. `o` opens the issue
-            // in the user's browser.
-            KeyCode::Char('x') => self.start_close_or_reopen(),
-            KeyCode::Char('o') => self.open_in_browser(),
             _ => {}
         }
     }
@@ -992,7 +1045,7 @@ impl<'a> IssuesView<'a> {
         match crate::external::open_url(&url) {
             Ok(()) => self
                 .tx
-                .send(AppEvent::NotifyInfo(format!("Opened {}", url))),
+                .send(AppEvent::NotifySuccess(format!("Opening {}", url))),
             Err(e) => self
                 .tx
                 .send(AppEvent::NotifyError(format!("Open browser: {}", e))),
@@ -1032,18 +1085,15 @@ impl<'a> IssuesView<'a> {
         let editing_text = matches!(field, ComposeField::Title | ComposeField::Body);
         let editing_body = matches!(field, ComposeField::Body);
 
-        // Global escapes / submits.
-        match key.code {
-            KeyCode::Char('s') if ctrl => {
-                self.submit_compose();
-                return;
-            }
-            KeyCode::Esc => {
-                self.compose = None;
-                self.mode = Mode::List;
-                return;
-            }
-            _ => {}
+        // Scoped compose action — `submit` (Ctrl+S by default).
+        if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
+            self.submit_compose();
+            return;
+        }
+        if matches!(key.code, KeyCode::Esc) {
+            self.compose = None;
+            self.mode = Mode::List;
+            return;
         }
 
         // Up/Down behaviour: when editing Body and there are multiple
@@ -1487,6 +1537,14 @@ impl<'a> IssuesView<'a> {
     // ─── Comment editor key dispatch ─────────────────────────────
 
     fn handle_event_comment_editor(&mut self, key: KeyEvent) {
+        // `submit` is shared with the compose forms — rebindable via
+        // [scope.compose]. Ctrl+Enter still fires here too because most
+        // terminals don't propagate the modifier with Enter, so it's
+        // worth keeping as a hardcoded second path.
+        if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
+            self.submit_comment_editor();
+            return;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         // Cursor-changing actions trigger viewport anchoring; pure
         // scrolling / Esc do not (lets manual scroll stand).
@@ -1495,13 +1553,6 @@ impl<'a> IssuesView<'a> {
                 self.comment_editor = None;
                 false
             }
-            KeyCode::Char('s') if ctrl => {
-                self.submit_comment_editor();
-                false
-            }
-            // Ctrl+Enter is the canonical "send" but most terminals
-            // don't propagate the modifier with Enter — Ctrl+S is the
-            // reliable shortcut. Both work where the terminal allows.
             KeyCode::Enter if ctrl => {
                 self.submit_comment_editor();
                 false
@@ -2536,12 +2587,18 @@ impl<'a> IssuesView<'a> {
         if !is_me {
             return;
         }
-        // Fire directly — issues don't open a separate dialog (matches
-        // PR behaviour where delete is a single keystroke).
-        self.tx.send(AppEvent::DeleteIssueComment {
-            issue_number: number,
-            comment_id,
-        });
+        let author = entry.author.clone();
+        let body_preview = entry.body.clone();
+        // Open the same kind of preview-style confirmation the PR view
+        // uses — the user reads the body + author before committing
+        // to a destructive action.
+        self.tx
+            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmDeleteIssueComment {
+                issue_number: number,
+                comment_id,
+                author,
+                body_preview,
+            }));
     }
 
     fn submit_comment_editor(&mut self) {
@@ -3962,15 +4019,31 @@ impl<'a> IssuesView<'a> {
         let body_has_ref = extract_hash_refs(&detail.body)
             .into_iter()
             .any(|n| n != detail.number && (issue_set.contains(&n) || pr_set.contains(&n)));
-        let mut top_shortcuts: Vec<&'static str> = Vec::new();
+        let detail_key = |action: &str| {
+            self.ctx
+                .keybind
+                .primary_scoped_key(&["issues", "detail"], action)
+        };
+        let hint = |action: &str, label: &str| {
+            let k = detail_key(action);
+            if k.is_empty() {
+                String::new()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+        let mut top_shortcuts: Vec<String> = Vec::new();
         if self.conversation_selected == 0 {
-            // Issue body card: quote-reply only (no in-place edit
-            // since the issue body itself isn't editable from this
-            // surface), plus react.
-            top_shortcuts.push("R:quote reply");
-            top_shortcuts.push("+:react");
+            let q = hint("quote_reply", "quote reply");
+            if !q.is_empty() {
+                top_shortcuts.push(q);
+            }
+            let r = hint("react", "react");
+            if !r.is_empty() {
+                top_shortcuts.push(r);
+            }
             if body_has_ref {
-                top_shortcuts.push("↵:open ref");
+                top_shortcuts.push("↵:open ref".to_string());
             }
         }
         let top_layout = push_comment_card(
@@ -4023,22 +4096,31 @@ impl<'a> IssuesView<'a> {
                 let first = lines.len();
                 let is_me = me_login.as_deref().is_some_and(|me| me == c.author);
                 let selected = self.conversation_selected == idx;
-                let mut shortcuts: Vec<&'static str> = Vec::new();
+                let mut shortcuts: Vec<String> = Vec::new();
                 if selected {
-                    // Issue comments are flat (no `in_reply_to_id`),
-                    // so every reply path is a quote-reply, never an
-                    // inline reply — label accordingly.
-                    shortcuts.push("R:quote reply");
-                    shortcuts.push("+:react");
+                    let q = hint("quote_reply", "quote reply");
+                    if !q.is_empty() {
+                        shortcuts.push(q);
+                    }
+                    let r = hint("react", "react");
+                    if !r.is_empty() {
+                        shortcuts.push(r);
+                    }
                     let has_ref = extract_hash_refs(&c.body).into_iter().any(|n| {
                         n != detail.number && (issue_set.contains(&n) || pr_set.contains(&n))
                     });
                     if has_ref {
-                        shortcuts.push("↵:open ref");
+                        shortcuts.push("↵:open ref".to_string());
                     }
                     if is_me {
-                        shortcuts.push("e:edit");
-                        shortcuts.push("d:delete");
+                        let e = hint("edit_own", "edit");
+                        if !e.is_empty() {
+                            shortcuts.push(e);
+                        }
+                        let d = hint("delete_own", "delete");
+                        if !d.is_empty() {
+                            shortcuts.push(d);
+                        }
                     }
                 }
                 let layout = push_comment_card(

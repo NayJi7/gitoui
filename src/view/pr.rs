@@ -1095,13 +1095,28 @@ impl<'a> PullRequestsView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
+        // Helper to pull the current binding for a scoped action so the
+        // footer mirrors what the user configured. Returns "" if the
+        // action is unbound — we'd still render the hint label, just
+        // with no key prefix, so the user notices something's missing.
+        let kb = &self.ctx.keybind;
+        let scoped = |scope: &[&str], action: &str, label: &str| -> String {
+            let key = kb.primary_scoped_key(scope, action);
+            if key.is_empty() {
+                label.to_string()
+            } else {
+                format!("{key}:{label}")
+            }
+        };
+
         // When the inline editor is open, the footer is owned by it.
         if self.comment_editor.is_some() {
-            let parts = if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
-                vec!["Sending…", "Esc:cancel"]
-            } else {
-                vec!["Ctrl+S:send", "Esc:cancel"]
-            };
+            let parts: Vec<String> =
+                if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
+                    vec!["Sending…".into(), "Esc:cancel".into()]
+                } else {
+                    vec![scoped(&["compose"], "submit", "send"), "Esc:cancel".into()]
+                };
             return format!("⌘ {}", parts.join("▕▏"));
         }
         // Footer holds the GLOBAL actions only. Card-specific shortcuts
@@ -1122,39 +1137,39 @@ impl<'a> PullRequestsView<'a> {
             }
             return format!(
                 "⌘ {}",
-                ["↑↓:field", "Ctrl+S:create", "Esc:cancel"].join("▕▏")
+                [
+                    "↑↓:field".to_string(),
+                    scoped(&["compose"], "submit", "create"),
+                    "Esc:cancel".to_string(),
+                ]
+                .join("▕▏")
             );
         }
-        let parts: Vec<&str> = match self.mode {
-            Mode::List => vec!["n:new PR", "r:reload"],
+        let parts: Vec<String> = match self.mode {
+            Mode::List => vec![
+                scoped(&["pr", "list"], "new_pr", "new PR"),
+                scoped(&["pr"], "reload", "reload"),
+            ],
             Mode::Compose => vec![],
             Mode::Detail => {
-                // Inside a drill-down the footer collapses to just
-                // Esc — every other shortcut belongs to the list view.
                 if self.files_drilldown.is_some() || self.commits_drilldown.is_some() {
                     return format!("⌘ {}", "Esc:back");
                 }
-                // Hold the footer until the PR detail has fully
-                // loaded — surfacing `c:comment`, `a:approve`, etc.
-                // before the data lands would let the user fire
-                // actions on a half-populated PR. Only `r:reload`
-                // and `Esc` are safe before the fetch completes.
                 if self.opened_detail().is_none() {
-                    return format!("⌘ {}", ["r:reload", "Esc:back"].join("▕▏"));
+                    return format!(
+                        "⌘ {}",
+                        [scoped(&["pr"], "reload", "reload"), "Esc:back".into()].join("▕▏")
+                    );
                 }
-                // Footer = REVIEW actions (daily verbs). State /
-                // meta shortcuts (Ctrl+X close, draft toggle, labels,
-                // reviewers, open-in-web) sit right-aligned on the
-                // tab-bar row instead — keeps this row scannable.
-                let mut p = vec!["c:comment"];
+                let mut p: Vec<String> = vec![scoped(&["pr", "conversation"], "new_comment", "comment")];
                 if matches!(self.active_tab, Tab::Commits | Tab::Files) {
-                    p.push("Enter:view diff");
+                    p.push("Enter:view diff".into());
                 }
-                p.push("a:approve");
-                p.push("x:request changes");
-                p.push("m:merge");
-                p.push("o:open in web");
-                p.push("r:reload");
+                p.push(scoped(&["pr"], "approve", "approve"));
+                p.push(scoped(&["pr"], "request_changes", "request changes"));
+                p.push(scoped(&["pr"], "merge", "merge"));
+                p.push(scoped(&["pr"], "open_in_browser", "open in web"));
+                p.push(scoped(&["pr"], "reload", "reload"));
                 p
             }
         };
@@ -1269,7 +1284,6 @@ impl<'a> PullRequestsView<'a> {
     // ---------- events ----------
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
-        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
         // Mention popup overlays the editor — it intercepts keys
         // (↑↓/Enter/Esc) and forwards chars/backspaces through so
@@ -1311,8 +1325,10 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // `r` reloads — works in list / detail modes when no input is active.
-        if key.code == KeyCode::Char('r') && key.modifiers == KeyModifiers::NONE {
+        // `reload` is a PR-wide action — works in list AND detail modes.
+        // Resolved via [scope.pr]; the inner handlers will also resolve
+        // their own scopes after this for mode-specific actions.
+        if let Some("reload") = self.ctx.keybind.resolve_scoped(&["pr"], key) {
             self.reload();
             return;
         }
@@ -1322,15 +1338,14 @@ impl<'a> PullRequestsView<'a> {
             Mode::Detail => self.handle_event_detail(event_with_count, key),
             Mode::Compose => self.handle_event_compose(event_with_count, key),
         }
-        let _ = KeyModifiers::NONE;
     }
 
     fn handle_event_list(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
-        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-        // `n` opens the compose-new-PR view — keep it before the
-        // UserEvent dispatch since `n` doesn't map to any standard
-        // `UserEvent`.
-        if key.code == KeyCode::Char('n') && key.modifiers == KeyModifiers::NONE {
+        // PR-list scope: only `new_pr` lives here (parent scope `pr`
+        // already handled `reload` in the outer dispatcher). Resolved
+        // via [scope.pr.list] — walking to [scope.pr] for anything
+        // not bound in the leaf.
+        if let Some("new_pr") = self.ctx.keybind.resolve_scoped(&["pr", "list"], key) {
             self.start_compose_pr();
             return;
         }
@@ -1391,6 +1406,15 @@ impl<'a> PullRequestsView<'a> {
                 }
                 _ => {}
             }
+            // `submit` is shared with the compose forms — rebindable via
+            // [scope.compose]. Ctrl+Enter is the canonical "send" combo
+            // in most terminals but many don't propagate the modifier
+            // with Enter, so Ctrl+S is the reliable fallback baked into
+            // the default scope.compose binding.
+            if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
+                self.submit_comment_editor();
+                return;
+            }
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             // `true` when the dispatched action moved the cursor or
             // edited the buffer — we anchor the viewport to the cursor
@@ -1400,14 +1424,6 @@ impl<'a> PullRequestsView<'a> {
             let cursor_changed = match key.code {
                 KeyCode::Esc => {
                     self.comment_editor = None;
-                    false
-                }
-                // Ctrl+Enter is the canonical "send" combo but many
-                // terminals don't propagate the modifier with Enter
-                // (they send a plain `\r`). Ctrl+S is the reliable
-                // fallback that always reaches us.
-                KeyCode::Char('s') if ctrl => {
-                    self.submit_comment_editor();
                     false
                 }
                 KeyCode::Enter if ctrl => {
@@ -1518,86 +1534,89 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // ── PR-level action shortcuts (work on any tab once a PR is opened).
-        //    a:approve  x:request changes  m:merge  o:open in browser
-        let plain = key.modifiers == KeyModifiers::NONE;
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        match key.code {
-            KeyCode::Char('a') if plain => {
-                self.start_approve();
-                return;
+        // ── PR-level action shortcuts (every tab once a PR is opened).
+        //    Resolved through [scope.pr] — rebindable from the user's
+        //    config.toml without touching this code.
+        if let Some(action) = self.ctx.keybind.resolve_scoped(&["pr"], key) {
+            match action {
+                "approve" => {
+                    self.start_approve();
+                    return;
+                }
+                "request_changes" => {
+                    self.start_request_changes();
+                    return;
+                }
+                "merge" => {
+                    self.start_merge();
+                    return;
+                }
+                "open_in_browser" => {
+                    self.open_in_browser();
+                    return;
+                }
+                "labels_picker" => {
+                    self.start_labels_picker();
+                    return;
+                }
+                "reviewers_picker" => {
+                    self.start_reviewers_picker();
+                    return;
+                }
+                "close_pr" => {
+                    self.confirm_close_pr();
+                    return;
+                }
+                "reopen_pr" => {
+                    self.confirm_reopen_pr();
+                    return;
+                }
+                "toggle_draft" => {
+                    self.confirm_toggle_draft();
+                    return;
+                }
+                _ => {}
             }
-            KeyCode::Char('x') if plain => {
-                self.start_request_changes();
-                return;
-            }
-            KeyCode::Char('m') if plain => {
-                self.start_merge();
-                return;
-            }
-            KeyCode::Char('o') if plain => {
-                self.open_in_browser();
-                return;
-            }
-            KeyCode::Char('l') if plain => {
-                self.start_labels_picker();
-                return;
-            }
-            KeyCode::Char('v') if plain => {
-                self.start_reviewers_picker();
-                return;
-            }
-            KeyCode::Char('x') if ctrl => {
-                self.confirm_close_pr();
-                return;
-            }
-            KeyCode::Char('o') if ctrl => {
-                self.confirm_reopen_pr();
-                return;
-            }
-            KeyCode::Char('d') if ctrl => {
-                self.confirm_toggle_draft();
-                return;
-            }
-            _ => {}
         }
 
-        // ── Conversation-tab action shortcuts (no editor open).
-        //    Lowercase `r` is reserved for view-level `reload` (handled
-        //    above in handle_event); reply moves to uppercase `R` so
-        //    both stay accessible.
-        //    For `R` we match the uppercase glyph regardless of modifier
-        //    — different terminals attach SHIFT, NONE, or even both to
-        //    uppercase letters, so we just trust the produced char.
         // ── Reaction picker takes over every key while open ────────
         if self.reaction_picker.is_some() {
             self.handle_event_reaction_picker(key);
             return;
         }
 
+        // ── Conversation-tab action shortcuts (no editor open).
+        //    Resolved through [scope.pr.conversation] — falls back to
+        //    [scope.pr] for any key the leaf scope doesn't override.
         if matches!(self.active_tab, Tab::Conversation) {
-            match key.code {
-                KeyCode::Char('c') if plain => {
-                    self.start_new_comment();
-                    return;
+            if let Some(action) = self
+                .ctx
+                .keybind
+                .resolve_scoped(&["pr", "conversation"], key)
+            {
+                match action {
+                    "new_comment" => {
+                        self.start_new_comment();
+                        return;
+                    }
+                    "quote_reply" => {
+                        self.start_reply();
+                        return;
+                    }
+                    "edit_own" => {
+                        self.start_edit();
+                        return;
+                    }
+                    "delete_own" => {
+                        self.confirm_delete_comment();
+                        return;
+                    }
+                    "react" => {
+                        self.start_react();
+                        return;
+                    }
+                    _ => {}
                 }
-                KeyCode::Char('R') => {
-                    self.start_reply();
-                    return;
-                }
-                KeyCode::Char('e') if plain => {
-                    self.start_edit();
-                    return;
-                }
-                KeyCode::Char('d') if plain => {
-                    self.confirm_delete_comment();
-                    return;
-                }
-                KeyCode::Char('+') => {
-                    self.start_react();
-                    return;
-                }
-                _ => {}
             }
         }
 
@@ -2295,18 +2314,20 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
+        // ── Scoped compose actions ─────────────────────────────────
+        // `submit` (Ctrl+S) is rebindable via [scope.compose]. The
+        // word-jump bindings further down are still hardcoded — they
+        // belong to text input, not view dispatch.
+        if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
+            self.submit_compose_pr();
+            return;
+        }
+
         // ── Global compose keys ────────────────────────────────────
-        match key.code {
-            KeyCode::Esc => {
-                self.compose = None;
-                self.mode = Mode::List;
-                return;
-            }
-            KeyCode::Char('s') if ctrl => {
-                self.submit_compose_pr();
-                return;
-            }
-            _ => {}
+        if matches!(key.code, KeyCode::Esc) {
+            self.compose = None;
+            self.mode = Mode::List;
+            return;
         }
 
         // ── Vertical navigation between fields ─────────────────────
@@ -2797,7 +2818,7 @@ impl<'a> PullRequestsView<'a> {
         match crate::external::open_url(&url) {
             Ok(()) => self
                 .tx
-                .send(AppEvent::NotifyInfo(format!("Opened {}", url))),
+                .send(AppEvent::NotifySuccess(format!("Opening {}", url))),
             Err(e) => self
                 .tx
                 .send(AppEvent::NotifyError(format!("Open browser: {}", e))),
@@ -5563,22 +5584,30 @@ impl<'a> PullRequestsView<'a> {
             .unwrap_or(false);
         let is_draft = detail.map(|d| d.draft).unwrap_or(false);
 
+        let kb = &self.ctx.keybind;
+        let pr_key = |action: &str| kb.primary_scoped_key(&["pr"], action);
+        let hint = |action: &str, label: &str| {
+            let k = pr_key(action);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+
         let mut parts: Vec<String> = Vec::new();
         if is_open {
-            parts.push("Ctrl+X:close".into());
-            parts.push(
-                if is_draft {
-                    "Ctrl+D:mark ready"
-                } else {
-                    "Ctrl+D:to draft"
-                }
-                .into(),
-            );
+            parts.push(hint("close_pr", "close"));
+            parts.push(if is_draft {
+                hint("toggle_draft", "mark ready")
+            } else {
+                hint("toggle_draft", "to draft")
+            });
         } else if is_closed {
-            parts.push("Ctrl+O:reopen".into());
+            parts.push(hint("reopen_pr", "reopen"));
         }
-        parts.push("l:labels".into());
-        parts.push("v:reviewers".into());
+        parts.push(hint("labels_picker", "labels"));
+        parts.push(hint("reviewers_picker", "reviewers"));
 
         // ▕▏ matches the footer hint separator used elsewhere in the
         // app for visual consistency. `⌘` mirrors the footer prefix
@@ -5663,7 +5692,17 @@ impl<'a> PullRequestsView<'a> {
                 is_me: pr_is_me,
                 // PR description card: quote-reply only (no in-place
                 // edit / delete shortcuts here).
-                inline_shortcuts: vec!["R:quote reply"],
+                inline_shortcuts: {
+                    let k = self
+                        .ctx
+                        .keybind
+                        .primary_scoped_key(&["pr", "conversation"], "quote_reply");
+                    if k.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![format!("{k}:quote reply")]
+                    }
+                },
                 // PR body itself doesn't surface its reactions here
                 // — they'd need a separate `GET /reactions` call
                 // (the PR endpoint doesn't inline them on the body).
@@ -5862,26 +5901,54 @@ impl<'a> PullRequestsView<'a> {
         //    reply, GitHub doesn't natively thread those)
         //  - edit / delete only for own editable kinds (review entries
         //    aren't editable from the API).
-        let mut shortcuts: Vec<&'static str> = Vec::new();
+        let conv_key = |action: &str| {
+            self.ctx
+                .keybind
+                .primary_scoped_key(&["pr", "conversation"], action)
+        };
+        let hint = |action: &str, label: &str| {
+            let k = conv_key(action);
+            if k.is_empty() {
+                String::new()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+        let mut shortcuts: Vec<String> = Vec::new();
         let is_review_comment = matches!(entry.kind, ConversationKind::ReviewComment { .. });
         if is_review_comment {
-            shortcuts.push("R:reply");
+            let s = hint("quote_reply", "reply");
+            if !s.is_empty() {
+                shortcuts.push(s);
+            }
         } else {
-            shortcuts.push("R:quote reply");
+            let s = hint("quote_reply", "quote reply");
+            if !s.is_empty() {
+                shortcuts.push(s);
+            }
         }
         let editable_kind = matches!(
             entry.kind,
             ConversationKind::Comment | ConversationKind::ReviewComment { .. }
         );
         if is_me && editable_kind {
-            shortcuts.push("e:edit");
-            shortcuts.push("d:delete");
+            let e = hint("edit_own", "edit");
+            if !e.is_empty() {
+                shortcuts.push(e);
+            }
+            let d = hint("delete_own", "delete");
+            if !d.is_empty() {
+                shortcuts.push(d);
+            }
         }
         // Reactions are available on every comment that has an id —
         // i.e. proper issue / review comments, not the synthesized
         // review summary rows (which never carry one).
         if entry.id.is_some() {
-            shortcuts.push("+:react");
+            let r = hint("react", "react");
+            if !r.is_empty() {
+                shortcuts.push(r);
+            }
         }
         // `↵:open` chip whenever the body contains a `#N` we can
         // resolve to an issue or a PR in this repo — clicking on
@@ -5890,7 +5957,9 @@ impl<'a> PullRequestsView<'a> {
             .into_iter()
             .any(|n| self.resolve_hash_ref(n).is_some());
         if has_resolvable_ref {
-            shortcuts.push("↵:open");
+            // Enter is a global UserEvent::Confirm — keep it labelled
+            // with the canonical glyph regardless of rebind.
+            shortcuts.push("↵:open".to_string());
         }
         let card_layout = push_comment_card(
             lines,
@@ -6434,8 +6503,10 @@ pub(crate) struct CommentCardInput<'a> {
     /// Action shortcuts to surface inline in the top border when this
     /// card is selected (e.g. ["R:reply", "e:edit", "d:delete"]).
     /// Empty for cards that have no card-scoped actions (PR description,
-    /// reviews) or when not selected.
-    pub(crate) inline_shortcuts: Vec<&'static str>,
+    /// reviews) or when not selected. The strings are computed from the
+    /// user's current keybind config so the displayed key tracks any
+    /// rebind.
+    pub(crate) inline_shortcuts: Vec<String>,
     /// Reaction totals to render as an `emoji N` chip row below the
     /// comment body. Empty / zero-count = no row drawn.
     pub(crate) reactions: crate::github::pr::ReactionCounts,

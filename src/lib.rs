@@ -225,6 +225,21 @@ pub fn run() -> Result<()> {
         }
     };
 
+    // Validate the user config FIRST — before we pay the cost of
+    // initialising syntect (which loads ~100 syntax definitions and a
+    // dozen theme files) or spawning the event thread. A misformatted
+    // TOML or unknown theme name otherwise added ~half a second of
+    // latency before the user saw the diagnostic.
+    let mut preflight_config = match config::load_or_diagnose() {
+        Ok(c) => Some(c),
+        Err(diag) => {
+            let proto = protocol::auto_detect();
+            print_no_repo_splash(proto);
+            diag.write_to_stderr();
+            std::process::exit(1);
+        }
+    };
+
     highlight::init();
     let ec = event::EventController::init();
     let mut refresh_view_context = None;
@@ -248,7 +263,14 @@ pub fn run() -> Result<()> {
         // log the error to stderr — the running session shouldn't
         // crash because the user typo'd a hex code mid-edit.
         let (mut core_config, ui_config, mut graph_config, mut color_theme, keybind_patch) =
-            if terminal.is_none() {
+            if let Some(c) = preflight_config.take() {
+                // First iteration consumes the pre-flight result that we
+                // computed *before* paying for syntect / event thread.
+                c
+            } else if terminal.is_none() {
+                // Pre-flight got consumed by an earlier iteration that
+                // bailed (`Ret::Refresh` re-enters this loop, etc.) —
+                // re-load with the diagnostic-bearing path.
                 match config::load_or_diagnose() {
                     Ok(config) => config,
                     Err(diag) => {
@@ -284,7 +306,7 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        let keybind = keybind::KeyBind::new(keybind_patch);
+        let keybind = keybind::KeyBinds::new(keybind_patch);
 
         // Lazy-load policy: an explicit CLI `-n` always wins. Otherwise default
         // to `initial_load_count` and grow by `load_more_count` each time the
@@ -483,6 +505,22 @@ pub fn run() -> Result<()> {
 
         if terminal.is_none() {
             terminal = Some(ratatui::init());
+            // Push the kitty keyboard protocol disambiguation flag
+            // RIGHT after raw mode + alt-screen are entered. Without
+            // this, terminals fall back to xterm's legacy meta encoding
+            // (Alt+letter → ESC + letter), which is unreliable when the
+            // two bytes drift apart in the read window — `Alt+c` is
+            // then delivered as a stray `Esc` that closes the active
+            // view, with the `c` arriving too late to be combined.
+            // Terminals that don't speak the protocol silently ignore
+            // the push; the `state` strip in `event::EventController`
+            // normalizes the lock-key bits this protocol attaches.
+            let _ = ratatui::crossterm::execute!(
+                std::io::stdout(),
+                ratatui::crossterm::event::PushKeyboardEnhancementFlags(
+                    ratatui::crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+                )
+            );
             if mouse_enabled {
                 ratatui::crossterm::execute!(
                     std::io::stdout(),
@@ -528,6 +566,14 @@ pub fn run() -> Result<()> {
         }
     };
 
+    // Mirror the disambiguate push from startup with a Pop so we don't
+    // leave the user's terminal stuck in enhanced-keys mode after
+    // gitoui exits. Best-effort; terminals that ignored the push will
+    // also ignore the pop.
+    let _ = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::PopKeyboardEnhancementFlags,
+    );
     ratatui::crossterm::execute!(
         std::io::stdout(),
         ratatui::crossterm::event::DisableMouseCapture

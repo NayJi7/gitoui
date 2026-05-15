@@ -120,3 +120,117 @@ amend_commit = ["ctrl-m"]
 
 # Show file history (git log --follow) from diff view
 file_history = ["shift-h"]
+
+# ─────────────────────────────────────────────────────────────────────
+# View-scoped bindings.
+#
+# Anything below this point belongs to a specific view (or sub-view).
+# When a key is bound here, the view's scoped resolver hits it FIRST —
+# the global section above is the fallback. That's how we let the same
+# key (e.g. `a`) mean different things in different contexts:
+#  • `a` globally  → stage  (uncommitted view)
+#  • `a` in PR     → approve
+#  • `a` in issues → assignees picker
+#
+# Each `[scope]` block lists action_name → key list, same syntax as
+# the global section. Nested tables like `[pr.conversation]` are
+# sub-scopes that override their parent — so a Conversation-only
+# binding wins over a PR-wide one, which wins over the global one.
+# Anything not listed in a scope falls through to the parent.
+# ─────────────────────────────────────────────────────────────────────
+
+# Commit list view — scope-only actions that overlay the global key
+# map for the list view exclusively. `h` is `navigate_left` globally
+# (used by vim users + by tab-switching in PR / Issues / Diff), but in
+# the commit list it has no left/right semantics, so we repurpose it
+# for "scroll + select the HEAD commit" — a fast way to jump back to
+# the top of `git log --all` after scrolling far down history.
+[scope.list]
+select_head_commit = ["h"]
+
+# PR view — actions on the open Pull Request as a whole.
+[scope.pr]
+reload             = ["r"]
+approve            = ["a"]
+request_changes    = ["x"]
+merge              = ["m"]
+open_in_browser    = ["o"]
+labels_picker      = ["l"]
+reviewers_picker   = ["v"]
+close_pr           = ["ctrl-x"]
+reopen_pr          = ["ctrl-o"]
+toggle_draft       = ["ctrl-d"]
+
+[scope.pr.list]
+new_pr = ["n"]
+
+[scope.pr.conversation]
+new_comment = ["c"]
+quote_reply = ["shift-r"]
+edit_own    = ["e"]
+delete_own  = ["d"]
+react       = ["+"]
+
+# Issues view — actions on the open Issue as a whole.
+[scope.issues]
+reload            = ["r"]
+labels_picker     = ["l"]
+assignees_picker  = ["a"]
+milestone_picker  = ["m"]
+close_or_reopen   = ["x"]
+open_in_browser   = ["o"]
+
+[scope.issues.list]
+new_issue = ["n"]
+
+[scope.issues.detail]
+new_comment            = ["c"]
+quote_reply            = ["shift-r"]
+reference_in_new_issue = ["shift-n"]
+edit_own               = ["e"]
+delete_own             = ["d"]
+react                  = ["+"]
+
+# Rebase plan editor — single-char rebase commands.
+[scope.rebase]
+pick           = ["p"]
+reword         = ["r"]
+edit           = ["e"]
+squash         = ["s"]
+fixup          = ["f"]
+drop           = ["d"]
+grab           = ["space"]
+abort_previous = ["shift-a"]
+
+# Rebase resume prompt — shown when an interactive rebase is paused.
+[scope.rebase.resume]
+continue_rebase = ["c", "shift-c"]
+skip_commit     = ["s", "shift-s"]
+abort           = ["a", "shift-a"]
+
+# Reword inline editor — extra word-jump shortcuts inside the text field.
+# (Named `reword_editor` to avoid colliding with the `reword` action above.)
+[scope.rebase.reword_editor]
+delete_word_left  = ["ctrl-h", "ctrl-w", "ctrl-backspace"]
+delete_word_right = ["ctrl-delete"]
+word_left         = ["ctrl-left"]
+word_right        = ["ctrl-right"]
+
+# 3-way conflict editor.
+[scope.conflict]
+pick_ours              = ["o"]
+pick_theirs            = ["t"]
+pick_both_ours_first   = ["b"]
+pick_both_theirs_first = ["shift-b"]
+next_hunk              = ["n"]
+prev_hunk              = ["p"]
+
+# Compose forms (new PR / new Issue). The submit action is the only
+# truly rebindable shortcut here — word-jump editing keys (Ctrl+H,
+# Ctrl+W, Ctrl+Backspace, Ctrl+Delete, Ctrl+Left/Right) stay hardcoded
+# because they're text-input semantics shared with every other input
+# field in the app, not view-specific actions. The mention popup is
+# tied to the literal `#` character in the body parser, so it isn't
+# rebindable either.
+[scope.compose]
+submit = ["ctrl-s"]

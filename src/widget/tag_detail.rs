@@ -15,8 +15,11 @@ pub struct TagDetailState {
     pub hovered_action: Option<usize>,
 }
 
-pub const TAG_ACTIONS: &[(&str, &str)] =
-    &[("Push Tag", "W"), ("Delete Tag", "F"), ("Copy Name", "Y")];
+pub const TAG_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
+    ("Push Tag", crate::event::UserEvent::PushTag),
+    ("Delete Tag", crate::event::UserEvent::DeleteTag),
+    ("Copy Name", crate::event::UserEvent::CopyTagName),
+];
 
 #[derive(Debug, Clone)]
 pub struct TagMetadata {
@@ -178,7 +181,7 @@ impl TagDetail<'_> {
         action_block.render(action_actions_area, buf);
 
         let mut lines = Vec::new();
-        for (i, (label, key)) in TAG_ACTIONS.iter().enumerate() {
+        for (i, (label, event)) in TAG_ACTIONS.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -186,10 +189,12 @@ impl TagDetail<'_> {
                 Style::default()
             };
             let key_style = style.add_modifier(Modifier::BOLD);
-            lines.push(Line::from(vec![
-                Span::styled(label.to_string(), style),
-                Span::styled(format!(" ({})", key), key_style),
-            ]));
+            let key = self.ctx.keybind.primary_global_key(*event);
+            let mut spans = vec![Span::styled(label.to_string(), style)];
+            if !key.is_empty() {
+                spans.push(Span::styled(format!(" ({})", key), key_style));
+            }
+            lines.push(Line::from(spans));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));

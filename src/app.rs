@@ -32,7 +32,7 @@ use crate::{
     },
     github_auth::GithubAuthState,
     graph::{CellWidthType, Graph, GraphImageManager, GraphStyle},
-    keybind::KeyBind,
+    keybind::KeyBinds,
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
     widget::commit_list::{CommitInfo, CommitListState},
@@ -119,7 +119,7 @@ impl std::fmt::Debug for AppContext {
 }
 
 pub struct AppContext {
-    pub keybind: KeyBind,
+    pub keybind: KeyBinds,
     pub core_config: CoreConfig,
     pub ui_config: UiConfig,
     pub color_theme: ColorTheme,
@@ -151,7 +151,7 @@ pub struct AppContext {
 impl Default for AppContext {
     fn default() -> Self {
         Self {
-            keybind: KeyBind::default(),
+            keybind: KeyBinds::default(),
             core_config: CoreConfig::default(),
             ui_config: UiConfig::default(),
             color_theme: ColorTheme::default(),
@@ -869,16 +869,40 @@ impl App<'_> {
                                     terminal,
                                 )?;
                             } else if let KeyCode::Char(c) = key.code {
-                                // Accumulate numeric prefix
                                 if c.is_ascii_digit()
+                                    && key.modifiers
+                                        == ratatui::crossterm::event::KeyModifiers::NONE
                                     && (c != '0' || !self.app_status.numeric_prefix.is_empty())
                                 {
+                                    // Accumulate numeric prefix.
                                     self.app_status.numeric_prefix.push(c);
                                 } else {
-                                    needs_draw = false; // unbound non-digit key: nothing changed
+                                    // Globally unbound — forward to the
+                                    // view so its scoped resolver gets
+                                    // a chance. Without this, every
+                                    // view-scoped action whose key
+                                    // isn't ALSO bound globally (e.g.
+                                    // every `[scope.pr.conversation]`
+                                    // override, every Alt-letter binding,
+                                    // every F-key) silently dropped at
+                                    // the app layer and never reached
+                                    // the view's resolve_scoped call.
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
                                 }
                             } else {
-                                needs_draw = false; // unbound non-char key: nothing changed
+                                // Non-char unbound keys (F-keys, etc.) —
+                                // same story: forward to the view.
+                                self.app_status.numeric_prefix.clear();
+                                self.handle_view_event_clearing_detail_avatar(
+                                    UserEventWithCount::from_event(UserEvent::Unknown),
+                                    key,
+                                    terminal,
+                                )?;
                             }
                         }
                     }
@@ -2332,10 +2356,13 @@ impl App<'_> {
         // live as the user navigates), right side replaces the usual shortcut
         // bar with compare-specific actions.
         let compare_pending = self.view.list_compare_pending();
-        let show_enhanced = matches!(
-            &self.app_status.status_line,
-            StatusLine::None | StatusLine::NotificationInfo(_)
-        ) && !is_search_active
+        // The enhanced right-side bar (HEAD info, branch, ahead/behind,
+        // shortcut hints) overlays ON TOP of the status text. We only
+        // keep it when the left side is empty (`StatusLine::None`),
+        // otherwise a long notification ("Opened https://…") collides
+        // with the bar and the user sees both layers mashed together.
+        let show_enhanced = matches!(&self.app_status.status_line, StatusLine::None)
+            && !is_search_active
             && !is_config_active
             && compare_pending.is_none()
             && !self.dir_input.active;
@@ -2484,8 +2511,16 @@ impl App<'_> {
                 let case_str = if ignore_case { "[OFF]" } else { "[ON]" };
                 let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
                 let regex_str = if regex { "[ON]" } else { "[OFF]" };
+                let kb = &self.ctx.keybind;
+                let case_k = kb.primary_global_key(UserEvent::IgnoreCaseToggle);
+                let fuzzy_k = kb.primary_global_key(UserEvent::FuzzyToggle);
+                // Regex toggle reuses the `Discard` event (see
+                // `view::list::set_search_regex`) — no dedicated
+                // UserEvent. Look that up so a `discard` rebind
+                // surfaces here too.
+                let regex_k = kb.primary_global_key(UserEvent::Discard);
                 format!(
-                    "⌘ s:case{case_str}▕▏z:fuzzy{fuzzy_str}▕▏x:regex{regex_str}▕▏⇆:cycle▕▏Esc:clear"
+                    "⌘ {case_k}:case{case_str}▕▏{fuzzy_k}:fuzzy{fuzzy_str}▕▏{regex_k}:regex{regex_str}▕▏⇆:cycle▕▏Esc:clear"
                 )
             } else if is_config_active {
                 self.view
@@ -2497,6 +2532,15 @@ impl App<'_> {
                 // unambiguously which actions are relevant in this mode.
                 "⌘ Space:compare▕▏↑↓:navigate▕▏Esc:cancel".into()
             } else {
+                let kb = &self.ctx.keybind;
+                let g = |event: UserEvent, label: &str| -> String {
+                    let k = kb.primary_global_key(event);
+                    if k.is_empty() {
+                        label.to_string()
+                    } else {
+                        format!("{k}:{label}")
+                    }
+                };
                 match &self.view {
                     View::List(_) => {
                         // `c` / `C` (copy msg / hash) are deliberately kept
@@ -2504,31 +2548,55 @@ impl App<'_> {
                         // reduce clutter. They're discoverable via `?:help`.
                         // `R:PRs` and `I:Issues` only appear when BOTH the
                         // user is logged in to GitHub AND the repo has a
-                        // GitHub-hosted remote — otherwise the shortcuts
-                        // would point at features that can't open anything.
+                        // GitHub-hosted remote.
+                        let mut parts = vec![
+                            g(UserEvent::Search, "search"),
+                            g(UserEvent::RefList, "refs"),
+                            g(UserEvent::Push, "push"),
+                            g(UserEvent::Pull, "pull"),
+                            g(UserEvent::Refresh, "fetch"),
+                        ];
                         if self.github_features_available() {
-                            "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏R:PRs▕▏I:Issues▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
-                                .into()
-                        } else {
-                            "⌘ f:search▕▏Tab:refs▕▏P:push▕▏U:pull▕▏r:fetch▕▏d:cd▕▏p:config▕▏?:help▕▏q:quit"
-                                .into()
+                            parts.push(g(UserEvent::PullRequests, "PRs"));
+                            parts.push(g(UserEvent::Issues, "Issues"));
                         }
+                        parts.push(g(UserEvent::Drop, "cd"));
+                        parts.push(g(UserEvent::Config, "config"));
+                        parts.push(g(UserEvent::HelpToggle, "help"));
+                        parts.push(g(UserEvent::Quit, "quit"));
+                        format!("⌘ {}", parts.join("▕▏"))
                     }
                     View::Diff(_) => self
                         .view
                         .diff_footer_hint()
-                        .unwrap_or_else(|| "⌘ c:copy-path".into()),
-                    View::Detail(_) => "⌘ ⇆:prev/next▕▏H:history▕▏c:msg▕▏C:hash▕▏r:fetch".into(),
-                    View::Refs(_) => "⌘ D:delete▕▏c:copy-name▕▏r:fetch▕▏?:help".into(),
-                    View::Help(_) => "⌘ ?:close".into(),
-                    View::UserCommand(_) => "⌘ ?:help▕▏r:fetch".into(),
+                        .unwrap_or_else(|| format!("⌘ {}", g(UserEvent::FullCopy, "copy-path"))),
+                    View::Detail(_) => format!(
+                        "⌘ ⇆:prev/next▕▏{}▕▏{}▕▏{}▕▏{}",
+                        g(UserEvent::FileHistory, "history"),
+                        g(UserEvent::FullCopy, "msg"),
+                        g(UserEvent::ShortCopy, "hash"),
+                        g(UserEvent::Refresh, "fetch"),
+                    ),
+                    View::Refs(_) => format!(
+                        "⌘ {}▕▏{}▕▏{}▕▏{}",
+                        g(UserEvent::DeleteBranch, "delete"),
+                        g(UserEvent::FullCopy, "copy-name"),
+                        g(UserEvent::Refresh, "fetch"),
+                        g(UserEvent::HelpToggle, "help"),
+                    ),
+                    View::Help(_) => format!("⌘ {}", g(UserEvent::HelpToggle, "close")),
+                    View::UserCommand(_) => format!(
+                        "⌘ {}▕▏{}",
+                        g(UserEvent::HelpToggle, "help"),
+                        g(UserEvent::Refresh, "fetch"),
+                    ),
                     View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm".into(),
                     // All branch / tag actions live in the right-hand action
                     // bar — see `LOCAL_BRANCH_ACTIONS` / `REMOTE_BRANCH_ACTIONS`
                     // / `TAG_ACTIONS`. The footer only keeps what's NOT in the
                     // panel (fetch).
-                    View::BranchDetail(_) => "⌘ r:fetch".into(),
-                    View::TagDetail(_) => "⌘ r:fetch".into(),
+                    View::BranchDetail(_) => format!("⌘ {}", g(UserEvent::Refresh, "fetch")),
+                    View::TagDetail(_) => format!("⌘ {}", g(UserEvent::Refresh, "fetch")),
                     View::Uncommitted(_) => self.view.uncommitted_footer_hint().unwrap_or_default(),
                     View::FileHistory(_) => self
                         .view

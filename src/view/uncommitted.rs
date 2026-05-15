@@ -562,23 +562,35 @@ impl<'a> UncommittedView<'a> {
         let has_staged = !self.staged.is_empty();
         let can_unstage = has_staged;
         let can_discard = has_unstaged || has_staged;
+        let kb = &self.ctx.keybind;
+        let global = |event: crate::event::UserEvent, label: &str| -> String {
+            let k = kb.primary_global_key(event);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
         let mut parts = Vec::new();
         if has_conflicts {
-            parts.push("a:resolve".to_string());
+            parts.push(global(crate::event::UserEvent::Stage, "resolve"));
         } else if has_unstaged {
-            parts.push("a:stage".to_string());
-            parts.push("A:stage-all".to_string());
+            parts.push(global(crate::event::UserEvent::Stage, "stage"));
+            parts.push(global(crate::event::UserEvent::StageAll, "stage-all"));
         }
         if can_unstage {
-            parts.push("u:unstage".to_string());
+            parts.push(global(crate::event::UserEvent::Unstage, "unstage"));
             if has_staged {
-                parts.push("U:unstage-all".to_string());
+                // `unstage_all` shares the `U` key with `pull` via the
+                // view's event-merge — surface the canonical Pull key
+                // so footer + behaviour stay consistent.
+                parts.push(global(crate::event::UserEvent::Pull, "unstage-all"));
             }
         }
         if can_discard {
-            parts.push("x:discard".to_string());
+            parts.push(global(crate::event::UserEvent::Discard, "discard"));
             if has_unstaged || has_staged {
-                parts.push("X:discard-all".to_string());
+                parts.push(global(crate::event::UserEvent::DiscardAll, "discard-all"));
             }
         }
         // commit (w), stash (i) and clean-untracked (v) are deliberately
@@ -586,9 +598,9 @@ impl<'a> UncommittedView<'a> {
         // (see `widget/uncommitted.rs::render_action_bar`). Repeating them
         // here would just clutter the bottom strip.
         if !self.unstaged.is_empty() || !self.staged.is_empty() || !self.untracked.is_empty() {
-            parts.push("H:history".to_string());
+            parts.push(global(crate::event::UserEvent::FileHistory, "history"));
         }
-        parts.push("r:fetch".to_string());
+        parts.push(global(crate::event::UserEvent::Refresh, "fetch"));
         format!("⌘ {}", parts.join("▕▏"))
     }
 }

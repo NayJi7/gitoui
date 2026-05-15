@@ -13,12 +13,15 @@ use crate::{
     app::AppContext,
     color::ColorTheme,
     event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    keybind::KeyBinds,
     view::View,
 };
 
-/// One key + action pair displayed in the help table.
+/// One key + action pair displayed in the help table. `key` is owned
+/// because it's resolved per-render against the user's `KeyBinds`,
+/// so the help page mirrors any rebinding from the config file.
 struct Shortcut {
-    key: &'static str,
+    key: String,
     action: &'static str,
 }
 
@@ -26,7 +29,36 @@ struct Shortcut {
 struct HelpSection {
     title: &'static str,
     intro: Option<&'static str>,
-    shortcuts: &'static [Shortcut],
+    shortcuts: Vec<Shortcut>,
+}
+
+/// Build a Shortcut for a global UserEvent. The displayed key tracks
+/// `[keybind]` overrides automatically. Falls back to the action label
+/// alone (no key prefix) when the user unbound the event.
+fn sg(kb: &KeyBinds, event: UserEvent, action: &'static str) -> Shortcut {
+    Shortcut {
+        key: kb.primary_global_key(event),
+        action,
+    }
+}
+
+/// Build a Shortcut for a scope-local action (`[scope.<path>] action`).
+/// Same dynamic-key story as `sg`.
+fn ss(kb: &KeyBinds, scope: &[&str], action_name: &str, action: &'static str) -> Shortcut {
+    Shortcut {
+        key: kb.primary_scoped_key(scope, action_name),
+        action,
+    }
+}
+
+/// Build a Shortcut with a fixed key string — for symbolic keys
+/// (`Esc`, `↑↓`, `Enter`, etc.) and for terminal-level shortcuts
+/// (`Ctrl+Shift+C` copy/paste) that aren't bound through gitoui.
+fn lit(key: &str, action: &'static str) -> Shortcut {
+    Shortcut {
+        key: key.to_string(),
+        action,
+    }
 }
 
 #[derive(Debug)]
@@ -104,7 +136,7 @@ impl HelpView<'_> {
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
         let event = event_with_count.event;
         let count = event_with_count.count;
-        let sections_len = sections().len();
+        let sections_len = sections(&self.ctx.keybind).len();
 
         match event {
             UserEvent::Quit => self.tx.send(AppEvent::Quit),
@@ -257,7 +289,7 @@ impl HelpView<'_> {
         // Persist `left_area` + row→section map so mouse handlers can
         // resolve a click/hover back to a section index.
         self.left_area = left_area;
-        let sections = sections();
+        let sections = sections(&self.ctx.keybind);
         let mut left_lines: Vec<Line> = Vec::new();
         let mut left_item_rows: Vec<usize> = Vec::with_capacity(sections.len());
         // Reserve a 2-col gutter on the left so the `▶` selected marker
@@ -339,7 +371,7 @@ impl HelpView<'_> {
             .unwrap_or(0)
             .max(4);
 
-        for sh in section.shortcuts {
+        for sh in &section.shortcuts {
             if sh.key.is_empty() && sh.action.is_empty() {
                 right_lines.push(Line::from(""));
                 continue;
@@ -443,56 +475,23 @@ impl<'a> HelpView<'a> {
 // Refs). Only Q (Quit) is documented once, in General.
 // ─────────────────────────────────────────────────────────────────────────
 
-fn sections() -> Vec<HelpSection> {
+fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
     vec![
         HelpSection {
             title: "General",
             intro: Some("Available from anywhere in the app."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Q",
-                    action: "Quit gitoui",
-                },
-                Shortcut {
-                    key: "Ctrl+C",
-                    action: "Force quit (always works)",
-                },
-                Shortcut {
-                    key: "? / F1",
-                    action: "Toggle this help",
-                },
-                Shortcut {
-                    key: "P",
-                    action: "Open configuration",
-                },
-                Shortcut {
-                    key: "Shift+R",
-                    action: "Open Pull Requests view",
-                },
-                Shortcut {
-                    key: "Shift+I",
-                    action: "Open Issues view",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Terminal",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Shift+drag",
-                    action: "Select text with the mouse",
-                },
-                Shortcut {
-                    key: "Ctrl+Shift+C",
-                    action: "Copy the selected text",
-                },
-                Shortcut {
-                    key: "Ctrl+Shift+V",
-                    action: "Paste into the focused text input",
-                },
+            shortcuts: vec![
+                sg(kb, UserEvent::Quit, "Quit gitoui"),
+                sg(kb, UserEvent::ForceQuit, "Force quit (always works)"),
+                sg(kb, UserEvent::HelpToggle, "Toggle this help"),
+                sg(kb, UserEvent::Config, "Open configuration"),
+                sg(kb, UserEvent::PullRequests, "Open Pull Requests view"),
+                sg(kb, UserEvent::Issues, "Open Issues view"),
+                lit("", ""),
+                lit("Terminal", ""),
+                lit("Shift+drag", "Select text with the mouse"),
+                lit("Ctrl+Shift+C", "Copy the selected text"),
+                lit("Ctrl+Shift+V", "Paste into the focused text input"),
             ],
         },
         HelpSection {
@@ -500,291 +499,88 @@ fn sections() -> Vec<HelpSection> {
             intro: Some(
                 "Shared across every list-like view (commit list, refs, files, comments…).",
             ),
-            shortcuts: &[
-                Shortcut {
-                    key: "j / Down",
-                    action: "Move down one row",
-                },
-                Shortcut {
-                    key: "k / Up",
-                    action: "Move up one row",
-                },
-                Shortcut {
-                    key: "h / Left",
-                    action: "Move left / close node",
-                },
-                Shortcut {
-                    key: "l / Right",
-                    action: "Move right / open node",
-                },
-                Shortcut {
-                    key: "Shift+J",
-                    action: "Older commit (in detail / drilldowns)",
-                },
-                Shortcut {
-                    key: "Shift+K",
-                    action: "Newer commit",
-                },
-                Shortcut {
-                    key: "Alt+J / Alt+Down",
-                    action: "Go to parent commit",
-                },
-                Shortcut {
-                    key: "g",
-                    action: "Go to top",
-                },
-                Shortcut {
-                    key: "Shift+G",
-                    action: "Go to bottom",
-                },
-                Shortcut {
-                    key: "Shift+M",
-                    action: "Select middle of viewport",
-                },
-                Shortcut {
-                    key: "Shift+L",
-                    action: "Select bottom of viewport",
-                },
-                Shortcut {
-                    key: "Ctrl+E",
-                    action: "Scroll one line down",
-                },
-                Shortcut {
-                    key: "Ctrl+Y",
-                    action: "Scroll one line up",
-                },
-                Shortcut {
-                    key: "Ctrl+F / PageDown",
-                    action: "Page down",
-                },
-                Shortcut {
-                    key: "Ctrl+B / PageUp",
-                    action: "Page up",
-                },
-                Shortcut {
-                    key: "Ctrl+D",
-                    action: "Half page down",
-                },
-                Shortcut {
-                    key: "Ctrl+U",
-                    action: "Half page up",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Confirm / drill into selection",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel / back",
-                },
+            shortcuts: vec![
+                sg(kb, UserEvent::NavigateDown, "Move down one row"),
+                sg(kb, UserEvent::NavigateUp, "Move up one row"),
+                sg(kb, UserEvent::NavigateLeft, "Move left / close node"),
+                sg(kb, UserEvent::NavigateRight, "Move right / open node"),
+                sg(kb, UserEvent::SelectDown, "Older commit (in detail / drilldowns)"),
+                sg(kb, UserEvent::SelectUp, "Newer commit"),
+                sg(kb, UserEvent::GoToParent, "Go to parent commit"),
+                sg(kb, UserEvent::GoToTop, "Go to top"),
+                sg(kb, UserEvent::GoToBottom, "Go to bottom"),
+                sg(kb, UserEvent::SelectMiddle, "Select middle of viewport"),
+                sg(kb, UserEvent::SelectBottom, "Select bottom of viewport"),
+                sg(kb, UserEvent::ScrollDown, "Scroll one line down"),
+                sg(kb, UserEvent::ScrollUp, "Scroll one line up"),
+                sg(kb, UserEvent::PageDown, "Page down"),
+                sg(kb, UserEvent::PageUp, "Page up"),
+                sg(kb, UserEvent::HalfPageDown, "Half page down"),
+                sg(kb, UserEvent::HalfPageUp, "Half page up"),
+                sg(kb, UserEvent::Confirm, "Confirm / drill into selection"),
+                sg(kb, UserEvent::Cancel, "Cancel / back"),
             ],
         },
         HelpSection {
             title: "Commit List",
             intro: Some("The main view — `gitoui`'s home screen."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Search",
-                    action: "",
-                },
-                Shortcut {
-                    key: "f",
-                    action: "Start a search",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Apply search query",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel search / clear compare mark",
-                },
-                Shortcut {
-                    key: "← / →",
-                    action: "Cycle to previous / next match",
-                },
-                Shortcut {
-                    key: "s",
-                    action: "Toggle case-sensitive matching",
-                },
-                Shortcut {
-                    key: "z",
-                    action: "Toggle fuzzy matching",
-                },
-                Shortcut {
-                    key: "x",
-                    action: "Toggle regex matching (while search applied)",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Actions",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open commit detail (or Uncommitted on the top row)",
-                },
-                Shortcut {
-                    key: "Tab",
-                    action: "Open refs panel",
-                },
-                Shortcut {
-                    key: "Space",
-                    action: "Mark / unmark a commit for 2-commit compare",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Refetch from remote",
-                },
-                Shortcut {
-                    key: "]",
-                    action: "Load older commits",
-                },
-                Shortcut {
-                    key: "Shift+P",
-                    action: "Push current branch",
-                },
-                Shortcut {
-                    key: "Shift+U",
-                    action: "Pull current branch",
-                },
-                Shortcut {
-                    key: "Ctrl+A",
-                    action: "Abort in-progress rebase / merge / cherry-pick",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Copy",
-                    action: "",
-                },
-                Shortcut {
-                    key: "c",
-                    action: "Copy commit message",
-                },
-                Shortcut {
-                    key: "Shift+C",
-                    action: "Copy commit hash",
-                },
+            shortcuts: vec![
+                lit("Search", ""),
+                sg(kb, UserEvent::Search, "Start a search"),
+                sg(kb, UserEvent::Confirm, "Apply search query"),
+                sg(kb, UserEvent::Cancel, "Cancel search / clear compare mark"),
+                lit("← / →", "Cycle to previous / next match"),
+                sg(kb, UserEvent::IgnoreCaseToggle, "Toggle case-sensitive matching"),
+                sg(kb, UserEvent::FuzzyToggle, "Toggle fuzzy matching"),
+                sg(kb, UserEvent::Discard, "Toggle regex matching (while search applied)"),
+                lit("", ""),
+                lit("Actions", ""),
+                sg(kb, UserEvent::Confirm, "Open commit detail (or Uncommitted on the top row)"),
+                sg(kb, UserEvent::RefList, "Open refs panel"),
+                sg(kb, UserEvent::MarkCompare, "Mark / unmark a commit for 2-commit compare"),
+                sg(kb, UserEvent::Refresh, "Refetch from remote"),
+                sg(kb, UserEvent::LoadMore, "Load older commits"),
+                sg(kb, UserEvent::Push, "Push current branch"),
+                sg(kb, UserEvent::Pull, "Pull current branch"),
+                sg(kb, UserEvent::AbortOperation, "Abort in-progress rebase / merge / cherry-pick"),
+                ss(kb, &["list"], "select_head_commit", "Scroll to HEAD (centered)"),
+                lit("", ""),
+                lit("Copy", ""),
+                sg(kb, UserEvent::FullCopy, "Copy commit message"),
+                sg(kb, UserEvent::ShortCopy, "Copy commit hash"),
             ],
         },
         HelpSection {
             title: "Commit Detail",
             intro: Some("Opens with Enter on a commit. All Navigation shortcuts apply."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc / Enter",
-                    action: "Close detail",
-                },
-                Shortcut {
-                    key: "b",
-                    action: "Open blame on the focused file",
-                },
-                Shortcut {
-                    key: "Shift+H",
-                    action: "Open file history on the focused file",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Commit actions",
-                    action: "",
-                },
-                Shortcut {
-                    key: "t",
-                    action: "Add tag",
-                },
-                Shortcut {
-                    key: "Shift+B",
-                    action: "Create branch from this commit",
-                },
-                Shortcut {
-                    key: "o",
-                    action: "Checkout this commit",
-                },
-                Shortcut {
-                    key: "Shift+O",
-                    action: "Cherry-pick",
-                },
-                Shortcut {
-                    key: "d",
-                    action: "Drop commit (uses interactive rebase)",
-                },
-                Shortcut {
-                    key: "m",
-                    action: "Merge",
-                },
-                Shortcut {
-                    key: "e",
-                    action: "Open interactive rebase from here",
-                },
-                Shortcut {
-                    key: "Shift+S",
-                    action: "Reset",
-                },
-                Shortcut {
-                    key: "Ctrl+S",
-                    action: "Squash with previous commit",
-                },
-                Shortcut {
-                    key: "Ctrl+M",
-                    action: "Amend HEAD message (HEAD only)",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Stash actions",
-                    action: "(only on stash nodes)",
-                },
-                Shortcut {
-                    key: "y",
-                    action: "Apply stash (keep)",
-                },
-                Shortcut {
-                    key: "Ctrl+P",
-                    action: "Pop stash (apply + drop)",
-                },
-                Shortcut {
-                    key: "Ctrl+X",
-                    action: "Drop stash",
-                },
-                Shortcut {
-                    key: "Ctrl+N",
-                    action: "Create branch from stash",
-                },
-                Shortcut {
-                    key: "Ctrl+I",
-                    action: "Copy stash name",
-                },
-                Shortcut {
-                    key: "Ctrl+O",
-                    action: "Copy stash hash",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Copy",
-                    action: "",
-                },
-                Shortcut {
-                    key: "c",
-                    action: "Copy commit message",
-                },
-                Shortcut {
-                    key: "Shift+C",
-                    action: "Copy commit hash",
-                },
+            shortcuts: vec![
+                lit("Esc / Enter", "Close detail"),
+                sg(kb, UserEvent::Blame, "Open blame on the focused file"),
+                sg(kb, UserEvent::FileHistory, "Open file history on the focused file"),
+                lit("", ""),
+                lit("Commit actions", ""),
+                sg(kb, UserEvent::AddTag, "Add tag"),
+                sg(kb, UserEvent::CreateBranch, "Create branch from this commit"),
+                sg(kb, UserEvent::Checkout, "Checkout this commit"),
+                sg(kb, UserEvent::CherryPick, "Cherry-pick"),
+                sg(kb, UserEvent::Drop, "Drop commit (uses interactive rebase)"),
+                sg(kb, UserEvent::Merge, "Merge"),
+                sg(kb, UserEvent::Rebase, "Open interactive rebase from here"),
+                sg(kb, UserEvent::Reset, "Reset"),
+                sg(kb, UserEvent::Squash, "Squash with previous commit"),
+                sg(kb, UserEvent::AmendCommit, "Amend HEAD message (HEAD only)"),
+                lit("", ""),
+                lit("Stash actions", "(only on stash nodes)"),
+                sg(kb, UserEvent::ApplyStash, "Apply stash (keep)"),
+                sg(kb, UserEvent::PopStash, "Pop stash (apply + drop)"),
+                sg(kb, UserEvent::DropStash, "Drop stash"),
+                sg(kb, UserEvent::CreateBranchFromStash, "Create branch from stash"),
+                sg(kb, UserEvent::CopyStashName, "Copy stash name"),
+                sg(kb, UserEvent::CopyStashHash, "Copy stash hash"),
+                lit("", ""),
+                lit("Copy", ""),
+                sg(kb, UserEvent::FullCopy, "Copy commit message"),
+                sg(kb, UserEvent::ShortCopy, "Copy commit hash"),
             ],
         },
         HelpSection {
@@ -792,945 +588,301 @@ fn sections() -> Vec<HelpSection> {
             intro: Some(
                 "Opens with Tab from the commit list. Lists branches, tags, stashes, remotes.",
             ),
-            shortcuts: &[
-                Shortcut {
-                    key: "Tab / Esc",
-                    action: "Close refs panel",
-                },
-                Shortcut {
-                    key: "Right",
-                    action: "Open / expand node",
-                },
-                Shortcut {
-                    key: "Left",
-                    action: "Close / collapse node",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open Branch Detail / Tag Detail / jump to ref",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Refetch",
-                },
-                Shortcut {
-                    key: "Shift+C",
-                    action: "Copy ref name",
-                },
+            shortcuts: vec![
+                lit("Tab / Esc", "Close refs panel"),
+                lit("Right", "Open / expand node"),
+                lit("Left", "Close / collapse node"),
+                lit("Enter", "Open Branch Detail / Tag Detail / jump to ref"),
+                sg(kb, UserEvent::Refresh, "Refetch"),
+                sg(kb, UserEvent::ShortCopy, "Copy ref name"),
             ],
         },
         HelpSection {
             title: "Branch Detail",
             intro: Some("Opens with Enter on a branch in the Refs panel."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc",
-                    action: "Close",
-                },
-                Shortcut {
-                    key: "o",
-                    action: "Checkout branch",
-                },
-                Shortcut {
-                    key: "Ctrl+R",
-                    action: "Rename branch",
-                },
-                Shortcut {
-                    key: "Shift+D",
-                    action: "Delete branch",
-                },
-                Shortcut {
-                    key: "m",
-                    action: "Merge into current branch",
-                },
-                Shortcut {
-                    key: "e",
-                    action: "Rebase onto this branch",
-                },
-                Shortcut {
-                    key: "Shift+Q",
-                    action: "Push branch",
-                },
-                Shortcut {
-                    key: "Shift+U",
-                    action: "Pull branch",
-                },
-                Shortcut {
-                    key: "Ctrl+T",
-                    action: "Set upstream",
-                },
-                Shortcut {
-                    key: "Shift+E",
-                    action: "Create archive (.tar.gz)",
-                },
-                Shortcut {
-                    key: "Shift+T",
-                    action: "Unselect branch (detach HEAD)",
-                },
-                Shortcut {
-                    key: "Shift+V",
-                    action: "Copy branch name",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Refetch",
-                },
+            shortcuts: vec![
+                lit("Esc", "Close"),
+                sg(kb, UserEvent::Checkout, "Checkout branch"),
+                sg(kb, UserEvent::RenameBranch, "Rename branch"),
+                sg(kb, UserEvent::DeleteBranch, "Delete branch"),
+                sg(kb, UserEvent::Merge, "Merge into current branch"),
+                sg(kb, UserEvent::Rebase, "Rebase onto this branch"),
+                sg(kb, UserEvent::PushBranch, "Push branch"),
+                sg(kb, UserEvent::Pull, "Pull branch"),
+                sg(kb, UserEvent::SetUpstream, "Set upstream"),
+                sg(kb, UserEvent::CreateArchive, "Create archive (.tar.gz)"),
+                sg(kb, UserEvent::UnselectBranch, "Unselect branch (detach HEAD)"),
+                sg(kb, UserEvent::CopyBranchName, "Copy branch name"),
+                sg(kb, UserEvent::Refresh, "Refetch"),
             ],
         },
         HelpSection {
             title: "Tag Detail",
             intro: Some("Opens with Enter on a tag in the Refs panel."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc",
-                    action: "Close",
-                },
-                Shortcut {
-                    key: "Shift+W",
-                    action: "Push tag",
-                },
-                Shortcut {
-                    key: "Shift+F",
-                    action: "Delete tag",
-                },
-                Shortcut {
-                    key: "Shift+Y",
-                    action: "Copy tag name",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Refetch",
-                },
+            shortcuts: vec![
+                lit("Esc", "Close"),
+                sg(kb, UserEvent::PushTag, "Push tag"),
+                sg(kb, UserEvent::DeleteTag, "Delete tag"),
+                sg(kb, UserEvent::CopyTagName, "Copy tag name"),
+                sg(kb, UserEvent::Refresh, "Refetch"),
             ],
         },
         HelpSection {
             title: "Uncommitted",
             intro: Some("Opens with Enter on the top row of the commit list (`(uncommitted)`)."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc",
-                    action: "Back to commit list",
-                },
-                Shortcut {
-                    key: "Up / Down",
-                    action: "Navigate files within the active section",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Switch section (Unstaged / Staged / Untracked)",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open diff of the focused file",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Refresh file lists",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Staging",
-                    action: "",
-                },
-                Shortcut {
-                    key: "a",
-                    action: "Stage selected file",
-                },
-                Shortcut {
-                    key: "Shift+A",
-                    action: "Stage all unstaged + untracked",
-                },
-                Shortcut {
-                    key: "u",
-                    action: "Unstage selected file (Staged section)",
-                },
-                Shortcut {
-                    key: "Shift+U",
-                    action: "Unstage all staged files",
-                },
-                Shortcut {
-                    key: "x",
-                    action: "Discard selected unstaged change",
-                },
-                Shortcut {
-                    key: "Shift+X",
-                    action: "Discard all unstaged + staged changes",
-                },
-                Shortcut {
-                    key: "v",
-                    action: "Clean (delete) untracked file",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Save state",
-                    action: "",
-                },
-                Shortcut {
-                    key: "w",
-                    action: "Commit (opens commit message editor)",
-                },
-                Shortcut {
-                    key: "i",
-                    action: "Stash",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Inspect",
-                    action: "",
-                },
-                Shortcut {
-                    key: "b",
-                    action: "Blame the focused file",
-                },
-                Shortcut {
-                    key: "Shift+H",
-                    action: "File history of the focused file",
-                },
+            shortcuts: vec![
+                lit("Esc", "Back to commit list"),
+                lit("Up / Down", "Navigate files within the active section"),
+                lit("Left / Right", "Switch section (Unstaged / Staged / Untracked)"),
+                lit("Enter", "Open diff of the focused file"),
+                sg(kb, UserEvent::Refresh, "Refresh file lists"),
+                lit("", ""),
+                lit("Staging", ""),
+                sg(kb, UserEvent::Stage, "Stage selected file"),
+                sg(kb, UserEvent::StageAll, "Stage all unstaged + untracked"),
+                sg(kb, UserEvent::Unstage, "Unstage selected file (Staged section)"),
+                sg(kb, UserEvent::Pull, "Unstage all staged files"),
+                sg(kb, UserEvent::Discard, "Discard selected unstaged change"),
+                sg(kb, UserEvent::DiscardAll, "Discard all unstaged + staged changes"),
+                sg(kb, UserEvent::CleanUntracked, "Clean (delete) untracked file"),
+                lit("", ""),
+                lit("Save state", ""),
+                sg(kb, UserEvent::Commit, "Commit (opens commit message editor)"),
+                sg(kb, UserEvent::Stash, "Stash"),
+                lit("", ""),
+                lit("Inspect", ""),
+                sg(kb, UserEvent::Blame, "Blame the focused file"),
+                sg(kb, UserEvent::FileHistory, "File history of the focused file"),
             ],
         },
         HelpSection {
             title: "Diff",
             intro: Some("Opens with Enter on a file row, from commit Detail or Uncommitted."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc / Enter",
-                    action: "Close diff",
-                },
-                Shortcut {
-                    key: "j / k / arrows",
-                    action: "Scroll",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Move focus across hunks / action buttons",
-                },
-                Shortcut {
-                    key: "+",
-                    action: "Cycle to the next file in the commit",
-                },
-                Shortcut {
-                    key: "-",
-                    action: "Cycle to the previous file",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Refresh",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Search",
-                    action: "",
-                },
-                Shortcut {
-                    key: "f",
-                    action: "Toggle in-diff search",
-                },
-                Shortcut {
-                    key: "n",
-                    action: "Next match",
-                },
-                Shortcut {
-                    key: "Shift+N",
-                    action: "Previous match",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Inspect",
-                    action: "",
-                },
-                Shortcut {
-                    key: "b",
-                    action: "Blame the current file",
-                },
-                Shortcut {
-                    key: "Shift+H",
-                    action: "Open file history",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Copy",
-                    action: "",
-                },
-                Shortcut {
-                    key: "c",
-                    action: "Copy the file path",
-                },
-                Shortcut {
-                    key: "Shift+C",
-                    action: "Copy the commit hash",
-                },
+            shortcuts: vec![
+                lit("Esc / Enter", "Close diff"),
+                lit("j / k / arrows", "Scroll"),
+                lit("Left / Right", "Move focus across hunks / action buttons"),
+                sg(kb, UserEvent::CycleFileNext, "Cycle to the next file in the commit"),
+                sg(kb, UserEvent::CycleFilePrev, "Cycle to the previous file"),
+                sg(kb, UserEvent::Refresh, "Refresh"),
+                lit("", ""),
+                lit("Search", ""),
+                sg(kb, UserEvent::Search, "Toggle in-diff search"),
+                sg(kb, UserEvent::GoToNext, "Next match"),
+                sg(kb, UserEvent::GoToPrevious, "Previous match"),
+                lit("", ""),
+                lit("Inspect", ""),
+                sg(kb, UserEvent::Blame, "Blame the current file"),
+                sg(kb, UserEvent::FileHistory, "Open file history"),
+                lit("", ""),
+                lit("Copy", ""),
+                sg(kb, UserEvent::FullCopy, "Copy the file path"),
+                sg(kb, UserEvent::ShortCopy, "Copy the commit hash"),
             ],
         },
         HelpSection {
             title: "Blame",
             intro: Some("Opens with `b` on a file."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc",
-                    action: "Close blame",
-                },
-                Shortcut {
-                    key: "j / k",
-                    action: "Move line by line",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Jump to previous / next blame block",
-                },
-                Shortcut {
-                    key: "PageUp / PageDown",
-                    action: "Scroll a page",
-                },
-                Shortcut {
-                    key: "g / Shift+G",
-                    action: "Top / bottom",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open the commit that authored the focused line",
-                },
-                Shortcut {
-                    key: "Shift+H",
-                    action: "Open file history (same file)",
-                },
+            shortcuts: vec![
+                lit("Esc", "Close blame"),
+                lit("j / k", "Move line by line"),
+                lit("Left / Right", "Jump to previous / next blame block"),
+                lit("PageUp / PageDown", "Scroll a page"),
+                lit("g / Shift+G", "Top / bottom"),
+                lit("Enter", "Open the commit that authored the focused line"),
+                sg(kb, UserEvent::FileHistory, "Open file history (same file)"),
             ],
         },
         HelpSection {
             title: "File History",
             intro: Some("Opens with `Shift+H` on a file — equivalent of `git log --follow`."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc / Enter",
-                    action: "Close history",
-                },
-                Shortcut {
-                    key: "j / k / arrows",
-                    action: "Navigate revisions",
-                },
-                Shortcut {
-                    key: "PageUp / PageDown",
-                    action: "Scroll a page",
-                },
-                Shortcut {
-                    key: "g / Shift+G",
-                    action: "Top / bottom",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open commit detail for the focused revision",
-                },
-                Shortcut {
-                    key: "b",
-                    action: "Blame the file at this revision",
-                },
-                Shortcut {
-                    key: "c",
-                    action: "Copy commit message",
-                },
-                Shortcut {
-                    key: "Shift+C",
-                    action: "Copy commit hash",
-                },
+            shortcuts: vec![
+                lit("Esc / Enter", "Close history"),
+                lit("j / k / arrows", "Navigate revisions"),
+                lit("PageUp / PageDown", "Scroll a page"),
+                lit("g / Shift+G", "Top / bottom"),
+                lit("Enter", "Open commit detail for the focused revision"),
+                sg(kb, UserEvent::Blame, "Blame the file at this revision"),
+                sg(kb, UserEvent::FullCopy, "Copy commit message"),
+                sg(kb, UserEvent::ShortCopy, "Copy commit hash"),
             ],
         },
         HelpSection {
             title: "Interactive Rebase",
             intro: Some("Opens with `e` on a commit. Edit the rebase plan, then Enter to apply."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Enter",
-                    action: "Apply rebase plan",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel (releases grab first if any)",
-                },
-                Shortcut {
-                    key: "Up / Down",
-                    action: "Move selection (or reorder when grabbed)",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Cycle action for the selected row",
-                },
-                Shortcut {
-                    key: "Space",
-                    action: "Grab / release the focused row",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Per-row action",
-                    action: "",
-                },
-                Shortcut {
-                    key: "p",
-                    action: "Pick",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Reword (opens inline editor)",
-                },
-                Shortcut {
-                    key: "e",
-                    action: "Edit",
-                },
-                Shortcut {
-                    key: "s",
-                    action: "Squash into previous",
-                },
-                Shortcut {
-                    key: "f",
-                    action: "Fixup into previous",
-                },
-                Shortcut {
-                    key: "d",
-                    action: "Drop",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Stale rebase",
-                    action: "(when resume banner shown)",
-                },
-                Shortcut {
-                    key: "Shift+A",
-                    action: "Abort the previously-stuck rebase",
-                },
-                Shortcut {
-                    key: "c / Shift+C",
-                    action: "Continue stuck rebase",
-                },
-                Shortcut {
-                    key: "s / Shift+S",
-                    action: "Skip current commit",
-                },
-                Shortcut {
-                    key: "a / Shift+A",
-                    action: "Abort and bail",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Reword editor",
-                    action: "(while inline-editing a subject)",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Save reworded message",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel reword",
-                },
-                Shortcut {
-                    key: "Ctrl+H / Ctrl+W",
-                    action: "Delete word to the left",
-                },
-                Shortcut {
-                    key: "Ctrl+Backspace",
-                    action: "Delete word to the left",
-                },
-                Shortcut {
-                    key: "Ctrl+Delete",
-                    action: "Delete word to the right",
-                },
-                Shortcut {
-                    key: "Ctrl+Left / Right",
-                    action: "Jump by word",
-                },
+            shortcuts: vec![
+                lit("Enter", "Apply rebase plan"),
+                lit("Esc", "Cancel (releases grab first if any)"),
+                lit("Up / Down", "Move selection (or reorder when grabbed)"),
+                lit("Left / Right", "Cycle action for the selected row"),
+                ss(kb, &["rebase"], "grab", "Grab / release the focused row"),
+                lit("", ""),
+                lit("Per-row action", ""),
+                ss(kb, &["rebase"], "pick", "Pick"),
+                ss(kb, &["rebase"], "reword", "Reword (opens inline editor)"),
+                ss(kb, &["rebase"], "edit", "Edit"),
+                ss(kb, &["rebase"], "squash", "Squash into previous"),
+                ss(kb, &["rebase"], "fixup", "Fixup into previous"),
+                ss(kb, &["rebase"], "drop", "Drop"),
+                lit("", ""),
+                lit("Stale rebase", "(when resume banner shown)"),
+                ss(kb, &["rebase"], "abort_previous", "Abort the previously-stuck rebase"),
+                ss(kb, &["rebase", "resume"], "continue_rebase", "Continue stuck rebase"),
+                ss(kb, &["rebase", "resume"], "skip_commit", "Skip current commit"),
+                ss(kb, &["rebase", "resume"], "abort", "Abort and bail"),
+                lit("", ""),
+                lit("Reword editor", "(while inline-editing a subject)"),
+                lit("Enter", "Save reworded message"),
+                lit("Esc", "Cancel reword"),
+                ss(kb, &["rebase", "reword_editor"], "delete_word_left", "Delete word to the left"),
+                ss(kb, &["rebase", "reword_editor"], "delete_word_right", "Delete word to the right"),
+                ss(kb, &["rebase", "reword_editor"], "word_left", "Jump one word left"),
+                ss(kb, &["rebase", "reword_editor"], "word_right", "Jump one word right"),
             ],
         },
         HelpSection {
             title: "Conflict Editor",
             intro: Some("Opens automatically during a conflicted merge / rebase / cherry-pick."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Enter",
-                    action: "Save resolution and mark as resolved",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel and leave conflict in place",
-                },
-                Shortcut {
-                    key: "Left / p",
-                    action: "Previous conflict hunk",
-                },
-                Shortcut {
-                    key: "Right / n",
-                    action: "Next conflict hunk",
-                },
-                Shortcut {
-                    key: "o",
-                    action: "Pick OURS for the focused hunk",
-                },
-                Shortcut {
-                    key: "t",
-                    action: "Pick THEIRS",
-                },
-                Shortcut {
-                    key: "b",
-                    action: "Keep BOTH (ours first)",
-                },
-                Shortcut {
-                    key: "Shift+B",
-                    action: "Keep BOTH (theirs first)",
-                },
-                Shortcut {
-                    key: "j / k / arrows",
-                    action: "Scroll",
-                },
+            shortcuts: vec![
+                lit("Enter", "Save resolution and mark as resolved"),
+                lit("Esc", "Cancel and leave conflict in place"),
+                ss(kb, &["conflict"], "prev_hunk", "Previous conflict hunk"),
+                ss(kb, &["conflict"], "next_hunk", "Next conflict hunk"),
+                ss(kb, &["conflict"], "pick_ours", "Pick OURS for the focused hunk"),
+                ss(kb, &["conflict"], "pick_theirs", "Pick THEIRS"),
+                ss(kb, &["conflict"], "pick_both_ours_first", "Keep BOTH (ours first)"),
+                ss(kb, &["conflict"], "pick_both_theirs_first", "Keep BOTH (theirs first)"),
+                lit("j / k / arrows", "Scroll"),
             ],
         },
         HelpSection {
             title: "Compare (2-commit)",
             intro: Some("Opens after marking two commits with Space — shows the cumulative diff."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc",
-                    action: "Close compare",
-                },
-                Shortcut {
-                    key: "j / k / arrows",
-                    action: "Navigate files / scroll",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Switch between file list and diff panel",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open the focused file's diff",
-                },
+            shortcuts: vec![
+                lit("Esc", "Close compare"),
+                lit("j / k / arrows", "Navigate files / scroll"),
+                lit("Left / Right", "Switch between file list and diff panel"),
+                lit("Enter", "Open the focused file's diff"),
             ],
         },
         HelpSection {
             title: "Pull Requests",
             intro: Some("Opens with `Shift+R` (needs a GitHub remote + auth)."),
-            shortcuts: &[
-                Shortcut {
-                    key: "List",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Up / Down",
-                    action: "Navigate PRs",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Cycle filter (Open / Merged / Closed / All)",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open PR detail",
-                },
-                Shortcut {
-                    key: "n",
-                    action: "Compose a new PR",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Reload",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Close PR view",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Detail",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Switch tab (Conversation / Files / Commits / References)",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Drill into focused file or commit row",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Back (drilldown → list → close)",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Reload PR",
-                },
-                Shortcut {
-                    key: "o",
-                    action: "Open PR in browser",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "PR actions",
-                    action: "",
-                },
-                Shortcut {
-                    key: "a",
-                    action: "Approve review",
-                },
-                Shortcut {
-                    key: "x",
-                    action: "Request changes",
-                },
-                Shortcut {
-                    key: "m",
-                    action: "Merge PR",
-                },
-                Shortcut {
-                    key: "l",
-                    action: "Labels picker",
-                },
-                Shortcut {
-                    key: "v",
-                    action: "Reviewers picker",
-                },
-                Shortcut {
-                    key: "Ctrl+X",
-                    action: "Close PR",
-                },
-                Shortcut {
-                    key: "Ctrl+O",
-                    action: "Reopen PR",
-                },
-                Shortcut {
-                    key: "Ctrl+D",
-                    action: "Toggle draft state",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Conversation",
-                    action: "(tab actions)",
-                },
-                Shortcut {
-                    key: "c",
-                    action: "New comment",
-                },
-                Shortcut {
-                    key: "Shift+R",
-                    action: "Quote-reply to focused comment",
-                },
-                Shortcut {
-                    key: "e",
-                    action: "Edit own comment",
-                },
-                Shortcut {
-                    key: "d",
-                    action: "Delete own comment",
-                },
-                Shortcut {
-                    key: "+",
-                    action: "React (emoji picker)",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Compose",
-                    action: "(new PR / new comment / edit / reply)",
-                },
-                Shortcut {
-                    key: "Tab",
-                    action: "Move to the next field",
-                },
-                Shortcut {
-                    key: "Ctrl+S",
-                    action: "Submit",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel",
-                },
-                Shortcut {
-                    key: "#",
-                    action: "Open the #N issue/PR mention popup",
-                },
-                Shortcut {
-                    key: "Ctrl+H / Ctrl+W",
-                    action: "Delete word to the left",
-                },
-                Shortcut {
-                    key: "Ctrl+Left / Right",
-                    action: "Jump by word",
-                },
+            shortcuts: vec![
+                lit("List", ""),
+                lit("Up / Down", "Navigate PRs"),
+                lit("Left / Right", "Cycle filter (Open / Merged / Closed / All)"),
+                lit("Enter", "Open PR detail"),
+                ss(kb, &["pr", "list"], "new_pr", "Compose a new PR"),
+                ss(kb, &["pr"], "reload", "Reload"),
+                lit("Esc", "Close PR view"),
+                lit("", ""),
+                lit("Detail", ""),
+                lit("Left / Right", "Switch tab (Conversation / Files / Commits / References)"),
+                lit("Enter", "Drill into focused file or commit row"),
+                lit("Esc", "Back (drilldown → list → close)"),
+                ss(kb, &["pr"], "reload", "Reload PR"),
+                ss(kb, &["pr"], "open_in_browser", "Open PR in browser"),
+                lit("", ""),
+                lit("PR actions", ""),
+                ss(kb, &["pr"], "approve", "Approve review"),
+                ss(kb, &["pr"], "request_changes", "Request changes"),
+                ss(kb, &["pr"], "merge", "Merge PR"),
+                ss(kb, &["pr"], "labels_picker", "Labels picker"),
+                ss(kb, &["pr"], "reviewers_picker", "Reviewers picker"),
+                ss(kb, &["pr"], "close_pr", "Close PR"),
+                ss(kb, &["pr"], "reopen_pr", "Reopen PR"),
+                ss(kb, &["pr"], "toggle_draft", "Toggle draft state"),
+                lit("", ""),
+                lit("Conversation", "(tab actions)"),
+                ss(kb, &["pr", "conversation"], "new_comment", "New comment"),
+                ss(kb, &["pr", "conversation"], "quote_reply", "Quote-reply to focused comment"),
+                ss(kb, &["pr", "conversation"], "edit_own", "Edit own comment"),
+                ss(kb, &["pr", "conversation"], "delete_own", "Delete own comment"),
+                ss(kb, &["pr", "conversation"], "react", "React (emoji picker)"),
+                lit("", ""),
+                lit("Compose", "(new PR / new comment / edit / reply)"),
+                lit("Tab", "Move to the next field"),
+                ss(kb, &["compose"], "submit", "Submit"),
+                lit("Esc", "Cancel"),
+                lit("#", "Open the #N issue/PR mention popup"),
+                lit("Ctrl+H / Ctrl+W", "Delete word to the left"),
+                lit("Ctrl+Left / Right", "Jump by word"),
             ],
         },
         HelpSection {
             title: "Issues",
             intro: Some("Opens with `Shift+I` (needs a GitHub remote + auth)."),
-            shortcuts: &[
-                Shortcut {
-                    key: "List",
-                    action: "",
-                },
-                Shortcut {
-                    key: "j / k / arrows",
-                    action: "Navigate issues",
-                },
-                Shortcut {
-                    key: "g / Shift+G",
-                    action: "Top / bottom",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Cycle filter (Open / Closed / All)",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Open issue detail",
-                },
-                Shortcut {
-                    key: "n",
-                    action: "Compose a new issue",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Reload",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Close Issues view",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Detail",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Left / Right",
-                    action: "Switch tab (Conversation / Timeline / References)",
-                },
-                Shortcut {
-                    key: "j / k",
-                    action: "Move comment cursor (Conversation tab)",
-                },
-                Shortcut {
-                    key: "g / Shift+G",
-                    action: "First / last comment",
-                },
-                Shortcut {
-                    key: "PageUp / PageDown",
-                    action: "Scroll",
-                },
-                Shortcut {
-                    key: "Ctrl+U / Ctrl+D",
-                    action: "Half-page scroll",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Follow first #N ref (Conversation) / open ref (References)",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Back to list",
-                },
-                Shortcut {
-                    key: "r",
-                    action: "Reload issue",
-                },
-                Shortcut {
-                    key: "o",
-                    action: "Open issue in browser",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Issue actions",
-                    action: "",
-                },
-                Shortcut {
-                    key: "l",
-                    action: "Labels picker",
-                },
-                Shortcut {
-                    key: "a",
-                    action: "Assignees picker",
-                },
-                Shortcut {
-                    key: "m",
-                    action: "Milestone picker",
-                },
-                Shortcut {
-                    key: "x",
-                    action: "Close or reopen issue",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Conversation",
-                    action: "(tab actions)",
-                },
-                Shortcut {
-                    key: "c",
-                    action: "New comment",
-                },
-                Shortcut {
-                    key: "Shift+R",
-                    action: "Quote-reply to focused comment",
-                },
-                Shortcut {
-                    key: "Shift+N",
-                    action: "New issue with a back-reference to this one",
-                },
-                Shortcut {
-                    key: "e",
-                    action: "Edit own comment",
-                },
-                Shortcut {
-                    key: "d",
-                    action: "Delete own comment",
-                },
-                Shortcut {
-                    key: "+",
-                    action: "React (emoji picker)",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Compose",
-                    action: "(new issue / new comment / edit / reply)",
-                },
-                Shortcut {
-                    key: "Tab",
-                    action: "Move to the next field",
-                },
-                Shortcut {
-                    key: "Ctrl+S",
-                    action: "Submit",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel",
-                },
-                Shortcut {
-                    key: "#",
-                    action: "Open the #N issue/PR mention popup",
-                },
-                Shortcut {
-                    key: "Ctrl+H / Ctrl+W",
-                    action: "Delete word to the left",
-                },
-                Shortcut {
-                    key: "Ctrl+Left / Right",
-                    action: "Jump by word",
-                },
+            shortcuts: vec![
+                lit("List", ""),
+                lit("j / k / arrows", "Navigate issues"),
+                lit("g / Shift+G", "Top / bottom"),
+                lit("Left / Right", "Cycle filter (Open / Closed / All)"),
+                lit("Enter", "Open issue detail"),
+                ss(kb, &["issues", "list"], "new_issue", "Compose a new issue"),
+                ss(kb, &["issues"], "reload", "Reload"),
+                lit("Esc", "Close Issues view"),
+                lit("", ""),
+                lit("Detail", ""),
+                lit("Left / Right", "Switch tab (Conversation / Timeline / References)"),
+                lit("j / k", "Move comment cursor (Conversation tab)"),
+                lit("g / Shift+G", "First / last comment"),
+                lit("PageUp / PageDown", "Scroll"),
+                lit("Ctrl+U / Ctrl+D", "Half-page scroll"),
+                lit("Enter", "Follow first #N ref (Conversation) / open ref (References)"),
+                lit("Esc", "Back to list"),
+                ss(kb, &["issues"], "reload", "Reload issue"),
+                ss(kb, &["issues"], "open_in_browser", "Open issue in browser"),
+                lit("", ""),
+                lit("Issue actions", ""),
+                ss(kb, &["issues"], "labels_picker", "Labels picker"),
+                ss(kb, &["issues"], "assignees_picker", "Assignees picker"),
+                ss(kb, &["issues"], "milestone_picker", "Milestone picker"),
+                ss(kb, &["issues"], "close_or_reopen", "Close or reopen issue"),
+                lit("", ""),
+                lit("Conversation", "(tab actions)"),
+                ss(kb, &["issues", "detail"], "new_comment", "New comment"),
+                ss(kb, &["issues", "detail"], "quote_reply", "Quote-reply to focused comment"),
+                ss(kb, &["issues", "detail"], "reference_in_new_issue", "New issue with a back-reference to this one"),
+                ss(kb, &["issues", "detail"], "edit_own", "Edit own comment"),
+                ss(kb, &["issues", "detail"], "delete_own", "Delete own comment"),
+                ss(kb, &["issues", "detail"], "react", "React (emoji picker)"),
+                lit("", ""),
+                lit("Compose", "(new issue / new comment / edit / reply)"),
+                lit("Tab", "Move to the next field"),
+                ss(kb, &["compose"], "submit", "Submit"),
+                lit("Esc", "Cancel"),
+                lit("#", "Open the #N issue/PR mention popup"),
+                lit("Ctrl+H / Ctrl+W", "Delete word to the left"),
+                lit("Ctrl+Left / Right", "Jump by word"),
             ],
         },
         HelpSection {
             title: "Configuration",
             intro: Some("Opens with `p` from the commit list. Edit themes, modes, and identity."),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc / p",
-                    action: "Close configuration",
-                },
-                Shortcut {
-                    key: "j / k",
-                    action: "Move between items",
-                },
-                Shortcut {
-                    key: "h / l",
-                    action: "Cycle value left / right (for cycle items)",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Edit text input or trigger button (GitHub auth)",
-                },
-                Shortcut {
-                    key: "",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Text edit mode",
-                    action: "",
-                },
-                Shortcut {
-                    key: "Enter",
-                    action: "Save edit",
-                },
-                Shortcut {
-                    key: "Esc",
-                    action: "Cancel edit",
-                },
-                Shortcut {
-                    key: "Ctrl+Backspace",
-                    action: "Delete word to the left",
-                },
-                Shortcut {
-                    key: "Backspace",
-                    action: "Delete char to the left",
-                },
+            shortcuts: vec![
+                lit("Esc / p", "Close configuration"),
+                lit("j / k", "Move between items"),
+                lit("h / l", "Cycle value left / right (for cycle items)"),
+                lit("Enter", "Edit text input or trigger button (GitHub auth)"),
+                lit("o", "Open the config file in your $EDITOR"),
+                lit("", ""),
+                lit("Text edit mode", ""),
+                lit("Enter", "Save edit"),
+                lit("Esc", "Cancel edit"),
+                lit("Ctrl+Backspace", "Delete word to the left"),
+                lit("Backspace", "Delete char to the left"),
             ],
         },
         HelpSection {
             title: "Help",
             intro: Some("This page!"),
-            shortcuts: &[
-                Shortcut {
-                    key: "Esc / ? / F1",
-                    action: "Close help",
-                },
-                Shortcut {
-                    key: "j / k / arrows",
-                    action: "Change section",
-                },
-                Shortcut {
-                    key: "g / Shift+G",
-                    action: "First / last section",
-                },
-                Shortcut {
-                    key: "PageDown / PageUp",
-                    action: "Scroll the right pane",
-                },
-                Shortcut {
-                    key: "Ctrl+D / Ctrl+U",
-                    action: "Half-page scroll the right pane",
-                },
+            shortcuts: vec![
+                lit("Esc / ? / F1", "Close help"),
+                lit("j / k / arrows", "Change section"),
+                lit("g / Shift+G", "First / last section"),
+                lit("PageDown / PageUp", "Scroll the right pane"),
+                lit("Ctrl+D / Ctrl+U", "Half-page scroll the right pane"),
             ],
         },
     ]

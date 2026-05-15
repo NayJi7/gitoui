@@ -107,6 +107,24 @@ impl RebaseAction {
             _ => None,
         }
     }
+
+    /// Map a scoped action name (as resolved from `[scope.rebase]`) to
+    /// the corresponding enum variant. Stricter than `from_key` because
+    /// it's only used in the keybind dispatch path — typos in the user's
+    /// TOML can fail at config-load time later if we plumb validation
+    /// through, but for now an unknown name silently returns None and
+    /// the dispatcher falls through.
+    pub fn from_action_name(name: &str) -> Option<Self> {
+        match name {
+            "pick" => Some(RebaseAction::Pick),
+            "reword" => Some(RebaseAction::Reword),
+            "edit" => Some(RebaseAction::Edit),
+            "squash" => Some(RebaseAction::Squash),
+            "fixup" => Some(RebaseAction::Fixup),
+            "drop" => Some(RebaseAction::Drop),
+            _ => None,
+        }
+    }
 }
 
 /// One row of the rebase plan. Carries enough metadata to render a rich

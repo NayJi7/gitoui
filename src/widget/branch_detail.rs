@@ -15,27 +15,27 @@ pub struct BranchDetailState {
     pub hovered_action: Option<usize>,
 }
 
-pub const LOCAL_BRANCH_ACTIONS: &[(&str, &str)] = &[
-    ("Checkout", "o"),
-    ("Rename", "Ctrl+R"),
-    ("Delete", "D"),
-    ("Merge into current", "m"),
-    ("Rebase current on", "e"),
-    ("Push", "Q"),
-    ("Set Upstream", "I"),
-    ("Create Archive", "E"),
-    ("Unselect", "T"),
-    ("Copy Name", "V"),
+pub const LOCAL_BRANCH_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
+    ("Checkout", crate::event::UserEvent::Checkout),
+    ("Rename", crate::event::UserEvent::RenameBranch),
+    ("Delete", crate::event::UserEvent::DeleteBranch),
+    ("Merge into current", crate::event::UserEvent::Merge),
+    ("Rebase current on", crate::event::UserEvent::Rebase),
+    ("Push", crate::event::UserEvent::PushBranch),
+    ("Set Upstream", crate::event::UserEvent::SetUpstream),
+    ("Create Archive", crate::event::UserEvent::CreateArchive),
+    ("Unselect", crate::event::UserEvent::UnselectBranch),
+    ("Copy Name", crate::event::UserEvent::CopyBranchName),
 ];
 
-pub const REMOTE_BRANCH_ACTIONS: &[(&str, &str)] = &[
-    ("Checkout", "o"),
-    ("Delete Remote", "D"),
-    ("Merge into current", "m"),
-    ("Pull into current", "U"),
-    ("Create Archive", "E"),
-    ("Unselect", "T"),
-    ("Copy Name", "V"),
+pub const REMOTE_BRANCH_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
+    ("Checkout", crate::event::UserEvent::Checkout),
+    ("Delete Remote", crate::event::UserEvent::DeleteBranch),
+    ("Merge into current", crate::event::UserEvent::Merge),
+    ("Pull into current", crate::event::UserEvent::Pull),
+    ("Create Archive", crate::event::UserEvent::CreateArchive),
+    ("Unselect", crate::event::UserEvent::UnselectBranch),
+    ("Copy Name", crate::event::UserEvent::CopyBranchName),
 ];
 
 #[derive(Debug, Clone)]
@@ -207,7 +207,7 @@ impl BranchDetail<'_> {
         };
 
         let mut lines = Vec::new();
-        for (i, (label, key)) in actions.iter().enumerate() {
+        for (i, (label, event)) in actions.iter().enumerate() {
             let is_hovered = state.hovered_action == Some(i);
             let style = if is_hovered {
                 Style::default().add_modifier(Modifier::REVERSED)
@@ -215,10 +215,12 @@ impl BranchDetail<'_> {
                 Style::default()
             };
             let key_style = style.add_modifier(Modifier::BOLD);
-            lines.push(Line::from(vec![
-                Span::styled(label.to_string(), style),
-                Span::styled(format!(" ({})", key), key_style),
-            ]));
+            let key = self.ctx.keybind.primary_global_key(*event);
+            let mut spans = vec![Span::styled(label.to_string(), style)];
+            if !key.is_empty() {
+                spans.push(Span::styled(format!(" ({})", key), key_style));
+            }
+            lines.push(Line::from(spans));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));

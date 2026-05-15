@@ -52,6 +52,15 @@ impl<'a> ListView<'a> {
             }
             return;
         } else {
+            // Commit-list-scoped actions: `[scope.list]` overrides the
+            // global UserEvent map for keys that have a list-specific
+            // meaning. Currently `select_head_commit` (default `h`,
+            // taking precedence over the global `navigate_left` which
+            // is a no-op in this vertical list).
+            if let Some("select_head_commit") = self.ctx.keybind.resolve_scoped(&["list"], key) {
+                self.as_mut_list_state().select_head_commit();
+                return;
+            }
             match event {
                 UserEvent::Quit => {
                     self.tx.send(AppEvent::Quit);

@@ -217,11 +217,20 @@ impl<'a> ConflictView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
+        let kb = &self.ctx.keybind;
+        let scoped = |action: &str, label: &str| -> String {
+            let k = kb.primary_scoped_key(&["conflict"], action);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
         let parts = [
-            "o:ours".to_string(),
-            "t:theirs".to_string(),
-            "b:both".to_string(),
-            "B:both (reversed)".to_string(),
+            scoped("pick_ours", "ours"),
+            scoped("pick_theirs", "theirs"),
+            scoped("pick_both_ours_first", "both"),
+            scoped("pick_both_theirs_first", "both (reversed)"),
             "⇆:hunks".to_string(),
             "↑↓:scroll".to_string(),
         ];
@@ -303,34 +312,35 @@ impl<'a> ConflictView<'a> {
     }
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
-        use ratatui::crossterm::event::KeyCode;
-
-        match key.code {
-            KeyCode::Char('o') => {
-                self.pick(HunkResolution::Ours);
-                return;
+        // Conflict editor actions live in [scope.conflict].
+        if let Some(action) = self.ctx.keybind.resolve_scoped(&["conflict"], key) {
+            match action {
+                "pick_ours" => {
+                    self.pick(HunkResolution::Ours);
+                    return;
+                }
+                "pick_theirs" => {
+                    self.pick(HunkResolution::Theirs);
+                    return;
+                }
+                "pick_both_ours_first" => {
+                    self.pick(HunkResolution::BothOursFirst);
+                    return;
+                }
+                "pick_both_theirs_first" => {
+                    self.pick(HunkResolution::BothTheirsFirst);
+                    return;
+                }
+                "next_hunk" => {
+                    self.goto_hunk(1);
+                    return;
+                }
+                "prev_hunk" => {
+                    self.goto_hunk(-1);
+                    return;
+                }
+                _ => {}
             }
-            KeyCode::Char('t') => {
-                self.pick(HunkResolution::Theirs);
-                return;
-            }
-            KeyCode::Char('b') => {
-                self.pick(HunkResolution::BothOursFirst);
-                return;
-            }
-            KeyCode::Char('B') => {
-                self.pick(HunkResolution::BothTheirsFirst);
-                return;
-            }
-            KeyCode::Char('n') => {
-                self.goto_hunk(1);
-                return;
-            }
-            KeyCode::Char('p') => {
-                self.goto_hunk(-1);
-                return;
-            }
-            _ => {}
         }
 
         match event_with_count.event {

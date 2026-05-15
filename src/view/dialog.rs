@@ -85,6 +85,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
             DialogKind::ConfirmDeleteComment { .. } => (vec![], 0),
+            DialogKind::ConfirmDeleteIssueComment { .. } => (vec![], 0),
             DialogKind::ConfirmPullRequestStateChange { .. } => (vec![], 0),
             DialogKind::ConfirmPullRequestDraftToggle { .. } => (vec![], 0),
             // Multi-select pickers — seed `checkboxes` from the
@@ -1146,6 +1147,11 @@ impl<'a> DialogView<'a> {
                 author,
                 body_preview,
                 ..
+            }
+            | DialogKind::ConfirmDeleteIssueComment {
+                author,
+                body_preview,
+                ..
             } => {
                 lines.push(Line::from(vec![
                     Span::styled("Author: ", Style::default().fg(dim_fg)),
@@ -1752,6 +1758,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmPopStash { .. } => " Pop Stash ",
             DialogKind::ConfirmDropStash { .. } => " Drop Stash ",
             DialogKind::ConfirmDeleteComment { .. } => " Delete Comment ",
+            DialogKind::ConfirmDeleteIssueComment { .. } => " Delete Comment ",
             DialogKind::ConfirmPullRequestStateChange { closing: true, .. } => {
                 " Close Pull Request "
             }
@@ -2201,6 +2208,18 @@ impl<'a> DialogView<'a> {
                 self.tx.send(AppEvent::CloseDialog);
                 return;
             }
+            DialogKind::ConfirmDeleteIssueComment {
+                issue_number,
+                comment_id,
+                ..
+            } => {
+                self.tx.send(AppEvent::DeleteIssueComment {
+                    issue_number: *issue_number,
+                    comment_id: *comment_id,
+                });
+                self.tx.send(AppEvent::CloseDialog);
+                return;
+            }
             _ => {}
         }
         let (target, action) = match &self.kind {
@@ -2580,7 +2599,8 @@ impl<'a> DialogView<'a> {
             | DialogKind::IssueAssignees { .. }
             | DialogKind::IssueMilestone { .. }
             | DialogKind::ConfirmCloseIssue { .. }
-            | DialogKind::ConfirmReopenIssue { .. } => unreachable!(),
+            | DialogKind::ConfirmReopenIssue { .. }
+            | DialogKind::ConfirmDeleteIssueComment { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

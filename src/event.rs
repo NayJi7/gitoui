@@ -450,6 +450,16 @@ pub enum DialogKind {
         author: String,
         body_preview: String,
     },
+    /// Issue-side equivalent of `ConfirmDeleteComment`. Same preview
+    /// shape; the accept path bypasses the GitAction system and sends
+    /// `AppEvent::DeleteIssueComment` directly (matches the other
+    /// issue-side dialogs like `ConfirmCloseIssue`).
+    ConfirmDeleteIssueComment {
+        issue_number: u64,
+        comment_id: u64,
+        author: String,
+        body_preview: String,
+    },
     /// Confirm closing or reopening a PR. `closing == true` closes a
     /// currently-open PR; `false` reopens a closed one.
     ConfirmPullRequestStateChange {
@@ -845,7 +855,22 @@ impl EventController {
             match ratatui::crossterm::event::poll(std::time::Duration::from_millis(50)) {
                 Ok(true) => match ratatui::crossterm::event::read() {
                     Ok(e) => match e {
-                        ratatui::crossterm::event::Event::Key(key) => {
+                        ratatui::crossterm::event::Event::Key(mut key) => {
+                            // Normalize the modifier-state bits before
+                            // dispatch. Once we push the kitty keyboard
+                            // protocol disambiguation flag (see
+                            // `lib::run` / `EventController::resume`),
+                            // terminals attach lock-key state
+                            // (NUM_LOCK, CAPS_LOCK) to every KeyEvent.
+                            // Our parsed bindings are built via
+                            // `KeyEvent::new`, which sets `state: NONE`
+                            // — so without this strip a user with
+                            // NumLock or CapsLock on never matched
+                            // their own bindings. The lock state isn't
+                            // a dispatch input anywhere in the app;
+                            // dropping it makes the lookup
+                            // numlock/capslock-insensitive.
+                            key.state = ratatui::crossterm::event::KeyEventState::NONE;
                             tx.send(AppEvent::Key(key));
                         }
                         ratatui::crossterm::event::Event::Mouse(mouse) => {
@@ -876,6 +901,21 @@ impl EventController {
         )
         .unwrap();
         ratatui::crossterm::terminal::enable_raw_mode().unwrap();
+        // Ask the terminal to disambiguate escape codes (Kitty keyboard
+        // protocol). Without it, terminals that fall back to xterm's
+        // legacy meta encoding ship `Alt+letter` as `Esc` + `letter`
+        // bytes — crossterm can usually parse the pair as a single
+        // KeyEvent but only when both bytes land inside its short
+        // read-window. Stragglers leak through as a stray `Esc` that
+        // closes the current view, which is what made Alt-* bindings
+        // appear to "do nothing". Terminals that don't speak the
+        // protocol silently ignore the push.
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::PushKeyboardEnhancementFlags(
+                ratatui::crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+            )
+        );
 
         self.drain_crossterm_event();
         self.start();
@@ -884,6 +924,14 @@ impl EventController {
     pub fn suspend(&self) {
         self.stop();
 
+        // Best-effort undo of the keyboard protocol push so the next
+        // process the user runs in the same terminal isn't left in
+        // enhanced-key mode. Ignored on terminals that didn't accept
+        // the push in the first place.
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::PopKeyboardEnhancementFlags,
+        );
         ratatui::crossterm::terminal::disable_raw_mode().unwrap();
         ratatui::crossterm::execute!(
             std::io::stdout(),

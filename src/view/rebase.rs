@@ -28,7 +28,7 @@
 use std::{path::PathBuf, rc::Rc};
 
 use ratatui::{
-    crossterm::event::{KeyEvent, KeyModifiers},
+    crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -140,35 +140,51 @@ impl<'a> InteractiveRebaseView<'a> {
     }
 
     pub fn footer_hint(&self) -> String {
+        let kb = &self.ctx.keybind;
+        let scoped = |scope: &[&str], action: &str, label: &str| -> String {
+            let k = kb.primary_scoped_key(scope, action);
+            if k.is_empty() {
+                label.to_string()
+            } else {
+                format!("{k}:{label}")
+            }
+        };
+
         // Resume mode has its own minimal hint — only 4 actions matter.
         if self.resume.is_some() {
-            let parts = ["C:continue", "S:skip", "A:abort", "Esc:exit"];
+            let parts = [
+                scoped(&["rebase", "resume"], "continue_rebase", "continue"),
+                scoped(&["rebase", "resume"], "skip_commit", "skip"),
+                scoped(&["rebase", "resume"], "abort", "abort"),
+                "Esc:exit".to_string(),
+            ];
             return format!("⌘ {}", parts.join("▕▏"));
         }
-        // Footer adapts: when a row is grabbed, arrows move it; otherwise
-        // arrows navigate. The Space hint flips between Grab / Release.
+        // Grabbed: arrows move the row, Space releases.
         if self.grabbed {
-            let parts = ["↑↓:move commit", "Space:release", "Esc:cancel"];
-            format!("⌘ {}", parts.join("▕▏"))
-        } else {
-            let mut parts: Vec<&str> = vec![
-                "p:pick",
-                "r:reword",
-                "e:edit",
-                "s:squash",
-                "f:fixup",
-                "d:drop",
-                "⇆:cycle",
-                "Space:grab",
-                "↑↓:nav",
-            ];
-            // Surface the abort shortcut only when there's something to abort —
-            // keeps the footer quiet on the happy path.
-            if crate::git::rebase::rebase_in_progress(&self.repo_path) {
-                parts.push("A:abort prev");
-            }
-            format!("⌘ {}", parts.join("▕▏"))
+            let space = scoped(&["rebase"], "grab", "release");
+            return format!(
+                "⌘ {}",
+                ["↑↓:move commit".to_string(), space, "Esc:cancel".into()].join("▕▏")
+            );
         }
+        let mut parts: Vec<String> = vec![
+            scoped(&["rebase"], "pick", "pick"),
+            scoped(&["rebase"], "reword", "reword"),
+            scoped(&["rebase"], "edit", "edit"),
+            scoped(&["rebase"], "squash", "squash"),
+            scoped(&["rebase"], "fixup", "fixup"),
+            scoped(&["rebase"], "drop", "drop"),
+            "⇆:cycle".to_string(),
+            scoped(&["rebase"], "grab", "grab"),
+            "↑↓:nav".to_string(),
+        ];
+        // Surface the abort shortcut only when there's something to abort —
+        // keeps the footer quiet on the happy path.
+        if crate::git::rebase::rebase_in_progress(&self.repo_path) {
+            parts.push(scoped(&["rebase"], "abort_previous", "abort prev"));
+        }
+        format!("⌘ {}", parts.join("▕▏"))
     }
 
     pub fn update_layout(&mut self, _area: Rect) {}
@@ -460,25 +476,74 @@ impl<'a> InteractiveRebaseView<'a> {
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::KeyCode;
 
-        // Resume mode hijacks input — only C / S / A / Esc make sense
-        // when there's an in-progress rebase to recover.
+        // Resume mode hijacks input — only continue / skip / abort / Esc
+        // make sense when there's an in-progress rebase to recover.
+        // Bindings live in [scope.rebase.resume].
         if self.resume.is_some() {
-            match key.code {
-                KeyCode::Char('c') | KeyCode::Char('C') => self.continue_rebase(),
-                KeyCode::Char('s') | KeyCode::Char('S') => self.skip_rebase(),
-                KeyCode::Char('a') | KeyCode::Char('A') => self.abort_resume(),
-                KeyCode::Esc => self.cancel(),
-                _ => {}
+            if let Some(action) = self.ctx.keybind.resolve_scoped(&["rebase", "resume"], key) {
+                match action {
+                    "continue_rebase" => {
+                        self.continue_rebase();
+                        return;
+                    }
+                    "skip_commit" => {
+                        self.skip_rebase();
+                        return;
+                    }
+                    "abort" => {
+                        self.abort_resume();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            if matches!(key.code, KeyCode::Esc) {
+                self.cancel();
             }
             return;
         }
 
         // Reword inline editor takes ALL input until Enter or Esc.
-        // Mirrors the dialog-input keymap: Ctrl+H / Ctrl+W / Ctrl+Backspace
-        // delete the word to the left, Ctrl+Delete the word to the right,
-        // Ctrl+Left/Right jump by word.
+        // Word-jump shortcuts are scoped via [scope.rebase.reword_editor];
+        // basic editing (chars, backspace, delete, arrows, home, end)
+        // stays hardcoded because it's text input, not a view action.
         if self.reword_editing.is_some() {
-            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            if let Some(action) = self
+                .ctx
+                .keybind
+                .resolve_scoped(&["rebase", "reword_editor"], key)
+            {
+                match action {
+                    "delete_word_left" => {
+                        if let Some(r) = self.reword_editing.as_mut() {
+                            let new_pos = word_left(&r.buffer, r.cursor);
+                            r.buffer.drain(new_pos..r.cursor);
+                            r.cursor = new_pos;
+                        }
+                        return;
+                    }
+                    "delete_word_right" => {
+                        if let Some(r) = self.reword_editing.as_mut() {
+                            let new_pos = word_right(&r.buffer, r.cursor);
+                            r.buffer.drain(r.cursor..new_pos);
+                        }
+                        return;
+                    }
+                    "word_left" => {
+                        if let Some(r) = self.reword_editing.as_mut() {
+                            r.cursor = word_left(&r.buffer, r.cursor);
+                        }
+                        return;
+                    }
+                    "word_right" => {
+                        if let Some(r) = self.reword_editing.as_mut() {
+                            r.cursor = word_right(&r.buffer, r.cursor);
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
+            }
             match key.code {
                 KeyCode::Enter => {
                     self.commit_reword();
@@ -486,32 +551,6 @@ impl<'a> InteractiveRebaseView<'a> {
                 }
                 KeyCode::Esc => {
                     self.cancel_reword();
-                    return;
-                }
-                // Ctrl+H is the terminal alias for Ctrl+Backspace (ASCII ^H).
-                KeyCode::Char('h') if ctrl => {
-                    if let Some(r) = self.reword_editing.as_mut() {
-                        let new_pos = word_left(&r.buffer, r.cursor);
-                        r.buffer.drain(new_pos..r.cursor);
-                        r.cursor = new_pos;
-                    }
-                    return;
-                }
-                // Ctrl+W: Unix word-delete-left.
-                KeyCode::Char('w') if ctrl => {
-                    if let Some(r) = self.reword_editing.as_mut() {
-                        let new_pos = word_left(&r.buffer, r.cursor);
-                        r.buffer.drain(new_pos..r.cursor);
-                        r.cursor = new_pos;
-                    }
-                    return;
-                }
-                KeyCode::Backspace if ctrl => {
-                    if let Some(r) = self.reword_editing.as_mut() {
-                        let new_pos = word_left(&r.buffer, r.cursor);
-                        r.buffer.drain(new_pos..r.cursor);
-                        r.cursor = new_pos;
-                    }
                     return;
                 }
                 KeyCode::Backspace => {
@@ -529,13 +568,6 @@ impl<'a> InteractiveRebaseView<'a> {
                     }
                     return;
                 }
-                KeyCode::Delete if ctrl => {
-                    if let Some(r) = self.reword_editing.as_mut() {
-                        let new_pos = word_right(&r.buffer, r.cursor);
-                        r.buffer.drain(r.cursor..new_pos);
-                    }
-                    return;
-                }
                 KeyCode::Delete => {
                     if let Some(r) = self.reword_editing.as_mut() {
                         if r.cursor < r.buffer.len() {
@@ -548,12 +580,6 @@ impl<'a> InteractiveRebaseView<'a> {
                     }
                     return;
                 }
-                KeyCode::Left if ctrl => {
-                    if let Some(r) = self.reword_editing.as_mut() {
-                        r.cursor = word_left(&r.buffer, r.cursor);
-                    }
-                    return;
-                }
                 KeyCode::Left => {
                     if let Some(r) = self.reword_editing.as_mut() {
                         if r.cursor > 0 {
@@ -563,12 +589,6 @@ impl<'a> InteractiveRebaseView<'a> {
                             }
                             r.cursor = prev;
                         }
-                    }
-                    return;
-                }
-                KeyCode::Right if ctrl => {
-                    if let Some(r) = self.reword_editing.as_mut() {
-                        r.cursor = word_right(&r.buffer, r.cursor);
                     }
                     return;
                 }
@@ -607,32 +627,31 @@ impl<'a> InteractiveRebaseView<'a> {
             }
         }
 
-        // Space toggles "grab" mode on the selected row — when grabbed,
-        // arrows move the commit instead of moving the cursor.
-        if matches!(key.code, KeyCode::Char(' ')) {
-            self.grabbed = !self.grabbed;
-            return;
-        }
-
-        // Uppercase A → abort a stale previous rebase. Destructive, so
-        // gated behind Shift to avoid collision with the action shortcuts.
-        if matches!(key.code, KeyCode::Char('A')) {
-            self.abort_previous();
-            return;
-        }
-
-        // Single-letter action shortcuts are disabled while grabbed so the
-        // user can't accidentally change action mid-move (would surprise).
-        if !self.grabbed {
-            if let KeyCode::Char(c) = key.code {
-                if let Some(action) = RebaseAction::from_key(c) {
-                    self.set_action(self.selected, action);
-                    // Reword keypress also opens the inline editor right away.
-                    if action == RebaseAction::Reword {
-                        self.start_reword(self.selected);
-                    }
+        // Plan-editor scope: action chars (p/r/e/s/f/d), `grab` (Space)
+        // and `abort_previous` (Shift+A). All resolved via [scope.rebase].
+        // Action chars are disabled while grabbed so the user can't
+        // accidentally change action mid-move.
+        if let Some(action) = self.ctx.keybind.resolve_scoped(&["rebase"], key) {
+            match action {
+                "grab" => {
+                    self.grabbed = !self.grabbed;
                     return;
                 }
+                "abort_previous" => {
+                    self.abort_previous();
+                    return;
+                }
+                name if !self.grabbed => {
+                    if let Some(rebase_action) = RebaseAction::from_action_name(name) {
+                        self.set_action(self.selected, rebase_action);
+                        // `reword` also opens the inline editor right away.
+                        if rebase_action == RebaseAction::Reword {
+                            self.start_reword(self.selected);
+                        }
+                        return;
+                    }
+                }
+                _ => {}
             }
         }
 
