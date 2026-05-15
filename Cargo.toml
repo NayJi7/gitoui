@@ -1,7 +1,7 @@
 [package]
 name = "gitoui"
 version = "0.1.2"
-description = "Say oui to the most complete git terminal youser interface"
+description = "Say oui to the smoothest git terminal youser experience"
 authors = ["NayJi7 <naayji7@gmail.com>"]
 homepage = "https://github.com/NayJi7/gitoui"
 repository = "https://github.com/NayJi7/gitoui"

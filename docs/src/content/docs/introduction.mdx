@@ -1,0 +1,87 @@
+---
+title: Introduction
+description: What gitoui is, what it isn't, and why it forked from serie.
+---
+
+import { Card, CardGrid, Badge } from "@astrojs/starlight/components";
+
+**<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>** ([`/ʒi.tu.i/`](/faq/#how-do-i-pronounce-gitoui)) is a terminal git
+client. It started as a fork of [serie](https://github.com/lusingander/serie) —
+a beautifully-rendered `git log --graph` viewer — and grew into a daily-driver
+TUI that covers diffs, staging, blame, history, interactive rebase, conflict
+resolution, and GitHub Pull Requests / Issues. <Badge text="pre-1.0" variant="caution" />
+
+![demo](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/demo.gif)
+
+## Why a fork?
+
+Serie does one thing exceptionally well: it pre-renders the commit graph as
+SVG/PNG and displays it inline through the terminal's image protocol
+(Kitty, iTerm2, Sixel). That graph is the prettiest in any terminal client.
+
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> keeps that. What it adds:
+
+<CardGrid>
+  <Card title="Diff + hunk staging" icon="document">
+    Side-by-side or inline diffs with `git add -p` style **hunk-level
+    staging** baked into the Uncommitted view.
+  </Card>
+  <Card title="Blame + file history" icon="random">
+    `b` to blame, `Shift+H` for `git log --follow`. Drill back through
+    every rename, click a line to open its commit detail.
+  </Card>
+  <Card title="2-commit comparison" icon="bars">
+    Mark two commits with `Space` — gitoui opens the cumulative
+    `git diff <a>..<b>` between the endpoints.
+  </Card>
+  <Card title="Interactive rebase" icon="pencil">
+    Visual plan editor: grab + drop rows, reword in place, pause +
+    resume modes that detect `.git/rebase-merge/` on startup.
+  </Card>
+  <Card title="3-way conflict editor" icon="warning">
+    Pick **OURS / THEIRS / BOTH** per hunk and `git add` the result —
+    no need to drop to vimdiff.
+  </Card>
+  <Card title="GitHub PRs + Issues" icon="github">
+    Full conversation threads, reviews, labels, assignees, milestones,
+    reactions, mention autocomplete, comment CRUD — behind OAuth
+    device-flow auth.
+  </Card>
+  <Card title="Inline avatars" icon="seti:image">
+    GitHub avatars rendered next to commits, comments, reviews — same
+    image protocols that draw the graph.
+  </Card>
+  <Card title="Two-layer keybinds" icon="setting">
+    Global `[keybind]` UserEvents **plus** per-view
+    `[keybind.scope.<path>]` overrides, with a max-1-modifier rule.
+  </Card>
+  <Card title="Custom themes" icon="seti:plan">
+    Drop a `.toml` in `~/.config/gitoui/themes/`, inherit from any
+    built-in, override individual tokens, switch live with `←` / `→`.
+  </Card>
+</CardGrid>
+
+## What <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is not
+
+- A full-featured git client — there's no remote management UI, no submodule
+  workflow, no LFS handling. The focus stays on **reading + reviewing
+  history** with the operations you do daily on top of it.
+- A pure ASCII renderer — the inline image protocol is the point. On terminals
+  that can't speak Kitty / iTerm2 / Sixel, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> falls back to Unicode
+  glyphs but you lose the polished graph.
+
+## Project status
+
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is in pre-public development. It works end-to-end and is being daily-
+driven on real repos, but the API and config schema may still shift before
+the v1.0 tag.
+
+If you came here from serie and want the bare graph viewer with nothing
+else: that's still the upstream project — go give it a star. <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is the
+"with batteries" cousin.
+
+---
+
+_Built with Rust and [ratatui](https://github.com/ratatui/ratatui). Released
+under the MIT license — see the
+[GitHub repo](https://github.com/NayJi7/gitoui) for sources._

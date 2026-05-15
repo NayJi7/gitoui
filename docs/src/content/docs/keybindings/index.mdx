@@ -3,16 +3,15 @@ title: Keybindings — overview
 description: How the two-layer keybind system works in gitoui (global UserEvents + per-view scopes).
 ---
 
-import { Aside } from "@astrojs/starlight/components";
+import { Steps, Aside, Badge } from "@astrojs/starlight/components";
 
-<span class="gitoui-wordmark">gitoui</span> has a **two-layer keybind system**:
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> has a **two-layer keybind system**:
 
 1. A **global** map of `UserEvent → key list`. Same shape as upstream serie:
    `quit = ["q"]`, `navigate_up = ["k", "up"]`, etc. Available everywhere.
 2. **Per-view scopes** — `[keybind.scope.<path>]` sub-tables that override
-   the global map for a specific view (PR, Issues, Rebase, Conflict editor,
-   Compose form, Commit List, …). Scopes nest: `pr.conversation` walks back
-   to `pr` then to the global section if a key isn't bound in the leaf.
+   the global map for a specific view. Scopes nest: `pr.conversation` walks
+   back to `pr` then to the global section if a key isn't bound in the leaf.
 
 The two layers exist for one reason: views need keys to mean different
 things. `a` is `stage` globally (Uncommitted view) but `approve` in PR
@@ -21,13 +20,17 @@ in the commit list. A flat key map can't represent that — scopes can.
 
 ## Dispatch order
 
-When you press a key:
+<Steps>
 
-1. The view checks its **scoped** map first (deepest scope → walks parents).
-2. If the scoped lookup misses, the **global** `UserEvent` map fires.
-3. If neither matches, the key is forwarded to the view's `handle_event`
-   with `UserEvent::Unknown` so view-local literal-char matches still get a
-   chance.
+1. **Scoped lookup first** — the view checks its scope chain (deepest
+   path → walks parents, e.g. `pr.conversation` → `pr`).
+2. **Global fallback** — if the scoped chain misses, the global
+   `UserEvent` map fires.
+3. **Literal-char escape** — if neither matches, the key is forwarded
+   to the view's `handle_event` with `UserEvent::Unknown` so
+   view-local literal-char matches still get a chance.
+
+</Steps>
 
 This is what makes `a` mean different things across views without needing
 explicit "if PR-view do X else Y" branching in the dispatcher.
@@ -49,9 +52,10 @@ Anything you don't touch keeps its full default key list.
 
 ## Modifier cap
 
-<span class="gitoui-wordmark">gitoui</span> accepts **at most one modifier prefix** per key — `ctrl-X`, `alt-X`,
-or `shift-X`. Chained combos like `ctrl-shift-a` are rejected at config-
-load with a styled diagnostic.
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> accepts **at most one modifier prefix** per key —
+<Badge text="ctrl-X" variant="tip" /> <Badge text="alt-X" variant="tip" /> <Badge text="shift-X" variant="tip" />.
+Chained combos like `ctrl-shift-a` are rejected at config-load with a styled
+diagnostic.
 
 Why: the displays stay compact (`Ctrl+a` vs `Ctrl+Shift+a`), and most
 terminals are unreliable with three-key combos anyway. If you need more
@@ -97,8 +101,10 @@ the new key in the footer.
 
 | Path                                                | What |
 |-----------------------------------------------------|------|
-| [`assets/default-keybind.toml`](https://github.com/NayJi7/gitoui/blob/master/assets/default-keybind.toml) (embedded) | The defaults <span class="gitoui-wordmark">gitoui</span> ships with. |
+| [`assets/default-keybind.toml`](https://github.com/NayJi7/gitoui/blob/master/assets/default-keybind.toml) (embedded) | The defaults <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships with. |
 | `~/.config/gitoui/config.toml` → `[keybind]` and `[keybind.scope.<path>]` | Your overrides. |
 
 A clean way to see your effective bindings is the in-app Help page (`?` or
 `F1`) — every shortcut listed there is computed from your live config.
+
+{/* PHOTO of the in-app Help page opened with `?` — sectioned grid of shortcuts per scope (List / PR / Issues / Rebase / Conflict / Compose), each key drawn from the live keybind map so a rebind in `config.toml` shows up immediately here. */}

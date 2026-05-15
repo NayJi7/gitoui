@@ -1,0 +1,333 @@
+---
+title: Themes
+description: Built-in themes and how to ship your own as a TOML file.
+---
+
+import { Steps, Aside, FileTree, Code, Tabs, TabItem } from "@astrojs/starlight/components";
+
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships **10 built-in themes**, and lets you drop your own as a TOML
+file under `~/.config/gitoui/themes/`. Both are addressed by name through
+the `core.option.theme` config key.
+
+## Built-in themes
+
+| Name              | Vibe              |
+|-------------------|-------------------|
+| `Tokyo Night`     | Default — dark blue / purple.  |
+| `Dracula`         | Iconic purple / pink / green dark. |
+| `Catppuccin Mocha`| Pastel dark.      |
+| `Catppuccin Latte`| Pastel light.     |
+| `Gruvbox Dark`    | Warm earthy dark. |
+| `Nord`            | Cold Scandinavian. |
+| `Solarized Dark`  | Classic dark.     |
+| `Solarized Light` | Classic light.    |
+| `One Dark`        | Atom-derived.     |
+| `Monokai Pro`     | Vivid contrast.   |
+
+Pick one from the Configuration view (`p` from the list, then ←/→ on the
+"theme" row) or set it in `config.toml`:
+
+```toml
+[core.option]
+theme = "Dracula"
+```
+
+{/* PHOTO of a 2×5 grid of the same commit-list view rendered with each built-in theme. Same repo, same window size — only the palette differs. */}
+
+Each named theme bundles a matching **syntax theme** (the syntect theme used
+for diff highlighting) — that's why setting `theme = "Dracula"` also changes
+the syntax highlighter to Dracula. You can override the syntax pick on its
+own with `syntax_theme = "..."`.
+
+## Custom themes
+
+<FileTree>
+- ~/.config/gitoui/
+  - config.toml
+  - themes/
+    - **MySuperTheme.toml** your custom theme file
+    - Sunset.toml as many as you like
+</FileTree>
+
+The name you set in `core.option.theme` must match the **file stem**
+(without `.toml`).
+
+<Steps>
+
+1. **Create the theme file** at `~/.config/gitoui/themes/MySuperTheme.toml`
+   (start from the [full template below](#full-template)).
+2. **Set it in `config.toml`:**
+
+   ```toml
+   [core.option]
+   theme = "MySuperTheme"
+   ```
+3. **Restart `gitoui`** — or use the Configuration view's `←` / `→` cycler
+   on the theme row to switch live without restart.
+
+</Steps>
+
+{/* PHOTO gif of live theme cycling — Configuration view open on the "theme" row, pressing ← / → cycles through built-ins then a custom theme, the whole UI repaints between each press. */}
+
+### `base` inheritance
+
+`base = "Tokyo Night"` starts from the Tokyo Night palette; any token you
+**don't** mention keeps its base value. Omit `base` to start from defaults
+(roughly Tokyo Night anyway, but a few greys are slightly different).
+
+This is the recommended way to customise: pick the closest built-in as `base`,
+then override only the 3 – 10 tokens you want to change.
+
+### Auto syntax theme
+
+If you **don't** set `syntax_theme`, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> auto-picks one based on the
+resolved `bg` luminance:
+
+- Dark `bg` → `base16-ocean.dark`
+- Light `bg` → `InspiredGitHub`
+
+Set `syntax_theme = "Dracula"` (or any other syntect theme name) to force a
+specific one. This overrides both the base's syntax theme and the auto-pick.
+
+## Color values
+
+Every color token accepts the full ratatui `Color` syntax:
+
+```toml
+fg = "#abcdef"             # hex string  (recommended)
+bg = "black"               # ANSI named
+list_match_fg = "bright-white"
+list_match_bg = "11"       # xterm 256 indexed
+detail_label_fg = { Rgb = [100, 100, 100] }  # legacy struct form
+```
+
+Hex strings are the recommended form — they round-trip cleanly across
+terminals and are unambiguous.
+
+## All tokens
+
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> exposes **~45 color tokens** grouped by the UI surface they
+paint. The full source is
+[`src/color.rs::ColorTheme`](https://github.com/NayJi7/gitoui/blob/master/src/color.rs).
+
+### Base
+
+The fallback foreground / background used everywhere a more specific token
+isn't defined.
+
+| Token | Paints |
+|---|---|
+| `fg` | Default foreground for body text. |
+| `bg` | Default background of the whole UI. |
+
+### Commit list — the home screen
+
+| Token | Paints |
+|---|---|
+| `list_selected_fg` | Foreground of the focused commit row. |
+| `list_selected_bg` | Background of the focused commit row. |
+| `list_compare_marked_fg` | Foreground of a commit marked as endpoint A in the 2-commit compare flow (Space / Ctrl+click). |
+| `list_compare_marked_bg` | Background of the marked endpoint — picks a more saturated, theme-coherent accent. |
+| `list_ref_paren_fg` | The `(` / `)` parentheses around ref glyphs. |
+| `list_ref_branch_fg` | Local branch ref glyph. |
+| `list_ref_remote_branch_fg` | Remote branch ref glyph (`origin/foo`). |
+| `list_ref_tag_fg` | Tag ref glyph. |
+| `list_ref_stash_fg` | Stash entry glyph. |
+| `list_head_fg` | The `HEAD` pointer / current branch marker. |
+| `list_commit_message_fg` | Commit subject text. |
+| `list_name_fg` | Author name column. |
+| `list_hash_fg` | Short hash column. |
+| `list_date_fg` | Date column. |
+| `list_match_fg` | Foreground of search-matched characters. |
+| `list_match_bg` | Background of search-matched characters. |
+
+### Commit detail — the right pane
+
+| Token | Paints |
+|---|---|
+| `detail_label_fg` | Field labels (`Author:`, `Date:`, `Commit:`, …). |
+| `detail_name_fg` | Author name. |
+| `detail_date_fg` | Author / commit date. |
+| `detail_email_fg` | Author email. |
+| `detail_hash_fg` | Full commit hash. |
+| `detail_ref_branch_fg` | Branch refs listed on the commit. |
+| `detail_ref_remote_branch_fg` | Remote branch refs. |
+| `detail_ref_tag_fg` | Tag refs. |
+| `detail_file_change_add_fg` | `A` marker on added files. |
+| `detail_file_change_modify_fg` | `M` marker on modified files. |
+| `detail_file_change_delete_fg` | `D` marker on deleted files. |
+| `detail_file_change_move_fg` | `R` marker on renamed files. |
+
+### Refs panel — `Tab` from the list
+
+| Token | Paints |
+|---|---|
+| `ref_selected_fg` | Foreground of the focused row in the refs panel. |
+| `ref_selected_bg` | Background of the focused row in the refs panel. |
+
+### Help page
+
+| Token | Paints |
+|---|---|
+| `help_block_title_fg` | Section titles in the help page (`?` / `F1`). |
+| `help_key_fg` | Key chips drawn next to each action. |
+
+### Inputs + editors
+
+| Token | Paints |
+|---|---|
+| `virtual_cursor_fg` | The faux cursor block we paint inside multi-line text editors (commit message editor, rebase reword editor, PR / Issue compose forms). |
+| `status_input_fg` | Active input text in the footer (search query, dialog inputs). |
+| `status_input_transient_fg` | Placeholder / transient hints in inputs (greyed-out). |
+
+### Status / footer messages
+
+| Token | Paints |
+|---|---|
+| `status_info_fg` | Informational toasts in the footer (`Match N of M`, etc.). |
+| `status_success_fg` | Success toasts (commit landed, push OK…). |
+| `status_warn_fg` | Warning toasts (rebase paused, draft toggled…). |
+| `status_error_fg` | Error toasts (git command failed, validation error…). |
+
+### Misc
+
+| Token | Paints |
+|---|---|
+| `divider_fg` | Panel borders, vertical separators, horizontal rules. |
+| `graph_branches` | Array of hex strings used as the commit-graph branch palette. Empty array means "fall back to `[graph.color.branches]` from the user TOML, then to defaults." 12 entries is a good number; the graph cycles through them as branches diverge. |
+
+## Full template
+
+Copy the block below, paste it into `~/.config/gitoui/themes/MySuperTheme.toml`,
+then replace any token you want. Tokens you delete fall back to the `base`
+theme; tokens you keep override it.
+
+<Tabs>
+<TabItem label="Full template (every token)">
+
+```toml
+# ~/.config/gitoui/themes/MySuperTheme.toml
+#
+# Optional — inherit from any built-in theme. Tokens you don't list
+# below keep their value from the base theme.
+base = "Tokyo Night"
+
+# Optional — force a syntect theme for diff highlighting. Without it,
+# gitoui auto-picks `base16-ocean.dark` on dark bg, `InspiredGitHub` on light.
+# syntax_theme = "Dracula"
+
+# ─── Base ──────────────────────────────────────────────────────────────────
+fg = "#c0caf5"
+bg = "#1a1b26"
+
+# ─── Commit list (home screen) ─────────────────────────────────────────────
+list_selected_fg          = "#ffffff"
+list_selected_bg          = "#3b4261"
+list_compare_marked_fg    = "#ffffff"
+list_compare_marked_bg    = "#6e55ab"
+list_ref_paren_fg         = "#e0af68"
+list_ref_branch_fg        = "#9ece6a"
+list_ref_remote_branch_fg = "#f7768e"
+list_ref_tag_fg           = "#e0af68"
+list_ref_stash_fg         = "#bb9af7"
+list_head_fg              = "#7dcfff"
+list_commit_message_fg    = "#b4bde5"
+list_name_fg              = "#7dcfff"
+list_hash_fg              = "#e0af68"
+list_date_fg              = "#bb9af7"
+list_match_fg             = "#1a1b26"
+list_match_bg             = "#e0af68"
+
+# ─── Commit detail (right pane) ────────────────────────────────────────────
+detail_label_fg              = "#a9b1d6"
+detail_name_fg               = "#7dcfff"
+detail_date_fg               = "#bb9af7"
+detail_email_fg              = "#7aa2f7"
+detail_hash_fg               = "#e0af68"
+detail_ref_branch_fg         = "#9ece6a"
+detail_ref_remote_branch_fg  = "#f7768e"
+detail_ref_tag_fg            = "#e0af68"
+detail_file_change_add_fg    = "#9ece6a"
+detail_file_change_modify_fg = "#e0af68"
+detail_file_change_delete_fg = "#f7768e"
+detail_file_change_move_fg   = "#7dcfff"
+
+# ─── Refs panel (Tab from the list) ────────────────────────────────────────
+ref_selected_fg = "#ffffff"
+ref_selected_bg = "#3b4261"
+
+# ─── Help page (? / F1) ────────────────────────────────────────────────────
+help_block_title_fg = "#9ece6a"
+help_key_fg         = "#e0af68"
+
+# ─── Inputs / editors ──────────────────────────────────────────────────────
+virtual_cursor_fg          = "#c0caf5"
+status_input_fg            = "#c0caf5"
+status_input_transient_fg  = "#565f89"
+
+# ─── Status / footer ───────────────────────────────────────────────────────
+status_info_fg    = "#7dcfff"
+status_success_fg = "#9ece6a"
+status_warn_fg    = "#e0af68"
+status_error_fg   = "#f7768e"
+
+# ─── Misc ──────────────────────────────────────────────────────────────────
+divider_fg = "#565f89"
+
+# ─── Commit graph palette ──────────────────────────────────────────────────
+# 12 colors is the sweet spot — the graph cycles through them as branches
+# diverge. An empty array falls back to the global [graph.color.branches]
+# in your config.toml.
+graph_branches = [
+  "#f7768e", "#7aa2f7", "#9ece6a", "#e0af68",
+  "#bb9af7", "#7dcfff", "#ff9e64", "#73daca",
+  "#ad8ee6", "#2ac3de", "#ff007c", "#41a6b5",
+]
+```
+
+</TabItem>
+<TabItem label="Minimal (recommended)">
+
+The 90% workflow — pick the closest built-in as `base`, then change only
+the handful of tokens you care about. Everything else stays in sync with
+the base palette.
+
+```toml
+# ~/.config/gitoui/themes/MySuperTheme.toml
+base = "Tokyo Night"
+
+# Brand-coloured accent for matches, refs, status info.
+list_match_bg      = "#F05133"
+list_ref_branch_fg = "#F05133"
+help_key_fg        = "#F05133"
+status_info_fg     = "#F05133"
+status_error_fg    = "#8B2A12"
+
+# Tweak the graph palette.
+graph_branches = [
+  "#F05133", "#8B2A12", "#F1ECEC", "#F5F4F2",
+  "#4B4646", "#7d8590", "#bb9af7", "#9ece6a",
+  "#e0af68", "#7dcfff", "#73daca", "#ff9e64",
+]
+```
+
+</TabItem>
+</Tabs>
+
+<Aside type="note">
+When a named theme is active, individual `[color]` overrides in your
+`config.toml` are **ignored** — the theme replaces the palette wholesale.
+To tweak a single token while keeping a theme, fork it into your own
+`themes/<name>.toml`, then change just the tokens you want.
+</Aside>
+
+## Errors
+
+Bad theme files surface as styled boot-time diagnostics:
+
+| Error | Cause |
+|---|---|
+| **Theme not found** | name doesn't match any built-in OR any `~/.config/gitoui/themes/<name>.toml` file. The error includes the searched path. |
+| **Theme file invalid** | TOML parse error inside your custom theme. |
+| **Unknown base** | `base = "X"` in the file but `X` isn't a built-in. |
+| **I/O error** | file exists but can't be read (permissions, etc.). |

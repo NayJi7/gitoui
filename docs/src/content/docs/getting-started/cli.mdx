@@ -3,11 +3,13 @@ title: CLI options
 description: Command-line flags accepted by the gitoui binary.
 ---
 
+import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
+
 ```text
 gitoui [OPTIONS]
 ```
 
-<span class="gitoui-wordmark">gitoui</span> reads everything it needs from the current working directory and the
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> reads everything it needs from the current working directory and the
 config file. The flags here are the rare cases where you want to override
 defaults for one specific run.
 
@@ -24,23 +26,50 @@ defaults for one specific run.
 
 ## Examples
 
-Load fewer commits up front for huge repos:
+<Tabs>
+<TabItem label="Huge repo">
+
+Load fewer commits up front and rely on `]` (`load_more`) to grow the list:
 
 ```sh
 gitoui -n 200
 ```
 
-Force Sixel (e.g. when `auto` picks the wrong protocol on a custom terminal):
+</TabItem>
+
+<TabItem label="Force a protocol">
+
+When `auto` picks the wrong protocol on a custom terminal:
 
 ```sh
 gitoui --protocol sixel
+gitoui --protocol kitty
+gitoui --protocol iterm2
+gitoui --protocol unicode   # skip images entirely
 ```
 
-Open with the cursor on HEAD rather than the newest commit:
+</TabItem>
+
+<TabItem label="Open on HEAD">
+
+Cursor lands on HEAD instead of the newest commit:
 
 ```sh
 gitoui -i head
 ```
+
+</TabItem>
+
+<TabItem label="Topo order">
+
+Walk history topologically (parents before children) instead of by date:
+
+```sh
+gitoui --order topo
+```
+
+</TabItem>
+</Tabs>
 
 ## Environment
 
@@ -49,3 +78,9 @@ gitoui -i head
 | `GITOUI_CONFIG_FILE`     | Override the config file path (skips the XDG lookup).   |
 | `XDG_CONFIG_HOME`        | Base directory for the config + themes + token.         |
 | `NO_COLOR`               | Honored by the `--help` output and by the no-repo error splash. |
+
+<Aside type="tip">
+CLI flags **override** the corresponding `[core.option]` config keys for a
+single run. To persist a choice, set it in `~/.config/gitoui/config.toml` —
+see the [config schema](/configurations/config-file-format/).
+</Aside>

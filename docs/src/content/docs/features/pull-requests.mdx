@@ -3,7 +3,7 @@ title: Pull Requests
 description: Review and act on PRs from inside gitoui — list, detail, conversation, compose.
 ---
 
-import { Aside } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Steps, Aside, Badge } from "@astrojs/starlight/components";
 
 `Shift+R` (anywhere in the app) opens the **PR list**. Needs the repo to
 have a GitHub remote and you to be logged in via the Configuration view's
@@ -17,6 +17,8 @@ GitHub Auth section.
 | Title    | With label chips and head→base branch arrow.    |
 | Author   | Login + avatar (when avatars are enabled).      |
 | Status   | Open / Merged / Closed + draft indicator.       |
+
+{/* PHOTO of the PR list — bordered panel with sub-header "Pull Requests", columns #N / Title / Author + avatar / Status, label chips on titles, cursor row highlighted. */}
 
 | Press        | Action                                              |
 |--------------|-----------------------------------------------------|
@@ -40,7 +42,7 @@ follow the current PR state.
 |------------------|----------------------|
 | `a`              | Approve review.      |
 | `x`              | Request changes.     |
-| `m`              | Merge.               |
+| `m`              | Merge (opens the merge dialog — squash / merge commit / rebase). |
 | `o`              | Open in browser.     |
 | `l`              | Labels picker.       |
 | `v`              | Reviewers picker.    |
@@ -49,14 +51,21 @@ follow the current PR state.
 | `Ctrl+D`         | Toggle draft.        |
 | `r`              | Reload from API.     |
 
-Confirmation dialogs open for destructive actions (close, merge,
-toggle-draft, delete-comment).
+<Aside type="caution">
+Confirmation dialogs open for **destructive** actions (close, merge,
+toggle-draft, delete-comment) so you can't fat-finger an irreversible call.
+</Aside>
 
-### Conversation tab
+### Tabs
+
+<Tabs>
+<TabItem label="Conversation">
 
 Shows the PR description card, then every comment, review, review-comment,
 and timeline event in chronological order. The selected card has a
 **top-border ribbon** with card-local actions:
+
+{/* PHOTO of a PR Conversation tab — PR description card on top, two comment cards below with avatars + names + reaction chips, the focused card carrying the top-border action ribbon (`c new / Shift+R quote / e edit / d delete / + react`). */}
 
 | Press     | Action                                                |
 |-----------|-------------------------------------------------------|
@@ -69,38 +78,54 @@ and timeline event in chronological order. The selected card has a
 
 `#N` mentions are styled inline and clickable. The picker is mouse-aware.
 
-### Files tab
+</TabItem>
 
-Lists every file touched by the PR with +/− line counts. `Enter` drills
-into the file's diff (same view as commit-detail diffs).
+<TabItem label="Files">
 
-### Commits tab
+Lists every file touched by the PR with **+/− line counts**. `Enter`
+drills into the file's diff — same view as commit-detail diffs, including
+hunk navigation and in-diff search.
 
-Shows the commits in the PR. `Enter` drills into a commit's detail view.
+</TabItem>
 
-### References tab
+<TabItem label="Commits">
 
-Lists `#N` references found in the PR body and in comments, plus reverse
-references (other issues/PRs that mention this one).
+Shows the commits in the PR with author + avatar + date. `Enter` drills
+into a commit's detail view, where every diff / blame / file-history flow
+works as in the main app.
+
+</TabItem>
+
+<TabItem label="References">
+
+Lists `#N` references found in the PR body and in comments, plus
+**reverse references** (other issues / PRs that mention this one). `Enter`
+on a reference navigates cross-view.
+
+</TabItem>
+</Tabs>
 
 ## Compose
 
-`n` from the PR list opens the **compose form** with fields for Title,
-Body, Base branch, Head branch, Labels, Reviewers, Draft. Submit with
-`Ctrl+S` (rebindable via `[keybind.scope.compose] submit`).
+<Steps>
 
-The body field accepts markdown and supports:
+1. `n` from the PR list opens the **compose form** — fields for Title,
+   Body, Base branch, Head branch, Labels, Reviewers, Draft.
+2. Type in the Body — markdown supported, with live preview on the right.
+3. Type `#` to open the **mention popup**: filter by number, `↑↓` to pick,
+   `Enter` to insert as `#123`.
+4. Submit with `Ctrl+S` <Badge text="rebindable" variant="tip" /> via
+   `[keybind.scope.compose] submit`.
 
-- `#` opens the **mention popup** — typing `123` filters to issues/PRs
-  with that number; `↑↓` to pick; `Enter` to insert as `#123`.
-- `Ctrl+H` / `Ctrl+W` / `Ctrl+Backspace` — delete word left.
-- `Ctrl+Left` / `Ctrl+Right` — jump by word.
+</Steps>
 
-The right column shows a live preview of the rendered body.
+The body field also supports word-jump editing — `Ctrl+H` / `Ctrl+W` /
+`Ctrl+Backspace` delete word left, `Ctrl+Left` / `Ctrl+Right` jump by word.
+
+{/* PHOTO gif of the PR compose form — type a Title, jump to Body with Tab, type `#` to open the mention popup, pick an issue with ↑↓ + Enter, then submit with Ctrl+S. Right column shows the live markdown preview updating as you type. */}
 
 <Aside type="note">
 The OAuth token used by these features is stored at
-`~/.config/gitoui/github_token.toml` with `0600` permissions. Never commit
-this file — it's user-only and reissued via the Configuration view if you
-need to rotate.
+`~/.config/gitoui/github_token.toml` with `0600` permissions. Reissue it
+via the Configuration view's GitHub Auth section if you need to rotate.
 </Aside>

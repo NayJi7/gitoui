@@ -2,11 +2,14 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
-// Site URL = the GitHub Pages URL the workflow deploys to.
-// `base` matches the repo name so all absolute paths in the built
-// HTML resolve under /gitoui/. Set GITOUI_DOCS_BASE='' locally to
-// preview at the root (e.g. `npm run dev`).
-const base = process.env.GITOUI_DOCS_BASE ?? "/gitoui";
+// Site URL = the GitHub Pages URL the workflow deploys to. `base`
+// matches the repo name so all absolute paths in the built HTML
+// resolve under /gitoui/. In `astro dev` we default the base to "" so
+// hero/sidebar links written as `/getting-started/...` resolve
+// without the prefix the deploy adds. `GITOUI_DOCS_BASE` always wins
+// when set explicitly (CI builds set it to "/gitoui").
+const isDev = process.argv.includes("dev");
+const base = process.env.GITOUI_DOCS_BASE ?? (isDev ? "" : "/gitoui");
 
 // https://astro.build/config
 export default defineConfig({
@@ -16,20 +19,22 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "gitoui",
-      description:
-        "Terminal UI git client — rich commit graph, PRs, Issues, and inline image-protocol rendering.",
+      description: "Say oui to the smoothest git terminal youser experience.",
       logo: {
         src: "./src/assets/logo-mark.svg",
         replacesTitle: false,
       },
       favicon: "/favicon.svg",
-      social: {
-        github: "https://github.com/NayJi7/gitoui",
-      },
+      social: [
+        { icon: "github", label: "GitHub", href: "https://github.com/NayJi7/gitoui" },
+      ],
       editLink: {
         baseUrl: "https://github.com/NayJi7/gitoui/edit/master/docs/",
       },
       customCss: ["./src/styles/theme.css"],
+      components: {
+        SiteTitle: "./src/components/SiteTitle.astro",
+      },
       sidebar: [
         {
           label: "Introduction",
@@ -67,7 +72,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { label: "Commit graph", link: "/features/commit-graph/" },
-            { label: "Diff & blame", link: "/features/diff-blame/" },
+            { label: "Diff, blame & history", link: "/features/diff-blame/" },
             { label: "Uncommitted & staging", link: "/features/uncommitted/" },
             { label: "Interactive rebase", link: "/features/interactive-rebase/" },
             { label: "Conflict editor", link: "/features/conflict-editor/" },

@@ -34,7 +34,8 @@
 
 /* Anywhere the literal "gitoui" wordmark shows up: site title in the
    header, the splash hero h1, and any inline mention wrapped in
-   `<span class="gitoui-wordmark">gitoui</span>` from markdown content. */
+   `<span class="gitoui-wordmark"><span class="git-part">git</span>...`
+   from markdown content. */
 .site-title,
 .site-title span,
 .hero h1,
@@ -42,6 +43,32 @@
   font-family: var(--gitoui-wordmark-font);
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+/* Brand wordmark split — `git` orange, `oui` cream — as documented in
+   the brand book's "Wordmark" section. */
+.git-part {
+  color: #f05133;
+}
+.oui-part {
+  color: #f1ecec;
+}
+
+/* On light themes flip the `oui` half to the near-black brand token so
+   the wordmark stays legible against the off-white plate. */
+:root[data-theme="light"] .oui-part {
+  color: #111111;
+}
+
+/* Tighten the gap between the G logomark and the "gitoui" wordmark in
+   the Starlight header. The default flex layout leaves the logo image
+   and the title span far apart; the brand book composition has them
+   nearly flush so the orange G reads as part of the wordmark. */
+header.header a.site-title {
+  gap: 0.65rem;
+}
+header.header a.site-title img {
+  margin-right: 0;
 }
 
 /* Brand palette — see `assets/brand/gitoui-brand-standalone.html`. */

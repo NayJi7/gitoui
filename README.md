@@ -13,7 +13,7 @@
 
 </p>
 
-<p align="center"><em>Say <strong>oui</strong> to the most complete git terminal youser interface.</em></p>
+<p align="center"><em>Say <strong>oui</strong> to the smoothest git terminal youser experience.</em></p>
 
 <p align="center">
   <!-- ▶ demo GIF — full app walkthrough -->

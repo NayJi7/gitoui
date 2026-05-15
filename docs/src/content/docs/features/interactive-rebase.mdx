@@ -3,7 +3,7 @@ title: Interactive rebase
 description: Visual plan editor for git rebase -i, plus a resume mode for paused rebases.
 ---
 
-import { Aside } from "@astrojs/starlight/components";
+import { Steps, Tabs, TabItem, Aside, Badge } from "@astrojs/starlight/components";
 
 `e` on a non-HEAD commit (from the commit list or detail view) opens the
 **Interactive rebase plan editor**. Same semantics as `git rebase -i
@@ -13,6 +13,8 @@ import { Aside } from "@astrojs/starlight/components";
 
 The view lists every commit from the selected one up to HEAD, with the
 default action `pick` next to each row.
+
+{/* PHOTO gif of the plan editor — open on a 5-commit range, press `r` on one to set Reword, `d` on another to Drop, Space to grab a third and reorder it up with arrows, Enter to apply. */}
 
 | Press                | Action                                                                                       |
 |----------------------|----------------------------------------------------------------------------------------------|
@@ -25,7 +27,7 @@ default action `pick` next to each row.
 | `Space`              | **Grab** the row — `↑↓` now reorders the commit instead of moving the cursor; `Space` again or `Enter` drops the grab. |
 | `↑ / ↓`              | Move cursor (or move grabbed row).                                                           |
 | `← / →`              | Cycle the action of the focused row.                                                         |
-| `Enter`              | **Apply** the plan — <span class="gitoui-wordmark">gitoui</span> writes it to `.git/rebase-merge/git-rebase-todo` and runs `git rebase -i`. |
+| `Enter`              | **Apply** the plan — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> writes it to `.git/rebase-merge/git-rebase-todo` and runs `git rebase -i`. |
 | `Esc`                | Cancel (releases the grab first if one is active).                                           |
 
 ## Reword inline editor
@@ -33,6 +35,8 @@ default action `pick` next to each row.
 Hitting `r` on a commit, or moving onto a row already set to `reword`,
 opens the inline subject editor. You type the new message on the row
 itself.
+
+{/* PHOTO gif of the reword inline editor — press `r` on a row, the subject becomes editable in place, type a new message with Ctrl+W word-deletes, press Enter to commit the reword. */}
 
 | Press                                    | Action                          |
 |------------------------------------------|---------------------------------|
@@ -44,9 +48,19 @@ itself.
 
 ## Resume mode
 
-If your rebase pauses (conflict, `edit` action, etc.), <span class="gitoui-wordmark">gitoui</span> detects the
+If your rebase pauses (conflict, `edit` action, etc.), <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> detects the
 `.git/rebase-merge/` directory on the next launch and shows a **resume
 banner** at the top of the rebase view.
+
+<Steps>
+
+1. Open <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> — the resume banner appears automatically when a
+   `.git/rebase-merge/` exists.
+2. Pick: <Badge text="c continue" variant="success" /> · <Badge text="s skip" variant="caution" /> · <Badge text="a abort" variant="danger" />
+3. The banner re-opens on every launch until the rebase is resolved (or
+   aborted).
+
+</Steps>
 
 | Press               | Action                                                                |
 |---------------------|-----------------------------------------------------------------------|
@@ -55,19 +69,48 @@ banner** at the top of the rebase view.
 | `a` / `Shift+A`     | Abort (`git rebase --abort`).                                         |
 | `Esc`               | Close the resume view without acting (rebase stays paused).           |
 
-The banner re-opens automatically every time you launch <span class="gitoui-wordmark">gitoui</span> until the
-rebase is resolved.
+{/* PHOTO of the resume banner at the top of the rebase view — informs that a rebase is paused, with `c continue / s skip / a abort` chips, the current paused commit highlighted below. */}
 
 ## Layout modes
 
 `ui.common.rebase_view` controls how dense the plan view is:
 
-- `"inline"` (default) — actions sit next to commit messages.
-- `"compact"` — single line per commit, fewer columns.
-- `"split"` — actions in a separate left column, message on the right.
+<Tabs>
+<TabItem label="inline (default)">
+
+Actions sit next to commit messages — easiest to read at a glance.
+
+```toml
+[ui.common]
+rebase_view = "inline"
+```
+
+</TabItem>
+<TabItem label="compact">
+
+Single line per commit, fewer columns — best on narrow terminals.
+
+```toml
+[ui.common]
+rebase_view = "compact"
+```
+
+</TabItem>
+<TabItem label="split">
+
+Actions in a separate left column, message on the right — closer to
+`git rebase -i`'s text format.
+
+```toml
+[ui.common]
+rebase_view = "split"
+```
+
+</TabItem>
+</Tabs>
 
 <Aside type="caution">
 Like `git rebase -i`, the plan editor rewrites history. Make sure you have
 either an unrelated branch or a saved tag if you want a recovery point —
-<span class="gitoui-wordmark">gitoui</span> doesn't auto-tag for you.
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> doesn't auto-tag for you.
 </Aside>

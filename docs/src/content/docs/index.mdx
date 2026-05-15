@@ -1,23 +1,30 @@
 ---
 title: gitoui
-description: Terminal UI git client with a rich commit graph, GitHub PRs and Issues, and inline image-protocol rendering.
+description: Say oui to the smoothest git terminal youser experience.
 template: splash
 hero:
-  tagline: A terminal git client that says <em>oui</em> to the full commit graph experience — with PRs, Issues, and image-protocol rendering inline.
+  title: '<span class="git-part">git</span><span class="oui-part">oui</span>'
+  tagline: Say <em>oui</em> to the smoothest git terminal youser experience.
   image:
     file: ../../assets/logo-mark.svg
   actions:
+    - text: Read the docs
+      link: /introduction/
+      icon: right-arrow
+      variant: primary
     - text: Install gitoui
       link: /getting-started/installation/
-      icon: external
-      variant: primary
-    - text: Browse on GitHub
+      icon: rocket
+      variant: secondary
+    - text: GitHub
       link: https://github.com/NayJi7/gitoui
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
+
+{/* PHOTO gif of full app walkthrough — open gitoui in a repo, scroll the commit graph, drill into a commit detail, open its diff, jump to a PR, react to a comment. ~15-20s loop, 900px wide. This same gif goes in README.md as the hero demo. */}
 
 <CardGrid>
   <Card title="Rich commit graph" icon="rocket">
@@ -38,12 +45,12 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
   </Card>
 </CardGrid>
 
-## What is <span class="gitoui-wordmark">gitoui</span>?
+## What is <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>?
 
-**<span class="gitoui-wordmark">gitoui</span>** is a fork of [serie](https://github.com/lusingander/serie) that goes
+**<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>** is a fork of [serie](https://github.com/lusingander/serie) that goes
 beyond the commit-graph viewer. The original focus — a rich
 `git log --graph` rendered with terminal image protocols — is intact; on top of
-it <span class="gitoui-wordmark">gitoui</span> adds a full TUI workflow for everyday git: diffs, blame, staging,
+it <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> adds a full TUI workflow for everyday git: diffs, blame, staging,
 interactive rebase, conflict resolution, and GitHub integration for PRs and
 Issues.
 

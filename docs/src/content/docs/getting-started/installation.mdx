@@ -3,10 +3,10 @@ title: Installation
 description: Three ways to install gitoui — curl-pipe-sh, cargo install, or build from source.
 ---
 
-import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Aside, Steps } from "@astrojs/starlight/components";
 
 <Tabs>
-  <TabItem label="curl | sh">
+<TabItem label="curl | sh">
 
 The fastest install on Linux and macOS — downloads the latest prebuilt
 binary from GitHub Releases and drops it into `~/.local/bin`.
@@ -33,12 +33,12 @@ The installer:
 | `NO_COLOR=1`          | Disable ANSI colors in the installer output.          |
 | `--ascii` (or `GITOUI_ASCII=1`) | Force ASCII banner when piping the output. |
 
-  </TabItem>
+</TabItem>
 
-  <TabItem label="cargo install">
+<TabItem label="cargo install">
 
 If you have a Rust toolchain available, `cargo install` works from
-crates.io once <span class="gitoui-wordmark">gitoui</span> is published:
+crates.io once <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is published:
 
 ```sh
 cargo install gitoui
@@ -53,9 +53,9 @@ cargo install --git https://github.com/NayJi7/gitoui
 ```
 </Aside>
 
-  </TabItem>
+</TabItem>
 
-  <TabItem label="From source">
+<TabItem label="From source">
 
 ```sh
 git clone https://github.com/NayJi7/gitoui
@@ -67,17 +67,38 @@ install -m 0755 target/release/gitoui ~/.local/bin/
 The release binary is ~16 MB. A debug build is ~250 MB and slower at
 startup — only use it for development.
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 ## Verify
 
-```sh
-gitoui --version
-```
+<Steps>
 
-Then `cd` into any git repo and run `gitoui`. If your terminal supports a
-graph image protocol you should see the commit graph painted inline.
+1. **Check the binary is on your PATH:**
+
+   ```sh
+   gitoui --version
+   ```
+
+2. **`cd` into any git repo:**
+
+   ```sh
+   cd ~/my/repo
+   ```
+
+3. **Launch:**
+
+   ```sh
+   gitoui
+   ```
+
+   If your terminal supports a graph image protocol (Kitty / iTerm2 /
+   Sixel) you should see the commit graph painted inline. Otherwise
+   it falls back to Unicode glyphs.
+
+</Steps>
+
+{/* PHOTO of the gitoui splash on first launch in a small repo — the G logomark, the wordmark, and the commit graph with a few branches visible. */}
 
 ## Updating
 
@@ -86,7 +107,7 @@ release. `cargo install --force` does the same when installed via cargo.
 
 ## Uninstalling
 
-<span class="gitoui-wordmark">gitoui</span> doesn't write anywhere except your config dir:
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> doesn't write anywhere except your config dir:
 
 ```sh
 rm ~/.local/bin/gitoui              # binary

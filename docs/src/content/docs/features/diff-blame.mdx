@@ -1,9 +1,15 @@
 ---
-title: Diff & blame
+title: Diff, blame & history
 description: The diff viewer, side-by-side / unified modes, in-diff search, blame, file history.
 ---
 
-## Diff view
+import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
+
+Three closely-related views — drill into history with the same shortcut chain
+once you've focused a file.
+
+<Tabs>
+<TabItem label="Diff">
 
 `Enter` on a file row inside a commit drilldown (or the Uncommitted view)
 opens the **Diff** view. Layout is split between:
@@ -16,6 +22,8 @@ opens the **Diff** view. Layout is split between:
 
 `core.option.diff_mode = "enhanced"` (default) renders side-by-side. Set to
 `"unified"` for the traditional `git diff` layout.
+
+{/* PHOTO of the side-by-side diff view — left pane shows OLD with red deletions, right pane shows NEW with green additions, syntax-highlighted via syntect, hunk header chip on top. */}
 
 ### Navigation
 
@@ -39,7 +47,9 @@ matches. The current match is highlighted in `list_match_bg`.
 - `c` — copy the file path.
 - `Shift+C` — copy the commit hash.
 
-## Blame view
+</TabItem>
+
+<TabItem label="Blame">
 
 `b` on a file opens the blame view. Each line is prefixed with:
 
@@ -50,6 +60,8 @@ matches. The current match is highlighted in `list_match_bg`.
 Lines are grouped into **blame blocks** (consecutive lines sharing one
 commit). The viewport highlights the block under the cursor.
 
+{/* PHOTO of the blame view — left gutter with short hash + author + date per line, focused blame block highlighted, syntax-highlighted source code on the right. */}
+
 | Press         | Action                                       |
 |---------------|----------------------------------------------|
 | `↑↓ / j / k`  | Move line by line.                           |
@@ -58,7 +70,9 @@ commit). The viewport highlights the block under the cursor.
 | `Shift+H`     | Open file history (same file).               |
 | `Esc`         | Close.                                       |
 
-## File history
+</TabItem>
+
+<TabItem label="File history">
 
 `Shift+H` is the equivalent of `git log --follow <file>`. Shows every
 revision that touched the file, including renames.
@@ -69,3 +83,12 @@ revision that touched the file, including renames.
 | `b`     | Blame the file at that revision.               |
 | `c`     | Copy commit message.                           |
 | `Shift+C` | Copy commit hash.                            |
+
+</TabItem>
+</Tabs>
+
+<Aside type="tip">
+The three views chain naturally: from Diff press `b` for Blame, from Blame
+press `Shift+H` for File history, from a history row press `b` again to
+blame at *that* revision. Drill until you've found the right line.
+</Aside>

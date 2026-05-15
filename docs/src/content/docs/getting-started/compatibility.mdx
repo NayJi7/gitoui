@@ -3,6 +3,8 @@ title: Terminal compatibility
 description: Which terminals render the gitoui commit graph and avatars correctly.
 ---
 
+import { Badge, Aside } from "@astrojs/starlight/components";
+
 The commit graph and GitHub avatars are inline images. The terminal needs to
 speak one of three image protocols.
 
@@ -22,14 +24,18 @@ speak one of three image protocols.
 | **gnome-terminal / Ptyxis** | 🟡 | —    | —     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
 | **Windows Terminal**   | —     | —      | —     | Unicode fallback only (as of Windows Terminal 1.x). |
 
-✅ = first-class, 🟡 = supported with config, — = not supported.
+✅ <Badge text="first-class" variant="success" /> &nbsp;
+🟡 <Badge text="config needed" variant="caution" /> &nbsp;
+— <Badge text="not supported" variant="danger" />
 
 When in doubt, run `gitoui --protocol sixel` (or `kitty`, `iterm2`) to force a
 specific protocol and bypass auto-detect.
 
+{/* PHOTO of a side-by-side comparison of the commit graph in Kitty (pretty SVG rendering) vs the same view forced to `--protocol unicode` (ASCII glyph fallback). Same repo, same range, two terminals. */}
+
 ## Keyboard protocol
 
-<span class="gitoui-wordmark">gitoui</span> pushes the Kitty
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> pushes the Kitty
 [keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES`](https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
 flag at startup. This makes `Alt+letter` shortcuts arrive as a single
 KeyEvent on supporting terminals instead of `Esc` + `letter` (which would
@@ -39,14 +45,16 @@ Terminals that don't speak the protocol silently ignore the push — Alt-key
 bindings work where the terminal sends them as proper meta-encoded events
 (most modern terminals do).
 
-If `Alt+...` shortcuts don't fire on your setup, switch to `Ctrl+...` or
-override the bindings — see [Custom keybindings](/keybindings/custom/).
+<Aside type="caution" title="Alt keys not firing?">
+Switch to `Ctrl+...` for your custom bindings — see
+[Custom keybindings](/keybindings/custom/).
+</Aside>
 
 ## Mouse + clipboard
 
-- **Mouse** is enabled by default (`ui.common.mouse_enabled = true`). Click on
+- **Mouse** — enabled by default (`ui.common.mouse_enabled = true`). Click on
   rows / tabs / chips to interact. Wheel scrolls.
-- **Copy/paste** uses the system clipboard via the
-  [`arboard`](https://crates.io/crates/arboard) crate. On Wayland, `wl-copy` is
-  not required — `arboard`'s `wayland-data-control` feature talks the protocol
-  directly.
+- **Clipboard** — system clipboard via the
+  [`arboard`](https://crates.io/crates/arboard) crate. On Wayland, `wl-copy`
+  is **not** required — `arboard`'s `wayland-data-control` feature talks the
+  protocol directly.

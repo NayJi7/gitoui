@@ -3,6 +3,8 @@ title: Uncommitted & staging
 description: Stage hunks, stash, commit — without leaving gitoui.
 ---
 
+import { Steps, Aside, LinkCard } from "@astrojs/starlight/components";
+
 `Enter` on the top row of the commit list opens the **Uncommitted** view.
 Three side-by-side panels:
 
@@ -13,6 +15,8 @@ Three side-by-side panels:
 | **Untracked**| New files not yet tracked.                        |
 
 `← / →` switch between panels, `↑ / ↓` move the cursor within a panel.
+
+{/* PHOTO of the Uncommitted view — three side-by-side panels (Unstaged / Staged / Untracked), each with a couple of files, a `⚠ conflict` badge visible on one row, footer hints on bottom. */}
 
 ## File-level operations
 
@@ -26,13 +30,20 @@ Three side-by-side panels:
 | `Shift+X` | Discard every unstaged + staged change.                                |
 | `v`       | Clean (delete) an untracked file.                                      |
 
-## Open the diff with hunk-level staging
+## Hunk-level staging
 
-`Enter` on a file opens its diff. From there:
+<Steps>
 
-- The diff is **interactive**: pick a hunk, press `Enter` to stage or
-  unstage only that hunk (modes the way `git add -p` does).
-- Hit `r` to refresh the panel state.
+1. `Enter` on a file → opens the **interactive diff** for that file.
+2. Cursor moves between hunks with `↑ / ↓`.
+3. Press `Enter` on a hunk to stage (or unstage) just that hunk —
+   exactly what `git add -p` does, but visual.
+4. The hunk migrates Unstaged → Staged live; refresh the side panels
+   with `r` if you opened other tools in parallel.
+
+</Steps>
+
+{/* PHOTO gif of hunk-level staging — open a multi-hunk file, cursor moves between hunks, press Enter on one hunk to stage it; the hunk moves from Unstaged to Staged in real time. */}
 
 ## Commit, stash, branch
 
@@ -44,13 +55,17 @@ Three side-by-side panels:
 ## Conflict editor
 
 Unmerged files (the result of a paused merge, rebase or cherry-pick) show a
-`⚠ N conflict(s)` badge on the row. `a` on such a file opens the
-[3-way conflict editor](/features/conflict-editor/) — pick OURS / THEIRS /
-BOTH per hunk and save.
+`⚠ N conflict(s)` badge on the row. `a` on such a file opens the conflict
+editor — pick OURS / THEIRS / BOTH per hunk and save.
+
+<LinkCard title="3-way conflict editor →" href="/features/conflict-editor/"
+  description="OURS / THEIRS / BOTH per hunk, two-pane or inline layout." />
 
 ## Footer hints
 
+<Aside type="note">
 The footer dynamically shows only the shortcuts that apply to the current
 state — `stage-all` only appears when something is unstaged,
 `unstage-all` only when something is staged, etc. Same goes for the
 `H:history` chip (off when the focused file row is empty).
+</Aside>

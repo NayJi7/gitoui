@@ -1,0 +1,76 @@
+---
+title: Commit graph
+description: The home screen — pre-rendered git log graph with inline image protocol.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+The home screen is `git log --graph --all` rendered as pre-computed SVG/PNG
+that ships inline through your terminal's image protocol (Kitty / iTerm2 /
+Sixel). It auto-detects the protocol at startup; force one with `--protocol`.
+
+## What's shown
+
+Each row carries:
+
+- **Graph cell** — branches, merges, the commit dot (orange for HEAD).
+- **Commit message** with inline ref glyphs (branch / remote / tag / stash).
+- **Author name** — coloured per the theme. Avatar painted inline when cached.
+- **Short hash**.
+- **Date** — format set by `core.option.date_time_format`.
+
+The top row is a synthetic **Uncommitted Changes** entry. Drilling into it
+opens the [Uncommitted view](/features/uncommitted/) for staging + commit.
+
+{/* PHOTO of the commit graph home with a busy history — multiple branches, a merge commit, a tag glyph, a stash, HEAD highlighted in orange, the synthetic Uncommitted row on top. */}
+
+## Search
+
+`f` opens the search input. By default search is incremental, fuzzy off,
+case-insensitive off. Inline toggles while the search is active:
+
+| Press           | Effect                                        |
+|-----------------|-----------------------------------------------|
+| `s`             | Toggle case sensitivity.                      |
+| `z`             | Toggle fuzzy matching.                        |
+| `x`             | Toggle regex (after a search is applied).     |
+| `Enter`         | Apply the query (status line shows "Match N of M"). |
+| `n` / `N`       | Next / previous match.                        |
+| `Esc`           | Clear the query and exit search mode.         |
+
+The search bar's toggle state persists per-session via `[core.search]` in
+the config.
+
+{/* PHOTO gif of the search flow — press `f`, type a query, watch matches highlight live; toggle `s` (case) and `z` (fuzzy) and see the match count update, then press Enter and jump between matches with `n` / `N`. */}
+
+## 2-commit comparison
+
+<Steps>
+
+1. Press `Space` on commit **A** — a brand-coloured chip marks it.
+2. Move the cursor to commit **B** (any direction, any distance).
+3. Press `Space` again — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> opens the **Compare** view
+   with the cumulative diff between the two endpoints (`git diff
+   <a>..<b>`).
+
+</Steps>
+
+`Ctrl+click` is the mouse equivalent. `Esc` clears the mark at any point.
+
+{/* PHOTO gif of the 2-commit compare flow — press Space on commit A (chip appears), scroll, press Space on commit B, the Compare view opens showing the cumulative diff. */}
+
+## Lazy load
+
+The initial run loads `core.option.initial_load_count` commits (1000 by
+default). `]` (`load_more`) appends another `core.option.load_more_count`
+to the list — repeat as many times as you need to walk back in history.
+
+`-n N` on the CLI overrides the initial count for one run.
+
+## Auto-refresh
+
+<Aside type="tip">
+A filesystem watcher on `.git/` keeps the list in sync with external git
+operations (commits from another shell, fetch, branch switches…). The
+graph re-renders when needed without you having to press `r`.
+</Aside>

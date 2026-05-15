@@ -3,14 +3,24 @@ title: Config file
 description: Schema reference for gitoui's TOML config file.
 ---
 
-import { Aside } from "@astrojs/starlight/components";
+import { FileTree, Aside, Tabs, TabItem } from "@astrojs/starlight/components";
 
 The config file lives at `$XDG_CONFIG_HOME/gitoui/config.toml` (default
 `~/.config/gitoui/config.toml`). Override with `GITOUI_CONFIG_FILE=...`.
 
-Everything below is optional — <span class="gitoui-wordmark">gitoui</span> ships with sensible defaults and only
+Everything below is optional — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships with sensible defaults and only
 reads the keys you specify. Unknown keys are rejected with a styled
 diagnostic at boot.
+
+## Where it lives
+
+<FileTree>
+- ~/.config/gitoui/
+  - **config.toml** the file documented on this page
+  - themes/
+    - MySuperTheme.toml [custom themes](/configurations/themes/)
+  - github_token.toml OAuth (mode `0600`, user-only)
+</FileTree>
 
 ## Top-level sections
 
@@ -62,9 +72,12 @@ back to disk when the user flips them.
 | `conflict_view` | `two-pane` / `inline` (default `two-pane`)  | Conflict editor layout. |
 | `rebase_view`   | `inline` / `compact` / `split` (default `inline`) | Interactive-rebase plan layout. |
 
-## `[graph.color]`
+## `[graph.color]` and `[color]`
 
-Lets you override the graph palette without changing the UI theme.
+<Tabs>
+<TabItem label="[graph.color]">
+
+Override the graph palette without changing the UI theme:
 
 ```toml
 [graph.color]
@@ -80,7 +93,9 @@ branches = [
 If a named theme defines its own `graph_branches`, that wins over a generic
 `[graph.color.branches]` setting — see [Themes](/configurations/themes/).
 
-## `[color]`
+</TabItem>
+
+<TabItem label="[color]">
 
 The full theme palette — ~40 tokens (`fg`, `bg`, `list_selected_fg`, etc.).
 Use this section only when you want to override a single token of an active
@@ -95,10 +110,13 @@ Each token accepts:
 - An **indexed color**: `fg = "42"` (xterm 256 palette).
 - The legacy struct form: `fg = { Rgb = [241, 236, 236] }`.
 
+</TabItem>
+</Tabs>
+
 ## `[keybind]`
 
-Two-layer keybinding system — see the dedicated
-[Keybindings](/keybindings/) page for the full reference.
+Two-layer keybinding system — see the dedicated [Keybindings](/keybindings/)
+page for the full reference.
 
 ```toml
 [keybind]
@@ -113,10 +131,10 @@ approve = ["ctrl-a"]
 
 ## Validation
 
-<span class="gitoui-wordmark">gitoui</span> validates the entire config at boot. Failures render a styled
-`--help`-shaped diagnostic block before the no-repo splash:
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> validates the entire config at boot. Failures render a styled
+`--help`-shaped diagnostic block before the no-repo splash, catching:
 
-- **TOML syntax** errors → file + line + caret pointer.
+- **TOML syntax** errors → file + line + caret pointer to the bad token.
 - **Schema** mismatches (wrong type, unknown key) → which key and what was expected.
 - **Theme** problems — unknown name, missing file under `themes/`, file with
   invalid TOML, or an unknown `base = "..."` reference.
@@ -124,8 +142,10 @@ approve = ["ctrl-a"]
   keys with more than one modifier prefix.
 
 <Aside type="tip">
-Run <span class="gitoui-wordmark">gitoui</span> with a deliberately broken config to see the diagnostic format:
+Run <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> with a deliberately broken config to see the diagnostic format:
 ```sh
 GITOUI_CONFIG_FILE=/tmp/bad.toml gitoui
 ```
 </Aside>
+
+{/* PHOTO of a boot-time diagnostic block — `gitoui` refused to start, the styled error pane shows the offending key with a caret pointer, line:column, and the expected schema (e.g. a typo on `core.option.theme` or an unknown event in `[keybind]`). */}
