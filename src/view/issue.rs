@@ -2592,13 +2592,14 @@ impl<'a> IssuesView<'a> {
         // Open the same kind of preview-style confirmation the PR view
         // uses — the user reads the body + author before committing
         // to a destructive action.
-        self.tx
-            .send(AppEvent::OpenDialog(crate::event::DialogKind::ConfirmDeleteIssueComment {
+        self.tx.send(AppEvent::OpenDialog(
+            crate::event::DialogKind::ConfirmDeleteIssueComment {
                 issue_number: number,
                 comment_id,
                 author,
                 body_preview,
-            }));
+            },
+        ));
     }
 
     fn submit_comment_editor(&mut self) {

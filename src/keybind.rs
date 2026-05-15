@@ -77,8 +77,8 @@ impl KeyBinds {
     ///   `Ctrl+A` ONLY.
     /// * Untouched events/actions keep their full default key list.
     pub fn new(custom: Option<KeyBinds>) -> Self {
-        let mut bundle: KeyBinds = toml::from_str(DEFAULT_KEY_BIND)
-            .expect("default key bind should be correct");
+        let mut bundle: KeyBinds =
+            toml::from_str(DEFAULT_KEY_BIND).expect("default key bind should be correct");
         if let Some(custom) = custom {
             let overridden_events: rustc_hash::FxHashSet<UserEvent> =
                 custom.global.0.values().copied().collect();
@@ -91,8 +91,7 @@ impl KeyBinds {
             }
             for (scope_path, sb) in custom.scopes {
                 let target = bundle.scopes.entry(scope_path).or_default();
-                let overridden: rustc_hash::FxHashSet<String> =
-                    sb.0.values().cloned().collect();
+                let overridden: rustc_hash::FxHashSet<String> = sb.0.values().cloned().collect();
                 target.0.retain(|_, action| !overridden.contains(action));
                 for (key_event, action) in sb.0 {
                     target.insert(key_event, action);
@@ -278,7 +277,8 @@ impl<'de> Deserialize<'de> for KeyBinds {
         // Build the global section by serializing back to TOML and
         // reusing the existing KeyBind deserializer (covers UserEvent
         // name parsing, key string parsing, and conflict detection).
-        let globals_toml = toml::Value::try_from(globals_input).map_err(serde::de::Error::custom)?;
+        let globals_toml =
+            toml::Value::try_from(globals_input).map_err(serde::de::Error::custom)?;
         bundle.global = globals_toml.try_into().map_err(serde::de::Error::custom)?;
 
         // Build each scope. Per-scope conflict detection (two events
@@ -288,9 +288,7 @@ impl<'de> Deserialize<'de> for KeyBinds {
             let mut sb = ScopeBindings::default();
             for (action_name, keys_value) in scope_table {
                 let keys: Vec<String> = keys_value.try_into().map_err(|e| {
-                    serde::de::Error::custom(format!(
-                        "keybind.{path}.{action_name}: {e}"
-                    ))
+                    serde::de::Error::custom(format!("keybind.{path}.{action_name}: {e}"))
                 })?;
                 for raw in keys {
                     let key_event = parse_key_event(&raw).map_err(|s| {
@@ -723,8 +721,7 @@ mod tests {
         assert!(kb.scopes.contains_key("pr.conversation"));
         assert!(kb.scopes.contains_key("rebase"));
         assert_eq!(
-            kb.scopes["pr"]
-                .get(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty())),
+            kb.scopes["pr"].get(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty())),
             Some(&"approve".to_string())
         );
         assert_eq!(
@@ -750,7 +747,10 @@ mod tests {
 
         // `a` exists in `pr` only — looking up via `pr.conversation`
         // must walk up to `pr` and find it.
-        assert_eq!(kb.resolve_scoped(&["pr", "conversation"], a), Some("approve"));
+        assert_eq!(
+            kb.resolve_scoped(&["pr", "conversation"], a),
+            Some("approve")
+        );
         assert_eq!(kb.resolve_scoped(&["pr"], a), Some("approve"));
         // `c` is only in the leaf scope, parent doesn't see it.
         assert_eq!(

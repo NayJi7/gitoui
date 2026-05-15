@@ -324,7 +324,6 @@ pub struct CommitListState<'a> {
     // that happens on every refresh. Storing it here would be reset
     // by every `LoadMore` reload, causing the loader to re-fire on
     // every keypress while the user is near the bottom.
-
     default_ignore_case: bool,
     default_fuzzy: bool,
     default_regex: bool,

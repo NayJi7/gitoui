@@ -1111,12 +1111,11 @@ impl<'a> PullRequestsView<'a> {
 
         // When the inline editor is open, the footer is owned by it.
         if self.comment_editor.is_some() {
-            let parts: Vec<String> =
-                if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
-                    vec!["Sending…".into(), "Esc:cancel".into()]
-                } else {
-                    vec![scoped(&["compose"], "submit", "send"), "Esc:cancel".into()]
-                };
+            let parts: Vec<String> = if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
+                vec!["Sending…".into(), "Esc:cancel".into()]
+            } else {
+                vec![scoped(&["compose"], "submit", "send"), "Esc:cancel".into()]
+            };
             return format!("⌘ {}", parts.join("▕▏"));
         }
         // Footer holds the GLOBAL actions only. Card-specific shortcuts
@@ -1161,7 +1160,8 @@ impl<'a> PullRequestsView<'a> {
                         [scoped(&["pr"], "reload", "reload"), "Esc:back".into()].join("▕▏")
                     );
                 }
-                let mut p: Vec<String> = vec![scoped(&["pr", "conversation"], "new_comment", "comment")];
+                let mut p: Vec<String> =
+                    vec![scoped(&["pr", "conversation"], "new_comment", "comment")];
                 if matches!(self.active_tab, Tab::Commits | Tab::Files) {
                     p.push("Enter:view diff".into());
                 }
@@ -1284,7 +1284,6 @@ impl<'a> PullRequestsView<'a> {
     // ---------- events ----------
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
-
         // Mention popup overlays the editor — it intercepts keys
         // (↑↓/Enter/Esc) and forwards chars/backspaces through so
         // the query stays in sync with what the user types.
