@@ -4,14 +4,16 @@
 // the SAME pill style so the trio looks uniform.
 import config from "virtual:starlight/user-config";
 import { Icon } from "@astrojs/starlight/components";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---
 
 <div class="header-actions sl-flex">
-  <a href="/getting-started/installation/" class="header-link sl-flex">
+  <a href={`${base}/getting-started/installation/`} class="header-link sl-flex">
     <Icon name="rocket" />
     <span>Install</span>
   </a>
-  <a href="/introduction/" class="header-link sl-flex">
+  <a href={`${base}/introduction/`} class="header-link sl-flex">
     <Icon name="open-book" />
     <span>Docs</span>
   </a>

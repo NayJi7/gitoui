@@ -1,0 +1,181 @@
+---
+// Custom 404 — overrides Starlight's default so we don't inherit the
+// home-page hero (3 CTAs, scroll hint, animations). Single centered
+// panel, header stays visible, page can't scroll.
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const homeHref = `${base}/`;
+---
+
+<StarlightPage frontmatter={{ title: "Error 404", template: "splash" }}>
+  <div class="not-found" aria-live="polite">
+    <p class="nf-eyebrow">Error 404</p>
+    <h1 class="nf-headline">
+      <code
+        ><span class="nf-prompt">$</span> git log --grep="<span
+          class="nf-path"
+          data-base={base}
+          data-default-path="that page">that page</span>" → 0 results.</code
+      >
+    </h1>
+    <p class="nf-sub">Maybe it never made it past code review.</p>
+    <a class="nf-cta" href={homeHref}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        aria-hidden="true">
+        <path d="M19 12H5M12 19l-7-7 7-7"></path>
+      </svg>
+      <span>Back to home</span>
+    </a>
+  </div>
+</StarlightPage>
+
+<script is:inline>
+  // Inject what the user actually tried into the grep argument so the
+  // message reads "you asked for /install.sh, found nothing".
+  (function () {
+    const el = document.querySelector(".nf-path");
+    if (!el) return;
+    let path = window.location.pathname;
+    // Strip the deployment base prefix (`/gitoui`) so the message shows
+    // only the meaningful tail the user typed.
+    const base = el.dataset.base || "";
+    if (base && path.startsWith(base)) path = path.slice(base.length);
+    if (!path || path === "/") path = el.dataset.defaultPath || "that page";
+    el.textContent = path;
+  })();
+</script>
+
+<style is:global>
+  /* On the 404 the splash template normally hides the header by zeroing
+     out its slot. We want it BACK. Also kill page scrolling so the
+     centered card owns the whole viewport. */
+  :root:has(.not-found) {
+    overflow: hidden;
+  }
+  :root:has(.not-found) header.header {
+    transform: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  /* The splash template wraps content in a content panel — let it grow
+     to viewport height so the inner flex can center vertically. */
+  :root:has(.not-found) main {
+    min-height: calc(100vh - var(--sl-nav-height, 3.75rem));
+    display: flex;
+  }
+  /* Splash template emits a leading <h1> with the frontmatter title and
+     a trailing footer (prev/next nav). Both compete with our centered
+     panel — hide them so the 404 owns the viewport. */
+  :root:has(.not-found) main > .content-panel:first-of-type {
+    display: none;
+  }
+  :root:has(.not-found) main > .content-panel:last-of-type > .sl-container > footer {
+    display: none;
+  }
+  :root:has(.not-found) .content-panel {
+    flex: 1;
+    display: flex;
+  }
+  :root:has(.not-found) .content-panel > .sl-container {
+    flex: 1;
+    display: flex;
+  }
+  :root:has(.not-found) .content-panel > .sl-container > .sl-markdown-content {
+    flex: 1;
+    display: flex;
+  }
+</style>
+
+<style>
+  .not-found {
+    --brand: #f05133;
+    --cream: #f1ecec;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 1.5rem;
+    padding-inline: 1.5rem;
+    /* Pull up slightly so the center looks optically centered against
+       the visible page area (header occupies the top strip). */
+    padding-block: 0;
+  }
+
+  .nf-eyebrow {
+    margin: 0;
+    font-family: var(--gitoui-wordmark-font, "Orbitron", system-ui);
+    font-size: clamp(2.5rem, 8vw, 5rem);
+    font-weight: 700;
+    color: var(--cream);
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  :root[data-theme="light"] .nf-eyebrow { color: #111; }
+
+  .nf-headline {
+    margin: 0;
+    font-size: clamp(0.95rem, 1.6vw, 1.2rem);
+    font-weight: 400;
+    max-width: min(100%, 56rem);
+  }
+  .nf-headline code {
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    color: var(--sl-color-text);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--sl-color-gray-5);
+    padding: 0.6rem 0.9rem;
+    border-radius: 0.25rem;
+    white-space: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    display: inline-block;
+  }
+  :root[data-theme="light"] .nf-headline code {
+    background: rgba(20, 18, 17, 0.04);
+    border-color: var(--sl-color-gray-5);
+  }
+  .nf-prompt {
+    color: var(--brand);
+    user-select: none;
+    margin-right: 0.45em;
+  }
+  .nf-path {
+    color: var(--brand);
+    font-weight: 600;
+  }
+
+  .nf-sub {
+    margin: 0;
+    font-size: clamp(0.95rem, 1.4vw, 1.05rem);
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    max-width: 38ch;
+  }
+
+  .nf-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 1.4rem;
+    border-radius: 0.25rem;
+    background: var(--brand);
+    color: #111;
+    border: 1px solid var(--brand);
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: none;
+    box-shadow: 0 6px 22px -8px rgba(240, 81, 51, 0.5);
+    transition: background-color 180ms ease, transform 180ms ease,
+      box-shadow 180ms ease;
+  }
+  .nf-cta:hover {
+    background: #ff6346;
+    border-color: #ff6346;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 28px -10px rgba(240, 81, 51, 0.65);
+  }
+  .nf-cta svg { width: 1.05rem; height: 1.05rem; }
+</style>

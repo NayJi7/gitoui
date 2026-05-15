@@ -34,6 +34,11 @@ const titleCharCount = (title as string).replace(/<[^>]+>/g, "").length;
 const TYPED_SPEED_MS = 110;
 const TYPED_START_MS = 900;
 const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
+
+// Astro injects BASE_URL with a trailing slash (`/gitoui/` in prod,
+// `/` in dev). Trim it so we can safely concatenate path fragments
+// without producing `//`.
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---
 
 <section class="hero" data-hero style={`--caret-show: ${titleDoneMs}ms`}>
@@ -54,7 +59,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
       </h1>
       {tagline && <p class="hero-tagline" set:html={tagline} />}
       <div class="hero-actions">
-        <a class="cta cta-primary" href="/getting-started/installation/">
+        <a class="cta cta-primary" href={`${base}/getting-started/installation/`}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             aria-hidden="true">
@@ -62,7 +67,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
           </svg>
           <span>Oui're so in!</span>
         </a>
-        <a class="cta cta-secondary" href="/introduction/">
+        <a class="cta cta-secondary" href={`${base}/introduction/`}>
           <span>RTFM, gently</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
