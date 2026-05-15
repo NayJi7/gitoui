@@ -663,6 +663,12 @@ impl CoreConfig {
     pub fn set_protocol(&mut self, protocol: crate::ImageProtocolType) {
         self.option.protocol = Some(protocol);
     }
+    pub fn order(&self) -> crate::CommitOrderType {
+        self.option.order.unwrap_or(crate::CommitOrderType::Chrono)
+    }
+    pub fn set_order(&mut self, order: crate::CommitOrderType) {
+        self.option.order = Some(order);
+    }
     pub fn date_time_format(&self) -> DateTimeFormat {
         self.option.date_time_format
     }
@@ -790,6 +796,17 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
                 crate::ImageProtocolType::Kitty => "kitty",
                 crate::ImageProtocolType::KittyUnicode => "kitty-unicode",
                 crate::ImageProtocolType::Sixel => "sixel",
+            },
+        );
+    }
+
+    if let Some(order) = core.option.order {
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "order"],
+            match order {
+                crate::CommitOrderType::Chrono => "chrono",
+                crate::CommitOrderType::Topo => "topo",
             },
         );
     }

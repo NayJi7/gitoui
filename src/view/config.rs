@@ -27,19 +27,20 @@ use crate::{
 //   3  Diff Mode
 //   4  Resolve Mode      ← merge-conflict editor layout
 //   5  Rebase Mode       ← interactive-rebase editor layout
-//   6  Initial Selection
-//   7  Mouse
-//   8  Date Format
-//   9  Image Protocol
-//  10  Git Name          ← TEXT_EDIT_START_INDEX
-//  11  Git Email
-//  12  Default Branch
-//  13  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  14  Github Avatars    ← GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 15;
-const TEXT_EDIT_START_INDEX: usize = 10;
-const GITHUB_AUTH_INDEX: usize = 13;
-const GITHUB_AVATARS_INDEX: usize = 14;
+//   6  Order             ← commit order: chrono vs topo
+//   7  Initial Selection
+//   8  Mouse
+//   9  Date Format
+//  10  Image Protocol
+//  11  Git Name          ← TEXT_EDIT_START_INDEX
+//  12  Git Email
+//  13  Default Branch
+//  14  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  15  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 16;
+const TEXT_EDIT_START_INDEX: usize = 11;
+const GITHUB_AUTH_INDEX: usize = 14;
+const GITHUB_AVATARS_INDEX: usize = 15;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -78,6 +79,10 @@ pub struct ConfigView<'a> {
     pending_preview_deletes: Vec<u16>,
     left_area: Rect,
     left_item_rows: Vec<Option<usize>>,
+    /// Top line index of the left-column viewport. Auto-scrolls as the
+    /// cursor moves out of view, plus responds directly to wheel /
+    /// PageUp / PageDown when the cursor is parked at the edge.
+    left_scroll: usize,
 }
 
 impl<'a> ConfigView<'a> {
@@ -92,6 +97,7 @@ impl<'a> ConfigView<'a> {
             diff_mode_display(self.ui_config.common.diff_mode),
             conflict_view_display(self.ui_config.common.conflict_view),
             rebase_view_display(self.ui_config.common.rebase_view),
+            commit_order_display(self.core_config.order()),
             initial_selection_display(self.core_config.initial_selection()),
             mouse_display(self.ui_config.common.mouse_enabled),
             self.core_config
@@ -125,6 +131,7 @@ impl<'a> ConfigView<'a> {
             "Diff Mode",
             "Resolve Mode",
             "Rebase Mode",
+            "Order",
             "Initial Select",
             "Mouse",
             "Date Format",
@@ -198,6 +205,7 @@ impl<'a> ConfigView<'a> {
             pending_preview_deletes: Vec::new(),
             left_area: Rect::default(),
             left_item_rows: Vec::new(),
+            left_scroll: 0,
         }
     }
 
@@ -271,6 +279,14 @@ impl<'a> ConfigView<'a> {
                     self.cycle_option_prev();
                 }
             }
+            UserEvent::ScrollDown => {
+                let step = count.max(1);
+                self.left_scroll = self.left_scroll.saturating_add(step);
+            }
+            UserEvent::ScrollUp => {
+                let step = count.max(1);
+                self.left_scroll = self.left_scroll.saturating_sub(step);
+            }
             UserEvent::Cancel | UserEvent::Close | UserEvent::Config => {
                 self.tx.send(AppEvent::CloseConfig);
             }
@@ -326,9 +342,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            10 => self.core_config.user_name().unwrap_or("").to_string(),
-            11 => self.core_config.user_email().unwrap_or("").to_string(),
-            12 => self.core_config.default_branch().unwrap_or("").to_string(),
+            11 => self.core_config.user_name().unwrap_or("").to_string(),
+            12 => self.core_config.user_email().unwrap_or("").to_string(),
+            13 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -475,9 +491,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            10 => self.core_config.set_user_name(value),
-            11 => self.core_config.set_user_email(value),
-            12 => self.core_config.set_default_branch(value),
+            11 => self.core_config.set_user_name(value),
+            12 => self.core_config.set_user_email(value),
+            13 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -549,22 +565,29 @@ impl<'a> ConfigView<'a> {
                 self.ui_config.common.set_rebase_view(prev);
             }
             6 => {
+                let prev = match self.core_config.order() {
+                    crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
+                    crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
+                };
+                self.core_config.set_order(prev);
+            }
+            7 => {
                 let prev = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            7 => {
+            8 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            8 => {
+            9 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            9 => {
+            10 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -648,22 +671,29 @@ impl<'a> ConfigView<'a> {
                 self.ui_config.common.set_rebase_view(next);
             }
             6 => {
+                let next = match self.core_config.order() {
+                    crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
+                    crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
+                };
+                self.core_config.set_order(next);
+            }
+            7 => {
                 let next = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
                 };
                 self.core_config.set_initial_selection(next);
             }
-            7 => {
+            8 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            8 => {
+            9 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            9 => {
+            10 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -785,6 +815,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Rebase Mode",
                 rebase_view_display(self.ui_config.common.rebase_view),
+                false,
+            ),
+            (
+                "Order",
+                commit_order_display(self.core_config.order()),
                 false,
             ),
             (
@@ -935,7 +970,49 @@ impl<'a> ConfigView<'a> {
         }
         self.left_item_rows = item_rows;
 
-        let paragraph = Paragraph::new(lines);
+        // Auto-scroll: if the currently-selected item's row index falls
+        // outside the viewport, slide `left_scroll` so it's visible. This
+        // is what makes ↑ / ↓ keep working past the bottom edge of the
+        // pane on small terminals.
+        let viewport_h = left_area.height as usize;
+        let total_lines = lines.len();
+        if let Some(sel_row) = self
+            .left_item_rows
+            .iter()
+            .position(|r| r == &Some(self.selected))
+        {
+            if viewport_h > 0 {
+                if sel_row < self.left_scroll {
+                    self.left_scroll = sel_row;
+                } else if sel_row >= self.left_scroll + viewport_h {
+                    self.left_scroll = sel_row + 1 - viewport_h;
+                }
+            }
+        }
+        let max_scroll = total_lines.saturating_sub(viewport_h);
+        if self.left_scroll > max_scroll {
+            self.left_scroll = max_scroll;
+        }
+
+        let mut visible: Vec<Line> = lines
+            .into_iter()
+            .skip(self.left_scroll)
+            .take(viewport_h)
+            .collect();
+        // Top / bottom `…` markers signal more content past the viewport
+        // — same convention as the Help page.
+        if total_lines > viewport_h && !visible.is_empty() {
+            let dots_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+            let dots = Line::from(Span::styled("  …", dots_style));
+            if self.left_scroll > 0 {
+                visible[0] = dots.clone();
+            }
+            if self.left_scroll + viewport_h < total_lines {
+                let last = visible.len() - 1;
+                visible[last] = dots;
+            }
+        }
+        let paragraph = Paragraph::new(visible);
         f.render_widget(paragraph, left_area);
 
         // Description / preview (right column)
@@ -948,6 +1025,7 @@ impl<'a> ConfigView<'a> {
             diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
             rebase_view_description(self.ui_config.common.rebase_view),
+            "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children — branches stay grouped, like `git log --topo-order`.".into(),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
@@ -1388,6 +1466,13 @@ fn initial_selection_display(sel: InitialSelection) -> String {
     match sel {
         InitialSelection::Latest => "Latest".to_string(),
         InitialSelection::Head => "HEAD".to_string(),
+    }
+}
+
+fn commit_order_display(order: crate::CommitOrderType) -> String {
+    match order {
+        crate::CommitOrderType::Chrono => "Chrono".to_string(),
+        crate::CommitOrderType::Topo => "Topo".to_string(),
     }
 }
 
