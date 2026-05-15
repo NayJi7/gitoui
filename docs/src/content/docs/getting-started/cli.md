@@ -7,7 +7,7 @@ description: Command-line flags accepted by the gitoui binary.
 gitoui [OPTIONS]
 ```
 
-gitoui reads everything it needs from the current working directory and the
+<span class="gitoui-wordmark">gitoui</span> reads everything it needs from the current working directory and the
 config file. The flags here are the rare cases where you want to override
 defaults for one specific run.
 

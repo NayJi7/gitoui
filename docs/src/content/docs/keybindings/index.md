@@ -5,7 +5,7 @@ description: How the two-layer keybind system works in gitoui (global UserEvents
 
 import { Aside } from "@astrojs/starlight/components";
 
-gitoui has a **two-layer keybind system**:
+<span class="gitoui-wordmark">gitoui</span> has a **two-layer keybind system**:
 
 1. A **global** map of `UserEvent → key list`. Same shape as upstream serie:
    `quit = ["q"]`, `navigate_up = ["k", "up"]`, etc. Available everywhere.
@@ -49,7 +49,7 @@ Anything you don't touch keeps its full default key list.
 
 ## Modifier cap
 
-gitoui accepts **at most one modifier prefix** per key — `ctrl-X`, `alt-X`,
+<span class="gitoui-wordmark">gitoui</span> accepts **at most one modifier prefix** per key — `ctrl-X`, `alt-X`,
 or `shift-X`. Chained combos like `ctrl-shift-a` are rejected at config-
 load with a styled diagnostic.
 
@@ -97,7 +97,7 @@ the new key in the footer.
 
 | Path                                                | What |
 |-----------------------------------------------------|------|
-| [`assets/default-keybind.toml`](https://github.com/NayJi7/gitoui/blob/master/assets/default-keybind.toml) (embedded) | The defaults gitoui ships with. |
+| [`assets/default-keybind.toml`](https://github.com/NayJi7/gitoui/blob/master/assets/default-keybind.toml) (embedded) | The defaults <span class="gitoui-wordmark">gitoui</span> ships with. |
 | `~/.config/gitoui/config.toml` → `[keybind]` and `[keybind.scope.<path>]` | Your overrides. |
 
 A clean way to see your effective bindings is the in-app Help page (`?` or

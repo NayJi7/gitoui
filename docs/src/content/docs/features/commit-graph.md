@@ -38,7 +38,7 @@ the config.
 ## 2-commit comparison
 
 `Space` on a commit marks it (highlighted with a brand-coloured chip). Move
-to another commit, press `Space` again → gitoui opens the **Compare** view
+to another commit, press `Space` again → <span class="gitoui-wordmark">gitoui</span> opens the **Compare** view
 with the cumulative diff between the two endpoints (`git diff <a>..<b>`).
 `Ctrl+click` is the mouse equivalent. `Esc` clears the mark.
 

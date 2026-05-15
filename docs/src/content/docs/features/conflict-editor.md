@@ -4,7 +4,7 @@ description: 3-way merge conflict resolution — pick OURS / THEIRS / BOTH per h
 ---
 
 When a merge / rebase / cherry-pick leaves a file in a conflicted state,
-gitoui detects the unmerged status and offers the **conflict editor** as
+<span class="gitoui-wordmark">gitoui</span> detects the unmerged status and offers the **conflict editor** as
 the `a` action on that file in the [Uncommitted view](/features/uncommitted/).
 
 ## What you see

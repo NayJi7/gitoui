@@ -38,7 +38,7 @@ The installer:
   <TabItem label="cargo install">
 
 If you have a Rust toolchain available, `cargo install` works from
-crates.io once gitoui is published:
+crates.io once <span class="gitoui-wordmark">gitoui</span> is published:
 
 ```sh
 cargo install gitoui
@@ -86,7 +86,7 @@ release. `cargo install --force` does the same when installed via cargo.
 
 ## Uninstalling
 
-gitoui doesn't write anywhere except your config dir:
+<span class="gitoui-wordmark">gitoui</span> doesn't write anywhere except your config dir:
 
 ```sh
 rm ~/.local/bin/gitoui              # binary

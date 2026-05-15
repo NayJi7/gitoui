@@ -5,7 +5,7 @@ description: Built-in themes and how to ship your own as a TOML file.
 
 import { Aside } from "@astrojs/starlight/components";
 
-gitoui ships **10 built-in themes**, and lets you drop your own as a TOML
+<span class="gitoui-wordmark">gitoui</span> ships **10 built-in themes**, and lets you drop your own as a TOML
 file under `~/.config/gitoui/themes/`. Both are addressed by name through
 the `core.option.theme` config key.
 
@@ -81,7 +81,7 @@ built-ins. Switching to one applies it live — no restart.
 
 ### Auto syntax theme
 
-If you **don't** set `syntax_theme`, gitoui auto-picks one based on the
+If you **don't** set `syntax_theme`, <span class="gitoui-wordmark">gitoui</span> auto-picks one based on the
 resolved `bg` luminance:
 
 - **Dark bg** → `base16-ocean.dark`

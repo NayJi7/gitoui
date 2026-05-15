@@ -3,7 +3,7 @@ title: Introduction
 description: What gitoui is, what it isn't, and why it forked from serie.
 ---
 
-**gitoui** ([`/ʒi.tu.i/`](/faq/#how-do-i-pronounce-gitoui)) is a terminal git
+**<span class="gitoui-wordmark">gitoui</span>** ([`/ʒi.tu.i/`](/faq/#how-do-i-pronounce-gitoui)) is a terminal git
 client. It started as a fork of [serie](https://github.com/lusingander/serie) —
 a beautifully-rendered `git log --graph` viewer — and grew into a daily-driver
 TUI that covers diffs, staging, blame, history, interactive rebase, conflict
@@ -17,7 +17,7 @@ Serie does one thing exceptionally well: it pre-renders the commit graph as
 SVG/PNG and displays it inline through the terminal's image protocol
 (Kitty, iTerm2, Sixel). That graph is the prettiest in any terminal client.
 
-gitoui keeps that. What it adds:
+<span class="gitoui-wordmark">gitoui</span> keeps that. What it adds:
 
 - **Side-by-side and inline diffs** with hunk-level staging in the uncommitted
   view.
@@ -38,23 +38,23 @@ gitoui keeps that. What it adds:
 - **User-defined themes** — drop a `.toml` in `~/.config/gitoui/themes/`,
   inherit from any built-in, override individual tokens.
 
-## What gitoui is not
+## What <span class="gitoui-wordmark">gitoui</span> is not
 
 - A full-featured git client — there's no remote management UI, no submodule
   workflow, no LFS handling. The focus stays on **reading + reviewing
   history** with the operations you do daily on top of it.
 - A pure ASCII renderer — the inline image protocol is the point. On terminals
-  that can't speak Kitty / iTerm2 / Sixel, gitoui falls back to Unicode
+  that can't speak Kitty / iTerm2 / Sixel, <span class="gitoui-wordmark">gitoui</span> falls back to Unicode
   glyphs but you lose the polished graph.
 
 ## Project status
 
-gitoui is in pre-public development. It works end-to-end and is being daily-
+<span class="gitoui-wordmark">gitoui</span> is in pre-public development. It works end-to-end and is being daily-
 driven on real repos, but the API and config schema may still shift before
 the v1.0 tag.
 
 If you came here from serie and want the bare graph viewer with nothing
-else: that's still the upstream project — go give it a star. gitoui is the
+else: that's still the upstream project — go give it a star. <span class="gitoui-wordmark">gitoui</span> is the
 "with batteries" cousin.
 
 ---

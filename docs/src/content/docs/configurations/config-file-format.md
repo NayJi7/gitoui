@@ -8,7 +8,7 @@ import { Aside } from "@astrojs/starlight/components";
 The config file lives at `$XDG_CONFIG_HOME/gitoui/config.toml` (default
 `~/.config/gitoui/config.toml`). Override with `GITOUI_CONFIG_FILE=...`.
 
-Everything below is optional — gitoui ships with sensible defaults and only
+Everything below is optional — <span class="gitoui-wordmark">gitoui</span> ships with sensible defaults and only
 reads the keys you specify. Unknown keys are rejected with a styled
 diagnostic at boot.
 
@@ -113,7 +113,7 @@ approve = ["ctrl-a"]
 
 ## Validation
 
-gitoui validates the entire config at boot. Failures render a styled
+<span class="gitoui-wordmark">gitoui</span> validates the entire config at boot. Failures render a styled
 `--help`-shaped diagnostic block before the no-repo splash:
 
 - **TOML syntax** errors → file + line + caret pointer.
@@ -124,7 +124,7 @@ gitoui validates the entire config at boot. Failures render a styled
   keys with more than one modifier prefix.
 
 <Aside type="tip">
-Run gitoui with a deliberately broken config to see the diagnostic format:
+Run <span class="gitoui-wordmark">gitoui</span> with a deliberately broken config to see the diagnostic format:
 ```sh
 GITOUI_CONFIG_FILE=/tmp/bad.toml gitoui
 ```

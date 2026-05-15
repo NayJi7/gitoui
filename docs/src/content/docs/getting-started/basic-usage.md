@@ -57,7 +57,7 @@ From the commit list, `Enter` on the top row (Uncommitted Changes) opens the
 ### 2-commit comparison
 
 `Space` on a commit marks it. Move to a second commit and press `Space`
-again — gitoui opens the cumulative diff between the two endpoints.
+again — <span class="gitoui-wordmark">gitoui</span> opens the cumulative diff between the two endpoints.
 `Esc` clears the mark.
 
 ### Interactive rebase
@@ -65,7 +65,7 @@ again — gitoui opens the cumulative diff between the two endpoints.
 `e` on a non-HEAD commit opens the **rebase plan editor**. Use the per-row
 shortcuts (`p` pick, `r` reword, `e` edit, `s` squash, `f` fixup, `d` drop)
 to set actions, `Space` to grab and reorder rows with arrows, `Enter` to
-apply. If the rebase pauses (conflict, edit), gitoui detects it on the next
+apply. If the rebase pauses (conflict, edit), <span class="gitoui-wordmark">gitoui</span> detects it on the next
 open and shows a resume banner with `c` continue / `s` skip / `a` abort.
 
 ### Open a Pull Request

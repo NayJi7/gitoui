@@ -3,20 +3,20 @@ title: FAQ
 description: Common questions about gitoui — pronunciation, fork status, terminal compat, daily use.
 ---
 
-## How do I pronounce gitoui?
+## How do I pronounce <span class="gitoui-wordmark">gitoui</span>?
 
 [`/ʒi.tu.i/`](https://en.wikipedia.org/wiki/Help:IPA/French) — like the
-French word *gitoui* would be if you stitched "git" and "oui" together.
+French word *<span class="gitoui-wordmark">gitoui</span>* would be if you stitched "git" and "oui" together.
 The "oui" half is the French word for "yes" — the project says yes to a
 fuller TUI workflow on top of serie's graph viewer.
 
 If IPA doesn't help: roughly **zhee-too-ee**.
 
-## Is gitoui a fork of serie? Why fork?
+## Is <span class="gitoui-wordmark">gitoui</span> a fork of serie? Why fork?
 
 Yes. [serie](https://github.com/lusingander/serie) is the upstream project
 and its commit-graph viewer is unique — inline SVG/PNG rendering through
-the terminal image protocol. gitoui keeps that core and layers on:
+the terminal image protocol. <span class="gitoui-wordmark">gitoui</span> keeps that core and layers on:
 
 - Side-by-side diff with hunk-level staging.
 - Blame + file history.
@@ -26,22 +26,22 @@ the terminal image protocol. gitoui keeps that core and layers on:
 - User-defined themes, scoped keybinds, dynamic shortcut display.
 
 If all you want is the graph viewer, serie is the lighter option — go give
-upstream a star. gitoui is the "with batteries" cousin.
+upstream a star. <span class="gitoui-wordmark">gitoui</span> is the "with batteries" cousin.
 
-## Can gitoui replace lazygit / gitui?
+## Can <span class="gitoui-wordmark">gitoui</span> replace lazygit / gitui?
 
 Different focus. lazygit and gitui are full git operations toolkits — every
-command surface is interactive. gitoui starts from "I want to read history
+command surface is interactive. <span class="gitoui-wordmark">gitoui</span> starts from "I want to read history
 and review changes" and adds the operations that fit naturally on top of
 that: stage, commit, rebase, resolve conflicts, review PRs.
 
-Use gitoui if your daily flow is **read-heavy** with frequent reviews +
+Use <span class="gitoui-wordmark">gitoui</span> if your daily flow is **read-heavy** with frequent reviews +
 some editing. Use lazygit/gitui if you want to drive every git command
 through the TUI.
 
 ## Why is `Alt+letter` not firing on my system?
 
-gitoui pushes the Kitty keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES`
+<span class="gitoui-wordmark">gitoui</span> pushes the Kitty keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES`
 flag at startup — that makes `Alt+letter` arrive as a single KeyEvent on
 supporting terminals (Kitty, Ghostty, WezTerm, foot, Konsole 22.04+, …).
 Older terminals treat Alt as a meta-prefix and send `Esc` followed by the
@@ -56,7 +56,7 @@ custom bindings — see [Custom keybindings](/keybindings/custom/).
 Help is computed from your live config at render time. If the displayed
 key is wrong:
 
-1. Check your config validated — gitoui prints a styled diagnostic at
+1. Check your config validated — <span class="gitoui-wordmark">gitoui</span> prints a styled diagnostic at
    startup if there's an error.
 2. Make sure you're on the right config file (`GITOUI_CONFIG_FILE` env
    variable might be overriding the default location).
@@ -84,12 +84,12 @@ graph and skips avatar rendering. The result looks like a slightly fancier
 
 ## My terminal scrambles the graph after I exit
 
-gitoui pops the Kitty keyboard protocol on exit, but **inline image
+<span class="gitoui-wordmark">gitoui</span> pops the Kitty keyboard protocol on exit, but **inline image
 placements** (Kitty / iTerm2) sometimes linger if you exit via a crash or
 `SIGKILL`. Press `Ctrl+L` in your shell to clear the screen — that flushes
 the stale placements.
 
-## Does gitoui send any data to a server?
+## Does <span class="gitoui-wordmark">gitoui</span> send any data to a server?
 
 The only network calls are:
 
@@ -100,12 +100,12 @@ The only network calls are:
 
 No telemetry, no crash reporting, no auto-update phone-home.
 
-## Is gitoui stable enough to use on real repos?
+## Is <span class="gitoui-wordmark">gitoui</span> stable enough to use on real repos?
 
-It's daily-driven on the gitoui repo itself and on a few sandboxes. Pre-v1.0
+It's daily-driven on the <span class="gitoui-wordmark">gitoui</span> repo itself and on a few sandboxes. Pre-v1.0
 means the config schema and some keybinds may still shift — your `.toml`
 config might need touches when you upgrade. The on-disk git operations are
-all plain `git` CLI calls, no libgit2, so worst-case gitoui never corrupts
+all plain `git` CLI calls, no libgit2, so worst-case <span class="gitoui-wordmark">gitoui</span> never corrupts
 state; it just produces an error you'd see from `git` directly.
 
 ## What's the license?

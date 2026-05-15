@@ -29,7 +29,7 @@ specific protocol and bypass auto-detect.
 
 ## Keyboard protocol
 
-gitoui pushes the Kitty
+<span class="gitoui-wordmark">gitoui</span> pushes the Kitty
 [keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES`](https://sw.kovidgoyal.net/kitty/keyboard-protocol/)
 flag at startup. This makes `Alt+letter` shortcuts arrive as a single
 KeyEvent on supporting terminals instead of `Esc` + `letter` (which would

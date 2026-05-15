@@ -25,7 +25,7 @@ default action `pick` next to each row.
 | `Space`              | **Grab** the row — `↑↓` now reorders the commit instead of moving the cursor; `Space` again or `Enter` drops the grab. |
 | `↑ / ↓`              | Move cursor (or move grabbed row).                                                           |
 | `← / →`              | Cycle the action of the focused row.                                                         |
-| `Enter`              | **Apply** the plan — gitoui writes it to `.git/rebase-merge/git-rebase-todo` and runs `git rebase -i`. |
+| `Enter`              | **Apply** the plan — <span class="gitoui-wordmark">gitoui</span> writes it to `.git/rebase-merge/git-rebase-todo` and runs `git rebase -i`. |
 | `Esc`                | Cancel (releases the grab first if one is active).                                           |
 
 ## Reword inline editor
@@ -44,7 +44,7 @@ itself.
 
 ## Resume mode
 
-If your rebase pauses (conflict, `edit` action, etc.), gitoui detects the
+If your rebase pauses (conflict, `edit` action, etc.), <span class="gitoui-wordmark">gitoui</span> detects the
 `.git/rebase-merge/` directory on the next launch and shows a **resume
 banner** at the top of the rebase view.
 
@@ -55,7 +55,7 @@ banner** at the top of the rebase view.
 | `a` / `Shift+A`     | Abort (`git rebase --abort`).                                         |
 | `Esc`               | Close the resume view without acting (rebase stays paused).           |
 
-The banner re-opens automatically every time you launch gitoui until the
+The banner re-opens automatically every time you launch <span class="gitoui-wordmark">gitoui</span> until the
 rebase is resolved.
 
 ## Layout modes
@@ -69,5 +69,5 @@ rebase is resolved.
 <Aside type="caution">
 Like `git rebase -i`, the plan editor rewrites history. Make sure you have
 either an unrelated branch or a saved tag if you want a recovery point —
-gitoui doesn't auto-tag for you.
+<span class="gitoui-wordmark">gitoui</span> doesn't auto-tag for you.
 </Aside>

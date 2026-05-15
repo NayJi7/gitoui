@@ -3,7 +3,7 @@ title: User commands
 description: Bind your own shell commands to in-app shortcuts.
 ---
 
-gitoui lets you wire up custom shell commands to numbered keybinds — useful
+<span class="gitoui-wordmark">gitoui</span> lets you wire up custom shell commands to numbered keybinds — useful
 for project-specific actions (e.g. open the deploy log, run a test, open
 the current commit in a code review tool).
 
@@ -36,7 +36,7 @@ selected commit** when the command fires. Other placeholders:
 
 ## Run a command
 
-The bound key fires the command in a subshell. gitoui suspends the TUI
+The bound key fires the command in a subshell. <span class="gitoui-wordmark">gitoui</span> suspends the TUI
 (leaves the alt-screen + raw mode), runs the command, prints any output to
 the underlying terminal, then resumes once it exits — same flow as
 `git commit` opening your `$EDITOR`.
@@ -49,7 +49,7 @@ command = "notify-send 'deploy started' && deploy.sh &"
 
 ## Limits
 
-- Commands run with the same env as the gitoui process — no isolation.
+- Commands run with the same env as the <span class="gitoui-wordmark">gitoui</span> process — no isolation.
 - Output is shown verbatim; if your command produces ANSI escape codes
   they'll render through.
 - Long-running commands block the UI until exit. For "fire and forget"

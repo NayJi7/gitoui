@@ -1,7 +1,9 @@
-/* Brand fonts — JetBrains Mono is the gitoui brand book's headline
-   typeface; we use it for headings + code + UI accents, and let the
-   body fall back to the platform's system sans for long-form reading. */
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+/* Brand fonts — two faces from the gitoui brand book:
+   * Orbitron for the "gitoui" wordmark (anywhere the brand name is
+     displayed prominently — site header, hero, and inline mentions
+     wrapped in `.gitoui-wordmark`).
+   * JetBrains Mono for body headings + code + UI mono. */
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
 
 :root {
   --sl-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
@@ -9,29 +11,37 @@
   --sl-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
     Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --sl-font-headings: "JetBrains Mono", ui-monospace, monospace;
+  --gitoui-wordmark-font: "Orbitron", "JetBrains Mono", monospace;
 }
 
-/* Apply the headings font to every heading + the splash hero title.
-   Starlight doesn't expose a CSS variable for headings out of the box,
-   so we target the structural classes directly. */
+/* Body headings use JetBrains Mono — terminal feel without screaming
+   "wordmark". */
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3,
 .sl-markdown-content h4,
 .sl-markdown-content h5,
 .sl-markdown-content h6,
-.hero h1,
-.site-title,
 [class*="card"] [class*="title"] {
   font-family: var(--sl-font-headings);
   letter-spacing: -0.01em;
 }
 
-/* Sidebar nav titles + page TOC keep the same look so the type system
-   feels intentional rather than headings-only. */
 .sidebar-content a,
 .sl-link-card .title {
   font-family: var(--sl-font-headings);
+}
+
+/* Anywhere the literal "gitoui" wordmark shows up: site title in the
+   header, the splash hero h1, and any inline mention wrapped in
+   `<span class="gitoui-wordmark">gitoui</span>` from markdown content. */
+.site-title,
+.site-title span,
+.hero h1,
+.gitoui-wordmark {
+  font-family: var(--gitoui-wordmark-font);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* Brand palette — see `assets/brand/gitoui-brand-standalone.html`. */
