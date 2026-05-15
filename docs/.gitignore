@@ -1,0 +1,15 @@
+# build output
+dist/
+.astro/
+
+# dependencies
+node_modules/
+
+# environment files
+.env
+.env.production
+
+# old mdBook output (kept around once during migration to compare,
+# safe to remove from history later)
+book/
+mdbook

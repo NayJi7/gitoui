@@ -1,0 +1,131 @@
+---
+title: Config file
+description: Schema reference for gitoui's TOML config file.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The config file lives at `$XDG_CONFIG_HOME/gitoui/config.toml` (default
+`~/.config/gitoui/config.toml`). Override with `GITOUI_CONFIG_FILE=...`.
+
+Everything below is optional — gitoui ships with sensible defaults and only
+reads the keys you specify. Unknown keys are rejected with a styled
+diagnostic at boot.
+
+## Top-level sections
+
+| Section          | Purpose                                                |
+|------------------|--------------------------------------------------------|
+| `[core.option]`  | UI defaults (theme, graph style, initial selection…).  |
+| `[core.search]`  | Persistent search toggles (fuzzy / case / regex).      |
+| `[core.user_command]` | Custom user-defined shell commands.               |
+| `[core.external]`| External hooks (clipboard, browser opener).            |
+| `[ui.common]`    | Per-view mode preferences.                             |
+| `[graph.color]`  | Graph palette overrides (independent of the UI theme). |
+| `[color]`        | Theme color tokens — usually populated via a named theme. |
+| `[keybind]`      | Keybindings (global section + scoped sub-tables).      |
+
+## `[core.option]`
+
+| Key                 | Type / default                            | Effect |
+|---------------------|-------------------------------------------|--------|
+| `theme`             | string / `"Tokyo Night"`                  | Built-in theme name or custom theme stem (file at `~/.config/gitoui/themes/<name>.toml`). Empty string disables theming. |
+| `syntax_theme`      | string / `"base16-ocean.dark"`            | Syntect theme for diff syntax highlighting. Overridden when `theme` is a named theme. |
+| `graph_style`       | `rounded` / `angular` / `smooth` (default `rounded`) | Branch corner shape. |
+| `graph_width`       | `auto` / `single` / `double` (default `auto`) | Graph image cell width. |
+| `initial_selection` | `latest` / `head` / `top` (default `latest`) | Cursor position when opening. |
+| `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
+| `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
+| `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |
+| `initial_load_count`| usize / `1000`                            | Number of commits loaded on startup. |
+| `load_more_count`   | usize / `200`                             | Step size each time you press `LoadMore` (`]`). |
+
+## `[core.search]`
+
+Persistent toggles for the list-view search bar.
+
+| Key           | Type / default | Effect                                |
+|---------------|----------------|---------------------------------------|
+| `fuzzy`       | bool / `false` | Default to fuzzy matching.            |
+| `ignore_case` | bool / `false` | Default to case-insensitive matching. |
+| `regex`       | bool / `false` | Default to regex matching.            |
+
+These mirror the in-app toggles (`s`, `z`, `x` in search mode). The view writes
+back to disk when the user flips them.
+
+## `[ui.common]`
+
+| Key             | Type / default                | Effect                          |
+|-----------------|-------------------------------|---------------------------------|
+| `mouse_enabled` | bool / `true`                 | Master mouse switch.            |
+| `diff_mode`     | `enhanced` / `unified` (default `enhanced`) | Side-by-side vs unified diff view. |
+| `conflict_view` | `two-pane` / `inline` (default `two-pane`)  | Conflict editor layout. |
+| `rebase_view`   | `inline` / `compact` / `split` (default `inline`) | Interactive-rebase plan layout. |
+
+## `[graph.color]`
+
+Lets you override the graph palette without changing the UI theme.
+
+```toml
+[graph.color]
+background = "#1a1b26"      # graph cell background
+edge = "#3b4261"            # connector lines + commit-circle outline
+branches = [
+  "#f7768e", "#7aa2f7", "#9ece6a", "#e0af68",
+  "#bb9af7", "#7dcfff", "#ff9e64", "#73daca",
+  "#ad8ee6", "#2ac3de", "#ff007c", "#41a6b5",
+]
+```
+
+If a named theme defines its own `graph_branches`, that wins over a generic
+`[graph.color.branches]` setting — see [Themes](/configurations/themes/).
+
+## `[color]`
+
+The full theme palette — ~40 tokens (`fg`, `bg`, `list_selected_fg`, etc.).
+Use this section only when you want to override a single token of an active
+named theme. For full custom palettes, prefer
+[`~/.config/gitoui/themes/<name>.toml`](/configurations/themes/) — the same
+schema, in a dedicated file.
+
+Each token accepts:
+
+- A **hex string**: `fg = "#f1ecec"`.
+- A **named color**: `fg = "red"` / `"bright-white"` / `"reset"`.
+- An **indexed color**: `fg = "42"` (xterm 256 palette).
+- The legacy struct form: `fg = { Rgb = [241, 236, 236] }`.
+
+## `[keybind]`
+
+Two-layer keybinding system — see the dedicated
+[Keybindings](/keybindings/) page for the full reference.
+
+```toml
+[keybind]
+# Global UserEvents — same shape as upstream serie.
+quit = ["q"]
+navigate_up = ["k", "up"]
+
+# Per-view scopes nest under `[keybind.scope.<path>]`.
+[keybind.scope.pr]
+approve = ["ctrl-a"]
+```
+
+## Validation
+
+gitoui validates the entire config at boot. Failures render a styled
+`--help`-shaped diagnostic block before the no-repo splash:
+
+- **TOML syntax** errors → file + line + caret pointer.
+- **Schema** mismatches (wrong type, unknown key) → which key and what was expected.
+- **Theme** problems — unknown name, missing file under `themes/`, file with
+  invalid TOML, or an unknown `base = "..."` reference.
+- **Keybind** issues — duplicate keys within a scope, unknown event name,
+  keys with more than one modifier prefix.
+
+<Aside type="tip">
+Run gitoui with a deliberately broken config to see the diagnostic format:
+```sh
+GITOUI_CONFIG_FILE=/tmp/bad.toml gitoui
+```
+</Aside>

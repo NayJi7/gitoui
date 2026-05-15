@@ -1,0 +1,30 @@
+/* Brand palette — see `assets/brand/gitoui-brand-standalone.html`. */
+:root {
+  --sl-color-accent-low: #2a0e07;
+  --sl-color-accent: #f05133; /* primary */
+  --sl-color-accent-high: #f5a899;
+  --sl-color-white: #f1ecec; /* "used" */
+  --sl-color-gray-1: #efe3e0;
+  --sl-color-gray-2: #c5b5b0;
+  --sl-color-gray-3: #8b7e7a;
+  --sl-color-gray-4: #4b4646; /* warm gray */
+  --sl-color-gray-5: #2a2624;
+  --sl-color-gray-6: #1a1716;
+  --sl-color-black: #111111; /* near-black */
+}
+
+/* Light mode keeps the brand orange as accent and pairs it with the
+   off-white background plate from the brand book. */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ffd5cd;
+  --sl-color-accent: #f05133;
+  --sl-color-accent-high: #8b2a12; /* shadow */
+  --sl-color-white: #111111;
+  --sl-color-gray-1: #2a2624;
+  --sl-color-gray-2: #4b4646;
+  --sl-color-gray-3: #8b7e7a;
+  --sl-color-gray-4: #c5b5b0;
+  --sl-color-gray-5: #efe3e0;
+  --sl-color-gray-6: #f5f4f2; /* off-white bg */
+  --sl-color-black: #ffffff;
+}

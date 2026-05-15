@@ -1,0 +1,114 @@
+---
+title: FAQ
+description: Common questions about gitoui — pronunciation, fork status, terminal compat, daily use.
+---
+
+## How do I pronounce gitoui?
+
+[`/ʒi.tu.i/`](https://en.wikipedia.org/wiki/Help:IPA/French) — like the
+French word *gitoui* would be if you stitched "git" and "oui" together.
+The "oui" half is the French word for "yes" — the project says yes to a
+fuller TUI workflow on top of serie's graph viewer.
+
+If IPA doesn't help: roughly **zhee-too-ee**.
+
+## Is gitoui a fork of serie? Why fork?
+
+Yes. [serie](https://github.com/lusingander/serie) is the upstream project
+and its commit-graph viewer is unique — inline SVG/PNG rendering through
+the terminal image protocol. gitoui keeps that core and layers on:
+
+- Side-by-side diff with hunk-level staging.
+- Blame + file history.
+- Interactive rebase plan editor with reword in place.
+- 3-way conflict editor.
+- GitHub PRs and Issues (full conversation threads).
+- User-defined themes, scoped keybinds, dynamic shortcut display.
+
+If all you want is the graph viewer, serie is the lighter option — go give
+upstream a star. gitoui is the "with batteries" cousin.
+
+## Can gitoui replace lazygit / gitui?
+
+Different focus. lazygit and gitui are full git operations toolkits — every
+command surface is interactive. gitoui starts from "I want to read history
+and review changes" and adds the operations that fit naturally on top of
+that: stage, commit, rebase, resolve conflicts, review PRs.
+
+Use gitoui if your daily flow is **read-heavy** with frequent reviews +
+some editing. Use lazygit/gitui if you want to drive every git command
+through the TUI.
+
+## Why is `Alt+letter` not firing on my system?
+
+gitoui pushes the Kitty keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES`
+flag at startup — that makes `Alt+letter` arrive as a single KeyEvent on
+supporting terminals (Kitty, Ghostty, WezTerm, foot, Konsole 22.04+, …).
+Older terminals treat Alt as a meta-prefix and send `Esc` followed by the
+letter; usually crossterm combines them, but if the bytes drift apart you
+end up firing `Cancel` (Esc) before the letter arrives.
+
+If your terminal doesn't speak the protocol, switch to `Ctrl+...` for your
+custom bindings — see [Custom keybindings](/keybindings/custom/).
+
+## I rebound a key — the Help page still shows the default
+
+Help is computed from your live config at render time. If the displayed
+key is wrong:
+
+1. Check your config validated — gitoui prints a styled diagnostic at
+   startup if there's an error.
+2. Make sure you're on the right config file (`GITOUI_CONFIG_FILE` env
+   variable might be overriding the default location).
+3. Some glyphs in the Help page are intentionally symbolic — `Esc`,
+   `↑↓`, `Enter`, `Tab`, `Space`, `#`. These don't follow rebinds (only
+   the action's *behaviour* moves, not the label).
+
+## Where do my settings live?
+
+| Path                                    | What                            |
+|-----------------------------------------|---------------------------------|
+| `~/.config/gitoui/config.toml`          | Main config.                    |
+| `~/.config/gitoui/themes/<name>.toml`   | Custom theme files.             |
+| `~/.config/gitoui/github_token.toml`    | OAuth token (mode `0600`).      |
+| `~/.cache/gitoui/avatars/`              | Avatar PNG cache.               |
+
+Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder
+and cache always live next to the config.
+
+## Can I disable the image protocol?
+
+`gitoui --protocol unicode` falls back to Unicode glyphs for the commit
+graph and skips avatar rendering. The result looks like a slightly fancier
+`git log --graph` and works in any terminal.
+
+## My terminal scrambles the graph after I exit
+
+gitoui pops the Kitty keyboard protocol on exit, but **inline image
+placements** (Kitty / iTerm2) sometimes linger if you exit via a crash or
+`SIGKILL`. Press `Ctrl+L` in your shell to clear the screen — that flushes
+the stale placements.
+
+## Does gitoui send any data to a server?
+
+The only network calls are:
+
+- **GitHub avatars** — fetched from `avatars.githubusercontent.com` and
+  cached locally. Disable with `core.option.github_avatars = false`.
+- **GitHub API** — only when you actively browse PRs / Issues. Uses your
+  OAuth token; respects the GitHub rate limit (5000 req/h per user).
+
+No telemetry, no crash reporting, no auto-update phone-home.
+
+## Is gitoui stable enough to use on real repos?
+
+It's daily-driven on the gitoui repo itself and on a few sandboxes. Pre-v1.0
+means the config schema and some keybinds may still shift — your `.toml`
+config might need touches when you upgrade. The on-disk git operations are
+all plain `git` CLI calls, no libgit2, so worst-case gitoui never corrupts
+state; it just produces an error you'd see from `git` directly.
+
+## What's the license?
+
+MIT — same as upstream serie. See
+[`LICENSE`](https://github.com/NayJi7/gitoui/blob/master/LICENSE).
