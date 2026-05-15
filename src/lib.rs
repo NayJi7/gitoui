@@ -28,7 +28,7 @@ use clap::{Parser, ValueEnum};
 use graph::GraphImageManager;
 use serde::Deserialize;
 
-/// Gitoui - Say oui to the most complete git terminal youser interface
+/// Gitoui - Say oui to the smoothest git terminal youser experience
 #[derive(Parser)]
 #[command(version)]
 struct Args {
@@ -403,6 +403,16 @@ pub fn run() -> Result<()> {
             repo_path: std::path::PathBuf::new(),
         });
 
+        // If we were launched from a sub-directory of a repo, jump up to
+        // the work-tree root so the header pwd, all `git` invocations,
+        // and the FS watcher anchor at the same place — the repo, not
+        // wherever the shell happened to be when the user typed
+        // `gitoui`. Failures here are harmless: when the cwd isn't in a
+        // repo at all the next `Repository::load(".", ...)` returns the
+        // no-repo error and the splash takes over.
+        if let Some(root) = git::find_repo_root(Path::new(".")) {
+            let _ = std::env::set_current_dir(&root);
+        }
         let repository = match git::Repository::load(Path::new("."), order, max_count) {
             Ok(repo) => repo,
             Err(e) if terminal.is_none() => {

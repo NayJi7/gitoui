@@ -301,56 +301,62 @@ fn check_git_repository(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Public probe used by the dir-input overlay to reject paths that aren't
-/// the *root* of a git work tree (or aren't bare repos) *before* doing the
-/// cd. We deliberately reject subfolders of a repo — opening `~/proj/src/`
-/// when the repo lives at `~/proj/` should fail, since gitoui's whole UI
-/// is anchored at the repo root. Returns false on any I/O error.
+/// Resolve the root of the git work tree (or bare repo) that contains
+/// `path`. Returns `Some(root)` when `path` is *anywhere* inside a git
+/// tree — the root itself OR any sub-directory — and `None` otherwise.
+///
+/// This is the entry point gitoui uses to anchor its whole UI at the
+/// repo root: running `gitoui` from `~/proj/src/sub/` resolves to
+/// `~/proj/` and we `cd` there before loading. The dir-input overlay
+/// uses the same resolver so users can type any path inside a repo and
+/// gitoui rebases to the root.
 ///
 /// Combines `--is-bare-repository` and `--show-toplevel` into a single
 /// `git rev-parse` invocation — `git` prints one result per flag on its
-/// own line, so we get both answers for the cost of one fork+exec. The
-/// dir-input overlay calls this on every Enter / 2nd-click; halving the
-/// process count makes the cd commit feel instant on slower machines.
-pub fn is_git_path(path: &Path) -> bool {
+/// own line, so we get both answers for the cost of one fork+exec.
+pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     let output = Command::new("git")
         .arg("rev-parse")
         .arg("--is-bare-repository")
         .arg("--show-toplevel")
         .current_dir(path)
-        .output();
-    let Ok(out) = output else { return false };
+        .output()
+        .ok()?;
     // stdout layout (git processes flags left-to-right and prints each
     // result on its own line):
-    //   work-tree root:  "false\n<path>\n"     exit 0
-    //   subfolder:       "false\n<root>\n"     exit 0 — caught by the
-    //                                                   toplevel == path check
+    //   work-tree root:  "false\n<root>\n"     exit 0
+    //   subfolder:       "false\n<root>\n"     exit 0 — same as root,
+    //                                                   `<root>` always points
+    //                                                   at the toplevel
     //   bare repo:       "true\n"              exit 128 — `--show-toplevel`
     //                                                     fails ("must be run
     //                                                     in a work tree") but
     //                                                     `--is-bare-repository`
     //                                                     already wrote "true"
     //   non-repo:        ""                    exit 128
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
     if lines.next() == Some("true") {
-        // Bare repo — the toplevel error is expected and ignored.
-        return true;
+        // Bare repo — the given path *is* the repo (or `--git-dir`).
+        // Canonicalise so the caller sees a stable absolute path.
+        return std::fs::canonicalize(path).ok();
     }
-    // Past this point we need a clean exit; a non-success status means the
-    // path isn't inside any git tree (not just "no work tree").
-    if !out.status.success() {
-        return false;
+    if !output.status.success() {
+        return None;
     }
     let toplevel = lines.next().unwrap_or("").trim();
     if toplevel.is_empty() {
-        return false;
+        return None;
     }
-    // Canonicalise both sides so symlinks and trailing slashes don't
-    // false-negative when comparing toplevel to the user-supplied path.
-    let toplevel_canon = std::fs::canonicalize(toplevel).ok();
-    let target_canon = std::fs::canonicalize(path).ok();
-    toplevel_canon == target_canon
+    // Canonicalise so symlinks / trailing slashes don't surface in the
+    // displayed pwd or in equality checks against other PathBuf values.
+    std::fs::canonicalize(toplevel).ok()
+}
+
+/// Back-compat shim — `find_repo_root(path).is_some()`. Used in spots
+/// where callers only need a yes/no answer (e.g. early validation).
+pub fn is_git_path(path: &Path) -> bool {
+    find_repo_root(path).is_some()
 }
 
 fn is_inside_work_tree(path: &Path) -> bool {

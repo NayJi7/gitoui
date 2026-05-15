@@ -642,17 +642,20 @@ impl App<'_> {
                                 ));
                                 continue;
                             }
-                            if !crate::git::is_git_path(&target) {
-                                self.dir_error_message = Some((
-                                    "not a git directory".to_string(),
-                                    std::time::Instant::now(),
-                                ));
-                                continue;
-                            }
-                            match std::env::set_current_dir(&target) {
+                            let repo_root = match crate::git::find_repo_root(&target) {
+                                Some(r) => r,
+                                None => {
+                                    self.dir_error_message = Some((
+                                        "not a git directory".to_string(),
+                                        std::time::Instant::now(),
+                                    ));
+                                    continue;
+                                }
+                            };
+                            match std::env::set_current_dir(&repo_root) {
                                 Ok(_) => {
                                     self.dir_recents =
-                                        crate::recents::push(&target, &self.dir_recents);
+                                        crate::recents::push(&repo_root, &self.dir_recents);
                                     self.dir_input.close();
                                     self.app_status.spinner_active = false;
                                     let _ = ratatui::crossterm::execute!(
@@ -5024,17 +5027,20 @@ impl<'a> App<'a> {
                                         ));
                                         return Ok(true);
                                     }
-                                    if !crate::git::is_git_path(&target) {
-                                        self.dir_error_message = Some((
-                                            "not a git directory".to_string(),
-                                            std::time::Instant::now(),
-                                        ));
-                                        return Ok(true);
-                                    }
-                                    match std::env::set_current_dir(&target) {
+                                    let repo_root = match crate::git::find_repo_root(&target) {
+                                        Some(r) => r,
+                                        None => {
+                                            self.dir_error_message = Some((
+                                                "not a git directory".to_string(),
+                                                std::time::Instant::now(),
+                                            ));
+                                            return Ok(true);
+                                        }
+                                    };
+                                    match std::env::set_current_dir(&repo_root) {
                                         Ok(_) => {
                                             self.dir_recents =
-                                                crate::recents::push(&target, &self.dir_recents);
+                                                crate::recents::push(&repo_root, &self.dir_recents);
                                             self.dir_input.close();
                                             self.dir_dropdown_area = None;
                                             self.app_status.spinner_active = false;
