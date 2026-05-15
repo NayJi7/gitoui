@@ -259,6 +259,15 @@ impl<'a> ListView<'a> {
         // gated to SearchState::Applied inside the helper, so it's a
         // no-op outside search mode.
         self.maybe_sync_search_status();
+
+        // Auto lazy-load: when the cursor approaches the bottom of
+        // what we've loaded, pre-fetch the next batch transparently
+        // so the user never feels a "limit". The state's helper
+        // de-dupes the request so we only fire once per growth step.
+        if self.as_list_state().should_trigger_lazy_load() {
+            self.as_mut_list_state().mark_lazy_attempt();
+            self.load_more();
+        }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {

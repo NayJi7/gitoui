@@ -974,9 +974,19 @@ impl<'a> ConfigView<'a> {
         // outside the viewport, slide `left_scroll` so it's visible. This
         // is what makes ↑ / ↓ keep working past the bottom edge of the
         // pane on small terminals.
+        //
+        // Edge anchoring: when the cursor reaches the very FIRST or
+        // LAST selectable item, snap the scroll all the way to that
+        // edge. Otherwise the section headers above (or trailing blank
+        // rows below) stay clipped — and the `…` marker reads as
+        // "there's more" when there isn't.
         let viewport_h = left_area.height as usize;
         let total_lines = lines.len();
-        if let Some(sel_row) = self
+        if self.selected == 0 {
+            self.left_scroll = 0;
+        } else if self.selected + 1 >= CONFIG_ITEM_COUNT {
+            self.left_scroll = total_lines.saturating_sub(viewport_h);
+        } else if let Some(sel_row) = self
             .left_item_rows
             .iter()
             .position(|r| r == &Some(self.selected))

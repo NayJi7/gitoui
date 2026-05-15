@@ -2,7 +2,18 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     rc::Rc,
+    sync::atomic::{AtomicUsize, Ordering},
 };
+
+/// Global de-dup for the lazy-load auto-trigger. Stores the cursor
+/// position at which we last fired `LoadMore`. Lives at module scope
+/// so it survives the `CommitListState` rebuild that follows each
+/// reload — without that, every keystroke at the bottom would re-fire
+/// the loader and the user would see a hard blink per nav event.
+///
+/// `usize::MAX` is the sentinel for "never fired" so the very first
+/// near-bottom move always passes the gate.
+static LAST_LAZY_TRIGGER_POS: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use laurier::highlight::highlight_matched_text;
@@ -308,6 +319,11 @@ pub struct CommitListState<'a> {
     offset: usize,
     total: usize,
     height: usize,
+    // Lazy-load dedup lives in a module-level static (see
+    // `LAST_LAZY_TRIGGER_POS` below) so it survives the state rebuild
+    // that happens on every refresh. Storing it here would be reset
+    // by every `LoadMore` reload, causing the loader to re-fire on
+    // every keypress while the user is near the bottom.
 
     default_ignore_case: bool,
     default_fuzzy: bool,
@@ -563,6 +579,37 @@ impl<'a> CommitListState<'a> {
             .commit
             .parent_commit_hashes
             .first()
+    }
+
+    /// Returns true when the cursor is within `THRESHOLD` rows of the
+    /// last loaded commit AND we have moved at least `MIN_PROGRESS`
+    /// rows past the spot where we last fired a load. The progress
+    /// gate is the dedup: without it, every keystroke while the user
+    /// is parked at the bottom would re-fire `LoadMore`, and each
+    /// reload takes a frame or two — perceived as a hard blink.
+    ///
+    /// The dedup lives in a module-level `AtomicUsize` so it survives
+    /// the `CommitListState` rebuild that happens after every reload.
+    /// Field storage would reset back to 0 on rebuild and defeat the
+    /// guard.
+    pub fn should_trigger_lazy_load(&self) -> bool {
+        const THRESHOLD: usize = 300;
+        const MIN_PROGRESS: usize = 200;
+        if self.total == 0 {
+            return false;
+        }
+        let pos = self.current_selected_index();
+        if pos + THRESHOLD < self.total {
+            return false;
+        }
+        let last = LAST_LAZY_TRIGGER_POS.load(Ordering::Relaxed);
+        // First trigger of the session OR meaningful forward progress
+        // past the last trigger position — both unlock another load.
+        last == usize::MAX || pos >= last.saturating_add(MIN_PROGRESS)
+    }
+
+    pub fn mark_lazy_attempt(&mut self) {
+        LAST_LAZY_TRIGGER_POS.store(self.current_selected_index(), Ordering::Relaxed);
     }
 
     pub fn select_prev(&mut self) {

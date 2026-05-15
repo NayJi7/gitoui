@@ -88,6 +88,10 @@ export default defineConfig({
           label: "FAQ",
           link: "/faq/",
         },
+        {
+          label: "License",
+          link: "/license/",
+        },
       ],
     }),
   ],
