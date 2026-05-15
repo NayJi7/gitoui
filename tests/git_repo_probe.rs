@@ -48,23 +48,23 @@ fn accepts_bare_repository() {
 }
 
 #[test]
-fn rejects_subfolder_of_work_tree() {
+fn accepts_subfolder_of_work_tree() {
     let dir = TempDir::new().unwrap();
     init_repo(&dir);
     let sub = dir.path().join("src");
     std::fs::create_dir(&sub).unwrap();
-    // Subdirectory IS inside the work tree per git, but gitoui's UI is
-    // anchored at the repo root — so we reject it.
-    assert!(!gitoui::git::is_git_path(&sub));
+    // Since `feat: resolve repo root from any sub-directory`, is_git_path
+    // walks up to the work-tree root — any subfolder of a repo is valid.
+    assert!(gitoui::git::is_git_path(&sub));
 }
 
 #[test]
-fn rejects_nested_subfolder_of_work_tree() {
+fn accepts_nested_subfolder_of_work_tree() {
     let dir = TempDir::new().unwrap();
     init_repo(&dir);
     let nested = dir.path().join("src").join("inner");
     std::fs::create_dir_all(&nested).unwrap();
-    assert!(!gitoui::git::is_git_path(&nested));
+    assert!(gitoui::git::is_git_path(&nested));
 }
 
 #[test]
