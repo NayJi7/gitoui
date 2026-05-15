@@ -1,3 +1,39 @@
+/* Brand fonts — JetBrains Mono is the gitoui brand book's headline
+   typeface; we use it for headings + code + UI accents, and let the
+   body fall back to the platform's system sans for long-form reading. */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+
+:root {
+  --sl-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --sl-font-headings: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Apply the headings font to every heading + the splash hero title.
+   Starlight doesn't expose a CSS variable for headings out of the box,
+   so we target the structural classes directly. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+.sl-markdown-content h5,
+.sl-markdown-content h6,
+.hero h1,
+.site-title,
+[class*="card"] [class*="title"] {
+  font-family: var(--sl-font-headings);
+  letter-spacing: -0.01em;
+}
+
+/* Sidebar nav titles + page TOC keep the same look so the type system
+   feels intentional rather than headings-only. */
+.sidebar-content a,
+.sl-link-card .title {
+  font-family: var(--sl-font-headings);
+}
+
 /* Brand palette — see `assets/brand/gitoui-brand-standalone.html`. */
 :root {
   --sl-color-accent-low: #2a0e07;
