@@ -1,0 +1,625 @@
+---
+// Splash hero override — full-bleed, full-viewport landing with a soft
+// starfield, fade-in choreography, and three CTAs. Header is hidden
+// while the hero is at the top of the page (per-page behaviour keyed
+// on `data-hero-page` on <html>).
+import { Image } from "astro:assets";
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, image } = data.hero || {};
+
+let darkImage: ImageMetadata | undefined;
+let lightImage: ImageMetadata | undefined;
+if (image) {
+  if ("file" in image) {
+    darkImage = image.file;
+  } else if ("dark" in image) {
+    darkImage = image.dark;
+    lightImage = image.light;
+  }
+}
+
+const imageAttrs = {
+  loading: "eager" as const,
+  decoding: "async" as const,
+  width: 600,
+  height: 600,
+  alt: image?.alt || "",
+};
+
+// Total visible chars in the title (used to size the post-typing
+// fade-up delay for the tagline + buttons). Typed.js drives the
+// actual character-by-character animation client-side.
+const titleCharCount = (title as string).replace(/<[^>]+>/g, "").length;
+const TYPED_SPEED_MS = 110;
+const TYPED_START_MS = 900;
+const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
+---
+
+<section class="hero" data-hero style={`--caret-show: ${titleDoneMs}ms`}>
+  <div class="hero-stars" aria-hidden="true">
+    <div class="hero-stars-drift"></div>
+  </div>
+
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <h1 id="_top" data-page-title class="hero-title">
+        <span
+          class="hero-typed"
+          data-typed-source={title}
+          data-typed-speed={TYPED_SPEED_MS}
+          data-typed-start={TYPED_START_MS}
+          set:html={title}
+        />
+      </h1>
+      {tagline && <p class="hero-tagline" set:html={tagline} />}
+      <div class="hero-actions">
+        <a class="cta cta-primary" href="/getting-started/installation/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+          </svg>
+          <span>Oui're so in!</span>
+        </a>
+        <a class="cta cta-secondary" href="/introduction/">
+          <span>RTFM, gently</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            aria-hidden="true">
+            <path d="M5 12h14M13 5l7 7-7 7"></path>
+          </svg>
+        </a>
+        <a class="cta cta-ghost" href="https://github.com/NayJi7/gitoui">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.01-.02-1.98-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.18 1.18.92-.26 1.91-.39 2.89-.39.98 0 1.97.13 2.89.39 2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.76.11 3.05.73.81 1.18 1.84 1.18 3.1 0 4.42-2.7 5.39-5.27 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.68.8.56C20.22 21.38 23.5 17.07 23.5 12 23.5 5.65 18.35.5 12 .5z"></path>
+          </svg>
+          <span>Star us, maybe?</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="hero-mark" aria-hidden="true">
+      {darkImage && (
+        <Image src={darkImage} {...imageAttrs}
+          class:list={["hero-mark-img", { "light:sl-hidden": Boolean(lightImage) }]} />
+      )}
+      {lightImage && (
+        <Image src={lightImage} {...imageAttrs}
+          class="hero-mark-img dark:sl-hidden" />
+      )}
+    </div>
+  </div>
+
+  <a href="#beyond" class="hero-scroll-hint" aria-label="Scroll for more">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M6 9l6 6 6-6"></path>
+    </svg>
+  </a>
+</section>
+<div id="beyond" class="hero-anchor"></div>
+
+<script is:inline>
+  (function () {
+    document.documentElement.setAttribute("data-hero-page", "");
+    const onScroll = () => {
+      const atTop = window.scrollY < 80;
+      document.documentElement.toggleAttribute("data-hero-at-top", atTop);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+  })();
+</script>
+
+<script>
+  import Typed from "typed.js";
+
+  // Wait for fonts to load so Orbitron is ready before the type-in
+  // starts (otherwise the first chars render in a fallback font and
+  // re-flow mid-animation).
+  const start = async () => {
+    const el = document.querySelector<HTMLElement>(".hero-typed");
+    if (!el) return;
+    const html = el.dataset.typedSource;
+    const speed = Number(el.dataset.typedSpeed ?? 110);
+    const startDelay = Number(el.dataset.typedStart ?? 1500);
+    if (!html) return;
+    if (document.fonts?.ready) {
+      try { await document.fonts.ready; } catch {}
+    }
+    el.innerHTML = "";
+    // Reveal in the same frame we hand off to typed.js so there's no
+    // gap between "hidden" and "typing has started".
+    el.classList.add("is-ready");
+    const typed = new Typed(el, {
+      strings: [html],
+      typeSpeed: speed,
+      startDelay,
+      showCursor: true,
+      cursorChar: "▏",
+      contentType: "html",
+      loop: false,
+      smartBackspace: false,
+    });
+    // typed.js only adds `.typed-cursor--blink` once `toggleBlinking`
+    // fires — which doesn't happen until typing pauses. Add it
+    // manually right after init so the cursor blinks during the
+    // initial startDelay too. During active typing typed.js removes
+    // the class itself, so the cursor goes solid then.
+    requestAnimationFrame(() => {
+      typed.cursor?.classList.add("typed-cursor--blink");
+    });
+  };
+  start();
+  // Re-init on view transitions / client-side navigations.
+  document.addEventListener("astro:page-load", start);
+</script>
+
+<style is:global>
+  /* On the hero page, hide the header while we're at the top so the
+     splash owns the first viewport. Other pages: header always shown. */
+  :root[data-hero-page] header.header {
+    transition:
+      transform 380ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 320ms ease;
+  }
+  :root[data-hero-page][data-hero-at-top] header.header {
+    transform: translateY(-110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* Zero only the very first content-panel's vertical padding so the
+     hero can sit at viewport top — and ONLY there. The selector chain
+     is tight so it doesn't widen the markdown that follows. */
+  :root[data-hero-page] .content-panel:has(> .sl-container > .hero) {
+    padding-block: 0;
+  }
+  :root[data-hero-page] .content-panel:has(> .sl-container > .hero) > .sl-container {
+    padding: 0;
+  }
+</style>
+
+<style>
+  /* ── shape ────────────────────────────────────────────────────────── */
+  .hero {
+    --brand: #f05133;
+    --cream: #f1ecec;
+    --radius: 0.25rem;
+    --nav-h: var(--sl-nav-height, 3.75rem);
+    position: relative;
+    /* Pull the hero up to cover the strip that Starlight normally
+       reserves for the header (it's still there in the layout flow
+       even though we hide it via transform). Add that same amount to
+       the min-height so the visible hero stays full-viewport. */
+    margin-top: calc(var(--nav-h) * -1);
+    min-height: calc(100vh + var(--nav-h));
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    isolation: isolate;
+    /* Bleed full-width regardless of container padding above. */
+    width: 100vw;
+    margin-inline: calc(50% - 50vw);
+    padding-inline: clamp(1.5rem, 5vw, 4rem);
+    padding-block: clamp(2rem, 6vh, 4rem);
+  }
+
+  /* ── starfield ────────────────────────────────────────────────────── */
+  .hero-stars {
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(
+        ellipse 90% 70% at 50% 35%,
+        rgba(240, 81, 51, 0.06),
+        transparent 70%
+      );
+  }
+  /* Two layers of pinpoint stars; one drifts very gently, the other
+     twinkles very gently. Both opacities cap low so the field reads as
+     atmosphere, not as decoration. */
+  .hero-stars-drift,
+  .hero-stars::before {
+    position: absolute;
+    inset: -10%;
+    content: "";
+    background-image:
+      radial-gradient(1px 1px at 23% 17%, rgba(255, 255, 255, 0.55) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 81% 8%, rgba(255, 255, 255, 0.45) 50%, transparent 100%),
+      radial-gradient(1px 1px at 42% 73%, rgba(255, 255, 255, 0.5) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 12% 88%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(1.4px 1.4px at 67% 32%, rgba(255, 255, 255, 0.55) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 91% 51%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(1px 1px at 7% 41%, rgba(255, 255, 255, 0.35) 50%, transparent 100%),
+      radial-gradient(1.1px 1.1px at 55% 91%, rgba(255, 255, 255, 0.45) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 33% 28%, rgba(240, 81, 51, 0.4) 50%, transparent 100%),
+      radial-gradient(1.3px 1.3px at 76% 60%, rgba(240, 81, 51, 0.32) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 49% 12%, rgba(255, 255, 255, 0.5) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 88% 84%, rgba(255, 255, 255, 0.4) 50%, transparent 100%);
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+  }
+  .hero-stars-drift {
+    animation: hero-drift 22s ease-in-out infinite alternate;
+  }
+  .hero-stars::before {
+    background-image:
+      radial-gradient(1px 1px at 14% 62%, rgba(255, 255, 255, 0.45) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 38% 4%, rgba(255, 255, 255, 0.35) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 63% 21%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 85% 28%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 19% 36%, rgba(240, 81, 51, 0.32) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 70% 79%, rgba(255, 255, 255, 0.35) 50%, transparent 100%),
+      radial-gradient(1px 1px at 27% 53%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 53% 38%, rgba(255, 255, 255, 0.32) 50%, transparent 100%);
+    animation: hero-twinkle 6s ease-in-out infinite;
+  }
+  @keyframes hero-twinkle {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+  }
+  @keyframes hero-drift {
+    0%   { transform: translate3d(0, 0, 0); }
+    100% { transform: translate3d(-1.5%, -1%, 0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-stars::before,
+    .hero-stars-drift { animation: none; }
+  }
+
+  /* Soft fade-out at the bottom so the hero blends into the page below
+     instead of stopping at a hard edge. Uses the page background, so
+     it tracks dark / light theme automatically. */
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 12vh;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--sl-color-bg) 95%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* ── layout ───────────────────────────────────────────────────────── */
+  .hero-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(2rem, 5vw, 4rem);
+    /* Match Starlight's normal content column width — the starfield
+       still bleeds full width via the `.hero` wrapper, but the title +
+       tagline + actions + mark stay within the same horizontal
+       envelope as the rest of the doc. */
+    width: min(100%, 56rem);
+  }
+  @media (max-width: 50rem) {
+    .hero-inner {
+      grid-template-columns: 1fr;
+      gap: 2.5rem;
+      text-align: center;
+    }
+    .hero-copy { align-items: center; }
+    .hero-actions { justify-content: center; }
+  }
+
+  /* ── copy ─────────────────────────────────────────────────────────── */
+  .hero-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: clamp(1.5rem, 3vw, 2.5rem);
+  }
+  /* Extra breathing room between the title and the tagline beneath it. */
+  .hero-title {
+    margin-bottom: clamp(0.5rem, 1.5vw, 1.25rem);
+    position: relative;
+  }
+  /* typed.js paints chars into `.hero-typed` one at a time and appends
+     its own `.typed-cursor` span at the end. We style that cursor to
+     match the brand — solid orange block, slow blink.
+     The element starts INVISIBLE so the SSR text never flashes; the
+     JS adds `.is-ready` right before it kicks off typed.js. */
+  .hero-typed {
+    display: inline;
+    visibility: hidden;
+  }
+  .hero-typed.is-ready {
+    visibility: visible;
+  }
+  .hero-title :global(.typed-cursor) {
+    color: var(--brand);
+    font-weight: 400;
+    margin-left: 0.05em;
+    opacity: 1;
+    /* Default: SOLID. typed.js removes `--blink` while it's writing
+       chars and re-adds it when idle (between strings + after the
+       last char). We also force it on right after init so the cursor
+       blinks during the initial startDelay. */
+    animation: none !important;
+  }
+  .hero-title :global(.typed-cursor.typed-cursor--blink) {
+    /* Slow, deliberate blink — feels like a terminal idle cursor. */
+    animation: hero-typed-blink 1.3s step-end infinite !important;
+  }
+  @keyframes hero-typed-blink {
+    0%, 50% { opacity: 1; }
+    50.01%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-title :global(.typed-cursor) { animation: none; }
+  }
+  .hero-title {
+    font-family: var(--gitoui-wordmark-font);
+    font-size: clamp(3.25rem, 11vw, 7.5rem);
+    font-weight: 700;
+    line-height: 0.95;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .hero-title :global(.git-part) { color: var(--brand); }
+  .hero-title :global(.oui-part) { color: var(--cream); }
+  :root[data-theme="light"] .hero-title :global(.oui-part) { color: #111; }
+
+  .hero-tagline {
+    position: relative;
+    font-size: clamp(1.05rem, 1.7vw, 1.35rem);
+    line-height: 1.5;
+    color: var(--sl-color-text);
+    margin: 0;
+    /* Leave room under the text for the animated underline. */
+    padding-bottom: 1.25rem;
+    max-width: 38ch;
+    opacity: 0;
+    /* Wait a beat after the title finishes typing, then fade up.
+       Distinct visible pauses make the choreography read better. */
+    animation: hero-fade-up 700ms cubic-bezier(0.2, 0.7, 0.2, 1) calc(var(--caret-show, 1.5s) + 350ms) forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-tagline { opacity: 1; animation: none; }
+  }
+  /* Both `<em>oui</em>` and `<em>you</em>` colour-match the brand and
+     stay italic for the playful editorial accent. */
+  .hero-tagline :global(em) {
+    color: var(--brand);
+    font-style: italic;
+    font-weight: 500;
+  }
+  /* Animated underline that swipes in from left to right after the
+     fade-up choreography settles. Acts as the visual separator
+     between the tagline and the CTAs below. */
+  .hero-tagline::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    width: clamp(8rem, 60%, 16rem);
+    background: var(--brand);
+    /* Real wipe (mask) rather than a scaleX — the bar always has its
+       final length, a clip-path reveals it left-to-right. */
+    clip-path: inset(0 100% 0 0);
+    animation: hero-wipe 900ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+    animation-delay: calc(var(--caret-show, 1.5s) + 1000ms);
+  }
+  @keyframes hero-wipe {
+    to { clip-path: inset(0 0 0 0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-tagline::after {
+      animation: none;
+      clip-path: inset(0 0 0 0);
+    }
+  }
+
+  /* ── actions ──────────────────────────────────────────────────────── */
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+  /* Each button fades up with a small stagger between them so they
+     don't all pop in at the same instant. Starts after the tagline
+     fade-in has had a beat to settle. */
+  .cta {
+    opacity: 0;
+    animation: hero-fade-up 600ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  }
+  /* Buttons start AFTER the tagline + underline have fully landed
+     (tagline @ +350ms + 700ms duration ≈ +1050ms; underline @ +1000ms
+     + 900ms ≈ +1900ms). Stagger them with a clear gap. */
+  .cta:nth-child(1) { animation-delay: calc(var(--caret-show, 1.5s) + 1400ms); }
+  .cta:nth-child(2) { animation-delay: calc(var(--caret-show, 1.5s) + 1600ms); }
+  .cta:nth-child(3) { animation-delay: calc(var(--caret-show, 1.5s) + 1800ms); }
+  @media (prefers-reduced-motion: reduce) {
+    .cta { opacity: 1; animation: none; }
+  }
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 1.25rem;
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 180ms ease, background-color 180ms ease,
+      border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+  }
+  .cta svg { width: 1.05rem; height: 1.05rem; }
+  .cta-primary {
+    background: var(--brand);
+    color: #111;
+    border: 1px solid var(--brand);
+    box-shadow: 0 6px 22px -8px rgba(240, 81, 51, 0.5);
+  }
+  .cta-primary:hover {
+    background: #ff6346;
+    border-color: #ff6346;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 28px -10px rgba(240, 81, 51, 0.65);
+  }
+  .cta-secondary {
+    color: var(--cream);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--sl-color-gray-4);
+  }
+  .cta-secondary:hover {
+    background: rgba(240, 81, 51, 0.1);
+    border-color: var(--brand);
+    color: var(--brand);
+    transform: translateY(-1px);
+  }
+  .cta-ghost {
+    color: var(--cream);
+    background: transparent;
+    border: 1px solid var(--sl-color-gray-4);
+  }
+  .cta-ghost:hover {
+    border-color: var(--cream);
+    transform: translateY(-1px);
+  }
+  :root[data-theme="light"] .cta-secondary,
+  :root[data-theme="light"] .cta-ghost { color: #111; }
+
+  /* ── mark ─────────────────────────────────────────────────────────── */
+  .hero-mark {
+    display: grid;
+    place-items: center;
+    animation: hero-fade-scale 1200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: 100ms;
+  }
+  .hero-mark-img {
+    width: 100%;
+    max-width: min(28rem, 80%);
+    height: auto;
+    filter: drop-shadow(0 12px 40px rgba(240, 81, 51, 0.3));
+    animation: hero-float 7s ease-in-out infinite;
+    animation-delay: 1.3s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-mark-img { animation: none; }
+  }
+
+  /* ── scroll hint ──────────────────────────────────────────────────── */
+  .hero-scroll-hint {
+    position: absolute;
+    /* Sit above the fade-out gradient (12vh tall) so the arrow stays
+       visible — sticking it at the very bottom puts it inside the
+       fade and it disappears against the background. */
+    bottom: clamp(4rem, 9vh, 6.5rem);
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    opacity: 0;
+    z-index: 1;
+    animation: hero-fade-in 600ms ease 1500ms forwards;
+  }
+  .hero-scroll-hint svg {
+    width: 1.4rem;
+    height: 1.4rem;
+    animation: hero-scroll-bob 1.8s ease-in-out infinite;
+  }
+  .hero-scroll-hint:hover { color: var(--brand); }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-scroll-hint svg { animation: none; }
+  }
+
+  .hero-anchor { scroll-margin-top: 5rem; }
+
+  /* ── keyframes ────────────────────────────────────────────────────── */
+  @keyframes hero-fade-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes hero-fade-scale {
+    from { opacity: 0; transform: scale(0.85); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes hero-fade-in {
+    to { opacity: 1; }
+  }
+  @keyframes hero-float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-12px); }
+  }
+  @keyframes hero-scroll-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(6px); }
+  }
+
+  /* ── light theme overrides ─────────────────────────────────────────
+     The whole hero was painted for dark mode (cream text, white stars,
+     translucent dark gradients). On light backgrounds those become
+     either invisible or wrong-feeling, so we mirror each token. */
+
+  :root[data-theme="light"] .hero-stars {
+    background:
+      radial-gradient(
+        ellipse 90% 70% at 50% 35%,
+        rgba(240, 81, 51, 0.08),
+        transparent 70%
+      );
+  }
+  :root[data-theme="light"] .hero-stars-drift,
+  :root[data-theme="light"] .hero-stars::before {
+    /* Dark pinpoints on the cream / off-white background, with a few
+       orange ones to keep the brand atmosphere. */
+    background-image:
+      radial-gradient(1px 1px at 23% 17%, rgba(20, 18, 17, 0.5) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 81% 8%, rgba(20, 18, 17, 0.4) 50%, transparent 100%),
+      radial-gradient(1px 1px at 42% 73%, rgba(20, 18, 17, 0.45) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 12% 88%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(1.4px 1.4px at 67% 32%, rgba(20, 18, 17, 0.5) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 91% 51%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(1px 1px at 7% 41%, rgba(20, 18, 17, 0.3) 50%, transparent 100%),
+      radial-gradient(1.1px 1.1px at 55% 91%, rgba(20, 18, 17, 0.4) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 33% 28%, rgba(240, 81, 51, 0.55) 50%, transparent 100%),
+      radial-gradient(1.3px 1.3px at 76% 60%, rgba(240, 81, 51, 0.45) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 49% 12%, rgba(20, 18, 17, 0.45) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 88% 84%, rgba(20, 18, 17, 0.35) 50%, transparent 100%);
+  }
+  :root[data-theme="light"] .hero-stars::before {
+    background-image:
+      radial-gradient(1px 1px at 14% 62%, rgba(20, 18, 17, 0.4) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 38% 4%, rgba(20, 18, 17, 0.3) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 63% 21%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 85% 28%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 19% 36%, rgba(240, 81, 51, 0.45) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 70% 79%, rgba(20, 18, 17, 0.3) 50%, transparent 100%),
+      radial-gradient(1px 1px at 27% 53%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 53% 38%, rgba(20, 18, 17, 0.3) 50%, transparent 100%);
+  }
+
+  /* Secondary + ghost CTAs use cream text in dark mode; flip them to
+     near-black in light mode so they're actually readable. */
+  :root[data-theme="light"] .cta-secondary,
+  :root[data-theme="light"] .cta-ghost {
+    color: #111;
+    border-color: rgba(20, 18, 17, 0.2);
+  }
+  :root[data-theme="light"] .cta-secondary {
+    background: rgba(20, 18, 17, 0.04);
+  }
+  :root[data-theme="light"] .cta-secondary:hover {
+    background: rgba(240, 81, 51, 0.1);
+    border-color: var(--brand);
+    color: var(--brand);
+  }
+  :root[data-theme="light"] .cta-ghost:hover {
+    border-color: #111;
+    color: #111;
+  }
+
+  /* The G logo's drop-shadow reads as a smudge on cream — soften it. */
+  :root[data-theme="light"] .hero-mark-img {
+    filter: drop-shadow(0 12px 32px rgba(240, 81, 51, 0.2));
+  }
+</style>

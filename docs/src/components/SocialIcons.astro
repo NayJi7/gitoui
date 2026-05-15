@@ -1,0 +1,63 @@
+---
+// Override of Starlight's default SocialIcons. Adds two header buttons
+// (Install / Docs) and renders the social links from the config with
+// the SAME pill style so the trio looks uniform.
+import config from "virtual:starlight/user-config";
+import { Icon } from "@astrojs/starlight/components";
+---
+
+<div class="header-actions sl-flex">
+  <a href="/getting-started/installation/" class="header-link sl-flex">
+    <Icon name="rocket" />
+    <span>Install</span>
+  </a>
+  <a href="/introduction/" class="header-link sl-flex">
+    <Icon name="open-book" />
+    <span>Docs</span>
+  </a>
+  {
+    (config.social || []).map(({ label, href, icon }) => (
+      <a {href} rel="me" class="header-link sl-flex" aria-label={label}>
+        <Icon name={icon} />
+        <span>{label}</span>
+      </a>
+    ))
+  }
+</div>
+
+<style>
+  .header-actions {
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .header-link {
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    color: var(--sl-color-text);
+    font-size: var(--sl-text-sm);
+    font-weight: 500;
+    border-radius: 0.375rem;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .header-link:hover {
+    background: var(--sl-color-gray-5);
+    color: var(--sl-color-white);
+  }
+  .header-link svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  /* Hide labels on narrow viewports so the header doesn't crowd the
+     search bar. Icons stay visible. */
+  @media (max-width: 50rem) {
+    .header-link span {
+      display: none;
+    }
+    .header-link {
+      padding: 0.4rem;
+    }
+  }
+</style>

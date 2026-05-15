@@ -5,9 +5,10 @@
 // book.
 import { logos } from "virtual:starlight/user-images";
 import config from "virtual:starlight/user-config";
-import type { Props } from "@astrojs/starlight/props";
 
-const { siteTitle, siteTitleHref } = Astro.props as Props;
+// Starlight 0.39 moved per-route data off Astro.props onto a shared
+// locals object — see https://starlight.astro.build/manual-setup/
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
 
 // Split the title at the canonical brand cleave (`git` + `oui`). For any
 // other title string we fall back to a single span so this override
@@ -27,6 +28,9 @@ const back = m?.[2];
           src={logos.dark.src}
           width={logos.dark.width}
           height={logos.dark.height}
+          loading="eager"
+          decoding="sync"
+          fetchpriority="high"
         />
         {!("src" in config.logo) && (
           <img
@@ -35,6 +39,9 @@ const back = m?.[2];
             src={logos.light?.src}
             width={logos.light?.width}
             height={logos.light?.height}
+            loading="eager"
+            decoding="sync"
+            fetchpriority="high"
           />
         )}
       </>

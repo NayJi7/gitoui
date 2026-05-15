@@ -71,6 +71,64 @@ header.header a.site-title img {
   margin-right: 0;
 }
 
+/* Center the search bar horizontally in the header. Starlight's default
+   `.header { display: flex; justify-content: space-between; }` puts the
+   search wherever the left + right groups leave room — so when the
+   right side has more content (Install / Docs / GitHub + theme toggle)
+   the search visibly drifts left. Switch to a 3-column grid so the
+   search always sits dead-centre regardless of side widths.
+
+   The centre column uses `minmax(18rem, 30rem)` so the search keeps a
+   readable width on wide screens but can shrink on smaller layouts —
+   `auto` made it collapse to the compact "Search" pill which is what
+   `<site-search>` renders at its natural size. */
+@media (min-width: 50rem) {
+  div.header {
+    display: grid !important;
+    grid-template-columns: 1fr minmax(18rem, 30rem) 1fr;
+    align-items: center;
+    gap: var(--sl-nav-gap);
+  }
+  div.header > :first-child {
+    justify-self: start;
+  }
+  div.header > site-search {
+    justify-self: stretch;
+    width: 100%;
+  }
+  /* Site-search uses its own button element under the hood — let it
+     fill the centre column for the wider, balanced look. */
+  div.header > site-search > button {
+    width: 100%;
+  }
+  div.header > :last-child {
+    justify-self: end;
+  }
+}
+
+/* Squarer corners across the whole doc — this is a TUI's site, the
+   rounded-pill default reads as wrong context. We don't go to 0 (full
+   rectangles feel brutalist); 4px keeps elements feeling computed
+   without becoming sharp. */
+:root {
+  --sl-border-radius: 4px;
+}
+.sl-link-card,
+.card,
+[class*="card"],
+.starlight-aside,
+.expressive-code .frame,
+.expressive-code pre,
+input,
+select,
+button,
+.sl-link-button {
+  border-radius: 4px !important;
+}
+.starlight-aside { border-radius: 4px !important; }
+/* Search button (the "Search Ctrl K" pill) lives behind a custom el. */
+site-search button { border-radius: 4px !important; }
+
 /* Brand palette — see `assets/brand/gitoui-brand-standalone.html`. */
 :root {
   --sl-color-accent-low: #2a0e07;

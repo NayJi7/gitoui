@@ -34,6 +34,9 @@ export default defineConfig({
       customCss: ["./src/styles/theme.css"],
       components: {
         SiteTitle: "./src/components/SiteTitle.astro",
+        SocialIcons: "./src/components/SocialIcons.astro",
+        ThemeSelect: "./src/components/ThemeSelect.astro",
+        Hero: "./src/components/Hero.astro",
       },
       sidebar: [
         {

@@ -4,22 +4,9 @@ description: Say oui to the smoothest git terminal youser experience.
 template: splash
 hero:
   title: '<span class="git-part">git</span><span class="oui-part">oui</span>'
-  tagline: Say <em>oui</em> to the smoothest git terminal youser experience.
+  tagline: 'Say <em>oui</em> to the smoothest git terminal <em>you</em>ser experience.'
   image:
     file: ../../assets/logo-mark.svg
-  actions:
-    - text: Read the docs
-      link: /introduction/
-      icon: right-arrow
-      variant: primary
-    - text: Install gitoui
-      link: /getting-started/installation/
-      icon: rocket
-      variant: secondary
-    - text: GitHub
-      link: https://github.com/NayJi7/gitoui
-      icon: external
-      variant: minimal
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
@@ -47,12 +34,14 @@ import { Card, CardGrid } from "@astrojs/starlight/components";
 
 ## What is <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>?
 
-**<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>** is a fork of [serie](https://github.com/lusingander/serie) that goes
-beyond the commit-graph viewer. The original focus — a rich
-`git log --graph` rendered with terminal image protocols — is intact; on top of
-it <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> adds a full TUI workflow for everyday git: diffs, blame, staging,
-interactive rebase, conflict resolution, and GitHub integration for PRs and
-Issues.
+**<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>** is a fork of [serie](https://github.com/lusingander/serie),
+inspired by [GitKraken](https://www.gitkraken.com/) and the
+[Git Graph](https://marketplace.visualstudio.com/items?itemName=mhutchie.git-graph)
+VS Code extension. It goes beyond the commit-graph viewer: the original
+focus — a rich `git log --graph` rendered with terminal image
+protocols — is intact; on top of it <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> adds a full TUI workflow
+for everyday git: diffs, blame, staging, interactive rebase, conflict
+resolution, and GitHub integration for PRs and Issues.
 
 It runs the `git` CLI directly (no libgit2 binding) and pre-renders the commit
 graph as SVG/PNG images displayed inline in your terminal.
