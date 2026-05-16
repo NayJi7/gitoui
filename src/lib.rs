@@ -213,14 +213,20 @@ pub fn run() -> Result<()> {
     let args = match Args::try_parse() {
         Ok(args) => args,
         Err(err) => {
-            let proto = protocol::auto_detect();
-            print_no_repo_splash(proto);
             // clap separates "expected" exits (--help / --version) from real
             // failures via `ErrorKind`. We mirror clap's behaviour: success
             // exit on help/version, non-zero on parse errors. Using `print`
             // (stdout) for help/version and `eprint` (stderr) for errors
             // matches what `parse()` would have done.
             use clap::error::ErrorKind;
+            // Splash on every entry path EXCEPT --version: that one is
+            // meant to be parsed by scripts (install.sh, package
+            // managers, …) and a multi-line image-protocol splash
+            // bleeds into the captured output.
+            if err.kind() != ErrorKind::DisplayVersion {
+                let proto = protocol::auto_detect();
+                print_no_repo_splash(proto);
+            }
             match err.kind() {
                 ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
                     print!("{}", err);

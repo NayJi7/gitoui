@@ -338,9 +338,12 @@ check_existing() {
     if command -v "$BIN_NAME" >/dev/null 2>&1; then
         CURRENT_RAW="$("$BIN_NAME" --version 2>/dev/null || true)"
         # `--version` prints `gitoui X.Y.Z` (clap default). Grab the last
-        # whitespace-separated token; tolerate other formats by falling
-        # back to "unknown" so we still go through the update path.
-        CURRENT_VERSION="$(printf '%s\n' "$CURRENT_RAW" | awk '{print $NF}')"
+        # whitespace-separated token of the LAST line — older binaries
+        # used to print the brand splash above the version, and the
+        # captured escape sequences would otherwise re-render mid-line
+        # when echoed back. Falling back to "unknown" keeps the update
+        # path live for unknown formats.
+        CURRENT_VERSION="$(printf '%s\n' "$CURRENT_RAW" | awk 'NF{last=$NF} END{print last}')"
         [ -n "$CURRENT_VERSION" ] || CURRENT_VERSION="unknown"
         if [ "v${CURRENT_VERSION}" = "$RESOLVED_VERSION" ] \
            || [ "$CURRENT_VERSION" = "$RESOLVED_VERSION" ]; then
