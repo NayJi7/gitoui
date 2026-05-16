@@ -16,7 +16,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   <hr class="coda-rule" />
   <p class="coda-line">
     <a href="https://github.com/NayJi7/gitoui/stargazers" class="coda-stat">
-      <span class="ico">★</span><span class="num" data-stars>1</span> star
+      <span class="ico">★</span><span class="num" data-stars>—</span>&nbsp;<span data-stars-label>stars</span>
     </a>
     <span class="dot" aria-hidden="true">·</span>
     <a href={`${base}/introduction/`} class="coda-stat">
@@ -52,7 +52,10 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       // localised string ("1,234"), strip non-digits before summing.
       fetch("https://gitoui-install-counter.nayji7.workers.dev/count").then(r => r.ok ? r.json() : null),
     ]).then(([gh, cr, curl]) => {
-      if (gh?.stargazers_count != null) setText("[data-stars]", gh.stargazers_count);
+      if (gh?.stargazers_count != null) {
+        setText("[data-stars]", gh.stargazers_count);
+        setText("[data-stars-label]", gh.stargazers_count === 1 ? "star" : "stars");
+      }
       // Total downloads = crates.io (cargo install + cargo add) + curl
       // installs (the install.sh one-liner). Both paths represent a
       // person pulling gitoui to their machine; summing matches the
