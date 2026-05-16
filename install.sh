@@ -277,7 +277,7 @@ print_banner() {
         print_banner_ascii
         printf '\n'
     fi
-    printf '  %sSay oui to the most complete git terminal youser interface.%s\n' "$DIM" "$RESET"
+    printf '  %sSay oui to the smoothest git terminal youser experience.%s\n' "$DIM" "$RESET"
     printf '  %srepo:%s github.com/%s%s%s\n' "$DIM" "$RESET" "$BOLD" "$REPO" "$RESET"
     printf '\n'
 }
@@ -353,7 +353,10 @@ check_existing() {
     fi
 }
 
-# ── Download + extract — uses curl --progress-bar for a clean UI ──────
+# ── Download + extract — silent curl, clean error reporting ──────────
+# We swap the progress bar for `--silent --show-error` so failures
+# report on their own left-aligned line instead of trailing the bar's
+# carriage-return cursor at the right edge of the terminal.
 download_archive() {
     ARCHIVE="${BIN_NAME}-${VERSION_NUMBER}-${TARGET}.tar.gz"
     URL="https://github.com/${REPO}/releases/download/${RESOLVED_VERSION}/${ARCHIVE}"
@@ -362,12 +365,15 @@ download_archive() {
     # shellcheck disable=SC2064
     trap "rm -rf '$TMP'" EXIT INT TERM
     info "Downloading ${BOLD}${ARCHIVE}${RESET}"
-    printf '    %s' "${DIM}"
-    if ! curl --fail --location --progress-bar -o "${TMP}/${ARCHIVE}" "$URL"; then
-        printf '%s' "${RESET}"
+    if ! curl --fail --location --silent --show-error \
+            -o "${TMP}/${ARCHIVE}" "$URL" 2>"${TMP}/curl.err"; then
+        # Curl already wrote a one-line error to curl.err; surface it
+        # under the install prefix so the message stays in the column.
+        if [ -s "${TMP}/curl.err" ]; then
+            printf '    %s%s%s\n' "$DIM" "$(cat "${TMP}/curl.err")" "$RESET"
+        fi
         fail "Download failed: $URL"
     fi
-    printf '%s' "${RESET}"
 
     # Verify checksum when checksum.txt is published — non-fatal if
     # the file is missing (older releases may not include it).
