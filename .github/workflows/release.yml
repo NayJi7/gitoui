@@ -99,3 +99,31 @@ jobs:
           make_latest: true
           files: |
             releases/*
+
+  publish-crate:
+    # Push the source crate to crates.io after the binaries land. Runs
+    # in parallel with `release` (no needs:) — the GitHub Release and
+    # the crates.io upload don't depend on each other, and a publish
+    # failure must not orphan the binaries.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify Cargo.toml version matches the tag
+        # Refuses to publish when the bump commit was forgotten — `cargo
+        # publish` would still succeed silently with the old version.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo_v="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          if [ "$tag" != "$cargo_v" ]; then
+            echo "::error::tag $tag does not match Cargo.toml version $cargo_v"
+            exit 1
+          fi
+      - name: Publish to crates.io
+        env:
+          # Set CARGO_REGISTRY_TOKEN as a repository secret in
+          # Settings → Secrets and variables → Actions.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
