@@ -17,6 +17,7 @@ mod event;
 mod external;
 mod keybind;
 mod recents;
+mod update;
 mod view;
 mod watcher;
 mod widget;
@@ -55,6 +56,14 @@ struct Args {
     /// Initial selection of commit [default: latest]
     #[arg(short, long, value_name = "TYPE")]
     initial_selection: Option<InitialSelection>,
+
+    /// Force an update check + prompt now, then exit
+    #[arg(long, conflicts_with_all = &["no_update_check"])]
+    update: bool,
+
+    /// Skip the once-a-day automatic update check at startup
+    #[arg(long)]
+    no_update_check: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -224,6 +233,26 @@ pub fn run() -> Result<()> {
             }
         }
     };
+
+    // `--update` is the explicit escape hatch — always prompts, ignores
+    // the cache + the "never_ask" preference, and exits afterwards.
+    // Splash is shown above the check just like the --help / --version
+    // paths so the brand surfaces on every entry point.
+    if args.update {
+        let proto = protocol::auto_detect();
+        update::force_check(|| print_no_repo_splash(proto));
+        return Ok(());
+    }
+    // Otherwise, do the silent once-a-day check + prompt. The function
+    // bails out fast (no network) when the cache is fresh, the user has
+    // chosen "never", or we're not attached to a TTY. On `Updated` it
+    // already exec'd the new binary and never returns. Splash only
+    // prints if we're actually about to prompt — silent paths stay
+    // silent.
+    if !args.no_update_check {
+        let proto = protocol::auto_detect();
+        let _ = update::maybe_check_at_startup(|| print_no_repo_splash(proto));
+    }
 
     // Validate the user config FIRST — before we pay the cost of
     // initialising syntect (which loads ~100 syntax definitions and a

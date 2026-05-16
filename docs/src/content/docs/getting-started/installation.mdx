@@ -99,8 +99,28 @@ startup — only use it for development.
 
 ## Updating
 
-The `curl | sh` script is idempotent — re-run it to update to the latest
-release. `cargo install --force` does the same when installed via cargo.
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> checks crates.io for a newer release once a day at startup. When one is
+available, you'll see a prompt:
+
+- **`y`** — runs the update right away (`cargo install --force` if you installed
+  via cargo, otherwise re-runs `install.sh`) and re-launches the new binary.
+- **`n`** — skips this time. The prompt comes back tomorrow.
+- **`N`** — disables the automatic check entirely. Writes
+  `[core.option] check_updates = false` to your config file so future launches
+  stay silent. **To revert**, just remove that line from
+  `~/.config/gitoui/config.toml` and the check kicks back in on the next launch.
+
+The script and `cargo install` are both idempotent — you can also trigger an
+update manually at any time:
+
+```sh
+gitoui --update            # prompt now, regardless of cache / opt-out
+curl -fsSL https://nayji7.github.io/gitoui/install.sh | sh
+cargo install gitoui --force --locked
+```
+
+`gitoui --no-update-check` skips the daily check for a single launch without
+touching your config.
 
 ## Uninstalling
 

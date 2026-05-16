@@ -257,6 +257,11 @@ pub struct CoreOptionConfig {
     pub default_branch: Option<String>,
     #[default = true]
     pub github_avatars: bool,
+    /// Whether the binary checks crates.io for a newer version at
+    /// startup. Set to `false` (manually or via the prompt's `N`
+    /// answer) to silence the once-a-day check.
+    #[default = true]
+    pub check_updates: bool,
 }
 
 #[optional(derives = [Deserialize])]
