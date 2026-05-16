@@ -169,33 +169,55 @@ fn which(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_update() -> io::Result<()> {
+/// Run the appropriate installer for the detected install method.
+///
+/// `keep_welcome` controls whether install.sh prints its `Quick start`
+/// trailer (or, for the cargo path, whether `update.rs` prints an
+/// equivalent itself after `cargo install` returns):
+///
+/// - `true`  → explicit `gitoui --update`. The user invoked update as
+///   a one-shot command; show them how to launch gitoui afterwards
+///   instead of re-execing into the TUI.
+/// - `false` → auto-prompt at startup. The user was about to enter
+///   the TUI; suppress the welcome so the re-exec lands them straight
+///   in the running app.
+fn run_update(keep_welcome: bool) -> io::Result<()> {
     let method = detect_install_method();
     println!();
     match method {
         InstallMethod::Cargo => {
-            println!("→ Running `cargo install gitoui --locked --force`…");
+            // `--quiet` mutes cargo's "Compiling …" stream but still
+            // surfaces warnings / errors — gives the same visual
+            // calm as install.sh's progress lines.
             let status = Command::new("cargo")
-                .args(["install", "gitoui", "--locked", "--force"])
+                .args(["install", "gitoui", "--locked", "--force", "--quiet"])
                 .status()?;
             if !status.success() {
                 return Err(io::Error::other(
                     "cargo install exited non-zero — leaving current binary in place",
                 ));
             }
+            // Cargo doesn't print a quick-start hint; we do it
+            // ourselves so the user lands in the same spot as
+            // install.sh's tail.
+            if keep_welcome {
+                print_post_update_welcome();
+            }
         }
         InstallMethod::CurlScript => {
-            println!("→ Re-running install.sh from {INSTALL_SH_URL}…");
-            // sh -c "curl -fsSL <url> | sh" so the pipe stays inside the
-            // shell. `GITOUI_INSTALL_QUIET` tells install.sh to skip its
-            // own banner + welcome (we already drew them above) so the
-            // output isn't a duplicate splash. `GITOUI_INSTALL_FORCE_BINARY`
-            // pins install.sh to the binary path so it doesn't accidentally
-            // delegate to `cargo install --force` if the user has a stale
-            // `~/.cargo/bin/gitoui` alongside their `~/.local/bin/gitoui`.
-            let status = Command::new("sh")
-                .env("GITOUI_INSTALL_QUIET", "1")
-                .env("GITOUI_INSTALL_FORCE_BINARY", "1")
+            // sh -c "curl -fsSL <url> | sh" so the pipe stays inside
+            // the shell. install.sh honours these env knobs:
+            //   GITOUI_INSTALL_NO_BANNER   skip its brand splash
+            //   GITOUI_INSTALL_NO_WELCOME  skip its quick-start trailer
+            //   GITOUI_INSTALL_FORCE_BINARY  pin to ~/.local/bin even
+            //     if a stale ~/.cargo/bin/gitoui exists
+            let mut cmd = Command::new("sh");
+            cmd.env("GITOUI_INSTALL_NO_BANNER", "1")
+                .env("GITOUI_INSTALL_FORCE_BINARY", "1");
+            if !keep_welcome {
+                cmd.env("GITOUI_INSTALL_NO_WELCOME", "1");
+            }
+            let status = cmd
                 .arg("-c")
                 .arg(format!("curl -fsSL '{INSTALL_SH_URL}' | sh"))
                 .status()?;
@@ -206,8 +228,29 @@ fn run_update() -> io::Result<()> {
             }
         }
     }
-    println!();
     Ok(())
+}
+
+/// Mirrors install.sh's `print_welcome` so the cargo path (which doesn't
+/// invoke install.sh) ends on the same Quick-start trailer when the user
+/// explicitly ran `gitoui --update`.
+fn print_post_update_welcome() {
+    use std::io::IsTerminal;
+    let color = io::stdout().is_terminal() && env::var_os("NO_COLOR").is_none();
+    let (orange, bold, dim, reset) = if color {
+        ("\x1b[38;2;240;81;51m", "\x1b[1m", "\x1b[2m", "\x1b[0m")
+    } else {
+        ("", "", "", "")
+    };
+    println!();
+    println!("  {bold}Quick start{reset} — inside any git repo:");
+    println!("    {orange}{bold}gitoui{reset}        {dim}open the commit-graph viewer{reset}");
+    println!("    {orange}{bold}gitoui --help{reset} {dim}all flags and options{reset}");
+    println!();
+    println!(
+        "  {dim}In-app:{reset} press {bold}?{reset} anywhere for the keymap, {bold}q{reset} to quit."
+    );
+    println!();
 }
 
 /// Maps the Rust target triple of the running binary to the same triple
@@ -376,7 +419,10 @@ pub fn maybe_check_at_startup(splash: impl FnOnce()) -> CheckOutcome {
         return CheckOutcome::Continue;
     }
     splash();
-    prompt_and_act(&latest)
+    // Startup-prompt path → after the update we re-exec into the TUI
+    // so the user lands directly in the running app (their original
+    // intent was to launch gitoui, the update was a side trip).
+    prompt_and_act(&latest, /* relaunch_after = */ true)
 }
 
 /// Force an update check + prompt regardless of cache or the
@@ -415,10 +461,13 @@ pub fn force_check(splash: impl FnOnce()) -> CheckOutcome {
         println!("  `cargo install gitoui --locked --force`.");
         return CheckOutcome::Continue;
     }
-    prompt_and_act(&latest)
+    // Explicit `--update` is a one-shot intent: print the install.sh-
+    // style welcome at the end and exit — don't drop the user into the
+    // TUI like the startup-prompt path does.
+    prompt_and_act(&latest, /* relaunch_after = */ false)
 }
 
-fn prompt_and_act(latest: &str) -> CheckOutcome {
+fn prompt_and_act(latest: &str, relaunch_after: bool) -> CheckOutcome {
     println!();
     println!(
         "  gitoui v{latest} is available — you have v{}.",
@@ -441,15 +490,28 @@ fn prompt_and_act(latest: &str) -> CheckOutcome {
     };
 
     match choice {
-        Choice::Yes => match run_update() {
-            Ok(()) => match exec_self() {
-                Ok(()) => CheckOutcome::Updated,
-                Err(e) => {
-                    eprintln!("Couldn't re-exec the updated binary: {e}");
-                    eprintln!("Re-run `gitoui` manually to use the new version.");
+        Choice::Yes => match run_update(/* keep_welcome = */ !relaunch_after) {
+            Ok(()) => {
+                if relaunch_after {
+                    // Startup path — hop into the freshly-installed
+                    // binary so the user lands in the TUI they wanted
+                    // to launch in the first place.
+                    match exec_self() {
+                        Ok(()) => CheckOutcome::Updated,
+                        Err(e) => {
+                            eprintln!("Couldn't re-exec the updated binary: {e}");
+                            eprintln!("Re-run `gitoui` manually to use the new version.");
+                            std::process::exit(0);
+                        }
+                    }
+                } else {
+                    // Explicit `--update` — install.sh (or our cargo
+                    // helper above) already printed the Quick-start
+                    // welcome. Exit cleanly so the user can re-run
+                    // `gitoui` themselves when they're ready.
                     std::process::exit(0);
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("Update failed: {e}");
                 eprintln!("Continuing with the current version.");

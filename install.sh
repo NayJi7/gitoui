@@ -21,9 +21,16 @@
 #                                GET to a Cloudflare Worker that only
 #                                increments a counter — no IP, no UA, no
 #                                payload)
-#   GITOUI_INSTALL_QUIET         skip the brand banner + welcome message.
-#                                Set automatically by `gitoui --update` so
-#                                the splash isn't drawn twice.
+#   GITOUI_INSTALL_QUIET         legacy combined toggle (v0.1.6): skips
+#                                BOTH the banner AND the welcome trailer.
+#   GITOUI_INSTALL_NO_BANNER     skip the brand banner only. Set by
+#                                `gitoui --update` so the splash isn't
+#                                drawn twice.
+#   GITOUI_INSTALL_NO_WELCOME    skip the Quick-start welcome only. Set
+#                                by the startup-prompt path (after a
+#                                successful auto-update gitoui re-execs
+#                                straight into the TUI, no need for the
+#                                shell trailer).
 #   GITOUI_INSTALL_FORCE_BINARY  install to $INSTALL_DIR even if a cargo-
 #                                managed gitoui exists in ~/.cargo/bin/.
 #                                Set by `gitoui --update` when the running
@@ -282,7 +289,12 @@ print_banner_ascii() {
 print_banner() {
     # `gitoui --update` already drew its own splash above the update
     # prompt — skip ours so the user doesn't see two banners stacked.
+    # `GITOUI_INSTALL_QUIET` was the original combined toggle (v0.1.6);
+    # `GITOUI_INSTALL_NO_BANNER` is the per-section successor used by
+    # newer binaries to keep the welcome trailer while still skipping
+    # the splash.
     [ -n "${GITOUI_INSTALL_QUIET:-}" ] && return
+    [ -n "${GITOUI_INSTALL_NO_BANNER:-}" ] && return
     printf '\n'
     proto=$(detect_image_protocol)
     if [ "$proto" != "none" ]; then
@@ -519,6 +531,7 @@ install_binary() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null \
         || fail "Cannot create install directory: ${INSTALL_DIR}"
     DEST="${INSTALL_DIR}/${BIN_NAME}"
+    info "Installing at ${BOLD}${DEST}${RESET}"
     # Atomic-ish replace: write to a sibling temp path then rename, so a
     # mid-install interruption doesn't leave a half-written binary.
     TMP_DEST="${DEST}.new"
@@ -527,9 +540,9 @@ install_binary() {
     chmod 755 "$TMP_DEST"
     mv -f "$TMP_DEST" "$DEST"
     if [ "$UPDATE" -eq 1 ]; then
-        ok "Updated ${BOLD}${BIN_NAME}${RESET} at ${BOLD}${DEST}${RESET}"
+        ok "Updated ${BOLD}${BIN_NAME}${RESET}"
     else
-        ok "Installed ${BOLD}${BIN_NAME}${RESET} to ${BOLD}${DEST}${RESET}"
+        ok "Installed ${BOLD}${BIN_NAME}${RESET}"
     fi
 }
 
@@ -557,11 +570,13 @@ check_path() {
 
 # ── Welcome message — keep it short on purpose ─────────────────────────
 print_welcome() {
-    # When called from `gitoui --update`, the running gitoui will
-    # re-exec into the new binary right after install.sh returns, so
-    # the user lands directly in the app — printing a quick-start
-    # block here would just be redundant noise.
+    # When called from `gitoui --update` in startup-prompt mode, the
+    # running gitoui re-execs into the new binary right after we return
+    # — the quick-start block would just be redundant noise. Explicit
+    # `gitoui --update` keeps the welcome visible since it exits after
+    # install rather than re-execing into the TUI.
     [ -n "${GITOUI_INSTALL_QUIET:-}" ] && return
+    [ -n "${GITOUI_INSTALL_NO_WELCOME:-}" ] && return
     printf '\n'
     printf '  %sQuick start%s — inside any git repo:\n' "${BOLD}" "${RESET}"
     printf '    %sgitoui%s        %sopen the commit-graph viewer%s\n' \
