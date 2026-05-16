@@ -2,9 +2,13 @@
 // Override of Starlight's default SiteTitle — same logo handling, but
 // the "gitoui" title splits into <git-part> + <oui-part> so the brand
 // wordmark colors (#F05133 orange / #F1ECEC cream) apply per the brand
-// book.
+// book. A tiny "vX.Y.Z" pulled from the workspace Cargo.toml at build
+// time sits to the right of the wordmark.
 import { logos } from "virtual:starlight/user-images";
 import config from "virtual:starlight/user-config";
+// `?raw` tells Vite to inline the file as a string at build time, no
+// matter where the compiled component lands.
+import cargoToml from "../../../Cargo.toml?raw";
 
 // Starlight 0.39 moved per-route data off Astro.props onto a shared
 // locals object — see https://starlight.astro.build/manual-setup/
@@ -16,6 +20,11 @@ const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
 const m = /^(git)(oui)$/i.exec(siteTitle);
 const front = m?.[1];
 const back = m?.[2];
+
+// Grep for the first `version = "X.Y.Z"` in the workspace Cargo.toml
+// — that's the [package] entry near the top of the file.
+const versionMatch = cargoToml.match(/^\s*version\s*=\s*"([^"]+)"/m);
+const version = versionMatch?.[1];
 ---
 
 <a href={siteTitleHref} class="site-title sl-flex">
@@ -56,6 +65,7 @@ const back = m?.[2];
       )
     }
   </span>
+  {version && <span class="site-version" aria-label={`Version ${version}`}>v{version}</span>}
 </a>
 
 <style>
@@ -74,5 +84,18 @@ const back = m?.[2];
     max-width: 100%;
     object-fit: contain;
     object-position: 0 50%;
+  }
+  /* Tiny version tag to the right of the wordmark — same monospace
+     font as the rest of the project's code text, gray, baseline-aligned
+     so it sits flush with the wordmark's baseline. */
+  .site-version {
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--sl-color-gray-3);
+    letter-spacing: 0.02em;
+    align-self: end;
+    margin-bottom: 0.25rem;
+    margin-left: -0.25rem;
   }
 </style>

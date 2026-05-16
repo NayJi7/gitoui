@@ -12,7 +12,7 @@ The fastest install on Linux and macOS — downloads the latest prebuilt
 binary from GitHub Releases and drops it into `~/.local/bin`.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
+curl -fsSL https://nayji7.github.io/gitoui/install.sh | sh
 ```
 
 The installer:
@@ -37,21 +37,18 @@ The installer:
 
 <TabItem label="cargo install">
 
-If you have a Rust toolchain available, `cargo install` works from
-crates.io once <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is published:
+If you have a Rust toolchain, `cargo install` pulls the latest release
+straight from crates.io:
 
 ```sh
 cargo install gitoui
 ```
 
-<Aside type="caution">
-The crates.io publication lands at v1.0. Until then, install via the
-script above or `cargo install --git`:
+To track the bleeding edge instead, install from git HEAD:
 
 ```sh
 cargo install --git https://github.com/NayJi7/gitoui
 ```
-</Aside>
 
 </TabItem>
 

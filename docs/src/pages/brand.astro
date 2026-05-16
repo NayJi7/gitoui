@@ -135,7 +135,11 @@ const palette = [
 ];
 ---
 
-<StarlightPage frontmatter={{ title: "Brand", description: "Logos, wordmarks, colors, and download links for the gitoui brand." }}>
+<StarlightPage frontmatter={{ title: "Brand", description: "Logos, wordmarks, colors, and download links for the gitoui brand." }} headings={[
+  ...sections.map((s) => ({ depth: 2, slug: s.id, text: s.title })),
+  { depth: 2, slug: "colors", text: "Colors" },
+  { depth: 2, slug: "typography", text: "Typography" },
+]}>
   <p class="brand-intro">
     Resources and assets to help you reference the <strong>gitoui</strong> brand.
     Each asset ships as a clean SVG — hit the <strong>SVG</strong> button under
@@ -145,7 +149,7 @@ const palette = [
   {sections.map((section) => (
     <section class="brand-section" id={section.id}>
       <header class="brand-section-head">
-        <h2>{section.title}</h2>
+        <h2 id={section.id}>{section.title}</h2>
         <p set:html={section.description.replace(/`([^`]+)`/g, "<code>$1</code>")} />
       </header>
       <div class="brand-grid">
@@ -172,7 +176,7 @@ const palette = [
 
   <section class="brand-section" id="colors">
     <header class="brand-section-head">
-      <h2>Colors</h2>
+      <h2 id="colors">Colors</h2>
       <p>
         The brand book lives at <code>assets/brand/gitoui-brand-standalone.html</code> in the
         repo — these tokens are its <em>COLOR</em> section. The orange leads;
@@ -195,7 +199,7 @@ const palette = [
 
   <section class="brand-section" id="typography">
     <header class="brand-section-head">
-      <h2>Typography</h2>
+      <h2 id="typography">Typography</h2>
       <p>
         <strong>Orbitron</strong> for the wordmark and display headlines —
         gives the logotype its technical, terminal-adjacent feel.

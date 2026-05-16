@@ -10,6 +10,7 @@ hero:
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
+import HomeCoda from "../../components/HomeCoda.astro";
 
 {/* PHOTO gif of full app walkthrough — open gitoui in a repo, scroll the commit graph, drill into a commit detail, open its diff, jump to a PR, react to a comment. ~15-20s loop, 900px wide. This same gif goes in README.md as the hero demo. */}
 
@@ -45,3 +46,5 @@ resolution, and GitHub integration for PRs and Issues.
 
 It runs the `git` CLI directly (no libgit2 binding) and pre-renders the commit
 graph as SVG/PNG images displayed inline in your terminal.
+
+<HomeCoda />

@@ -1,0 +1,123 @@
+---
+// Closing bandeau for the home page — sits at the very bottom of the
+// markdown. A thin orange rule (echo of the hero's underline-wipe)
+// followed by a single monospace line: stars / downloads / version /
+// license, then two text links to Brand and the docs. Stats are live-
+// fetched client-side from GitHub + crates.io APIs at page load and
+// fall back to the SSR placeholders if the network drops.
+import cargoToml from "../../../Cargo.toml?raw";
+
+const versionMatch = cargoToml.match(/^\s*version\s*=\s*"([^"]+)"/m);
+const version = versionMatch?.[1] ?? "?.?.?";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<aside class="home-coda" aria-label="Project at a glance">
+  <hr class="coda-rule" />
+  <p class="coda-line">
+    <a href="https://github.com/NayJi7/gitoui/stargazers" class="coda-stat">
+      <span class="ico">★</span><span class="num" data-stars>1</span> star
+    </a>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href="https://crates.io/crates/gitoui" class="coda-stat">
+      <span class="ico">↓</span><span class="num" data-downloads>—</span> downloads
+    </a>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href={`${base}/getting-started/installation/`} class="coda-stat">
+      <span class="ico">⌖</span>v{version}
+    </a>
+    <span class="dot" aria-hidden="true">·</span>
+    <a href={`${base}/license/`} class="coda-stat">
+      <span class="ico">§</span>MIT
+    </a>
+    <span class="dot" aria-hidden="true">·</span>
+    <span class="coda-copy">
+      <span class="ico">©</span>{new Date().getFullYear()}{" "}
+      <a href="https://github.com/NayJi7" target="_blank" rel="noopener noreferrer" class="coda-author">NayJi7</a>
+    </span>
+  </p>
+</aside>
+
+<script is:inline>
+  (function () {
+    const setText = (sel, val) => {
+      const el = document.querySelector(sel);
+      if (el && val != null) el.textContent = String(val);
+    };
+    Promise.all([
+      fetch("https://api.github.com/repos/NayJi7/gitoui").then(r => r.ok ? r.json() : null),
+      fetch("https://crates.io/api/v1/crates/gitoui").then(r => r.ok ? r.json() : null),
+    ]).then(([gh, cr]) => {
+      if (gh?.stargazers_count != null) setText("[data-stars]", gh.stargazers_count);
+      if (cr?.crate?.downloads != null) setText("[data-downloads]", cr.crate.downloads);
+    }).catch(() => {});
+  })();
+</script>
+
+<style>
+  .home-coda {
+    --brand: #f05133;
+    margin-top: 4rem;
+    text-align: center;
+  }
+  /* Thin orange separator — same brand color as the hero's underline,
+     used here as a visual full-stop before the closing line. */
+  .coda-rule {
+    width: clamp(7rem, 25%, 12rem);
+    margin: 0 auto 1.5rem;
+    border: 0;
+    border-top: 2px solid var(--brand);
+    opacity: 0.85;
+  }
+  .coda-line {
+    margin: 0;
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: baseline;
+    gap: 0.4rem 0.85rem;
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-3);
+    line-height: 1.6;
+  }
+  .coda-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+  .coda-stat:hover { color: var(--brand); }
+  .coda-stat .ico {
+    color: var(--brand);
+    font-size: 0.95em;
+  }
+  .coda-stat .num {
+    color: var(--sl-color-text);
+    font-weight: 500;
+  }
+  .coda-line .dot {
+    color: var(--sl-color-gray-5);
+    user-select: none;
+  }
+  /* Plain copyright span — no hover effect since the row itself isn't
+     a link. Only the inner author handle is clickable. */
+  .coda-copy {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    color: var(--sl-color-gray-3);
+  }
+  .coda-copy .ico {
+    color: var(--brand);
+    font-size: 0.95em;
+  }
+  .coda-author {
+    color: var(--sl-color-text);
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+  .coda-author:hover { color: var(--brand); }
+</style>

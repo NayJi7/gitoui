@@ -4,7 +4,7 @@
 # Install or update gitoui — a terminal UI git log viewer.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NayJi7/gitoui/master/install.sh | sh
+#   curl -fsSL https://nayji7.github.io/gitoui/install.sh | sh
 #
 # Pass --ascii via `sh -s -- --ascii` (or run locally) to force the ASCII
 # banner — useful in terminals that drop image-protocol bytes or when

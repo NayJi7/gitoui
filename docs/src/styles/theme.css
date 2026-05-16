@@ -28,8 +28,36 @@
 }
 
 .sidebar-content a,
-.sl-link-card .title {
+.sl-link-card .title,
+.right-sidebar-panel,
+.right-sidebar-panel a {
   font-family: var(--sl-font-headings);
+}
+
+/* Hover state for top-level sidebar entries. Two markup shapes ship:
+   • Standalone links (Introduction, FAQ, Brand, License) carry the
+     `.large` class on the <a> itself.
+   • Group labels (Getting started, Configuration, …) use a nested
+     `<summary><span class="group-label"><span class="large">…`.
+   Both default to white; the default :hover is also white so nothing
+   changes visually. Push hover to brand orange — but skip the entry
+   that's currently the active page (Starlight gives that one its own
+   inverted-text + accent-bg highlight; overriding the color would
+   wash it back to orange-on-orange). */
+.sidebar-content a.large:not([aria-current="page"]):hover,
+.sidebar-content a.large:not([aria-current="page"]):focus-visible,
+.sidebar-content a:not([aria-current="page"]):hover .large,
+.sidebar-content a:not([aria-current="page"]):focus-visible .large,
+.sidebar-content summary:hover .large,
+.sidebar-content summary:focus-visible .large {
+  color: var(--sl-color-accent);
+}
+/* Same idea for the regular sub-link rows — once they're the active
+   page, the white-on-orange highlight is the brand cue; suppress the
+   default hover color shift. */
+.sidebar-content a:not(.large)[aria-current="page"]:hover,
+.sidebar-content a:not(.large)[aria-current="page"]:focus-visible {
+  color: var(--sl-color-text-invert);
 }
 
 /* Anywhere the literal "gitoui" wordmark shows up: site title in the
@@ -113,6 +141,14 @@ header.header a.site-title img {
 :root {
   --sl-border-radius: 4px;
 }
+/* Center the content panel horizontally within its column. Starlight
+   already does this at >= 72rem viewports via the same rule, but when
+   the layout sits between the doc-flex breakpoint and that one, the
+   container clings to the left. Force-center across all sizes — the
+   max-width still caps the prose at 45rem so typography is unchanged. */
+main > .content-panel > .sl-container {
+  margin-inline: auto !important;
+}
 .sl-link-card,
 .card,
 [class*="card"],
@@ -158,4 +194,152 @@ site-search button { border-radius: 4px !important; }
   --sl-color-gray-5: #efe3e0;
   --sl-color-gray-6: #f5f4f2; /* off-white bg */
   --sl-color-black: #ffffff;
+}
+
+
+/* ── Introduction badges row ─────────────────────────────────────────
+   Sits directly under the demo gif. Tight gap so the badges read as
+   one cluster, each one square-cornered and same-height for visual
+   rhythm. */
+.intro-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 1rem 0 1.5rem !important;
+}
+.intro-badges a {
+  text-decoration: none;
+  border: 0;
+  display: inline-flex;
+}
+.intro-badges img {
+  height: 1.3rem;
+  display: block;
+  border-radius: 3px;
+}
+
+/* ── FAQ accordion ───────────────────────────────────────────────────
+   Each Q+A is a native <details> element styled into a card. Summary
+   row carries a brand-orange chevron that rotates on open, the body
+   slides down via the default details/summary toggle. */
+.faq-list {
+  --brand: #f05133;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.faq-item {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 4px;
+  background: var(--sl-color-bg-nav, transparent);
+  transition: border-color 150ms ease, background-color 150ms ease;
+  overflow: hidden;
+}
+.faq-item[open] {
+  border-color: rgba(240, 81, 51, 0.4);
+}
+.faq-item:hover {
+  border-color: var(--sl-color-gray-4);
+}
+.faq-item[open]:hover {
+  border-color: var(--brand);
+}
+.faq-item > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--sl-font-headings, monospace);
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--sl-color-text);
+  user-select: none;
+  position: relative;
+}
+.faq-item > summary::-webkit-details-marker { display: none; }
+.faq-item > summary::marker { content: ""; display: none; }
+/* Single chevron on the LEFT — a unicode ▸ that rotates 90° on open
+   (▸ → ▾). White by default, brand orange when hovered or open. */
+.faq-item > summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  color: var(--sl-color-white);
+  font-size: 0.95em;
+  line-height: 1;
+  transform-origin: 50% 55%;
+  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    color 150ms ease;
+}
+.faq-item > summary:hover::before,
+.faq-item[open] > summary::before {
+  color: var(--brand);
+}
+.faq-item[open] > summary::before {
+  transform: rotate(90deg);
+}
+.faq-item > summary:hover {
+  color: var(--brand);
+}
+/* Discreet inset separator between the question (summary) and the
+   answer below — only when the item is open. Sits inside the card
+   with horizontal margin so it doesn't touch the borders. */
+.faq-item[open] > summary {
+  position: relative;
+}
+.faq-item[open] > summary::after {
+  content: "";
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 0;
+  height: 1px;
+  background: var(--sl-color-gray-5);
+  pointer-events: none;
+}
+/* The summary contains a real markdown `## Q` heading so the question
+   gets picked up by Starlight's TOC. Starlight wraps each heading in
+   a `.sl-heading-wrapper.level-h2` and tacks on an anchor link with a
+   chain icon — both must be flattened/hidden to keep the summary
+   visually identical to a plain text label. */
+.faq-item > summary .sl-heading-wrapper {
+  display: contents;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  margin-top: 0 !important;
+}
+.faq-item > summary h2 {
+  margin: 0 !important;
+  padding: 0 !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  color: inherit !important;
+  letter-spacing: inherit !important;
+  line-height: inherit !important;
+  display: inline !important;
+}
+.faq-item > summary .sl-anchor-link,
+.faq-item > summary .anchor-link {
+  display: none !important;
+}
+/* Body of an opened accordion item — markdown rendered children get a
+   small inset and tighter top spacing so the answer reads as part of
+   the card. */
+.faq-item > :not(summary) {
+  padding: 0 1rem 1rem 1rem;
+  margin-top: 0.25rem;
+}
+.faq-item > :not(summary):first-of-type {
+  padding-top: 0;
+}
+.faq-item p:first-of-type,
+.faq-item ol:first-of-type,
+.faq-item ul:first-of-type,
+.faq-item table:first-of-type {
+  margin-top: 0;
 }

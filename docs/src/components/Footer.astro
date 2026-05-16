@@ -182,7 +182,9 @@ const isSplash = template === "splash";
     border-top: 1px solid var(--sl-color-gray-5);
     font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
     font-size: 0.9rem;
-    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    /* Body text in this row stays gray-3 — used for the literal © year
+       text and the surrounding prose. Links override below. */
+    color: var(--sl-color-gray-3);
     line-height: 1.5;
   }
   .meta-cols {
@@ -193,12 +195,19 @@ const isSplash = template === "splash";
     gap: 0.75rem 2rem;
   }
   .meta-copy { margin: 0; }
-  .meta-row a {
-    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+  /* All meta-row links (NayJi7, Edit page) — same neutral text color
+     with brand-orange hover. `:global` reaches Starlight's EditLink
+     anchor which lives behind a scoped class. */
+  .meta-row a,
+  .meta-row :global(a) {
+    color: var(--sl-color-text);
     text-decoration: none;
     transition: color 150ms ease;
   }
-  .meta-row a:hover { color: var(--brand); }
+  .meta-row a:hover,
+  .meta-row :global(a:hover) {
+    color: var(--brand);
+  }
   /* Starlight's EditLink + LastUpdated each render their own <p> with
      an icon prefix; tighten the gap and zero the margin so they sit
      flush in our flex/grid slots. */
