@@ -91,10 +91,13 @@ jobs:
           merge-multiple: true
       - name: Checksum
         run: sha256sum releases/* > ./releases/checksum.txt
-      - name: Create Draft Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2.0.4
         with:
-          draft: true
+          # Publish straight away — `cargo publish` ships in parallel
+          # and the install.sh one-liner needs the binaries live the
+          # moment the tag exists.
+          draft: false
           generate_release_notes: true
           make_latest: true
           files: |
