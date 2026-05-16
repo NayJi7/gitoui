@@ -104,10 +104,14 @@ jobs:
             releases/*
 
   publish-crate:
-    # Push the source crate to crates.io after the binaries land. Runs
-    # in parallel with `release` (no needs:) — the GitHub Release and
-    # the crates.io upload don't depend on each other, and a publish
-    # failure must not orphan the binaries.
+    # Push the source crate to crates.io ONLY after the GitHub Release
+    # has been published successfully. Gating on `release` (which itself
+    # needs `build`) means a failed binary build or release-creation
+    # step keeps the crate off crates.io — so users never end up with
+    # a `cargo install gitoui` version that has no matching
+    # downloadable binary, and the install.sh one-liner never resolves
+    # a tag whose Release doesn't exist yet.
+    needs: release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
