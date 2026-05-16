@@ -357,16 +357,26 @@ pub enum AppEvent {
     /// isn't already locally available, then transitions. The PR
     /// number is remembered so `Esc` returns straight to the PR view
     /// instead of dropping to the commit graph.
+    ///
+    /// `after_fetch` flags the second-pass re-entry done by the fetch
+    /// thread on success — if the commit is STILL missing locally at
+    /// that point (e.g. PR was squash-merged + branch deleted, the
+    /// `refs/pull/<n>/head` ref no longer points at the original
+    /// commit), the handler errors out instead of re-spawning another
+    /// fetch and looping forever on "Fetching commit…".
     OpenPrCommitDetail {
         pr_number: u64,
         sha: String,
+        after_fetch: bool,
     },
     /// Open the existing DiffView for a single file in a PR. Same
-    /// fetch / return-flow mechanics as `OpenPrCommitDetail`.
+    /// fetch / return-flow mechanics as `OpenPrCommitDetail`, same
+    /// `after_fetch` re-entry guard.
     OpenPrFileDiff {
         pr_number: u64,
         sha: String,
         file_path: String,
+        after_fetch: bool,
     },
     /// A newly-created PR landed on GitHub — the PR view clears its
     /// compose draft, reloads the list, and opens the freshly
@@ -623,6 +633,29 @@ pub enum DialogKind {
     CheckoutHasLocalChanges {
         target: String,
         is_branch: bool,
+    },
+    /// Pull-request commit that gitoui can't read locally — typically
+    /// a squash-merged PR whose branch was deleted. Both git fetch
+    /// passes (`refs/pull/<n>/head` + direct SHA) failed to bring the
+    /// commit in. Offers an "open on GitHub" escape so the user can
+    /// still see the diff in their browser. `file_path` decides which
+    /// GitHub URL the action targets: `Some(_)` → PR's Files tab,
+    /// `None` → PR's Commits tab anchored on the SHA.
+    OrphanedPrCommit {
+        pr_number: u64,
+        sha: String,
+        owner: String,
+        repo: String,
+        file_path: Option<String>,
+    },
+    /// Fires when the user activates a row in the Checks tab. No local
+    /// action is possible (gitoui doesn't run CI), so the only sensible
+    /// follow-up is to open the run on GitHub. `name` is the check's
+    /// display label (e.g. "lint (stable)"), `url` is the `html_url`
+    /// returned by `GET .../check-runs`.
+    OpenCheckOnGitHub {
+        name: String,
+        url: String,
     },
 }
 

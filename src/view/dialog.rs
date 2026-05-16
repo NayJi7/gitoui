@@ -82,6 +82,7 @@ impl<'a> DialogView<'a> {
             DialogKind::StashWithMessage => (vec![false], 0),
             DialogKind::CommitWithMessage => (vec![false], 0),
             DialogKind::CleanUntracked => (vec![], 0),
+            DialogKind::OpenCheckOnGitHub { .. } => (vec![false], 0),
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
             DialogKind::ConfirmDeleteComment { .. } => (vec![], 0),
@@ -1698,6 +1699,144 @@ impl<'a> DialogView<'a> {
                 self.radio_rows.push(lines.len());
                 lines.push(self.radio_line(1, "Discard changes, then checkout"));
             }
+            DialogKind::OrphanedPrCommit {
+                pr_number,
+                sha,
+                owner,
+                repo,
+                file_path,
+            } => {
+                let short = &sha[..7.min(sha.len())];
+                let kind_label = if file_path.is_some() {
+                    "Files diff"
+                } else {
+                    "Commit"
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{}: ", kind_label), Style::default().fg(dim_fg)),
+                    Span::styled(
+                        short.to_string(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.list_hash_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" · PR ".to_string(), Style::default().fg(dim_fg)),
+                    Span::styled(
+                        format!("#{}", pr_number),
+                        Style::default()
+                            .fg(self.ctx.color_theme.list_hash_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                if let Some(path) = file_path {
+                    lines.push(Line::from(vec![
+                        Span::styled("File:   ", Style::default().fg(dim_fg)),
+                        Span::styled(path.clone(), Style::default().fg(self.ctx.color_theme.fg)),
+                    ]));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Not available locally — likely the PR was squash-merged".to_string(),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "and its source branch deleted, so GitHub no longer ships".to_string(),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "the original commit on `git fetch`.".to_string(),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(""));
+                let url = if file_path.is_some() {
+                    format!(
+                        "https://github.com/{}/{}/pull/{}/files",
+                        owner, repo, pr_number
+                    )
+                } else {
+                    format!(
+                        "https://github.com/{}/{}/pull/{}/commits/{}",
+                        owner, repo, pr_number, sha
+                    )
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("Validate", Style::default().fg(dim_fg)),
+                    Span::styled(" opens:".to_string(), Style::default().fg(dim_fg)),
+                ]));
+                // URL line: centered inside the dialog body, ellipsis-
+                // truncated when it overflows. Padding + URL live in
+                // separate spans so the underline only traces the
+                // URL chars, never the padding. The URL fg is a
+                // hardcoded GitHub-link blue (#3b82f6, Tailwind
+                // blue-500) so it reads as "hyperlink" regardless of
+                // the active theme's accent palette.
+                let max_url_w = (inner_width as usize).saturating_sub(2).max(4);
+                let url_chars = url.chars().count();
+                let url_display = if url_chars > max_url_w {
+                    let head: String = url.chars().take(max_url_w - 1).collect();
+                    format!("{}…", head)
+                } else {
+                    url
+                };
+                let display_w = url_display.chars().count();
+                let pad = (inner_width as usize).saturating_sub(display_w) / 2;
+                lines.push(Line::from(vec![
+                    Span::raw(" ".repeat(pad)),
+                    Span::styled(
+                        url_display,
+                        Style::default()
+                            .fg(ratatui::style::Color::Rgb(0x3b, 0x82, 0xf6))
+                            .add_modifier(Modifier::UNDERLINED),
+                    ),
+                ]));
+            }
+            DialogKind::OpenCheckOnGitHub { name, url } => {
+                lines.push(Line::from(vec![
+                    Span::styled("Check: ", Style::default().fg(dim_fg)),
+                    Span::styled(
+                        name.clone(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "gitoui can't run or display CI logs locally — the".to_string(),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "full job output lives on GitHub Actions.".to_string(),
+                    Style::default().fg(fg),
+                )));
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled("Validate", Style::default().fg(dim_fg)),
+                    Span::styled(" opens:".to_string(), Style::default().fg(dim_fg)),
+                ]));
+                // Centered, ellipsis-truncated, blue+underlined URL —
+                // same treatment as the OrphanedPrCommit dialog so the
+                // two "open on GitHub" prompts read identically.
+                let max_url_w = (inner_width as usize).saturating_sub(2).max(4);
+                let url_chars = url.chars().count();
+                let url_display = if url_chars > max_url_w {
+                    let head: String = url.chars().take(max_url_w - 1).collect();
+                    format!("{}…", head)
+                } else {
+                    url.clone()
+                };
+                let display_w = url_display.chars().count();
+                let pad = (inner_width as usize).saturating_sub(display_w) / 2;
+                lines.push(Line::from(vec![
+                    Span::raw(" ".repeat(pad)),
+                    Span::styled(
+                        url_display,
+                        Style::default()
+                            .fg(ratatui::style::Color::Rgb(0x3b, 0x82, 0xf6))
+                            .add_modifier(Modifier::UNDERLINED),
+                    ),
+                ]));
+            }
             DialogKind::ConfirmSwitchWorktree { path, display_name } => {
                 lines.push(Line::from(Span::styled(
                     format!("Switch to worktree '{}'?", display_name),
@@ -1788,6 +1927,14 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmDeleteWorktree { .. } => " Remove Worktree ",
             DialogKind::AddWorktree => " Add Worktree ",
             DialogKind::CheckoutHasLocalChanges { .. } => " Checkout — Local Changes ",
+            DialogKind::OrphanedPrCommit { file_path, .. } => {
+                if file_path.is_some() {
+                    " File not in local repo "
+                } else {
+                    " Commit not in local repo "
+                }
+            }
+            DialogKind::OpenCheckOnGitHub { .. } => " Open Check on GitHub ",
         }
         .to_string()
     }
@@ -2088,6 +2235,38 @@ impl<'a> DialogView<'a> {
     }
 
     fn confirm(&mut self) {
+        // Orphaned PR commit — Validate opens the GitHub web URL
+        // (the commit isn't in local git, no GitAction to run).
+        if let DialogKind::OrphanedPrCommit {
+            pr_number,
+            sha,
+            owner,
+            repo,
+            file_path,
+        } = &self.kind
+        {
+            let url = if file_path.is_some() {
+                format!(
+                    "https://github.com/{}/{}/pull/{}/files",
+                    owner, repo, pr_number
+                )
+            } else {
+                format!(
+                    "https://github.com/{}/{}/pull/{}/commits/{}",
+                    owner, repo, pr_number, sha
+                )
+            };
+            self.tx.send(AppEvent::CloseDialog);
+            match crate::external::open_url(&url) {
+                Ok(()) => self
+                    .tx
+                    .send(AppEvent::NotifySuccess(format!("Opening {}", url))),
+                Err(e) => self
+                    .tx
+                    .send(AppEvent::NotifyError(format!("Open browser: {}", e))),
+            }
+            return;
+        }
         if let DialogKind::ConfirmDeleteWorktree { path, is_dirty, .. } = &self.kind {
             let force = *is_dirty;
             let path = path.clone();
@@ -2101,6 +2280,22 @@ impl<'a> DialogView<'a> {
             let path = path.clone();
             self.tx.send(AppEvent::CloseDialog);
             self.tx.send(AppEvent::SwitchWorktree { path });
+            return;
+        }
+        // Check on GitHub — Validate opens the run's html_url. Like
+        // OrphanedPrCommit, no GitAction to run since the data lives on
+        // GitHub Actions, not in the local repo.
+        if let DialogKind::OpenCheckOnGitHub { url, .. } = &self.kind {
+            let url = url.clone();
+            self.tx.send(AppEvent::CloseDialog);
+            match crate::external::open_url(&url) {
+                Ok(()) => self
+                    .tx
+                    .send(AppEvent::NotifySuccess(format!("Opening {}", url))),
+                Err(e) => self
+                    .tx
+                    .send(AppEvent::NotifyError(format!("Open browser: {}", e))),
+            }
             return;
         }
         // Issue picker confirmations don't go through GitAction — they
@@ -2600,7 +2795,9 @@ impl<'a> DialogView<'a> {
             | DialogKind::IssueMilestone { .. }
             | DialogKind::ConfirmCloseIssue { .. }
             | DialogKind::ConfirmReopenIssue { .. }
-            | DialogKind::ConfirmDeleteIssueComment { .. } => unreachable!(),
+            | DialogKind::ConfirmDeleteIssueComment { .. }
+            | DialogKind::OrphanedPrCommit { .. }
+            | DialogKind::OpenCheckOnGitHub { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }

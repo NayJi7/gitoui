@@ -1617,7 +1617,11 @@ impl App<'_> {
                         view.on_compose_labels_picked(labels);
                     }
                 }
-                AppEvent::OpenPrCommitDetail { pr_number, sha } => {
+                AppEvent::OpenPrCommitDetail {
+                    pr_number,
+                    sha,
+                    after_fetch,
+                } => {
                     // Wipe lingering Kitty/iTerm2/Sixel placements so
                     // the PR view's avatars (header by-line, commit
                     // rows, …) don't ghost on top of the CommitDetail
@@ -1625,16 +1629,17 @@ impl App<'_> {
                     // ClosePullRequests / OpenPullRequestDetail use.
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
-                    self.open_pr_commit_detail(pr_number, sha);
+                    self.open_pr_commit_detail(pr_number, sha, after_fetch);
                 }
                 AppEvent::OpenPrFileDiff {
                     pr_number,
                     sha,
                     file_path,
+                    after_fetch,
                 } => {
                     self.clear_image(Some(terminal))?;
                     self.clear_terminal(terminal)?;
-                    self.open_pr_file_diff(pr_number, sha, file_path);
+                    self.open_pr_file_diff(pr_number, sha, file_path, after_fetch);
                 }
                 AppEvent::CloseInteractiveRebase => {
                     // Same pattern as CloseConflictEditor: close + enqueue
@@ -3694,7 +3699,7 @@ impl<'a> App<'a> {
     ///    commit + its files become available locally for the
     ///    existing `git show`-based renderers. On completion the
     ///    actual transition fires via `BuildPrCommitDetailView`.
-    fn open_pr_commit_detail(&mut self, pr_number: u64, sha: String) {
+    fn open_pr_commit_detail(&mut self, pr_number: u64, sha: String, after_fetch: bool) {
         let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
             Some(c) => c,
             None => {
@@ -3721,20 +3726,54 @@ impl<'a> App<'a> {
             self.build_pr_commit_detail_view(pr_number, sha);
             return;
         }
+        // Re-entry post-fetch and the SHA is still missing — both
+        // git fetch passes inside `fetch_pull_request_commit` ran
+        // but didn't bring the commit in. Happens on squash-merged
+        // PRs whose branch was deleted upstream. Surface the
+        // dedicated dialog (offers an "open on GitHub" escape via
+        // the PR's commit URL) instead of spawning another fetch
+        // that would loop on the same "Fetching commit…" spinner.
+        if after_fetch {
+            self.stop_spinner();
+            self.pr_nav_stack.clear();
+            self.ec
+                .send(AppEvent::OpenDialog(DialogKind::OrphanedPrCommit {
+                    pr_number,
+                    sha,
+                    owner: coords.owner,
+                    repo: coords.repo,
+                    file_path: None,
+                }));
+            return;
+        }
         self.start_spinner("Fetching commit…");
         std::thread::spawn(move || {
-            let result = crate::git::fetch_pull_request_ref(
+            let result = crate::git::fetch_pull_request_commit(
                 &repo_path,
                 &coords.owner,
                 &coords.repo,
                 pr_number,
+                &sha,
             );
             match result {
                 // We can't touch `self.view` from this thread — fire an
                 // event back to the main loop and let it build the
-                // Detail view there.
-                Ok(()) => tx.send(AppEvent::OpenPrCommitDetail { pr_number, sha }),
-                Err(e) => tx.send(AppEvent::NotifyError(format!("PR commit fetch: {}", e))),
+                // Detail view there. `after_fetch: true` short-circuits
+                // the spinner loop above if the commit is still missing
+                // (the dialog fires instead).
+                Ok(()) => tx.send(AppEvent::OpenPrCommitDetail {
+                    pr_number,
+                    sha,
+                    after_fetch: true,
+                }),
+                // Network error / git unreachable — same dialog, the
+                // user can still try GitHub web. NotifyError swallowed
+                // here so we don't surface two layers of failure.
+                Err(_) => tx.send(AppEvent::OpenPrCommitDetail {
+                    pr_number,
+                    sha,
+                    after_fetch: true,
+                }),
             }
         });
     }
@@ -3803,7 +3842,13 @@ impl<'a> App<'a> {
     /// Transition from the PR view to the existing single-file
     /// DiffView for one of the PR's changes. Same fetch + state save
     /// dance as `open_pr_commit_detail`.
-    fn open_pr_file_diff(&mut self, pr_number: u64, sha: String, file_path: String) {
+    fn open_pr_file_diff(
+        &mut self,
+        pr_number: u64,
+        sha: String,
+        file_path: String,
+        after_fetch: bool,
+    ) {
         let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
             Some(c) => c,
             None => {
@@ -3841,27 +3886,59 @@ impl<'a> App<'a> {
             self.open_file_diff_from_pr(sha, file_path);
             return;
         }
+        // Same loop-guard as `open_pr_commit_detail`: if we just
+        // came back from a fetch and the commit is still missing,
+        // the PR was squash-merged + branch deleted → open the
+        // orphan dialog so the user can jump to GitHub web for the
+        // file's diff.
+        if after_fetch {
+            self.stop_spinner();
+            self.pr_nav_stack.clear();
+            self.ec
+                .send(AppEvent::OpenDialog(DialogKind::OrphanedPrCommit {
+                    pr_number,
+                    sha,
+                    owner: coords.owner,
+                    repo: coords.repo,
+                    file_path: Some(file_path),
+                }));
+            return;
+        }
         self.start_spinner("Fetching file…");
         std::thread::spawn(move || {
-            let result = crate::git::fetch_pull_request_ref(
+            let result = crate::git::fetch_pull_request_commit(
                 &repo_path,
                 &coords.owner,
                 &coords.repo,
                 pr_number,
+                &sha,
             );
             match result {
                 Ok(()) => {
                     // After fetch, kick off the diff-open on the
                     // main thread (via a dedicated event so the
                     // worker doesn't touch UI state directly).
+                    // `after_fetch: true` is a safety belt — the
+                    // 2-pass fetch already validates the commit
+                    // landed, but the guard prevents a spinner loop
+                    // if it didn't (dialog fires instead).
                     tx.send(AppEvent::OpenPrFileDiff {
                         pr_number,
                         sha,
                         file_path,
+                        after_fetch: true,
                     });
                 }
-                Err(e) => {
-                    tx.send(AppEvent::NotifyError(format!("PR file fetch: {}", e)));
+                // Network error / git unreachable — surface the
+                // orphan dialog so the user can fall back to GitHub
+                // web. Same path as a successful-but-empty fetch.
+                Err(_) => {
+                    tx.send(AppEvent::OpenPrFileDiff {
+                        pr_number,
+                        sha,
+                        file_path,
+                        after_fetch: true,
+                    });
                 }
             }
         });
@@ -5156,7 +5233,15 @@ impl<'a> App<'a> {
     fn stop_spinner(&mut self) {
         self.app_status.spinner_active = false;
         self.header_logo_last = None; // logo switches from animated back to static
-                                      // status_line will be overwritten by the next NotifySuccess/NotifyError/Refresh
+                                      // Clear the status line too — the spinner renderer keeps
+                                      // showing `Spinner(msg)` until *something* overwrites it,
+                                      // and not every caller dispatches a Notify* afterwards
+                                      // (e.g. opening a dialog leaves no replacement). Without
+                                      // this, "Fetching commit…" lingers in the footer after
+                                      // the spinner stops.
+        if matches!(self.app_status.status_line, StatusLine::Spinner(_)) {
+            self.app_status.status_line = StatusLine::None;
+        }
     }
 
     fn info_notification(&mut self, msg: String) {

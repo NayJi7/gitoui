@@ -169,6 +169,12 @@ pub struct PullRequestsView<'a> {
     commits_hovered: usize,
     checks_scroll: usize,
     checks_hovered: usize,
+    /// Workflows the user has expanded in the Checks accordion. Empty
+    /// = everything collapsed (the default — keeps the tab compact so
+    /// the workflow names are scannable at a glance). Persisted only
+    /// for the lifetime of the PrView so re-opening the PR restores
+    /// which groups were unfolded.
+    expanded_check_groups: rustc_hash::FxHashSet<String>,
     files_scroll: usize,
     files_hovered: usize,
     /// Index of the file the user drilled into within the Files tab.
@@ -502,6 +508,25 @@ impl Tab {
     }
 }
 
+/// One displayed row in the Checks accordion. Headers group consecutive
+/// runs of the same workflow (mirrors what GitHub web shows on the
+/// `/pull/N/checks` page); `Item` rows are real check_runs, displayed
+/// only when their parent header is expanded.
+#[derive(Debug, Clone)]
+enum CheckRow {
+    Header {
+        workflow: String,
+        total: usize,
+        success: usize,
+        failure: usize,
+        pending: usize,
+        collapsed: bool,
+    },
+    Item {
+        check_idx: usize,
+    },
+}
+
 /// Per-column widths for the PR list. The "fit" columns (state, number,
 /// title, author) are padded to align tabularly; head/base are *not*
 /// padded — they sit flush against ` → ` so it always reads
@@ -713,6 +738,7 @@ impl<'a> PullRequestsView<'a> {
             commits_hovered: 0,
             checks_scroll: 0,
             checks_hovered: 0,
+            expanded_check_groups: rustc_hash::FxHashSet::default(),
             files_scroll: 0,
             files_hovered: 0,
             files_drilldown: None,
@@ -1802,6 +1828,7 @@ impl<'a> PullRequestsView<'a> {
                     pr_number: detail.number,
                     sha: detail.head_sha.clone(),
                     file_path: file.filename.clone(),
+                    after_fetch: false,
                 });
             }
             Tab::Commits => {
@@ -1818,9 +1845,50 @@ impl<'a> PullRequestsView<'a> {
                 self.tx.send(AppEvent::OpenPrCommitDetail {
                     pr_number: detail.number,
                     sha: commit.sha.clone(),
+                    after_fetch: false,
                 });
             }
+            Tab::Checks => self.activate_checks_row(),
             _ => {}
+        }
+    }
+
+    /// Enter / click on a row in the Checks accordion. Headers toggle
+    /// the group's collapsed state; items fire the "open on GitHub"
+    /// dialog (gitoui can't display CI logs locally, so a confirmation
+    /// to open the run in a browser is the only sensible action).
+    fn activate_checks_row(&mut self) {
+        let Some(detail) = self.opened_detail() else {
+            return;
+        };
+        let rows = self.check_display_rows(detail);
+        let Some(row) = rows.get(self.checks_hovered) else {
+            return;
+        };
+        match row {
+            CheckRow::Header { workflow, .. } => {
+                let key = workflow.clone();
+                if self.expanded_check_groups.contains(&key) {
+                    self.expanded_check_groups.remove(&key);
+                } else {
+                    self.expanded_check_groups.insert(key);
+                }
+            }
+            CheckRow::Item { check_idx } => {
+                let Some(c) = detail.check_runs.get(*check_idx) else {
+                    return;
+                };
+                let Some(url) = c.url.clone() else {
+                    self.tx.send(AppEvent::NotifyError(
+                        "This check has no GitHub URL".into(),
+                    ));
+                    return;
+                };
+                let name = c.name.clone();
+                self.tx.send(AppEvent::OpenDialog(
+                    crate::event::DialogKind::OpenCheckOnGitHub { name, url },
+                ));
+            }
         }
     }
 
@@ -1919,9 +1987,67 @@ impl<'a> PullRequestsView<'a> {
             .unwrap_or(0)
     }
     fn opened_checks_len(&self) -> usize {
+        // Navigation operates on the *display* row count (headers +
+        // items in expanded groups), not the raw check_runs count —
+        // otherwise the cursor would skip past hidden items or land
+        // on positions that don't render.
         self.opened_detail()
-            .map(|d| d.check_runs.len())
+            .map(|d| self.check_display_rows(d).len())
             .unwrap_or(0)
+    }
+
+    /// Flatten `detail.check_runs` into the row sequence rendered in the
+    /// Checks accordion. Groups by workflow_name preserving the order
+    /// of first appearance; emits a Header then (if the group isn't
+    /// collapsed) one Item per check_run in that group.
+    fn check_display_rows(&self, detail: &PullRequestDetail) -> Vec<CheckRow> {
+        let mut order: Vec<String> = Vec::new();
+        let mut groups: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+        for (i, c) in detail.check_runs.iter().enumerate() {
+            let key = c.workflow_name.clone();
+            if !groups.contains_key(&key) {
+                order.push(key.clone());
+            }
+            groups.entry(key).or_default().push(i);
+        }
+        let mut rows = Vec::new();
+        for wf in order {
+            let indices = groups.remove(&wf).unwrap_or_default();
+            let mut success = 0usize;
+            let mut failure = 0usize;
+            let mut pending = 0usize;
+            for &i in &indices {
+                let c = &detail.check_runs[i];
+                match (c.status, c.conclusion) {
+                    (CheckStatus::Completed, Some(CheckConclusion::Success))
+                    | (CheckStatus::Completed, Some(CheckConclusion::Neutral))
+                    | (CheckStatus::Completed, Some(CheckConclusion::Skipped)) => success += 1,
+                    (CheckStatus::Completed, Some(CheckConclusion::Failure))
+                    | (CheckStatus::Completed, Some(CheckConclusion::TimedOut))
+                    | (CheckStatus::Completed, Some(CheckConclusion::Cancelled))
+                    | (CheckStatus::Completed, Some(CheckConclusion::ActionRequired)) => {
+                        failure += 1
+                    }
+                    _ => pending += 1,
+                }
+            }
+            let collapsed = !self.expanded_check_groups.contains(&wf);
+            let total = indices.len();
+            rows.push(CheckRow::Header {
+                workflow: wf,
+                total,
+                success,
+                failure,
+                pending,
+                collapsed,
+            });
+            if !collapsed {
+                for i in indices {
+                    rows.push(CheckRow::Item { check_idx: i });
+                }
+            }
+        }
+        rows
     }
     fn opened_files_len(&self) -> usize {
         self.opened_detail().map(|d| d.files.len()).unwrap_or(0)
@@ -3673,13 +3799,17 @@ impl<'a> PullRequestsView<'a> {
                 // same "rows of items" model. On the Commits + Files
                 // tabs a click also drills into the clicked row (same
                 // outcome as Enter) — matches what users expect from
-                // GitHub web's PR sub-pages.
+                // GitHub web's PR sub-pages. Checks rows route through
+                // `activate_checks_row` so a header toggles its group
+                // and an item fires the GitHub-open dialog.
                 if let Some(area) = self.tab_content_area {
                     if rect_contains(Some(area), col, row) {
                         if let Some(idx) = self.row_at_tab(row, area) {
                             self.set_tab_hovered(idx);
                             if matches!(self.active_tab, Tab::Commits | Tab::Files) {
                                 self.enter_drilldown();
+                            } else if matches!(self.active_tab, Tab::Checks) {
+                                self.activate_checks_row();
                             }
                         }
                     }
@@ -6366,16 +6496,36 @@ impl<'a> PullRequestsView<'a> {
             f.render_widget(p, area);
             return;
         }
+        let rows = self.check_display_rows(detail);
+        // Clamp hovered into the current display range — a collapse
+        // shrinks the list so an out-of-range cursor needs to snap back.
+        if self.checks_hovered >= rows.len() {
+            self.checks_hovered = rows.len().saturating_sub(1);
+        }
         let visible = area.height as usize;
         if self.checks_hovered >= self.checks_scroll + visible {
             self.checks_scroll = self.checks_hovered + 1 - visible;
         } else if self.checks_hovered < self.checks_scroll {
             self.checks_scroll = self.checks_hovered;
         }
-        let items: Vec<ListItem<'static>> = detail
-            .check_runs
+        let items: Vec<ListItem<'static>> = rows
             .iter()
-            .map(|c| ListItem::new(check_row(theme, c)))
+            .map(|r| match r {
+                CheckRow::Header {
+                    workflow,
+                    total,
+                    success,
+                    failure,
+                    pending,
+                    collapsed,
+                } => ListItem::new(check_group_header_line(
+                    theme, workflow, *total, *success, *failure, *pending, *collapsed,
+                )),
+                CheckRow::Item { check_idx } => {
+                    let c = &detail.check_runs[*check_idx];
+                    ListItem::new(check_item_line(theme, c))
+                }
+            })
             .collect();
         let mut state = ListState::default();
         state.select(Some(self.checks_hovered));
@@ -7433,7 +7583,10 @@ fn commit_row(
     (Line::from(spans), avatar_col)
 }
 
-fn check_row(
+/// Individual check row, indented under its workflow header. Same
+/// status icon as before, just shifted right by 2 cells so the
+/// hierarchy reads at a glance.
+fn check_item_line(
     theme: &crate::color::ColorTheme,
     c: &crate::github::pr::CheckRunDetail,
 ) -> Line<'static> {
@@ -7452,8 +7605,13 @@ fn check_row(
         (CheckStatus::Queued, _) | (CheckStatus::InProgress, _) => ("⏳", theme.status_warn_fg),
         _ => ("?", theme.detail_label_fg),
     };
+    // Tree-style indent so items obviously belong to the header above:
+    // two spaces (align with the caret column), a dim `│` continuation
+    // bar (signals "still inside this group"), then the status icon.
     Line::from(vec![
         Span::raw("  "),
+        Span::styled("│", Style::default().fg(theme.detail_label_fg)),
+        Span::raw("     "),
         Span::styled(
             icon.to_string(),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -7461,6 +7619,80 @@ fn check_row(
         Span::raw("  "),
         Span::styled(c.name.clone(), Style::default().fg(theme.fg)),
     ])
+}
+
+/// Accordion header for a workflow: caret + workflow name + rollup
+/// counts. Caret reflects collapsed state (▶ collapsed / ▼ expanded).
+/// Counts are coloured success/error/warn so the header alone tells
+/// you whether the whole workflow is green.
+fn check_group_header_line(
+    theme: &crate::color::ColorTheme,
+    workflow: &str,
+    total: usize,
+    success: usize,
+    failure: usize,
+    pending: usize,
+    collapsed: bool,
+) -> Line<'static> {
+    let caret = if collapsed { "▶" } else { "▼" };
+    // Group-level status icon: any failure dominates, then any pending,
+    // else all-green. Matches the rollup GitHub web shows next to the
+    // workflow name on its checks page.
+    let (group_icon, group_color) = if failure > 0 {
+        ("✗", theme.status_error_fg)
+    } else if pending > 0 {
+        ("⏳", theme.status_warn_fg)
+    } else {
+        ("✓", theme.status_success_fg)
+    };
+    let mut spans = vec![
+        Span::raw("  "),
+        Span::styled(
+            caret.to_string(),
+            Style::default().fg(theme.detail_label_fg),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            group_icon.to_string(),
+            Style::default()
+                .fg(group_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            workflow.to_string(),
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("({})", total),
+            Style::default().fg(theme.detail_label_fg),
+        ),
+    ];
+    // Per-status breakdown — omit zeroes so simple all-green groups
+    // stay visually quiet.
+    if success > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("{} passed", success),
+            Style::default().fg(theme.status_success_fg),
+        ));
+    }
+    if failure > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("{} failed", failure),
+            Style::default().fg(theme.status_error_fg),
+        ));
+    }
+    if pending > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            format!("{} pending", pending),
+            Style::default().fg(theme.status_warn_fg),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// Per-column widths for the Files tab. Filename flexes; additions and

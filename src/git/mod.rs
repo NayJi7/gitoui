@@ -560,23 +560,52 @@ pub fn load_commit_by_hash(path: &Path, hash: &str) -> Option<Commit> {
     })
 }
 
-/// Fetch a Pull Request's head ref into `refs/pull/{n}/head` so the
-/// commits become available locally for `git show`. Uses the GitHub
-/// URL directly to dodge "which remote is GitHub?" guesswork. Quiet
-/// on success; failure surfaces the git stderr as the error string.
-pub fn fetch_pull_request_ref(
+/// Pull a single PR commit into the local repo so `git show` can
+/// render it. Two passes:
+///
+/// 1. `+refs/pull/<n>/head:refs/pull/<n>/head` — the canonical PR
+///    head refspec. Brings the whole PR branch in one shot for live
+///    PRs and is also faster than per-SHA fetches when the user
+///    drills into several commits on the same PR.
+/// 2. Direct SHA fetch (`git fetch <url> <sha>`) — fallback for
+///    squash-merged PRs whose branch was deleted: the head ref no
+///    longer points at the original commit, but GitHub still keeps
+///    the commit reachable for the PR's diff view and serves it
+///    when the client asks for a reachable-via-pull-but-orphan-from-
+///    branches SHA (`uploadpack.allowReachableSHA1InWant` = true on
+///    GitHub).
+///
+/// Returns `Ok(())` only when the commit object is actually present
+/// locally after the fetch. Returns `Err` with git stderr (or a
+/// generic hint) when both passes fail.
+pub fn fetch_pull_request_commit(
     path: &Path,
     owner: &str,
     repo: &str,
     pr_number: u64,
+    sha: &str,
 ) -> std::result::Result<(), String> {
     let url = format!("https://github.com/{}/{}", owner, repo);
+    // Pass 1 — pull/<n>/head refspec. Best-effort: ignore errors and
+    // re-check whether the commit landed.
     let refspec = format!("+refs/pull/{}/head:refs/pull/{}/head", pr_number, pr_number);
-    let output = Command::new("git")
+    let _ = Command::new("git")
         .args(["fetch", "--quiet", &url, &refspec])
+        .current_dir(path)
+        .output();
+    if load_commit_by_hash(path, sha).is_some() {
+        return Ok(());
+    }
+    // Pass 2 — direct SHA fetch. `--depth=1` avoids dragging the
+    // commit's full ancestry along just to render a single diff.
+    let output = Command::new("git")
+        .args(["fetch", "--quiet", "--depth=1", &url, sha])
         .current_dir(path)
         .output()
         .map_err(|e| format!("git fetch failed: {}", e))?;
+    if load_commit_by_hash(path, sha).is_some() {
+        return Ok(());
+    }
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(stderr
@@ -585,7 +614,10 @@ pub fn fetch_pull_request_ref(
             .unwrap_or("git fetch failed")
             .to_string());
     }
-    Ok(())
+    Err(format!(
+        "git fetch succeeded but commit {} is still missing locally",
+        &sha[..7.min(sha.len())]
+    ))
 }
 
 fn load_commits_format() -> String {

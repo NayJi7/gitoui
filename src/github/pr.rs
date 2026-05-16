@@ -257,6 +257,11 @@ pub struct CheckRunDetail {
     pub status: CheckStatus,
     pub conclusion: Option<CheckConclusion>,
     pub url: Option<String>,
+    /// Display name of the parent workflow (e.g. "Build", "CodeQL").
+    /// Used by the Checks tab to group runs the same way the GitHub
+    /// web UI does. Falls back to "Checks" when the parent workflow
+    /// can't be resolved.
+    pub workflow_name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -629,6 +634,11 @@ struct ApiWorkflowRunsResponse {
 struct ApiWorkflowRun {
     #[serde(default)]
     id: u64,
+    /// Display name of the workflow (e.g. "Build", "CodeQL"). Taken
+    /// from `.github/workflows/*.yml`'s `name:` field, or the file
+    /// name when `name:` isn't set.
+    #[serde(default)]
+    name: String,
     /// "push" / "pull_request" / "schedule" / "dynamic" / ...
     /// GitHub uses `event=dynamic` for internal auto-pipelines (the
     /// Copilot code-review workflow falls in this bucket). User CI
@@ -1108,11 +1118,13 @@ fn fetch_check_runs_detail(
     if sha.is_empty() {
         return Vec::new();
     }
-    // 1. Fetch the visible (= user CI) workflow run IDs in parallel
-    //    with the raw check-runs list, then keep only check-runs whose
-    //    parent workflow is user-visible. This matches what GitHub's
-    //    web UI counts as "Checks N" on the PR detail page.
-    let visible_ids = fetch_visible_workflow_run_ids(client, token, coords, sha);
+    // 1. Fetch the visible (= user CI) workflows in parallel with the
+    //    raw check-runs list, then keep only check-runs whose parent
+    //    workflow is user-visible. This matches what GitHub's web UI
+    //    counts as "Checks N" on the PR detail page. The same map
+    //    powers the accordion grouping in the Checks tab (run_id →
+    //    workflow display name).
+    let visible = fetch_visible_workflows(client, token, coords, sha);
 
     let url = format!(
         "https://api.github.com/repos/{}/{}/commits/{}/check-runs?per_page=50",
@@ -1139,52 +1151,53 @@ fn fetch_check_runs_detail(
     let w: Wrapper = serde_json::from_str(&body).unwrap_or(Wrapper { check_runs: vec![] });
     w.check_runs
         .into_iter()
-        .filter(|r| {
+        .filter_map(|r| {
             // Drop runs whose parent workflow isn't in the user-visible
             // set. Empty set (no user CI configured) → drop everything,
             // which is also what GitHub UI does.
-            match r.html_url.as_deref().and_then(extract_workflow_run_id) {
-                Some(id) => visible_ids.contains(&id),
-                None => false,
-            }
-        })
-        .map(|r| CheckRunDetail {
-            name: r.name,
-            status: match r.status.as_str() {
-                "queued" => CheckStatus::Queued,
-                "in_progress" => CheckStatus::InProgress,
-                "completed" => CheckStatus::Completed,
-                _ => CheckStatus::Other,
-            },
-            conclusion: r.conclusion.as_deref().map(|c| match c {
-                "success" => CheckConclusion::Success,
-                "failure" => CheckConclusion::Failure,
-                "neutral" => CheckConclusion::Neutral,
-                "cancelled" => CheckConclusion::Cancelled,
-                "timed_out" => CheckConclusion::TimedOut,
-                "action_required" => CheckConclusion::ActionRequired,
-                "skipped" => CheckConclusion::Skipped,
-                _ => CheckConclusion::Other,
-            }),
-            url: r.html_url,
+            let run_id = r.html_url.as_deref().and_then(extract_workflow_run_id)?;
+            let workflow_name = visible.get(&run_id)?.clone();
+            Some(CheckRunDetail {
+                name: r.name,
+                status: match r.status.as_str() {
+                    "queued" => CheckStatus::Queued,
+                    "in_progress" => CheckStatus::InProgress,
+                    "completed" => CheckStatus::Completed,
+                    _ => CheckStatus::Other,
+                },
+                conclusion: r.conclusion.as_deref().map(|c| match c {
+                    "success" => CheckConclusion::Success,
+                    "failure" => CheckConclusion::Failure,
+                    "neutral" => CheckConclusion::Neutral,
+                    "cancelled" => CheckConclusion::Cancelled,
+                    "timed_out" => CheckConclusion::TimedOut,
+                    "action_required" => CheckConclusion::ActionRequired,
+                    "skipped" => CheckConclusion::Skipped,
+                    _ => CheckConclusion::Other,
+                }),
+                url: r.html_url,
+                workflow_name,
+            })
         })
         .collect()
 }
 
-/// Fetch the workflow runs attached to a commit SHA and return the IDs
-/// of those that count as "user-visible" CI runs. The `event=dynamic`
-/// type covers GitHub's internal auto-pipelines (notably Copilot's PR
-/// reviewer), which GitHub itself hides from the PR detail's "Checks N"
-/// badge — we mirror that filter here so our counts agree with the web UI.
-fn fetch_visible_workflow_run_ids(
+/// Fetch the workflow runs attached to a commit SHA and return the map
+/// `run_id → workflow_name` for those that count as "user-visible" CI
+/// runs. The `event=dynamic` type covers GitHub's internal auto-
+/// pipelines (notably Copilot's PR reviewer), which GitHub itself hides
+/// from the PR detail's "Checks N" badge — we mirror that filter here
+/// so our counts agree with the web UI. The names also power the
+/// accordion grouping in the Checks tab (e.g. "Build", "CodeQL").
+fn fetch_visible_workflows(
     client: &reqwest::blocking::Client,
     token: &str,
     coords: &RepoCoords,
     sha: &str,
-) -> std::collections::HashSet<u64> {
-    use std::collections::HashSet;
+) -> std::collections::HashMap<u64, String> {
+    use std::collections::HashMap;
     if sha.is_empty() {
-        return HashSet::new();
+        return HashMap::new();
     }
     let url = format!(
         "https://api.github.com/repos/{}/{}/actions/runs?head_sha={}&per_page=100",
@@ -1197,10 +1210,10 @@ fn fetch_visible_workflow_run_ids(
         .send()
     {
         Ok(r) => r,
-        Err(_) => return HashSet::new(),
+        Err(_) => return HashMap::new(),
     };
     if !resp.status().is_success() {
-        return HashSet::new();
+        return HashMap::new();
     }
     let body = resp.text().unwrap_or_default();
     let parsed: ApiWorkflowRunsResponse =
@@ -1211,7 +1224,14 @@ fn fetch_visible_workflow_run_ids(
         .workflow_runs
         .into_iter()
         .filter(|r| r.event != "dynamic")
-        .map(|r| r.id)
+        .map(|r| {
+            let name = if r.name.is_empty() {
+                "Checks".to_string()
+            } else {
+                r.name
+            };
+            (r.id, name)
+        })
         .collect()
 }
 
