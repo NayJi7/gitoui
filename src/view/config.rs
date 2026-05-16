@@ -1213,7 +1213,11 @@ impl<'a> ConfigView<'a> {
         if row < self.left_area.y || row >= self.left_area.y.saturating_add(self.left_area.height) {
             return None;
         }
-        let row_idx = (row - self.left_area.y) as usize;
+        // `left_item_rows` is the FULL line list (headers / blanks / config
+        // rows), not the visible viewport. After scroll, screen row 0 maps
+        // to logical row `left_scroll`, so add it before indexing — without
+        // it hover lands on the wrong row by `left_scroll` lines.
+        let row_idx = (row - self.left_area.y) as usize + self.left_scroll;
         self.left_item_rows.get(row_idx).and_then(|idx| *idx)
     }
 
