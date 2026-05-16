@@ -303,20 +303,21 @@ print_banner() {
 # so the README badge can show the curl-install total. The Worker only
 # accepts pings with `curl/*` / `Wget/*` User-Agent, never logs IP or
 # payload, and capped at 2s here so a slow / unreachable counter never
-# delays the install. Skip with `GITOUI_NO_TRACK=1`.
-#
-# After deploying the Worker (`worker/` in the repo), replace
-# `https://gitoui-install-counter.nayji7.workers.dev` with its base URL, e.g.
-#   https://gitoui-install-counter.yourname.workers.dev
+# delays the install. Skip with `GITOUI_NO_TRACK=1`. To point at a
+# different Worker (forks): edit the URL below; the worker source is in
+# `worker/src/index.js` of this repo.
 track_install() {
     if [ -n "${GITOUI_NO_TRACK:-}" ]; then
         return 0
     fi
-    _url="https://gitoui-install-counter.nayji7.workers.dev/ping"
-    case "$_url" in
-        https://gitoui-install-counter.nayji7.workers.dev*) return 0 ;;  # placeholder not replaced
-    esac
-    curl -fsSL --max-time 2 "$_url" >/dev/null 2>&1 || true
+    # The earlier guard tried to detect an unreplaced `__INSTALL_COUNTER_URL__`
+    # placeholder via a `case` — but the same sed pass that swapped the URL
+    # also rewrote the case pattern, so the guard tautologically matched the
+    # real URL and the ping never fired. Trust the URL now; if it's wrong,
+    # curl --max-time 2 + `|| true` swallow the noise.
+    curl -fsSL --max-time 2 \
+        "https://gitoui-install-counter.nayji7.workers.dev/ping" \
+        >/dev/null 2>&1 || true
 }
 
 # ── Existing-install detection ────────────────────────────────────────
