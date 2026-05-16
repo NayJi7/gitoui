@@ -15,6 +15,9 @@
 #   GITOUI_VERSION   — specific tag to install (default: latest)
 #   NO_COLOR         — set to anything to disable ANSI colors
 #   GITOUI_ASCII     — set to 1 to force ASCII banner (same as --ascii)
+#   GITOUI_NO_TRACK  — set to anything to skip the anonymous install ping
+#                      (a single GET to a Cloudflare Worker that only
+#                      increments a counter — no IP, no UA, no payload)
 
 set -eu
 
@@ -281,6 +284,27 @@ print_banner() {
     printf '  %srepo:%s github.com/%s%s%s\n' "$DIM" "$RESET" "$BOLD" "$REPO" "$RESET"
     printf '\n'
 }
+# ── Install counter ping ──────────────────────────────────────────────
+# Best-effort GET to a Cloudflare Worker that just increments a counter
+# so the README badge can show the curl-install total. The Worker only
+# accepts pings with `curl/*` / `Wget/*` User-Agent, never logs IP or
+# payload, and capped at 2s here so a slow / unreachable counter never
+# delays the install. Skip with `GITOUI_NO_TRACK=1`.
+#
+# After deploying the Worker (`worker/` in the repo), replace
+# `https://gitoui-install-counter.nayji7.workers.dev` with its base URL, e.g.
+#   https://gitoui-install-counter.yourname.workers.dev
+track_install() {
+    if [ -n "${GITOUI_NO_TRACK:-}" ]; then
+        return 0
+    fi
+    _url="https://gitoui-install-counter.nayji7.workers.dev/ping"
+    case "$_url" in
+        https://gitoui-install-counter.nayji7.workers.dev*) return 0 ;;  # placeholder not replaced
+    esac
+    curl -fsSL --max-time 2 "$_url" >/dev/null 2>&1 || true
+}
+
 # ── Tooling check ──────────────────────────────────────────────────────
 need() {
     command -v "$1" >/dev/null 2>&1 || fail "Required tool not found: $1"
@@ -471,9 +495,10 @@ main() {
     need curl
     detect_target
     resolve_version
-    check_existing
-    download_archive
-    install_binary
+    check_existing      # exits 0 here if already up-to-date — no ping
+    download_archive    # exits 1 on failure (`fail()`) — no ping
+    install_binary      # exits 1 on failure (`fail()`) — no ping
+    track_install       # reached only on a real install or update
     check_path
     print_welcome
 }

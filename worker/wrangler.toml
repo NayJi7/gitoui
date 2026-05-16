@@ -1,0 +1,14 @@
+name = "gitoui-install-counter"
+main = "src/index.js"
+compatibility_date = "2025-05-01"
+
+# Bind a KV namespace named COUNTER to persist the install count.
+# Create the namespace once with `wrangler kv namespace create COUNTER`
+# (or via the Cloudflare dashboard) then paste the returned `id` below.
+[[kv_namespaces]]
+binding = "COUNTER"
+id = "6cec5b70c23141f3b6ca0ca6fc265676"
+
+# Observability — keeps logs visible in the dashboard. Free.
+[observability]
+enabled = true
