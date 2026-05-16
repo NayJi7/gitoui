@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 const CRATES_URL: &str = "https://crates.io/api/v1/crates/gitoui";
 const INSTALL_SH_URL: &str = "https://nayji7.github.io/gitoui/install.sh";
+const GH_RELEASES_BASE: &str = "https://github.com/NayJi7/gitoui/releases/download";
 const CACHE_DIRNAME: &str = "gitoui";
 const CACHE_FILENAME: &str = "update.toml";
 const CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60; // 1 day
@@ -185,8 +186,16 @@ fn run_update() -> io::Result<()> {
         }
         InstallMethod::CurlScript => {
             println!("→ Re-running install.sh from {INSTALL_SH_URL}…");
-            // sh -c "curl -fsSL <url> | sh" so the pipe stays inside the shell.
+            // sh -c "curl -fsSL <url> | sh" so the pipe stays inside the
+            // shell. `GITOUI_INSTALL_QUIET` tells install.sh to skip its
+            // own banner + welcome (we already drew them above) so the
+            // output isn't a duplicate splash. `GITOUI_INSTALL_FORCE_BINARY`
+            // pins install.sh to the binary path so it doesn't accidentally
+            // delegate to `cargo install --force` if the user has a stale
+            // `~/.cargo/bin/gitoui` alongside their `~/.local/bin/gitoui`.
             let status = Command::new("sh")
+                .env("GITOUI_INSTALL_QUIET", "1")
+                .env("GITOUI_INSTALL_FORCE_BINARY", "1")
                 .arg("-c")
                 .arg(format!("curl -fsSL '{INSTALL_SH_URL}' | sh"))
                 .status()?;
@@ -201,24 +210,106 @@ fn run_update() -> io::Result<()> {
     Ok(())
 }
 
+/// Maps the Rust target triple of the running binary to the same triple
+/// used in the release archive filenames. Returns `None` on a platform
+/// we don't publish prebuilt binaries for.
+fn current_target_triple() -> Option<&'static str> {
+    use std::env::consts::{ARCH, OS};
+    Some(match (OS, ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        _ => return None,
+    })
+}
+
+/// Check whether the GitHub Release archive for `version` and the
+/// running platform is published yet. Returns:
+/// - `Some(true)`  → archive exists, safe to run install.sh
+/// - `Some(false)` → archive 404s (release was just tagged, build CI
+///   still running — we mustn't prompt the user yet)
+/// - `None`        → network error or unsupported platform, caller
+///   should err on the side of "ask anyway".
+///
+/// Avoids the race where `crates.io` already publishes a new version
+/// (parallel `publish-crate` job finishes in seconds) but the multi-arch
+/// `release` job hasn't uploaded the binaries yet — running install.sh
+/// in that window resolves an older tag and silently exits "up to date".
+fn github_release_ready(version: &str) -> Option<bool> {
+    let target = current_target_triple()?;
+    let url = format!("{GH_RELEASES_BASE}/v{version}/gitoui-{version}-{target}.tar.gz");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .user_agent(concat!("gitoui/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .ok()?;
+    // HEAD follows redirects by default (the asset URL 302's to S3),
+    // so a final 200 means the file is downloadable.
+    let resp = client.head(&url).send().ok()?;
+    Some(resp.status().is_success())
+}
+
+/// Resolve the path the running binary should be re-execed from. Three
+/// fallback layers to survive the rough edges of `current_exe()` after
+/// install.sh has just swapped the binary in place:
+///
+/// 1. `current_exe()` as-is if the file still exists at that path
+///    (true when install.sh wrote elsewhere, or on macOS).
+/// 2. Strip a literal " (deleted)" suffix — Linux readlink(/proc/self/exe)
+///    appends that when the original inode was unlinked or replaced
+///    (which is exactly what `mv -f` inside `install_binary` does).
+/// 3. `PATH`-based lookup of `gitoui` as a last resort, for the case
+///    where install.sh wrote to a different directory than the one the
+///    user invoked us from.
+fn resolved_self_path() -> io::Result<PathBuf> {
+    let raw = env::current_exe()?;
+    if raw.exists() {
+        return Ok(raw);
+    }
+    let s = raw.to_string_lossy();
+    if let Some(stripped) = s.strip_suffix(" (deleted)") {
+        let candidate = PathBuf::from(stripped);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    let path_var = env::var_os("PATH").unwrap_or_default();
+    for dir in env::split_paths(&path_var) {
+        let candidate = dir.join("gitoui");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "gitoui binary not found after install — re-run `gitoui` manually",
+    ))
+}
+
+/// Args to forward to the re-execed binary. Drops `--update` so the new
+/// binary doesn't immediately loop into another update check — we just
+/// finished updating, the user's intent is satisfied.
+fn forwarded_args() -> Vec<String> {
+    env::args().skip(1).filter(|a| a != "--update").collect()
+}
+
 /// Replace the current process with a freshly-execed copy of the same
 /// binary path so the user lands inside the just-updated app without
 /// re-typing the command.
 #[cfg(unix)]
 fn exec_self() -> io::Result<()> {
     use std::os::unix::process::CommandExt;
-    let exe = env::current_exe()?;
-    let args: Vec<String> = env::args().skip(1).collect();
+    let exe = resolved_self_path()?;
     // `.exec()` only returns on failure.
-    Err(Command::new(exe).args(args).exec())
+    Err(Command::new(exe).args(forwarded_args()).exec())
 }
 
 #[cfg(not(unix))]
 fn exec_self() -> io::Result<()> {
     // Windows path: spawn the new process and exit cleanly.
-    let exe = env::current_exe()?;
-    let args: Vec<String> = env::args().skip(1).collect();
-    let status = Command::new(exe).args(args).status()?;
+    let exe = resolved_self_path()?;
+    let status = Command::new(exe).args(forwarded_args()).status()?;
     std::process::exit(status.code().unwrap_or(0));
 }
 
@@ -274,6 +365,16 @@ pub fn maybe_check_at_startup(splash: impl FnOnce()) -> CheckOutcome {
     if !is_newer(&latest, current_version()) {
         return CheckOutcome::Continue;
     }
+    // For curl-installed binaries, only prompt once GitHub has the
+    // matching archive — otherwise the user says yes and install.sh
+    // resolves the OLD tag, prints a misleading "already up to date".
+    // Silent skip here: a tomorrow-startup check will surface the
+    // version when the binaries land.
+    if matches!(detect_install_method(), InstallMethod::CurlScript)
+        && github_release_ready(&latest) == Some(false)
+    {
+        return CheckOutcome::Continue;
+    }
     splash();
     prompt_and_act(&latest)
 }
@@ -298,6 +399,20 @@ pub fn force_check(splash: impl FnOnce()) -> CheckOutcome {
 
     if !is_newer(&latest, current_version()) {
         println!("Already on the latest version (v{}).", current_version());
+        return CheckOutcome::Continue;
+    }
+    // Curl-installed: confirm GitHub has the matching archive before
+    // we offer the prompt. Explicit user-driven `--update` deserves a
+    // visible message instead of the silent skip the startup check
+    // does, so the user understands the wait.
+    if matches!(detect_install_method(), InstallMethod::CurlScript)
+        && github_release_ready(&latest) == Some(false)
+    {
+        println!();
+        println!("  gitoui v{latest} is published on crates.io but the prebuilt");
+        println!("  binaries aren't on GitHub yet (release CI still building).");
+        println!("  Try again in a few minutes, or build from source via");
+        println!("  `cargo install gitoui --locked --force`.");
         return CheckOutcome::Continue;
     }
     prompt_and_act(&latest)

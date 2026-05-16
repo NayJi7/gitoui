@@ -11,13 +11,24 @@
 # capturing the output to plain text.
 #
 # Environment overrides:
-#   INSTALL_DIR      — destination directory (default: $HOME/.local/bin)
-#   GITOUI_VERSION   — specific tag to install (default: latest)
-#   NO_COLOR         — set to anything to disable ANSI colors
-#   GITOUI_ASCII     — set to 1 to force ASCII banner (same as --ascii)
-#   GITOUI_NO_TRACK  — set to anything to skip the anonymous install ping
-#                      (a single GET to a Cloudflare Worker that only
-#                      increments a counter — no IP, no UA, no payload)
+#   INSTALL_DIR                  destination directory
+#                                (default: $HOME/.local/bin)
+#   GITOUI_VERSION               specific tag to install (default: latest)
+#   NO_COLOR                     disable ANSI colors
+#   GITOUI_ASCII                 set to 1 to force ASCII banner
+#                                (same as --ascii)
+#   GITOUI_NO_TRACK              skip the anonymous install ping (a single
+#                                GET to a Cloudflare Worker that only
+#                                increments a counter — no IP, no UA, no
+#                                payload)
+#   GITOUI_INSTALL_QUIET         skip the brand banner + welcome message.
+#                                Set automatically by `gitoui --update` so
+#                                the splash isn't drawn twice.
+#   GITOUI_INSTALL_FORCE_BINARY  install to $INSTALL_DIR even if a cargo-
+#                                managed gitoui exists in ~/.cargo/bin/.
+#                                Set by `gitoui --update` when the running
+#                                binary lives outside ~/.cargo/bin/ to
+#                                avoid silently updating the wrong copy.
 
 set -eu
 
@@ -269,6 +280,9 @@ print_banner_ascii() {
 }
 
 print_banner() {
+    # `gitoui --update` already drew its own splash above the update
+    # prompt — skip ours so the user doesn't see two banners stacked.
+    [ -n "${GITOUI_INSTALL_QUIET:-}" ] && return
     printf '\n'
     proto=$(detect_image_protocol)
     if [ "$proto" != "none" ]; then
@@ -303,6 +317,69 @@ track_install() {
         https://gitoui-install-counter.nayji7.workers.dev*) return 0 ;;  # placeholder not replaced
     esac
     curl -fsSL --max-time 2 "$_url" >/dev/null 2>&1 || true
+}
+
+# ── Existing-install detection ────────────────────────────────────────
+# Look at concrete filesystem paths (NOT `command -v gitoui` / PATH lookup)
+# so we always update the right copy regardless of what comes first on
+# the user's PATH. Two roots considered:
+#   - $HOME/.cargo/bin/gitoui     (cargo-managed install)
+#   - $INSTALL_DIR/gitoui         (binary install we write to)
+# Caller may set GITOUI_INSTALL_FORCE_BINARY=1 to skip the cargo check —
+# `gitoui --update` does this when the running binary is NOT in
+# ~/.cargo/bin, so a leftover cargo install doesn't capture the update.
+detect_existing() {
+    EXISTING_METHOD="none"
+    EXISTING_PATH=""
+    CARGO_BIN="${HOME}/.cargo/bin/${BIN_NAME}"
+    LOCAL_BIN="${INSTALL_DIR}/${BIN_NAME}"
+    if [ -z "${GITOUI_INSTALL_FORCE_BINARY:-}" ] && [ -x "$CARGO_BIN" ]; then
+        EXISTING_METHOD="cargo"
+        EXISTING_PATH="$CARGO_BIN"
+        return
+    fi
+    if [ -x "$LOCAL_BIN" ]; then
+        EXISTING_METHOD="binary"
+        EXISTING_PATH="$LOCAL_BIN"
+    fi
+}
+
+# Fetch the `max_stable_version` from crates.io. Used by the cargo-update
+# path to avoid running `cargo install --force` (which always rebuilds)
+# when we're already on the latest. Falls back to empty on any failure;
+# caller proceeds with cargo install in that case.
+fetch_crates_version() {
+    curl -fsSL --max-time 5 \
+        -H "User-Agent: gitoui-install.sh" \
+        "https://crates.io/api/v1/crates/${BIN_NAME}" 2>/dev/null \
+        | grep -o '"max_stable_version"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | head -n1 \
+        | sed -E 's/.*"max_stable_version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
+}
+
+# Cargo-managed install update path. Mirrors the binary path's "already
+# up to date → exit 0 silently" / "newer → install + log" semantics so
+# the install counter ping (in `main`) only fires when something actually
+# changed.
+update_via_cargo() {
+    info "Detected cargo install at ${BOLD}${EXISTING_PATH}${RESET}."
+    need cargo
+    LATEST_CRATES="$(fetch_crates_version)"
+    CURRENT_RAW="$("$EXISTING_PATH" --version 2>/dev/null || true)"
+    CURRENT_VERSION="$(printf '%s\n' "$CURRENT_RAW" | awk 'NF{last=$NF} END{print last}')"
+    if [ -n "$LATEST_CRATES" ] && [ "$CURRENT_VERSION" = "$LATEST_CRATES" ]; then
+        ok "gitoui ${BOLD}${CURRENT_VERSION}${RESET} is already up to date."
+        # Mirror the binary `check_existing` early-exit: print the
+        # welcome (suppressed under QUIET) and skip the ping.
+        print_welcome
+        exit 0
+    fi
+    info "Found gitoui ${BOLD}${CURRENT_VERSION:-unknown}${RESET} → updating to ${BOLD}${LATEST_CRATES:-latest}${RESET}."
+    info "Running ${BOLD}cargo install ${BIN_NAME} --locked --force${RESET}…"
+    if ! cargo install "${BIN_NAME}" --locked --force; then
+        fail "cargo install failed — leaving the current binary in place."
+    fi
+    ok "gitoui updated via ${BOLD}cargo${RESET}."
 }
 
 # ── Tooling check ──────────────────────────────────────────────────────
@@ -357,27 +434,31 @@ resolve_version() {
 }
 
 # ── Existing-install check — skips work when already up-to-date ────────
+# Uses the absolute $EXISTING_PATH set by detect_existing instead of a
+# PATH lookup so we always interrogate the same binary we're about to
+# overwrite (matters when the user has multiple gitoui copies on PATH).
 check_existing() {
     UPDATE=0
-    if command -v "$BIN_NAME" >/dev/null 2>&1; then
-        CURRENT_RAW="$("$BIN_NAME" --version 2>/dev/null || true)"
-        # `--version` prints `gitoui X.Y.Z` (clap default). Grab the last
-        # whitespace-separated token of the LAST line — older binaries
-        # used to print the brand splash above the version, and the
-        # captured escape sequences would otherwise re-render mid-line
-        # when echoed back. Falling back to "unknown" keeps the update
-        # path live for unknown formats.
-        CURRENT_VERSION="$(printf '%s\n' "$CURRENT_RAW" | awk 'NF{last=$NF} END{print last}')"
-        [ -n "$CURRENT_VERSION" ] || CURRENT_VERSION="unknown"
-        if [ "v${CURRENT_VERSION}" = "$RESOLVED_VERSION" ] \
-           || [ "$CURRENT_VERSION" = "$RESOLVED_VERSION" ]; then
-            ok "gitoui ${BOLD}${CURRENT_VERSION}${RESET} is already up to date."
-            print_welcome
-            exit 0
-        fi
-        info "Found gitoui ${BOLD}${CURRENT_VERSION}${RESET} → updating to ${BOLD}${RESOLVED_VERSION}${RESET}."
-        UPDATE=1
+    if [ "$EXISTING_METHOD" = "none" ] || [ -z "$EXISTING_PATH" ]; then
+        return
     fi
+    CURRENT_RAW="$("$EXISTING_PATH" --version 2>/dev/null || true)"
+    # `--version` prints `gitoui X.Y.Z` (clap default). Grab the last
+    # whitespace-separated token of the LAST line — older binaries used
+    # to print the brand splash above the version, and the captured
+    # escape sequences would otherwise re-render mid-line when echoed
+    # back. Fallback "unknown" keeps the update path live for unknown
+    # formats.
+    CURRENT_VERSION="$(printf '%s\n' "$CURRENT_RAW" | awk 'NF{last=$NF} END{print last}')"
+    [ -n "$CURRENT_VERSION" ] || CURRENT_VERSION="unknown"
+    if [ "v${CURRENT_VERSION}" = "$RESOLVED_VERSION" ] \
+       || [ "$CURRENT_VERSION" = "$RESOLVED_VERSION" ]; then
+        ok "gitoui ${BOLD}${CURRENT_VERSION}${RESET} is already up to date."
+        print_welcome
+        exit 0
+    fi
+    info "Found gitoui ${BOLD}${CURRENT_VERSION}${RESET} → updating to ${BOLD}${RESOLVED_VERSION}${RESET}."
+    UPDATE=1
 }
 
 # ── Download + extract — silent curl, clean error reporting ──────────
@@ -475,6 +556,11 @@ check_path() {
 
 # ── Welcome message — keep it short on purpose ─────────────────────────
 print_welcome() {
+    # When called from `gitoui --update`, the running gitoui will
+    # re-exec into the new binary right after install.sh returns, so
+    # the user lands directly in the app — printing a quick-start
+    # block here would just be redundant noise.
+    [ -n "${GITOUI_INSTALL_QUIET:-}" ] && return
     printf '\n'
     printf '  %sQuick start%s — inside any git repo:\n' "${BOLD}" "${RESET}"
     printf '    %sgitoui%s        %sopen the commit-graph viewer%s\n' \
@@ -494,13 +580,27 @@ main() {
     need tar
     need curl
     detect_target
-    resolve_version
-    check_existing      # exits 0 here if already up-to-date — no ping
-    download_archive    # exits 1 on failure (`fail()`) — no ping
-    install_binary      # exits 1 on failure (`fail()`) — no ping
-    track_install       # reached only on a real install or update
-    check_path
-    print_welcome
+    detect_existing
+    case "$EXISTING_METHOD" in
+        cargo)
+            # cargo-managed install — defer to `cargo install`, which
+            # owns version resolution (talks to crates.io). update_via_cargo
+            # exits 0 silently if already on the latest stable.
+            update_via_cargo
+            track_install    # only reached when cargo actually installed
+            print_welcome
+            ;;
+        *)
+            # Binary path — GitHub Release archives.
+            resolve_version
+            check_existing      # exits 0 here if already up-to-date — no ping
+            download_archive    # exits 1 on failure (`fail()`) — no ping
+            install_binary      # exits 1 on failure (`fail()`) — no ping
+            track_install       # reached only on a real install or update
+            check_path
+            print_welcome
+            ;;
+    esac
 }
 
 main
