@@ -19,7 +19,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       <span class="ico">★</span><span class="num" data-stars>1</span> star
     </a>
     <span class="dot" aria-hidden="true">·</span>
-    <a href="https://crates.io/crates/gitoui" class="coda-stat">
+    <a href={`${base}/introduction/`} class="coda-stat">
       <span class="ico">↓</span><span class="num" data-downloads>—</span> downloads
     </a>
     <span class="dot" aria-hidden="true">·</span>
@@ -47,9 +47,22 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     Promise.all([
       fetch("https://api.github.com/repos/NayJi7/gitoui").then(r => r.ok ? r.json() : null),
       fetch("https://crates.io/api/v1/crates/gitoui").then(r => r.ok ? r.json() : null),
-    ]).then(([gh, cr]) => {
+      // Curl-install counter (Cloudflare Worker). Same JSON shape that
+      // the shields.io endpoint badge consumes; `.message` is a
+      // localised string ("1,234"), strip non-digits before summing.
+      fetch("https://gitoui-install-counter.nayji7.workers.dev/count").then(r => r.ok ? r.json() : null),
+    ]).then(([gh, cr, curl]) => {
       if (gh?.stargazers_count != null) setText("[data-stars]", gh.stargazers_count);
-      if (cr?.crate?.downloads != null) setText("[data-downloads]", cr.crate.downloads);
+      // Total downloads = crates.io (cargo install + cargo add) + curl
+      // installs (the install.sh one-liner). Both paths represent a
+      // person pulling gitoui to their machine; summing matches the
+      // README's "downloads" framing.
+      const cargo = Number.isFinite(cr?.crate?.downloads) ? cr.crate.downloads : 0;
+      const curlCount = curl?.message
+        ? parseInt(String(curl.message).replace(/\D/g, ""), 10) || 0
+        : 0;
+      const total = cargo + curlCount;
+      if (total > 0) setText("[data-downloads]", total.toLocaleString("en-US"));
     }).catch(() => {});
   })();
 </script>
