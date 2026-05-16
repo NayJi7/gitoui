@@ -1879,9 +1879,8 @@ impl<'a> PullRequestsView<'a> {
                     return;
                 };
                 let Some(url) = c.url.clone() else {
-                    self.tx.send(AppEvent::NotifyError(
-                        "This check has no GitHub URL".into(),
-                    ));
+                    self.tx
+                        .send(AppEvent::NotifyError("This check has no GitHub URL".into()));
                     return;
                 };
                 let name = c.name.clone();
