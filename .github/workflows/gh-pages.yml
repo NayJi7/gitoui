@@ -6,6 +6,11 @@ on:
     paths:
       - "docs/**"
       - ".github/workflows/gh-pages.yml"
+      # Hosted assets that the docs site syncs from the repo root via
+      # the `sync-public` npm script. A change to either re-deploys
+      # /gitoui/install.sh and /gitoui/brand/<name>.svg.
+      - "install.sh"
+      - "assets/brand/**"
   workflow_dispatch:
 
 permissions:
