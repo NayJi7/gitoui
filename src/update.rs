@@ -141,6 +141,25 @@ enum InstallMethod {
     CurlScript,
 }
 
+/// Short label describing where the current binary was installed
+/// from. Used in the Config view header so the user can tell at a
+/// glance which install path will apply on the next `gitoui --update`.
+/// `dev` is reported when the binary lives inside a `target/`
+/// directory (i.e. a `cargo build` artifact, not a real install).
+pub fn install_label() -> &'static str {
+    let Ok(exe) = env::current_exe() else {
+        return "unknown";
+    };
+    let exe_str = exe.to_string_lossy();
+    if exe_str.contains("/target/debug/") || exe_str.contains("/target/release/") {
+        return "dev";
+    }
+    match detect_install_method() {
+        InstallMethod::Cargo => "cargo",
+        InstallMethod::CurlScript => "curl",
+    }
+}
+
 fn which(cmd: &str) -> bool {
     Command::new(cmd)
         .arg("--version")

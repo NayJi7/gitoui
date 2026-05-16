@@ -81,6 +81,11 @@ pub struct IssuesView<'a> {
     /// tab. Captured during the post-render restyle pass; consumed
     /// by `handle_click` to navigate to the referenced item.
     conversation_ref_links: Vec<RefLink>,
+    /// Reference the mouse is currently hovering — drives the
+    /// hover-bg highlight at next render. Identified by `(number,
+    /// is_pr)` so repeated occurrences of the same ref in a single
+    /// comment all light up together.
+    conversation_hovered_ref: Option<(u64, bool)>,
     /// References tab state — `hovered` is the selected row,
     /// `count` is the total rows (used to clamp nav), `row_rects`
     /// hold the per-row hit-test rects captured at render time.
@@ -103,6 +108,10 @@ pub struct IssuesView<'a> {
     /// `true` while the background PR fetch for `#` autocomplete is
     /// in flight, so we don't fire a second one.
     mention_pr_loading: bool,
+    /// Repo assignables cached for `@` autocomplete. Seeded from
+    /// the assignees picker fetch and from comment authors on the
+    /// open issue.
+    mention_user_cache: Vec<String>,
     /// In-session log of the viewer's reactions on each conversation
     /// entry — keyed by `(issue_number, target_idx)`. Stores both
     /// the kind (so the picker can highlight it red) and the
@@ -263,12 +272,16 @@ pub(crate) struct RefLink {
     pub is_pr: bool,
 }
 
-/// One candidate inside the `#` autocomplete popup. `pub(crate)` so
-/// the PR view can drive the same popup widget with its own data.
+/// One candidate inside the `#` / `@` autocomplete popup.
+/// `pub(crate)` so the PR view can drive the same popup widget with
+/// its own data. For `#` candidates `number` holds the issue/PR
+/// number and `login` is `None`; for `@` candidates `number` is `0`
+/// and `login` carries the user login.
 #[derive(Debug, Clone)]
 pub(crate) struct MentionItem {
     pub number: u64,
     pub title: String,
+    pub login: Option<String>,
     pub kind: MentionKind,
 }
 
@@ -276,28 +289,36 @@ pub(crate) struct MentionItem {
 pub(crate) enum MentionKind {
     Issue,
     Pr,
+    User,
 }
 
 /// Which text surface the popup is anchored to — read/write paths
-/// branch on this so the same popup machinery works for both the
-/// comment editor (Detail mode) and the compose Body field.
+/// branch on this so the same popup machinery works for the comment
+/// editor (Detail mode) and the compose Title / Body fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MentionTarget {
     CommentEditor,
     ComposeBody,
+    ComposeTitle,
 }
 
-/// Floating popup that proposes issues + PRs to insert as a `#NNN`
-/// reference. The active text surface routes its key events here
-/// while the popup is `Some`. `pub(crate)` so the PR view can hold
-/// its own instance and reuse the rendering helper.
+/// Floating popup that proposes issues + PRs (`#`) or users (`@`)
+/// to insert into the active text surface. The active surface routes
+/// its key events here while the popup is `Some`. `pub(crate)` so
+/// the PR view can hold its own instance and reuse the rendering
+/// helper.
 #[derive(Debug, Clone)]
 pub(crate) struct MentionPopup {
     pub target: MentionTarget,
-    /// Byte offset of the `#` token inside the target buffer —
+    /// Which character opened the popup — `'#'` for issue/PR refs,
+    /// `'@'` for user mentions. Drives both the trigger detection
+    /// in `update_mention_query_from_editor` and the insert format
+    /// in `pick_mention`.
+    pub trigger: char,
+    /// Byte offset of the trigger char inside the target buffer —
     /// drives the replacement range on pick.
     pub anchor: usize,
-    /// Chars typed after the `#` (the filter query).
+    /// Chars typed after the trigger (the filter query).
     pub query: String,
     /// Pre-filtered, sorted candidates the popup currently shows.
     /// Recomputed every time `query` changes.
@@ -414,12 +435,14 @@ impl<'a> IssuesView<'a> {
             prev_painted_avatars: Vec::new(),
             pending_avatar_paints: Vec::new(),
             conversation_ref_links: Vec::new(),
+            conversation_hovered_ref: None,
             references_hovered: 0,
             references_count: 0,
             references_row_rects: Vec::new(),
             list_avatar_slots: Vec::new(),
             reaction_picker: None,
             mention_popup: None,
+            mention_user_cache: Vec::new(),
             mention_pr_cache: Vec::new(),
             viewer_reactions: FxHashMap::default(),
             mention_pr_loading: false,
@@ -1200,17 +1223,22 @@ impl<'a> IssuesView<'a> {
     fn compose_field_insert_char(&mut self, ch: char) {
         // Detect a `#` typed inside the Body field BEFORE we mutate
         // anything else — we want the anchor offset to point at the
-        // `#` we're about to write. Title doesn't open the popup
-        // (we'd cover the field's underline) — only Body does.
-        let opened_popup_anchor: Option<usize> = {
+        // `#` / `@` we're about to write. Both Body and Title open
+        // the popup — GitHub web supports mentions in both fields,
+        // so we match that.
+        let popup_intent: Option<(usize, MentionTarget)> = {
             let Some(c) = self.compose.as_ref() else {
                 return;
             };
             if c.submitting {
                 return;
             }
-            if ch == '#' && matches!(c.field, ComposeField::Body) {
-                Some(c.body_cursor)
+            if ch == '#' || ch == '@' {
+                match c.field {
+                    ComposeField::Body => Some((c.body_cursor, MentionTarget::ComposeBody)),
+                    ComposeField::Title => Some((c.title_cursor, MentionTarget::ComposeTitle)),
+                    _ => None,
+                }
             } else {
                 None
             }
@@ -1221,8 +1249,8 @@ impl<'a> IssuesView<'a> {
                 *cur += ch.len_utf8();
             }
         }
-        if let Some(anchor) = opened_popup_anchor {
-            self.open_mention_popup(anchor, MentionTarget::ComposeBody);
+        if let Some((anchor, target)) = popup_intent {
+            self.open_mention_popup(anchor, target, ch);
         }
     }
 
@@ -1647,13 +1675,13 @@ impl<'a> IssuesView<'a> {
             }
             KeyCode::Char(ch) if !ctrl => {
                 self.editor_insert_char(ch);
-                // Typing a `#` opens the autocomplete anchored at
-                // the char we just inserted — `cursor` points to
+                // Typing a `#` or `@` opens the autocomplete anchored
+                // at the char we just inserted — `cursor` points to
                 // just past it, so anchor = cursor - 1.
-                if ch == '#' {
+                if ch == '#' || ch == '@' {
                     if let Some(ed) = self.comment_editor.as_ref() {
                         let anchor = ed.cursor.saturating_sub(1);
-                        self.open_mention_popup(anchor, MentionTarget::CommentEditor);
+                        self.open_mention_popup(anchor, MentionTarget::CommentEditor, ch);
                     }
                 }
                 true
@@ -1956,6 +1984,7 @@ impl<'a> IssuesView<'a> {
             out.push(MentionItem {
                 number: issue.number,
                 title: issue.title.clone(),
+                login: None,
                 kind: MentionKind::Issue,
             });
         }
@@ -1963,10 +1992,63 @@ impl<'a> IssuesView<'a> {
             out.push(MentionItem {
                 number: pr.number,
                 title: pr.title.clone(),
+                login: None,
                 kind: MentionKind::Pr,
             });
         }
         out.sort_by_key(|i| std::cmp::Reverse(i.number));
+        out
+    }
+
+    /// Build the `@` mention universe — assignables fetched for the
+    /// assignees picker plus the participants of the currently-open
+    /// conversation (Detail), OR the assignables fetched for compose
+    /// (Compose). De-dup by login, sort alpha.
+    fn mention_user_universe(&self) -> Vec<MentionItem> {
+        let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        let mut out: Vec<MentionItem> = Vec::new();
+        let push_login =
+            |login: &str, out: &mut Vec<MentionItem>, seen: &mut rustc_hash::FxHashSet<String>| {
+                let trimmed = login.trim();
+                if trimmed.is_empty() {
+                    return;
+                }
+                let key = trimmed.to_lowercase();
+                if seen.insert(key) {
+                    out.push(MentionItem {
+                        number: 0,
+                        title: trimmed.to_string(),
+                        login: Some(trimmed.to_string()),
+                        kind: MentionKind::User,
+                    });
+                }
+            };
+        for login in &self.mention_user_cache {
+            push_login(login, &mut out, &mut seen);
+        }
+        if let Some(number) = self.opened_issue_number {
+            if let Some(detail) = self.detail_cache.get(&number) {
+                push_login(&detail.author, &mut out, &mut seen);
+                for entry in &detail.conversation {
+                    push_login(&entry.author, &mut out, &mut seen);
+                }
+                for assignee in &detail.assignees {
+                    push_login(assignee, &mut out, &mut seen);
+                }
+            }
+        }
+        // Compose mode has no open issue — fall back to the
+        // assignables that the compose form already fetched for its
+        // own picker, plus the authors visible in the issue list.
+        if let Some(c) = self.compose.as_ref() {
+            for login in &c.available_assignees {
+                push_login(login, &mut out, &mut seen);
+            }
+        }
+        for issue in &self.items {
+            push_login(&issue.author, &mut out, &mut seen);
+        }
+        out.sort_by_key(|m| m.title.to_lowercase());
         out
     }
 
@@ -1975,7 +2057,16 @@ impl<'a> IssuesView<'a> {
     }
 
     fn refresh_mention_filter(&mut self) {
-        let universe = self.mention_universe();
+        let trigger = self
+            .mention_popup
+            .as_ref()
+            .map(|p| p.trigger)
+            .unwrap_or('#');
+        let universe = if trigger == '@' {
+            self.mention_user_universe()
+        } else {
+            self.mention_universe()
+        };
         if let Some(p) = self.mention_popup.as_mut() {
             p.filtered = Self::filter_mention_items(&p.query, &universe);
             if p.hovered >= p.filtered.len() {
@@ -1984,14 +2075,21 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    /// Open the `#` autocomplete popup anchored at `anchor` inside
-    /// `target`'s buffer.
-    fn open_mention_popup(&mut self, anchor: usize, target: MentionTarget) {
-        self.spawn_mention_prs_fetch();
-        let universe = self.mention_universe();
+    /// Open the autocomplete popup anchored at `anchor` inside
+    /// `target`'s buffer. `trigger` is the char that opened it
+    /// (`'#'` for issue/PR refs, `'@'` for user mentions); the
+    /// candidate universe + insert format both branch on it.
+    fn open_mention_popup(&mut self, anchor: usize, target: MentionTarget, trigger: char) {
+        let universe = if trigger == '@' {
+            self.mention_user_universe()
+        } else {
+            self.spawn_mention_prs_fetch();
+            self.mention_universe()
+        };
         let filtered = Self::filter_mention_items("", &universe);
         self.mention_popup = Some(MentionPopup {
             target,
+            trigger,
             anchor,
             query: String::new(),
             filtered,
@@ -2021,20 +2119,26 @@ impl<'a> IssuesView<'a> {
         p.scroll = new.min(max_scroll);
     }
 
-    /// Insert the selected `#N` into the editor buffer, replacing
-    /// the `#query` chunk that opened the popup. Closes the popup.
+    /// Insert the selected `#N` / `@login` into the editor buffer,
+    /// replacing the `#query` / `@query` chunk that opened the popup.
+    /// Closes the popup.
     fn pick_mention(&mut self) {
-        let (target, anchor, query_len, number) = {
+        let (target, anchor, query_len, replacement) = {
             let Some(p) = self.mention_popup.as_ref() else {
                 return;
             };
             let Some(item) = p.filtered.get(p.hovered) else {
                 return;
             };
-            (p.target, p.anchor, p.query.chars().count(), item.number)
+            let replacement = match item.kind {
+                MentionKind::User => {
+                    format!("@{}", item.login.as_deref().unwrap_or(item.title.as_str()))
+                }
+                _ => format!("#{}", item.number),
+            };
+            (p.target, p.anchor, p.query.chars().count(), replacement)
         };
         self.mention_popup = None;
-        let replacement = format!("#{}", number);
         // Clamp the splice range — an inconsistent (anchor, buf)
         // snapshot would otherwise panic `replace_range` with
         // "begin > end" mid-edit.
@@ -2060,6 +2164,17 @@ impl<'a> IssuesView<'a> {
                     .max(start);
                 c.body.replace_range(start..end, &replacement);
                 c.body_cursor = start + replacement.len();
+            }
+            MentionTarget::ComposeTitle => {
+                let Some(c) = self.compose.as_mut() else {
+                    return;
+                };
+                let start = anchor.min(c.title.len());
+                let end = walk_chars(&c.title, start.saturating_add(1), query_len)
+                    .min(c.title.len())
+                    .max(start);
+                c.title.replace_range(start..end, &replacement);
+                c.title_cursor = start + replacement.len();
             }
         }
     }
@@ -2113,15 +2228,17 @@ impl<'a> IssuesView<'a> {
             .unwrap_or(MentionTarget::CommentEditor);
         match target {
             MentionTarget::CommentEditor => self.handle_event_comment_editor(key),
-            MentionTarget::ComposeBody => self.handle_event_compose(key),
+            MentionTarget::ComposeBody | MentionTarget::ComposeTitle => {
+                self.handle_event_compose(key)
+            }
         }
         self.update_mention_query_from_editor();
     }
 
-    /// Re-read the chars between `anchor` (the `#`) and the cursor
-    /// in the editor buffer, rebuild `query` + filter. Closes the
-    /// popup if the buffer no longer starts with `#` at the anchor
-    /// (e.g. user backspaced past the `#`).
+    /// Re-read the chars between the trigger (`#` / `@`) and the
+    /// cursor, rebuild `query` + filter. Closes the popup if the
+    /// buffer no longer starts with the trigger at the anchor (e.g.
+    /// user backspaced past it).
     fn update_mention_query_from_editor(&mut self) {
         // Snapshot the bits we need under an immutable borrow, then
         // mutate `self` after the borrow ends. The (buf, cursor)
@@ -2132,6 +2249,7 @@ impl<'a> IssuesView<'a> {
             };
             let target = popup.target;
             let anchor = popup.anchor;
+            let trigger = popup.trigger;
             let (buf_ref, cursor_val): (&str, usize) = match target {
                 MentionTarget::CommentEditor => {
                     let Some(ed) = self.comment_editor.as_ref() else {
@@ -2147,15 +2265,24 @@ impl<'a> IssuesView<'a> {
                     };
                     (c.body.as_str(), c.body_cursor)
                 }
+                MentionTarget::ComposeTitle => {
+                    let Some(c) = self.compose.as_ref() else {
+                        self.mention_popup = None;
+                        return;
+                    };
+                    (c.title.as_str(), c.title_cursor)
+                }
             };
             let buf = buf_ref;
             let editor_cursor = cursor_val;
-            // Bail out if the anchor lost its `#` (user backspaced
-            // through it) or the cursor moved before the anchor.
-            if anchor >= buf.len() || !buf[anchor..].starts_with('#') || editor_cursor <= anchor {
+            // Bail out if the anchor lost its trigger char (user
+            // backspaced through it) or the cursor moved before the
+            // anchor.
+            if anchor >= buf.len() || !buf[anchor..].starts_with(trigger) || editor_cursor <= anchor
+            {
                 (String::new(), true)
             } else {
-                let slice = &buf[anchor + 1..editor_cursor.min(buf.len())];
+                let slice = &buf[anchor + trigger.len_utf8()..editor_cursor.min(buf.len())];
                 let mut q = String::new();
                 let mut closed = false;
                 for ch in slice.chars() {
@@ -3209,8 +3336,22 @@ impl<'a> IssuesView<'a> {
                             break;
                         }
                     }
+                    // Update hovered-ref so the matching `#N` span
+                    // lights up at next render.
+                    let local_col = col.saturating_sub(area.x);
+                    self.conversation_hovered_ref = self
+                        .conversation_ref_links
+                        .iter()
+                        .find(|l| {
+                            l.line == logical && local_col >= l.col_start && local_col < l.col_end
+                        })
+                        .map(|l| (l.number, l.is_pr));
+                } else {
+                    self.conversation_hovered_ref = None;
                 }
             }
+        } else {
+            self.conversation_hovered_ref = None;
         }
         // Compose: hovering a field row focuses it so the cursor +
         // visual highlight tracks the mouse. Matches PR's UX.
@@ -3809,7 +3950,7 @@ impl<'a> IssuesView<'a> {
             spans.push(Span::styled(
                 format!("#{}", d.number),
                 Style::default()
-                    .fg(theme.list_hash_fg)
+                    .fg(theme.list_ref_stash_fg)
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw("  "));
@@ -4167,11 +4308,20 @@ impl<'a> IssuesView<'a> {
         // resolve to a known issue or PR in our local caches and
         // also capture the click hit-boxes — GitHub web renders
         // these as underlined hyperlinks.
-        let issue_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|i| i.number).collect();
-        let pr_set: rustc_hash::FxHashSet<u64> =
-            self.mention_pr_cache.iter().map(|p| p.number).collect();
-        let issue_fg: Color = self.ctx.color_theme.status_success_fg;
+        let issue_titles: rustc_hash::FxHashMap<u64, String> = self
+            .items
+            .iter()
+            .map(|i| (i.number, i.title.clone()))
+            .collect();
+        let pr_titles: rustc_hash::FxHashMap<u64, String> = self
+            .mention_pr_cache
+            .iter()
+            .map(|p| (p.number, p.title.clone()))
+            .collect();
+        let issue_fg: Color = self.ctx.color_theme.list_ref_stash_fg;
         let pr_fg: Color = self.ctx.color_theme.list_hash_fg;
+        let hovered_ref = self.conversation_hovered_ref;
+        let hover_bg = Some(self.ctx.color_theme.list_selected_bg);
         self.conversation_ref_links.clear();
         let mut links: Vec<RefLink> = Vec::new();
         let lines: Vec<Line<'static>> = lines
@@ -4182,15 +4332,18 @@ impl<'a> IssuesView<'a> {
                     line_idx,
                     line,
                     &|n| {
-                        if pr_set.contains(&n) {
-                            Some((pr_fg, true))
-                        } else if issue_set.contains(&n) {
-                            Some((issue_fg, false))
+                        if let Some(title) = pr_titles.get(&n) {
+                            Some((pr_fg, true, title.clone()))
                         } else {
-                            None
+                            issue_titles
+                                .get(&n)
+                                .map(|title| (issue_fg, false, title.clone()))
                         }
                     },
                     &mut links,
+                    Some(self.ctx.color_theme.list_name_fg),
+                    hovered_ref,
+                    hover_bg,
                 )
             })
             .collect();
@@ -4437,7 +4590,7 @@ impl<'a> IssuesView<'a> {
             let kind_fg = if r.is_pr {
                 theme.list_hash_fg
             } else {
-                theme.status_success_fg
+                theme.list_ref_stash_fg
             };
             let state_fg = match r.state_label.as_str() {
                 "OPEN" => theme.status_success_fg,
@@ -4476,9 +4629,7 @@ impl<'a> IssuesView<'a> {
                 Span::raw("  "),
                 Span::styled(
                     format!("#{:width$}", r.number, width = max_num_w),
-                    Style::default()
-                        .fg(theme.list_hash_fg)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(kind_fg).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
             ];
@@ -4583,7 +4734,13 @@ impl<'a> IssuesView<'a> {
             ed.last_body_height = body_h;
         }
         let value = Style::default().fg(theme.fg);
-        let mention_fg = theme.list_hash_fg;
+        let pr_fg = theme.list_hash_fg;
+        let issue_fg = theme.list_ref_stash_fg;
+        let user_fg = theme.list_name_fg;
+        let ref_fallback_fg = theme.list_hash_fg;
+        let issue_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|i| i.number).collect();
+        let pr_set: rustc_hash::FxHashSet<u64> =
+            self.mention_pr_cache.iter().map(|p| p.number).collect();
         let body_text: Vec<Line<'static>> = if buffer.is_empty() {
             vec![Line::from(Span::styled(
                 "Type your comment…".to_string(),
@@ -4594,7 +4751,18 @@ impl<'a> IssuesView<'a> {
                 .split('\n')
                 .skip(scroll as usize)
                 .take(body_h as usize)
-                .map(|l| editor_line_with_mentions(l, value, mention_fg))
+                .map(|l| {
+                    editor_line_with_mentions(
+                        l,
+                        value,
+                        pr_fg,
+                        issue_fg,
+                        user_fg,
+                        ref_fallback_fg,
+                        &pr_set,
+                        &issue_set,
+                    )
+                })
                 .collect()
         };
         f.render_widget(Paragraph::new(body_text), body_area);
@@ -4730,7 +4898,24 @@ impl<'a> IssuesView<'a> {
     /// below, when there's no room above), 1 row per candidate +
     /// borders. Shows up to 8 issues / PRs matching the query.
     fn render_mention_popup(&mut self, f: &mut Frame, area: Rect) {
-        let editor_rect = self.editor_body_area.unwrap_or(area);
+        // Anchor the popup against the actively-edited surface so
+        // it pops next to the cursor — not into a top-left corner.
+        let target = self.mention_popup.as_ref().map(|p| p.target);
+        let editor_rect = match target {
+            Some(MentionTarget::ComposeTitle) => self
+                .compose_field_rects
+                .iter()
+                .find(|(f, _)| matches!(f, ComposeField::Title))
+                .map(|(_, r)| *r)
+                .unwrap_or(area),
+            Some(MentionTarget::ComposeBody) => self
+                .compose_field_rects
+                .iter()
+                .find(|(f, _)| matches!(f, ComposeField::Body))
+                .map(|(_, r)| *r)
+                .unwrap_or(area),
+            Some(MentionTarget::CommentEditor) | None => self.editor_body_area.unwrap_or(area),
+        };
         let theme = self.ctx.color_theme.clone();
         if let Some(popup) = self.mention_popup.as_mut() {
             paint_mention_popup(f, area, editor_rect, popup, &theme);
@@ -4858,10 +5043,23 @@ impl<'a> IssuesView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             )]
         } else {
-            vec![Span::styled(
-                state.title.clone(),
+            // Reuse the editor mention helper so `#N` / `@login` in
+            // the title pick up the same colours as the Body field.
+            let title_issue_set: rustc_hash::FxHashSet<u64> =
+                self.items.iter().map(|i| i.number).collect();
+            let title_pr_set: rustc_hash::FxHashSet<u64> =
+                self.mention_pr_cache.iter().map(|p| p.number).collect();
+            editor_line_with_mentions(
+                state.title.as_str(),
                 Style::default().fg(theme.fg),
-            )]
+                theme.list_hash_fg,
+                theme.list_ref_stash_fg,
+                theme.list_name_fg,
+                theme.list_hash_fg,
+                &title_pr_set,
+                &title_issue_set,
+            )
+            .spans
         };
         let (title_rect, title_value_x) = render_row(f, y, title_focused, "Title:", title_value);
         self.compose_field_rects
@@ -5055,7 +5253,13 @@ impl<'a> IssuesView<'a> {
             cc.body_last_height = body_inner.height;
         }
         let base_style = Style::default().fg(theme.fg);
-        let mention_fg = theme.list_hash_fg;
+        let pr_fg = theme.list_hash_fg;
+        let issue_fg = theme.list_ref_stash_fg;
+        let user_fg = theme.list_name_fg;
+        let ref_fallback_fg = theme.list_hash_fg;
+        let issue_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|i| i.number).collect();
+        let pr_set: rustc_hash::FxHashSet<u64> =
+            self.mention_pr_cache.iter().map(|p| p.number).collect();
         let body_text: Vec<Line<'static>> = if body_str.is_empty() {
             vec![Line::from(Span::styled(
                 "(type a description — supports markdown)".to_string(),
@@ -5066,7 +5270,18 @@ impl<'a> IssuesView<'a> {
                 .split('\n')
                 .skip(scroll as usize)
                 .take(body_inner.height as usize)
-                .map(|l| editor_line_with_mentions(l, base_style, mention_fg))
+                .map(|l| {
+                    editor_line_with_mentions(
+                        l,
+                        base_style,
+                        pr_fg,
+                        issue_fg,
+                        user_fg,
+                        ref_fallback_fg,
+                        &pr_set,
+                        &issue_set,
+                    )
+                })
                 .collect()
         };
         f.render_widget(Paragraph::new(body_text), body_inner);
@@ -5197,9 +5412,12 @@ pub(crate) fn restyle_and_track_hash_refs<F>(
     line: Line<'static>,
     resolver: &F,
     links: &mut Vec<RefLink>,
+    user_mention_color: Option<Color>,
+    hovered_ref: Option<(u64, bool)>,
+    hover_bg: Option<Color>,
 ) -> Line<'static>
 where
-    F: Fn(u64) -> Option<(Color, bool /* is_pr */)>,
+    F: Fn(u64) -> Option<(Color, bool /* is_pr */, String /* title */)>,
 {
     let mut out: Vec<Span<'static>> = Vec::new();
     // Track the running column position across spans so the link
@@ -5208,7 +5426,15 @@ where
     for span in line.spans {
         let span_text = span.content.to_string();
         let mut new_spans = restyle_hash_refs_in_span_collect(
-            &span_text, span.style, resolver, line_idx, col, links,
+            &span_text,
+            span.style,
+            resolver,
+            line_idx,
+            col,
+            links,
+            user_mention_color,
+            hovered_ref,
+            hover_bg,
         );
         for s in new_spans.drain(..) {
             col = col.saturating_add(s.content.chars().count() as u16);
@@ -5225,10 +5451,17 @@ pub(crate) fn restyle_hash_refs_in_span_collect<F>(
     line_idx: usize,
     span_col_start: u16,
     links: &mut Vec<RefLink>,
+    user_mention_color: Option<Color>,
+    hovered_ref: Option<(u64, bool)>,
+    hover_bg: Option<Color>,
 ) -> Vec<Span<'static>>
 where
-    F: Fn(u64) -> Option<(Color, bool)>,
+    F: Fn(u64) -> Option<(Color, bool, String)>,
 {
+    /// Cap the enriched title at this many display chars; anything
+    /// longer is suffixed with `…`. Keeps a single `#N` ref from
+    /// blowing past the right edge of the conversation body.
+    const TITLE_MAX_CHARS: usize = 30;
     let bytes = text.as_bytes();
     let mut out: Vec<Span<'static>> = Vec::new();
     let mut chunk_start: usize = 0;
@@ -5236,9 +5469,10 @@ where
     let mut cur_col: u16 = span_col_start;
     let mut i: usize = 0;
     while i < bytes.len() {
-        if bytes[i] == b'#' {
-            // Same boundary rules as before — left and right
-            // boundaries gate clean refs.
+        let trigger = bytes[i];
+        let is_hash = trigger == b'#';
+        let is_at = trigger == b'@' && user_mention_color.is_some();
+        if is_hash || is_at {
             let left_ok = i == 0
                 || matches!(
                     bytes[i - 1],
@@ -5246,46 +5480,93 @@ where
                 );
             if left_ok {
                 let mut j = i + 1;
-                while j < bytes.len() && bytes[j].is_ascii_digit() {
-                    j += 1;
+                if is_hash {
+                    while j < bytes.len() && bytes[j].is_ascii_digit() {
+                        j += 1;
+                    }
+                } else {
+                    while j < bytes.len()
+                        && (bytes[j].is_ascii_alphanumeric()
+                            || bytes[j] == b'_'
+                            || bytes[j] == b'-')
+                    {
+                        j += 1;
+                    }
                 }
                 if j > i + 1 {
-                    let right_ok = j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
+                    let right_ok =
+                        j == bytes.len() || !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_');
                     if right_ok {
-                        if let Ok(n) = text[i + 1..j].parse::<u64>() {
-                            if let Some((color, is_pr)) = resolver(n) {
-                                // Push the chunk before the match.
-                                if i > chunk_start {
-                                    let pre = &text[chunk_start..i];
-                                    let pre_chars = pre.chars().count() as u16;
-                                    out.push(Span::styled(pre.to_string(), original));
-                                    cur_col = cur_col.saturating_add(pre_chars);
-                                }
-                                // Capture the link rect — col_end is
-                                // exclusive so a click on the last
-                                // digit still hits.
-                                let ref_text = &text[i..j];
-                                let ref_chars = ref_text.chars().count() as u16;
-                                links.push(RefLink {
-                                    line: line_idx,
-                                    col_start: cur_col,
-                                    col_end: cur_col + ref_chars,
-                                    number: n,
-                                    is_pr,
-                                });
-                                out.push(Span::styled(
-                                    ref_text.to_string(),
-                                    Style::default()
-                                        .fg(color)
-                                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                                ));
-                                cur_col = cur_col.saturating_add(ref_chars);
-                                chunk_start = j;
-                                chunk_start_col = cur_col;
-                                i = j;
+                        // Build (rendered_text, fg_color, optional_link).
+                        // For `#N`, the displayed text is enriched
+                        // to `KIND#N (title…)` when the resolver
+                        // returns a title — source text in the
+                        // buffer stays `#N`, so click/edit math
+                        // remain unchanged.
+                        let (rendered, fg, link) = if is_hash {
+                            let Ok(n) = text[i + 1..j].parse::<u64>() else {
+                                i += 1;
                                 continue;
+                            };
+                            let Some((color, is_pr, title)) = resolver(n) else {
+                                i += 1;
+                                continue;
+                            };
+                            let kind_label = if is_pr { "PR" } else { "ISS" };
+                            let trimmed_title = title.trim();
+                            let rendered = if trimmed_title.is_empty() {
+                                format!("{}#{}", kind_label, n)
+                            } else if trimmed_title.chars().count() > TITLE_MAX_CHARS {
+                                let cut: String = trimmed_title
+                                    .chars()
+                                    .take(TITLE_MAX_CHARS.saturating_sub(1))
+                                    .collect();
+                                format!("{}#{} ({}…)", kind_label, n, cut)
+                            } else {
+                                format!("{}#{} ({})", kind_label, n, trimmed_title)
+                            };
+                            (rendered, color, Some((n, is_pr)))
+                        } else {
+                            // `@login` — render as-is, no link.
+                            let rendered = text[i..j].to_string();
+                            (rendered, user_mention_color.expect("checked above"), None)
+                        };
+                        let ref_chars = rendered.chars().count() as u16;
+                        let pre_chars = if i > chunk_start {
+                            text[chunk_start..i].chars().count() as u16
+                        } else {
+                            0
+                        };
+                        if let Some((n, is_pr)) = link {
+                            links.push(RefLink {
+                                line: line_idx,
+                                col_start: cur_col.saturating_add(pre_chars),
+                                col_end: cur_col
+                                    .saturating_add(pre_chars)
+                                    .saturating_add(ref_chars),
+                                number: n,
+                                is_pr,
+                            });
+                        }
+                        if i > chunk_start {
+                            let pre = &text[chunk_start..i];
+                            out.push(Span::styled(pre.to_string(), original));
+                            cur_col = cur_col.saturating_add(pre_chars);
+                        }
+                        let mut style = Style::default()
+                            .fg(fg)
+                            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                        if let (Some((n, is_pr)), Some(hb)) = (link, hover_bg) {
+                            if hovered_ref == Some((n, is_pr)) {
+                                style = style.bg(hb);
                             }
                         }
+                        out.push(Span::styled(rendered, style));
+                        cur_col = cur_col.saturating_add(ref_chars);
+                        chunk_start = j;
+                        chunk_start_col = cur_col;
+                        i = j;
+                        continue;
                     }
                 }
             }
@@ -5310,6 +5591,41 @@ where
 /// can't know yet if the reference will resolve.
 pub(crate) fn filter_mention_items_pub(query: &str, all: &[MentionItem]) -> Vec<MentionItem> {
     const MAX_ITEMS: usize = 10;
+    // `@` universe (all entries are User) — return the head of the
+    // (already-sorted) list when the query is empty, otherwise a
+    // simple prefix/substring score on the login.
+    if all.iter().all(|m| matches!(m.kind, MentionKind::User)) {
+        if query.is_empty() {
+            return all.iter().take(MAX_ITEMS).cloned().collect();
+        }
+        let q = query.to_lowercase();
+        let mut scored: Vec<(u32, &MentionItem)> = all
+            .iter()
+            .filter_map(|item| {
+                let login_low = item
+                    .login
+                    .as_deref()
+                    .unwrap_or(item.title.as_str())
+                    .to_lowercase();
+                if login_low == q {
+                    return Some((200, item));
+                }
+                if login_low.starts_with(&q) {
+                    return Some((100, item));
+                }
+                if login_low.contains(&q) {
+                    return Some((50, item));
+                }
+                None
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
+        return scored
+            .into_iter()
+            .take(MAX_ITEMS)
+            .map(|(_, m)| m.clone())
+            .collect();
+    }
     if query.is_empty() {
         let mut issues: Vec<MentionItem> = all
             .iter()
@@ -5397,16 +5713,31 @@ pub(crate) fn paint_mention_popup(
     let max_title_w: u16 = popup
         .filtered
         .iter()
-        .map(|m| m.title.chars().count() as u16)
+        .map(|m| match m.kind {
+            // User rows omit the secondary title — only the
+            // `@login` token is shown, sized via `widest_primary`.
+            MentionKind::User => 0,
+            _ => m.title.chars().count() as u16,
+        })
         .max()
         .unwrap_or(20);
-    let widest_num = popup
+    let widest_primary = popup
         .filtered
         .iter()
-        .map(|m| (m.number.to_string().chars().count() + 1) as u16)
+        .map(|m| match m.kind {
+            MentionKind::User => {
+                1 + m
+                    .login
+                    .as_deref()
+                    .unwrap_or(m.title.as_str())
+                    .chars()
+                    .count() as u16
+            }
+            _ => 1 + m.number.to_string().chars().count() as u16,
+        })
         .max()
         .unwrap_or(3);
-    let want_width = 2 + 5 + 1 + widest_num + 2 + max_title_w + 2 + 2;
+    let want_width = 2 + 5 + 1 + widest_primary + 2 + max_title_w + 2 + 2;
     let width = want_width.min(60).min(area.width.saturating_sub(2));
     let x = editor_rect
         .x
@@ -5461,18 +5792,32 @@ pub(crate) fn paint_mention_popup(
         row_rects.push(row_rect);
         let is_hovered = i == popup.hovered;
         let (kind_label, kind_fg) = match item.kind {
-            MentionKind::Issue => ("ISS", theme.status_success_fg),
+            MentionKind::Issue => ("ISS", theme.list_ref_stash_fg),
             MentionKind::Pr => ("PR ", theme.list_hash_fg),
+            MentionKind::User => ("USR", theme.list_name_fg),
         };
         let bg = if is_hovered {
             theme.list_selected_bg
         } else {
             theme.bg
         };
-        let num = format!("#{}", item.number);
-        let used = 1 + 3 + 1 + num.chars().count() + 2;
+        let primary = match item.kind {
+            MentionKind::User => {
+                format!("@{}", item.login.as_deref().unwrap_or(item.title.as_str()))
+            }
+            _ => format!("#{}", item.number),
+        };
+        let used = 1 + 3 + 1 + primary.chars().count() + 2;
         let title_budget = (inner.width as usize).saturating_sub(used + 2).max(4);
-        let title = fit_cell(&item.title, title_budget);
+        let secondary = match item.kind {
+            MentionKind::User => String::new(),
+            _ => fit_cell(&item.title, title_budget),
+        };
+        let primary_fg = match item.kind {
+            MentionKind::User => theme.list_name_fg,
+            MentionKind::Issue => theme.list_ref_stash_fg,
+            MentionKind::Pr => theme.list_hash_fg,
+        };
         let spans = vec![
             Span::styled(" ", Style::default().bg(bg)),
             Span::styled(
@@ -5484,14 +5829,14 @@ pub(crate) fn paint_mention_popup(
             ),
             Span::styled(" ", Style::default().bg(bg)),
             Span::styled(
-                num,
+                primary,
                 Style::default()
-                    .fg(theme.list_hash_fg)
+                    .fg(primary_fg)
                     .bg(bg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  ".to_string(), Style::default().bg(bg)),
-            Span::styled(title, Style::default().fg(theme.fg).bg(bg)),
+            Span::styled(secondary, Style::default().fg(theme.fg).bg(bg)),
         ];
         f.render_widget(
             Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
@@ -5503,43 +5848,75 @@ pub(crate) fn paint_mention_popup(
     popup.last_visible = rows;
 }
 
+/// Editor-side mention styling. `#N` uses `pr_fg` when N is in
+/// `pr_set`, `issue_fg` when in `issue_set`, `ref_fallback_fg`
+/// otherwise (unresolved → neutral colour rather than guessing).
+/// `@login` is always coloured with `user_fg` since there's no
+/// cheap way to validate the login client-side.
 pub(crate) fn editor_line_with_mentions(
     text: &str,
     base: Style,
-    mention_fg: Color,
+    pr_fg: Color,
+    issue_fg: Color,
+    user_fg: Color,
+    ref_fallback_fg: Color,
+    pr_set: &rustc_hash::FxHashSet<u64>,
+    issue_set: &rustc_hash::FxHashSet<u64>,
 ) -> Line<'static> {
     let bytes = text.as_bytes();
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut chunk_start: usize = 0;
     let mut i: usize = 0;
+    let is_left_boundary = |idx: usize| {
+        idx == 0
+            || matches!(
+                bytes[idx - 1],
+                b' ' | b'\t' | b'\n' | b'(' | b'[' | b',' | b'.' | b':' | b';' | b'<' | b'>'
+            )
+    };
     while i < bytes.len() {
-        if bytes[i] == b'#' {
-            let left_ok = i == 0
-                || matches!(
-                    bytes[i - 1],
-                    b' ' | b'\t' | b'\n' | b'(' | b'[' | b',' | b'.' | b':' | b';' | b'<' | b'>'
-                );
-            if left_ok {
-                let mut j = i + 1;
-                while j < bytes.len() && bytes[j].is_ascii_digit() {
-                    j += 1;
-                }
-                if j > i + 1 {
-                    let right_ok = j == bytes.len() || !bytes[j].is_ascii_alphanumeric();
-                    if right_ok {
-                        if i > chunk_start {
-                            spans.push(Span::styled(text[chunk_start..i].to_string(), base));
-                        }
-                        spans.push(Span::styled(
-                            text[i..j].to_string(),
-                            Style::default()
-                                .fg(mention_fg)
-                                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                        ));
-                        chunk_start = j;
-                        i = j;
-                        continue;
+        let trigger = bytes[i];
+        if (trigger == b'#' || trigger == b'@') && is_left_boundary(i) {
+            let mut j = i + 1;
+            let is_part = if trigger == b'#' {
+                |b: u8| b.is_ascii_digit()
+            } else {
+                |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
+            };
+            while j < bytes.len() && is_part(bytes[j]) {
+                j += 1;
+            }
+            if j > i + 1 {
+                let right_ok =
+                    j == bytes.len() || !(bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_');
+                if right_ok {
+                    if i > chunk_start {
+                        spans.push(Span::styled(text[chunk_start..i].to_string(), base));
                     }
+                    let fg = if trigger == b'@' {
+                        user_fg
+                    } else {
+                        text[i + 1..j]
+                            .parse::<u64>()
+                            .ok()
+                            .map(|n| {
+                                if pr_set.contains(&n) {
+                                    pr_fg
+                                } else if issue_set.contains(&n) {
+                                    issue_fg
+                                } else {
+                                    ref_fallback_fg
+                                }
+                            })
+                            .unwrap_or(ref_fallback_fg)
+                    };
+                    let style = Style::default()
+                        .fg(fg)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+                    spans.push(Span::styled(text[i..j].to_string(), style));
+                    chunk_start = j;
+                    i = j;
+                    continue;
                 }
             }
         }
@@ -5676,7 +6053,7 @@ fn format_issue_row(
         Span::styled(
             fit_cell(&format!("#{}", issue.number), cols.number),
             Style::default()
-                .fg(theme.list_hash_fg)
+                .fg(theme.list_ref_stash_fg)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),

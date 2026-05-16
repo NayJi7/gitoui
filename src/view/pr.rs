@@ -134,6 +134,9 @@ pub struct PullRequestsView<'a> {
     /// render time. Combined with `conversation_scroll` to resolve
     /// screen coordinates → ref number.
     conversation_ref_links: Vec<crate::view::issue::RefLink>,
+    /// Reference the mouse is currently hovering — drives the
+    /// hover-bg highlight on the matching `#N` span at next render.
+    conversation_hovered_ref: Option<(u64, bool)>,
     /// Cache of recently-fetched issue numbers for this repo, used to
     /// resolve `#N` references in PR comments. Populated lazily when
     /// a PR is opened so the colouring + click hit-test know whether
@@ -149,6 +152,10 @@ pub struct PullRequestsView<'a> {
     /// mention popup's filter. Built on-demand from `self.items` and
     /// a separate issue fetch.
     mention_issue_titles: rustc_hash::FxHashMap<u64, String>,
+    /// Repo collaborators / assignables cached for the `@` mention
+    /// popup. Combined with the live PR's participants when the
+    /// popup opens.
+    mention_user_cache: Vec<String>,
     /// In-session log of the viewer's reactions on each conversation
     /// entry — keyed by `(pr_number, target_idx)`. Same shape as the
     /// Issues view: stores `(kind, reaction_id)` so the picker can
@@ -687,10 +694,12 @@ impl<'a> PullRequestsView<'a> {
             conversation_scroll_to_selected: true,
             conversation_comment_spans: Vec::new(),
             conversation_ref_links: Vec::new(),
+            conversation_hovered_ref: None,
             mention_issue_numbers: rustc_hash::FxHashSet::default(),
             mention_issues_fetched: false,
             mention_popup: None,
             mention_issue_titles: rustc_hash::FxHashMap::default(),
+            mention_user_cache: Vec::new(),
             viewer_reactions: rustc_hash::FxHashMap::default(),
             conversation_comment_count: 1,
             comment_editor: None,
@@ -817,6 +826,7 @@ impl<'a> PullRequestsView<'a> {
             out.push(MentionItem {
                 number: *n,
                 title: title.clone(),
+                login: None,
                 kind: MentionKind::Issue,
             });
         }
@@ -824,6 +834,7 @@ impl<'a> PullRequestsView<'a> {
             out.push(MentionItem {
                 number: pr.number,
                 title: pr.title.clone(),
+                login: None,
                 kind: MentionKind::Pr,
             });
         }
@@ -831,13 +842,69 @@ impl<'a> PullRequestsView<'a> {
         out
     }
 
-    fn open_mention_popup(&mut self, anchor: usize, target: crate::view::issue::MentionTarget) {
+    /// `@` mention universe — repo assignables we've cached plus the
+    /// participants of the currently-open PR (author + comment
+    /// authors + reviewers + assignees). De-dup by login, alpha-sort.
+    fn mention_user_universe(&self) -> Vec<crate::view::issue::MentionItem> {
+        use crate::view::issue::{MentionItem, MentionKind};
+        let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        let mut out: Vec<MentionItem> = Vec::new();
+        let mut push_login = |login: &str, out: &mut Vec<MentionItem>| {
+            let trimmed = login.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let key = trimmed.to_lowercase();
+            if seen.insert(key) {
+                out.push(MentionItem {
+                    number: 0,
+                    title: trimmed.to_string(),
+                    login: Some(trimmed.to_string()),
+                    kind: MentionKind::User,
+                });
+            }
+        };
+        for login in &self.mention_user_cache {
+            push_login(login, &mut out);
+        }
+        if let Some(number) = self.opened_pr_number {
+            if let Some(detail) = self.detail_cache.get(&number) {
+                push_login(&detail.author, &mut out);
+                for entry in &detail.conversation {
+                    push_login(&entry.author, &mut out);
+                }
+                for reviewer in &detail.reviewers {
+                    push_login(reviewer, &mut out);
+                }
+            }
+        }
+        // Compose mode has no open PR — fall back to the authors
+        // visible in the PR list so `@` proposes something useful
+        // while creating a new PR.
+        for pr in &self.items {
+            push_login(&pr.author, &mut out);
+        }
+        out.sort_by_key(|m| m.title.to_lowercase());
+        out
+    }
+
+    fn open_mention_popup(
+        &mut self,
+        anchor: usize,
+        target: crate::view::issue::MentionTarget,
+        trigger: char,
+    ) {
         use crate::view::issue::{filter_mention_items_pub, MentionPopup};
-        self.spawn_mention_issue_numbers_fetch();
-        let universe = self.mention_universe();
+        let universe = if trigger == '@' {
+            self.mention_user_universe()
+        } else {
+            self.spawn_mention_issue_numbers_fetch();
+            self.mention_universe()
+        };
         let filtered = filter_mention_items_pub("", &universe);
         self.mention_popup = Some(MentionPopup {
             target,
+            trigger,
             anchor,
             query: String::new(),
             filtered,
@@ -855,7 +922,16 @@ impl<'a> PullRequestsView<'a> {
 
     fn refresh_mention_filter(&mut self) {
         use crate::view::issue::filter_mention_items_pub;
-        let universe = self.mention_universe();
+        let trigger = self
+            .mention_popup
+            .as_ref()
+            .map(|p| p.trigger)
+            .unwrap_or('#');
+        let universe = if trigger == '@' {
+            self.mention_user_universe()
+        } else {
+            self.mention_universe()
+        };
         if let Some(p) = self.mention_popup.as_mut() {
             p.filtered = filter_mention_items_pub(&p.query, &universe);
             if p.hovered >= p.filtered.len() {
@@ -866,7 +942,7 @@ impl<'a> PullRequestsView<'a> {
 
     fn update_mention_query_from_editor(&mut self) {
         use crate::view::issue::MentionTarget;
-        let (target, anchor, cursor, buf): (MentionTarget, usize, usize, String) = {
+        let (target, anchor, trigger, cursor, buf): (MentionTarget, usize, char, usize, String) = {
             let Some(p) = self.mention_popup.as_ref() else {
                 return;
             };
@@ -875,39 +951,45 @@ impl<'a> PullRequestsView<'a> {
                     let Some(ed) = self.comment_editor.as_ref() else {
                         return;
                     };
-                    (p.target, p.anchor, ed.cursor, ed.buffer.clone())
+                    (p.target, p.anchor, p.trigger, ed.cursor, ed.buffer.clone())
                 }
                 MentionTarget::ComposeBody => {
                     let Some(c) = self.compose.as_ref() else {
                         return;
                     };
-                    (p.target, p.anchor, c.cursor, c.body.clone())
+                    (p.target, p.anchor, p.trigger, c.cursor, c.body.clone())
+                }
+                MentionTarget::ComposeTitle => {
+                    let Some(c) = self.compose.as_ref() else {
+                        return;
+                    };
+                    (p.target, p.anchor, p.trigger, c.cursor, c.title.clone())
                 }
             }
         };
         let _ = target;
-        // Sanity: the `#` must still be at the anchor and the cursor
-        // must sit AFTER it. `cursor <= anchor` covers ← past the `#`
-        // and selecting/clicking before it — without this stricter
-        // bound, `buf[anchor + 1..cursor]` below panics with
-        // "begin > end" the moment the user presses ←.
-        if buf.as_bytes().get(anchor).copied() != Some(b'#') || cursor <= anchor {
+        // Sanity: the trigger char must still be at the anchor and
+        // the cursor must sit AFTER it. `cursor <= anchor` covers
+        // ← past the trigger and selecting/clicking before it.
+        let trigger_byte = trigger as u32;
+        let still_anchored = if trigger_byte < 0x80 {
+            buf.as_bytes().get(anchor).copied() == Some(trigger as u8)
+        } else {
+            buf[anchor..].starts_with(trigger)
+        };
+        if !still_anchored || cursor <= anchor {
             self.close_mention_popup();
             return;
         }
-        // Query is the chars between `#` (exclusive) and cursor.
-        // Belt-and-suspenders clamp: even with the guards above, an
-        // inconsistent (cursor, buf.len()) snapshot mid-edit would
-        // panic the slice. Force ordered, in-bounds indices.
-        let start = (anchor + 1).min(buf.len());
+        let trigger_len = trigger.len_utf8();
+        let start = (anchor + trigger_len).min(buf.len());
         let end = cursor.min(buf.len()).max(start);
         let query: String = buf[start..end]
             .chars()
-            .take_while(|c| c.is_ascii_alphanumeric())
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
             .collect();
-        let query_end = anchor + 1 + query.len();
+        let query_end = anchor + trigger_len + query.len();
         if query_end < cursor {
-            // Cursor moved past the typed query — drop the popup.
             self.close_mention_popup();
             return;
         }
@@ -918,29 +1000,33 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn pick_mention(&mut self) {
-        use crate::view::issue::MentionTarget;
-        let (target, anchor, query_len, number) = {
+        use crate::view::issue::{MentionKind, MentionTarget};
+        let (target, anchor, query_len, replacement) = {
             let Some(p) = self.mention_popup.as_ref() else {
                 return;
             };
             let Some(item) = p.filtered.get(p.hovered) else {
                 return;
             };
-            (p.target, p.anchor, p.query.chars().count(), item.number)
+            let replacement = match item.kind {
+                MentionKind::User => {
+                    format!("@{}", item.login.as_deref().unwrap_or(item.title.as_str()))
+                }
+                _ => format!("#{}", item.number),
+            };
+            (p.target, p.anchor, p.query.chars().count(), replacement)
         };
         self.mention_popup = None;
-        let replacement = format!("#{}", number);
-        // Clamp the splice range to ordered, in-bounds indices.
-        // Without this, an inconsistent (anchor, buf) snapshot
-        // (e.g. anchor past end after a multi-key edit) panics
-        // `replace_range` with "begin > end".
+        let trigger_len = 1; // both '#' and '@' are 1-byte ASCII
         match target {
             MentionTarget::CommentEditor => {
                 let Some(ed) = self.comment_editor.as_mut() else {
                     return;
                 };
                 let start = anchor.min(ed.buffer.len());
-                let end = (anchor + 1 + query_len).min(ed.buffer.len()).max(start);
+                let end = (anchor + trigger_len + query_len)
+                    .min(ed.buffer.len())
+                    .max(start);
                 ed.buffer.replace_range(start..end, &replacement);
                 ed.cursor = start + replacement.len();
             }
@@ -949,8 +1035,21 @@ impl<'a> PullRequestsView<'a> {
                     return;
                 };
                 let start = anchor.min(c.body.len());
-                let end = (anchor + 1 + query_len).min(c.body.len()).max(start);
+                let end = (anchor + trigger_len + query_len)
+                    .min(c.body.len())
+                    .max(start);
                 c.body.replace_range(start..end, &replacement);
+                c.cursor = start + replacement.len();
+            }
+            MentionTarget::ComposeTitle => {
+                let Some(c) = self.compose.as_mut() else {
+                    return;
+                };
+                let start = anchor.min(c.title.len());
+                let end = (anchor + trigger_len + query_len)
+                    .min(c.title.len())
+                    .max(start);
+                c.title.replace_range(start..end, &replacement);
                 c.cursor = start + replacement.len();
             }
         }
@@ -1034,6 +1133,25 @@ impl<'a> PullRequestsView<'a> {
                 }
                 self.compose_body_anchor_to_cursor();
             }
+            MentionTarget::ComposeTitle => {
+                if let Some(state) = self.compose.as_mut() {
+                    if !matches!(state.focused, ComposeField::Title) {
+                        state.focused = ComposeField::Title;
+                    }
+                    match key.code {
+                        KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Backspace => compose_field_delete_left(state),
+                        KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Left => compose_field_cursor_left(state),
+                        KeyCode::Right => compose_field_cursor_right(state),
+                        KeyCode::Home => compose_field_cursor_home(state),
+                        KeyCode::End => compose_field_cursor_end(state),
+                        KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
+                        _ => {}
+                    }
+                }
+            }
         }
         self.update_mention_query_from_editor();
     }
@@ -1056,7 +1174,7 @@ impl<'a> PullRequestsView<'a> {
             return Some((self.ctx.color_theme.list_hash_fg, true));
         }
         if self.mention_issue_numbers.contains(&n) {
-            return Some((self.ctx.color_theme.status_success_fg, false));
+            return Some((self.ctx.color_theme.list_ref_stash_fg, false));
         }
         None
     }
@@ -2397,35 +2515,50 @@ impl<'a> PullRequestsView<'a> {
                 }
             }
             ComposeField::Title => {
-                let Some(state) = self.compose.as_mut() else {
-                    return;
+                // Capture the trigger position BEFORE insertion so
+                // the popup anchor points at the freshly-written char.
+                let title_mention: Option<(usize, char)> = match key.code {
+                    KeyCode::Char(c) if !ctrl && (c == '#' || c == '@') => {
+                        self.compose.as_ref().map(|s| (s.cursor, c))
+                    }
+                    _ => None,
                 };
-                match key.code {
-                    KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
-                    KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
-                    KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
-                    KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
-                    KeyCode::Backspace => compose_field_delete_left(state),
-                    KeyCode::Left if ctrl => {
-                        let new = word_left_boundary(&state.title, state.cursor);
-                        state.cursor = new;
+                {
+                    let Some(state) = self.compose.as_mut() else {
+                        return;
+                    };
+                    match key.code {
+                        KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
+                        KeyCode::Backspace if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Char('h') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Char('w') if ctrl => compose_field_delete_word_left(state),
+                        KeyCode::Backspace => compose_field_delete_left(state),
+                        KeyCode::Left if ctrl => {
+                            let new = word_left_boundary(&state.title, state.cursor);
+                            state.cursor = new;
+                        }
+                        KeyCode::Right if ctrl => {
+                            let new = word_right_boundary(&state.title, state.cursor);
+                            state.cursor = new;
+                        }
+                        KeyCode::Left => compose_field_cursor_left(state),
+                        KeyCode::Right => compose_field_cursor_right(state),
+                        KeyCode::Home => compose_field_cursor_home(state),
+                        KeyCode::End => compose_field_cursor_end(state),
+                        _ => {}
                     }
-                    KeyCode::Right if ctrl => {
-                        let new = word_right_boundary(&state.title, state.cursor);
-                        state.cursor = new;
-                    }
-                    KeyCode::Left => compose_field_cursor_left(state),
-                    KeyCode::Right => compose_field_cursor_right(state),
-                    KeyCode::Home => compose_field_cursor_home(state),
-                    KeyCode::End => compose_field_cursor_end(state),
-                    _ => {}
+                }
+                if let Some((a, c)) = title_mention {
+                    self.open_mention_popup(a, crate::view::issue::MentionTarget::ComposeTitle, c);
                 }
             }
             ComposeField::Body => {
-                // Capture the `#` position BEFORE insertion so the
-                // popup anchor points at the freshly-written hash.
-                let mention_anchor: Option<usize> = match key.code {
-                    KeyCode::Char('#') if !ctrl => self.compose.as_ref().map(|c| c.cursor),
+                // Capture the trigger position BEFORE insertion so
+                // the popup anchor points at the freshly-written char.
+                let mention_anchor: Option<(usize, char)> = match key.code {
+                    KeyCode::Char(c) if !ctrl && (c == '#' || c == '@') => {
+                        self.compose.as_ref().map(|s| (s.cursor, c))
+                    }
                     _ => None,
                 };
                 {
@@ -2466,8 +2599,8 @@ impl<'a> PullRequestsView<'a> {
                 // view. Mouse wheel doesn't reach this branch — it's
                 // intercepted earlier — so wheel scroll stays sticky.
                 self.compose_body_anchor_to_cursor();
-                if let Some(a) = mention_anchor {
-                    self.open_mention_popup(a, crate::view::issue::MentionTarget::ComposeBody);
+                if let Some((a, c)) = mention_anchor {
+                    self.open_mention_popup(a, crate::view::issue::MentionTarget::ComposeBody, c);
                 }
             }
         }
@@ -3178,10 +3311,10 @@ impl<'a> PullRequestsView<'a> {
     // ────────────────────── Inline-editor key handlers ──────────────────────
 
     fn editor_insert_char(&mut self, c: char) {
-        // Capture the `#` position BEFORE we insert so the popup
-        // anchor points at the freshly-written hash, ready for the
+        // Capture the trigger position BEFORE we insert so the popup
+        // anchor points at the freshly-written char, ready for the
         // splice on pick.
-        let anchor: Option<usize> = if c == '#' {
+        let anchor: Option<usize> = if c == '#' || c == '@' {
             self.comment_editor.as_ref().map(|ed| ed.cursor)
         } else {
             None
@@ -3192,7 +3325,7 @@ impl<'a> PullRequestsView<'a> {
             ed.cursor += c.len_utf8();
         }
         if let Some(a) = anchor {
-            self.open_mention_popup(a, crate::view::issue::MentionTarget::CommentEditor);
+            self.open_mention_popup(a, crate::view::issue::MentionTarget::CommentEditor, c);
         }
     }
 
@@ -3697,6 +3830,27 @@ impl<'a> PullRequestsView<'a> {
                         if let Some(idx) = self.row_at_tab(row, area) {
                             self.set_tab_hovered(idx);
                         }
+                        // Conversation tab: highlight the `#N`
+                        // ref under the cursor so the user sees
+                        // it's clickable.
+                        if matches!(self.active_tab, Tab::Conversation) {
+                            let logical =
+                                (row.saturating_sub(area.y) as usize) + self.conversation_scroll;
+                            let local_col = col.saturating_sub(area.x);
+                            self.conversation_hovered_ref = self
+                                .conversation_ref_links
+                                .iter()
+                                .find(|l| {
+                                    l.line == logical
+                                        && local_col >= l.col_start
+                                        && local_col < l.col_end
+                                })
+                                .map(|l| (l.number, l.is_pr));
+                        } else {
+                            self.conversation_hovered_ref = None;
+                        }
+                    } else {
+                        self.conversation_hovered_ref = None;
                     }
                 }
             }
@@ -3870,10 +4024,29 @@ impl<'a> PullRequestsView<'a> {
             Mode::Compose => self.render_compose_mode(f, body_area),
         }
 
-        // `#` mention popup floats above the comment editor when
-        // open — drawn last so it sits on top of all other content.
+        // Mention popup floats above the actively-edited surface —
+        // pick its rect by target so it docks near the cursor rather
+        // than the top-left default fallback.
         if self.mention_popup.is_some() {
-            let editor_rect = self.editor_body_area.unwrap_or(body_area);
+            use crate::view::issue::MentionTarget;
+            let target = self.mention_popup.as_ref().map(|p| p.target);
+            let editor_rect = match target {
+                Some(MentionTarget::ComposeTitle) => self
+                    .compose_field_rects
+                    .iter()
+                    .find(|(f, _)| matches!(f, ComposeField::Title))
+                    .map(|(_, r)| *r)
+                    .unwrap_or(body_area),
+                Some(MentionTarget::ComposeBody) => self
+                    .compose_field_rects
+                    .iter()
+                    .find(|(f, _)| matches!(f, ComposeField::Body))
+                    .map(|(_, r)| *r)
+                    .unwrap_or(body_area),
+                Some(MentionTarget::CommentEditor) | None => {
+                    self.editor_body_area.unwrap_or(body_area)
+                }
+            };
             let theme = self.ctx.color_theme.clone();
             if let Some(p) = self.mention_popup.as_mut() {
                 crate::view::issue::paint_mention_popup(f, body_area, editor_rect, p, &theme);
@@ -4797,6 +4970,13 @@ impl<'a> PullRequestsView<'a> {
             rect
         };
 
+        // Pre-compute the mention universe sets so the Title row's
+        // closure can colour `#N` / `@login` consistently with the
+        // Body field below.
+        let title_pr_set: rustc_hash::FxHashSet<u64> =
+            self.items.iter().map(|p| p.number).collect();
+        let title_issue_set: rustc_hash::FxHashSet<u64> = self.mention_issue_numbers.clone();
+
         // ── Text-input row (Title) — flat text, no bg fill. Visual
         //    cue is the focus arrow + a thin underline below the
         //    typed value, like a vintage form field.
@@ -4825,10 +5005,19 @@ impl<'a> PullRequestsView<'a> {
                     Style::default().fg(theme.detail_label_fg),
                 ));
             } else {
-                spans.push(Span::styled(
-                    value.to_string(),
+                // Use the editor mention helper so `#N` / `@login`
+                // in the title pick up the same colours as the Body.
+                let title_styled = crate::view::issue::editor_line_with_mentions(
+                    value,
                     Style::default().fg(theme.fg),
-                ));
+                    theme.list_hash_fg,
+                    theme.list_ref_stash_fg,
+                    theme.list_name_fg,
+                    theme.list_hash_fg,
+                    &title_pr_set,
+                    &title_issue_set,
+                );
+                spans.extend(title_styled.spans);
             }
             f.render_widget(Paragraph::new(Line::from(spans)), row);
             // Underline below the row when focused (1-row strip).
@@ -4939,7 +5128,12 @@ impl<'a> PullRequestsView<'a> {
             s.body_last_height = body_inner.height;
         }
         let base_style = Style::default().fg(theme.fg);
-        let mention_fg = theme.list_hash_fg;
+        let pr_fg = theme.list_hash_fg;
+        let issue_fg = theme.list_ref_stash_fg;
+        let user_fg = theme.list_name_fg;
+        let ref_fallback_fg = theme.list_hash_fg;
+        let pr_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|p| p.number).collect();
+        let issue_set: rustc_hash::FxHashSet<u64> = self.mention_issue_numbers.clone();
         let body_lines: Vec<Line<'static>> = if state.body.is_empty() {
             vec![Line::from(Span::styled(
                 "(type a description — supports markdown)".to_string(),
@@ -4951,7 +5145,18 @@ impl<'a> PullRequestsView<'a> {
                 .split('\n')
                 .skip(scroll as usize)
                 .take(body_inner.height as usize)
-                .map(|l| crate::view::issue::editor_line_with_mentions(l, base_style, mention_fg))
+                .map(|l| {
+                    crate::view::issue::editor_line_with_mentions(
+                        l,
+                        base_style,
+                        pr_fg,
+                        issue_fg,
+                        user_fg,
+                        ref_fallback_fg,
+                        &pr_set,
+                        &issue_set,
+                    )
+                })
                 .collect()
         };
         f.render_widget(Paragraph::new(body_lines), body_inner);
@@ -5258,7 +5463,12 @@ impl<'a> PullRequestsView<'a> {
         // scroll offset, up to body_height. Wrap is OFF so screen rows
         // map 1:1 with logical rows — keeps cursor positioning trivial.
         let value = Style::default().fg(theme.fg);
-        let mention_fg = theme.list_hash_fg;
+        let pr_fg = theme.list_hash_fg;
+        let issue_fg = theme.list_ref_stash_fg;
+        let user_fg = theme.list_name_fg;
+        let ref_fallback_fg = theme.list_hash_fg;
+        let pr_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|p| p.number).collect();
+        let issue_set: rustc_hash::FxHashSet<u64> = self.mention_issue_numbers.clone();
         let body_text: Vec<Line<'static>> = if buffer.is_empty() {
             vec![Line::from(Span::styled(
                 match &kind {
@@ -5274,7 +5484,18 @@ impl<'a> PullRequestsView<'a> {
                 .split('\n')
                 .skip(scroll_offset as usize)
                 .take(body_height as usize)
-                .map(|l| crate::view::issue::editor_line_with_mentions(l, value, mention_fg))
+                .map(|l| {
+                    crate::view::issue::editor_line_with_mentions(
+                        l,
+                        value,
+                        pr_fg,
+                        issue_fg,
+                        user_fg,
+                        ref_fallback_fg,
+                        &pr_set,
+                        &issue_set,
+                    )
+                })
                 .collect()
         };
         f.render_widget(Paragraph::new(body_text), body_area);
@@ -5798,10 +6019,16 @@ impl<'a> PullRequestsView<'a> {
         // with UNDERLINED+BOLD, while capturing click hit-boxes for
         // the mouse handler. Lines without refs pass through.
         self.conversation_ref_links.clear();
-        let pr_set: rustc_hash::FxHashSet<u64> = self.items.iter().map(|p| p.number).collect();
-        let issue_set = self.mention_issue_numbers.clone();
-        let issue_fg: Color = self.ctx.color_theme.status_success_fg;
+        let pr_titles: rustc_hash::FxHashMap<u64, String> = self
+            .items
+            .iter()
+            .map(|p| (p.number, p.title.clone()))
+            .collect();
+        let issue_titles = self.mention_issue_titles.clone();
+        let issue_fg: Color = self.ctx.color_theme.list_ref_stash_fg;
         let pr_fg: Color = self.ctx.color_theme.list_hash_fg;
+        let hovered_ref = self.conversation_hovered_ref;
+        let hover_bg = Some(self.ctx.color_theme.list_selected_bg);
         let mut links: Vec<crate::view::issue::RefLink> = Vec::new();
         let lines: Vec<Line<'static>> = lines
             .into_iter()
@@ -5811,15 +6038,18 @@ impl<'a> PullRequestsView<'a> {
                     line_idx,
                     line,
                     &|n| {
-                        if pr_set.contains(&n) {
-                            Some((pr_fg, true))
-                        } else if issue_set.contains(&n) {
-                            Some((issue_fg, false))
+                        if let Some(title) = pr_titles.get(&n) {
+                            Some((pr_fg, true, title.clone()))
                         } else {
-                            None
+                            issue_titles
+                                .get(&n)
+                                .map(|title| (issue_fg, false, title.clone()))
                         }
                     },
                     &mut links,
+                    Some(self.ctx.color_theme.list_name_fg),
+                    hovered_ref,
+                    hover_bg,
                 )
             })
             .collect();

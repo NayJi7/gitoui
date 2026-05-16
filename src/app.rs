@@ -1817,15 +1817,24 @@ impl App<'_> {
         _terminal: &mut DefaultTerminal,
     ) -> Result<(), std::io::Error> {
         self.view.handle_event(event_with_count, key);
-        // Apply theme live when cycling in config view.
+        self.apply_live_config_theme();
+        Ok(())
+    }
+
+    /// Re-read the Config view's current theme and push it into the
+    /// shared `AppContext`. Called after every input path that can
+    /// cycle the option (keyboard + mouse) — without this the theme
+    /// only swapped on key events, leaving click-to-cycle visually
+    /// stale.
+    fn apply_live_config_theme(&mut self) {
         if let View::Config(ref view) = self.view {
             if let Ok(def) = crate::themes::resolve_or_load(&view.core_config().option.theme) {
                 let color_theme = def.color_theme;
-                // Rebuild the graph palette from the new theme + current
-                // `[graph.color]` config so the preview row in the config
-                // page and the underlying list view both re-render with
-                // the new background and branch colours. Without this the
-                // graph images stayed baked with the previous theme's bg.
+                // Rebuild the graph palette from the new theme +
+                // current `[graph.color]` config so both the preview
+                // row in the config page and the underlying list
+                // view re-render with the new background and branch
+                // colours.
                 let ctx = Rc::make_mut(&mut self.ctx);
                 ctx.color_theme = color_theme.clone();
                 ctx.graph_color_set =
@@ -1833,7 +1842,6 @@ impl App<'_> {
                 self.view.update_color_theme(color_theme);
             }
         }
-        Ok(())
     }
 
     fn flush_pending_graph_uploads(&mut self) -> Result<(), std::io::Error> {
@@ -5107,6 +5115,9 @@ impl<'a> App<'a> {
                 } else {
                     self.view.handle_click(mouse.column, mouse.row);
                 }
+                // Click in the Config view can cycle the theme — mirror
+                // the live-apply that the keyboard path runs.
+                self.apply_live_config_theme();
                 true
             }
             MouseEventKind::Moved => {

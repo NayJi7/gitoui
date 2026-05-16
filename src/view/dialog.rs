@@ -2689,7 +2689,7 @@ fn issue_header_line(
         Span::styled(
             format!("#{}", issue_number),
             Style::default()
-                .fg(theme.list_hash_fg)
+                .fg(theme.list_ref_stash_fg)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" · ", Style::default().fg(theme.detail_label_fg)),

@@ -2,7 +2,7 @@ use std::{rc::Rc, thread};
 
 use ratatui::{
     crossterm::event::KeyEvent,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Padding, Paragraph},
@@ -743,6 +743,23 @@ impl<'a> ConfigView<'a> {
             height: 1,
         };
         f.render_widget(Paragraph::new(title), title_area);
+
+        // Top-right meta — `vX.Y.Z · <install>`. Kept discreet
+        // (divider_fg) so it reads like a chrome label, not a
+        // primary action. Right-aligned via Paragraph::alignment.
+        let meta = format!(
+            "v{} · {}",
+            env!("CARGO_PKG_VERSION"),
+            crate::update::install_label()
+        );
+        let meta_line = Line::from(Span::styled(
+            meta,
+            Style::default().fg(self.ctx.color_theme.divider_fg),
+        ));
+        f.render_widget(
+            Paragraph::new(meta_line).alignment(Alignment::Right),
+            title_area,
+        );
 
         // Separator line
         let sep_area = Rect {
