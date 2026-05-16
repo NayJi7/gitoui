@@ -92,7 +92,7 @@ jobs:
       - name: Checksum
         run: sha256sum releases/* > ./releases/checksum.txt
       - name: Create Release
-        uses: softprops/action-gh-release@v2.0.4
+        uses: softprops/action-gh-release@v3.0.0
         with:
           # Publish straight away — `cargo publish` ships in parallel
           # and the install.sh one-liner needs the binaries live the
