@@ -142,7 +142,7 @@ impl AvatarManager {
     }
 
     fn email_to_path(&self, email: &str) -> PathBuf {
-        let hash = format!("{:x}", Md5::digest(email.trim().to_lowercase()));
+        let hash = hex_lower(&Md5::digest(email.trim().to_lowercase()));
         self.cache_dir.join(format!("{hash}.png"))
     }
 
@@ -515,6 +515,18 @@ fn write_avatar_atomic(path: &PathBuf, bytes: Vec<u8>) {
     if fs::write(&temp_path, bytes).is_ok() {
         let _ = fs::rename(&temp_path, path);
     }
+}
+
+/// Format a byte slice as lowercase hex. Replaces `format!("{:x}", digest)`
+/// which broke in md-5 0.11 / digest 0.11 (the `LowerHex` impl was removed
+/// from the digest output type).
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(s, "{b:02x}");
+    }
+    s
 }
 
 #[allow(dead_code)]
