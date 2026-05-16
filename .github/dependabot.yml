@@ -1,0 +1,67 @@
+# Dependabot — keeps dependencies fresh without blocking day-to-day
+# work. Security alerts are surfaced automatically (configured in repo
+# settings, not here); this file drives the weekly version-bump PRs.
+#
+# Each ecosystem is grouped so we get one PR per ecosystem instead of
+# one PR per crate / package, cutting review overhead drastically.
+version: 2
+
+updates:
+  # Rust crates pinned in the workspace.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+      include: scope
+    labels:
+      - dependencies
+      - rust
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Astro / Starlight site under docs/.
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(docs-deps)
+      include: scope
+    labels:
+      - dependencies
+      - docs
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions pinned by SHA — Dependabot will keep the SHAs +
+  # version comments in sync with upstream tags.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(ci)
+      include: scope
+    labels:
+      - dependencies
+      - ci
