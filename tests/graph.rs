@@ -1392,6 +1392,10 @@ fn uncommitted_001() -> TestResult {
     // Uncommitted commit node above HEAD.
     std::fs::write(repo_path.join("WIP.txt"), "work in progress\n").unwrap();
 
+    // Pin the Uncommitted node's date so the rendered image stays
+    // byte-stable across runs (see src/git/mod.rs for the override).
+    std::env::set_var("GITOUI_FAKE_NOW", "2024-01-05T12:00:00+00:00");
+
     git.log();
 
     let options = &[

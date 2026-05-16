@@ -168,15 +168,25 @@ impl Repository {
                     vec![]
                 };
 
+                // Tests pin `GITOUI_FAKE_NOW` to a fixed RFC3339 instant
+                // so snapshot baselines containing the Uncommitted node
+                // (which prints today's date next to the synthetic commit
+                // hash) stay byte-for-byte reproducible across runs. In
+                // any normal launch the env var is unset and we fall
+                // back to real wall-clock time.
+                let now = std::env::var("GITOUI_FAKE_NOW")
+                    .ok()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                    .unwrap_or_else(|| chrono::Local::now().fixed_offset());
                 let fake_commit = Commit {
                     commit_hash: fake_hash.clone(),
                     parent_commit_hashes,
                     author_name: "".to_string(),
                     author_email: "".to_string(),
-                    author_date: chrono::Local::now().fixed_offset(),
+                    author_date: now,
                     committer_name: "".to_string(),
                     committer_email: "".to_string(),
-                    committer_date: chrono::Local::now().fixed_offset(),
+                    committer_date: now,
                     commit_message: "Uncommitted changes".to_string(),
                     body: "".to_string(),
                     commit_type: CommitType::Uncommitted,
