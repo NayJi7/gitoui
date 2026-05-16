@@ -11,6 +11,10 @@ on:
       # /gitoui/install.sh and /gitoui/brand/<name>.svg.
       - "install.sh"
       - "assets/brand/**"
+      # SiteTitle.astro reads the workspace version from Cargo.toml at
+      # build time (via Vite's `?raw` import). A bump must trigger a
+      # redeploy or the header tag stays stuck on the previous release.
+      - "Cargo.toml"
   workflow_dispatch:
 
 permissions:
