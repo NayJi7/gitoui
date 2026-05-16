@@ -31,8 +31,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Rust only supports build-mode `none` — the extractor parses
+          # source directly, no cargo build needed (and `manual` is
+          # rejected with a fatal error).
           - language: rust
-            build-mode: manual
+            build-mode: none
           - language: actions
             build-mode: none
     steps:
@@ -44,10 +47,6 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-
-      - name: Build Rust crate (manual mode)
-        if: matrix.language == 'rust'
-        run: cargo build --all-targets --release
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
