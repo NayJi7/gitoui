@@ -1,0 +1,245 @@
+---
+// Override of Starlight's default Footer.
+//
+//   • On doc pages → opencode-style block: a thin separator on top, a
+//     slim prev/next pair, then a 2-column meta row (Edit page left,
+//     ©Author right), then the "Last updated" line centered below.
+//   • On splash pages (home hero, brand) → only a slim centered
+//     "©year NayJi7" credit line; pagination and meta would feel out
+//     of place under a hero.
+//
+// The 404 hides everything via CSS (it owns the viewport).
+import EditLink from "virtual:starlight/components/EditLink";
+import LastUpdated from "virtual:starlight/components/LastUpdated";
+import Pagination from "virtual:starlight/components/Pagination";
+
+const year = new Date().getFullYear();
+const template = Astro.locals.starlightRoute?.entry?.data?.template;
+const isSplash = template === "splash";
+---
+
+{!isSplash && (
+  <footer class="sl-flex doc-footer">
+    <div class="pager">
+      <Pagination />
+    </div>
+
+    <div class="meta-row">
+      <div class="meta-cols">
+        <div class="meta-left">
+          <EditLink />
+        </div>
+        <div class="meta-right">
+          <p class="meta-copy">
+            ©{year}
+            <a href="https://github.com/NayJi7" target="_blank" rel="noopener noreferrer">NayJi7</a>
+          </p>
+        </div>
+      </div>
+      <div class="meta-bottom">
+        <LastUpdated />
+      </div>
+    </div>
+  </footer>
+)}
+
+
+<style is:global>
+  /* Pseudo-element arrows on the pagination links — proper SVG glyphs
+     (lucide-style stroked arrows) baked into the background, brand
+     orange. Slide further on hover. Defined globally because Astro's
+     scoped <style> doesn't pass `::before` / `::after` through
+     :global(). NOTE: Starlight nests `.link-title` inside the outer
+     label span, so we use a descendant combinator. */
+  .pager .pagination-links > a[rel="prev"] .link-title::before,
+  .pager .pagination-links > a[rel="next"] .link-title::after {
+    content: "";
+    display: inline-block;
+    width: 0.95em;
+    height: 0.95em;
+    vertical-align: -0.12em;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+    transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .pager .pagination-links > a[rel="prev"] .link-title::before {
+    margin-right: 0.45em;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f05133' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='M19 12H5M12 19l-7-7 7-7'/></svg>");
+  }
+  .pager .pagination-links > a[rel="next"] .link-title::after {
+    margin-left: 0.45em;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f05133' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12h14M13 5l7 7-7 7'/></svg>");
+  }
+  .pager .pagination-links > a[rel="prev"]:hover .link-title::before {
+    transform: translateX(-4px);
+  }
+  .pager .pagination-links > a[rel="next"]:hover .link-title::after {
+    transform: translateX(4px);
+  }
+</style>
+
+<style>
+  /* Keep Starlight's per-doc footer base styles intact. */
+  @layer starlight.core {
+    footer {
+      flex-direction: column;
+      gap: 2rem;
+    }
+  }
+
+  /* ── doc footer ─────────────────────────────────────────────────── */
+  .doc-footer { --brand: #f05133; }
+
+  /* Pagination: kill Starlight's big card style. Two compact contained
+     chips, anchored to the left/right grid columns so a lone "Next"
+     stays on the right (and a lone "Previous" on the left). */
+  .pager {
+    margin-top: 2.5rem;
+  }
+  .pager :global(.pagination-links) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  /* Explicit column placement: prev always col 1, next always col 2.
+     Means a single child still lands on the correct side. */
+  .pager :global(.pagination-links > a[rel="prev"]) { grid-column: 1; }
+  .pager :global(.pagination-links > a[rel="next"]) {
+    grid-column: 2;
+    text-align: right;
+    justify-self: end;
+  }
+  .pager :global(.pagination-links > a[rel="prev"]) { justify-self: start; }
+
+  /* Compact contained chip — small padding, thin border, square-ish
+     corners. Each row paints itself so hover can shift label vs title
+     independently. All deep selectors live inside a single :global()
+     wrapper so the pseudo-elements get scoped correctly by Astro. */
+  .pager :global(.pagination-links > a) {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    padding: 0.7rem 1.05rem;
+    min-width: 0;
+    max-width: 100%;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.3rem;
+    background: transparent;
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 0.95rem;
+    line-height: 1.35;
+    text-decoration: none;
+    transition: border-color 150ms ease, background-color 150ms ease;
+  }
+  .pager :global(.pagination-links > a[rel="next"]) {
+    align-items: flex-end;
+  }
+  .pager :global(.pagination-links > a:hover) {
+    /* Soft brand tint on bg + a subtle orange edge — the "touch of git
+       orange" without washing the whole chip in it. */
+    border-color: rgba(240, 81, 51, 0.45);
+    background: rgba(240, 81, 51, 0.05);
+  }
+
+  /* Starlight nests the markup like this:
+        <a> <svg/> <span> "Previous" <br> <span.link-title>Title</span> </span> </a>
+     So the outer <span> carries the small "Previous"/"Next" label
+     styling, and the inner .link-title overrides for the page title. */
+  .pager :global(.pagination-links > a > span) {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .pager :global(.pagination-links > a .link-title) {
+    display: inline-block;
+    margin-top: 0.2rem;
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--sl-color-text);
+    text-transform: none;
+    letter-spacing: 0;
+    line-height: 1.3;
+    transition: color 150ms ease;
+  }
+  .pager :global(.pagination-links > a:hover .link-title) {
+    color: var(--brand);
+  }
+
+  /* Drop Starlight's giant arrow icon — we paint our own (rules
+     below in the global block, since Astro's :global() doesn't
+     pass `::before` / `::after` selectors through). */
+  .pager :global(.pagination-links > a > svg) {
+    display: none;
+  }
+
+  /* Separator above the meta row, then 2 cols + centered last-updated. */
+  .meta-row {
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--sl-color-gray-5);
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 0.9rem;
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    line-height: 1.5;
+  }
+  .meta-cols {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem 2rem;
+  }
+  .meta-copy { margin: 0; }
+  .meta-row a {
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+  .meta-row a:hover { color: var(--brand); }
+  /* Starlight's EditLink + LastUpdated each render their own <p> with
+     an icon prefix; tighten the gap and zero the margin so they sit
+     flush in our flex/grid slots. */
+  .meta-row :global(p) {
+    margin: 0;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4em;
+  }
+  /* Centered "Last updated:" line under the two columns. */
+  .meta-bottom {
+    margin-top: 0.85rem;
+    text-align: center;
+    color: var(--sl-color-gray-3);
+    font-size: 0.82rem;
+  }
+  .meta-bottom :global(p) {
+    justify-content: center;
+  }
+
+  /* ── splash footer — slim centered credit line ───────────────────── */
+  .site-footer {
+    --brand: #f05133;
+    margin-top: 2.5rem;
+    margin-inline: calc(50% - 50vw);
+    padding: 0.45rem clamp(1rem, 4vw, 2rem);
+    border-top: 1px solid var(--sl-color-gray-5);
+  }
+  .site-footer-line {
+    margin: 0;
+    text-align: center;
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 1rem;
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    line-height: 1.5;
+  }
+  .site-footer-line a {
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    text-decoration: none;
+    transition: color 150ms ease;
+    margin-left: 0.45em;
+  }
+  .site-footer-line a:hover { color: var(--brand); }
+</style>

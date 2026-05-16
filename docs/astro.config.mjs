@@ -20,6 +20,12 @@ export default defineConfig({
     starlight({
       title: "gitoui",
       description: "Say oui to the smoothest git terminal youser experience.",
+      // Use our custom 404 at src/pages/404.astro instead of Starlight's
+      // generated one — fixes the "route /404 defined twice" warning.
+      disable404Route: true,
+      // Show the page's last commit date in the doc footer. Starlight
+      // reads it from `git log -1 --format=%aI <file>` at build time.
+      lastUpdated: true,
       logo: {
         src: "./src/assets/logo-mark.svg",
         replacesTitle: false,
@@ -37,6 +43,7 @@ export default defineConfig({
         SocialIcons: "./src/components/SocialIcons.astro",
         ThemeSelect: "./src/components/ThemeSelect.astro",
         Hero: "./src/components/Hero.astro",
+        Footer: "./src/components/Footer.astro",
       },
       sidebar: [
         {
@@ -87,6 +94,10 @@ export default defineConfig({
         {
           label: "FAQ",
           link: "/faq/",
+        },
+        {
+          label: "Brand",
+          link: "/brand",
         },
         {
           label: "License",

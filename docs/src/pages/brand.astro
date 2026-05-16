@@ -1,0 +1,409 @@
+---
+// Brand page — showcase the gitoui brand assets so contributors,
+// reviewers, and downstream sites can grab the right logo / wordmark
+// at the right contrast without digging through the repo. Modeled
+// after opencode.ai/brand: short intro → asset gallery grouped by
+// category → color palette pulled from CLAUDE.md's brand book.
+//
+// Asset files live at /gitoui/brand/<name>.svg (synced by
+// `npm run sync-public` from ../../assets/brand/).
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const assetUrl = (name: string) => `${base}/brand/${name}`;
+
+type Asset = {
+  src: string;
+  alt: string;
+  label: string;
+  variant: "dark" | "light";
+};
+
+type Section = {
+  id: string;
+  title: string;
+  description: string;
+  assets: Asset[];
+};
+
+const sections: Section[] = [
+  {
+    id: "logomark",
+    title: "Logomark",
+    description:
+      "The G symbol on its own. Use the orange variant on dark backgrounds and the near-black variant on light backgrounds.",
+    assets: [
+      {
+        src: assetUrl("logo-nobg.svg"),
+        alt: "gitoui G logomark in orange on a transparent background",
+        label: "Orange, transparent",
+        variant: "dark",
+      },
+      {
+        src: assetUrl("logo-nobg-black.svg"),
+        alt: "gitoui G logomark in near-black on a transparent background",
+        label: "Black, transparent",
+        variant: "light",
+      },
+      {
+        src: assetUrl("logo-bg.svg"),
+        alt: "gitoui G logomark on an off-white background plate",
+        label: "Orange on off-white plate",
+        variant: "light",
+      },
+      {
+        src: assetUrl("logo-bg-black.svg"),
+        alt: "gitoui G logomark in black on an off-white background plate",
+        label: "Black on off-white plate",
+        variant: "light",
+      },
+    ],
+  },
+  {
+    id: "wordmark",
+    title: "Wordmark",
+    description:
+      "The `gitoui` wordmark. The default keeps `git` in orange and `oui` in the brand cream; the wide variant adds breathing room for headers.",
+    assets: [
+      {
+        src: assetUrl("wordmark-nobg.svg"),
+        alt: "gitoui wordmark, default spacing, transparent",
+        label: "Default",
+        variant: "dark",
+      },
+      {
+        src: assetUrl("wordmark-nobg-black.svg"),
+        alt: "gitoui wordmark, default spacing, near-black",
+        label: "Default · black",
+        variant: "light",
+      },
+      {
+        src: assetUrl("wordmark-nobg-wide.svg"),
+        alt: "gitoui wordmark, wide spacing, transparent",
+        label: "Wide",
+        variant: "dark",
+      },
+      {
+        src: assetUrl("wordmark-nobg-wide-black.svg"),
+        alt: "gitoui wordmark, wide spacing, near-black",
+        label: "Wide · black",
+        variant: "light",
+      },
+    ],
+  },
+  {
+    id: "combined",
+    title: "Combined mark",
+    description:
+      "Logomark + wordmark together — favour this on README headers, presentation title slides, and anywhere the logo needs to introduce the name itself.",
+    assets: [
+      {
+        src: assetUrl("mixed-nobg.svg"),
+        alt: "gitoui combined mark, transparent",
+        label: "Transparent",
+        variant: "dark",
+      },
+      {
+        src: assetUrl("mixed-nobg-black.svg"),
+        alt: "gitoui combined mark, near-black, transparent",
+        label: "Black · transparent",
+        variant: "light",
+      },
+      {
+        src: assetUrl("mixed.svg"),
+        alt: "gitoui combined mark on an off-white plate",
+        label: "On off-white plate",
+        variant: "light",
+      },
+      {
+        src: assetUrl("mixed-black.svg"),
+        alt: "gitoui combined mark in black on an off-white plate",
+        label: "Black on off-white plate",
+        variant: "light",
+      },
+    ],
+  },
+];
+
+const palette = [
+  { name: "Primary", hex: "#F05133", note: "git orange — wordmark `git`, G logomark" },
+  { name: "Shadow", hex: "#8B2A12", note: "depth on the G logomark" },
+  { name: "Used", hex: "#F1ECEC", note: "off-white `oui` letters" },
+  { name: "Off-White Bg", hex: "#F5F4F2", note: "light background plate" },
+  { name: "Warm Gray", hex: "#4B4646", note: "secondary text" },
+  { name: "Near-Black", hex: "#111111", note: "dark variants on light backgrounds" },
+];
+---
+
+<StarlightPage frontmatter={{ title: "Brand", description: "Logos, wordmarks, colors, and download links for the gitoui brand." }}>
+  <p class="brand-intro">
+    Resources and assets to help you reference the <strong>gitoui</strong> brand.
+    Each asset ships as a clean SVG — hit the <strong>SVG</strong> button under
+    any variant to download it.
+  </p>
+
+  {sections.map((section) => (
+    <section class="brand-section" id={section.id}>
+      <header class="brand-section-head">
+        <h2>{section.title}</h2>
+        <p set:html={section.description.replace(/`([^`]+)`/g, "<code>$1</code>")} />
+      </header>
+      <div class="brand-grid">
+        {section.assets.map((asset) => (
+          <figure class="brand-card" data-variant={asset.variant}>
+            <div class="brand-preview">
+              <img src={asset.src} alt={asset.alt} loading="lazy" />
+            </div>
+            <figcaption>
+              <span class="brand-card-label">{asset.label}</span>
+              <a class="brand-download" href={asset.src} download aria-label={`Download ${asset.label} as SVG`}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+                </svg>
+                <span>SVG</span>
+              </a>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </section>
+  ))}
+
+  <section class="brand-section" id="colors">
+    <header class="brand-section-head">
+      <h2>Colors</h2>
+      <p>
+        The brand book lives at <code>assets/brand/gitoui-brand-standalone.html</code> in the
+        repo — these tokens are its <em>COLOR</em> section. The orange leads;
+        everything else is supporting.
+      </p>
+    </header>
+    <div class="brand-swatches">
+      {palette.map((c) => (
+        <div class="swatch">
+          <div class="swatch-chip" style={`background:${c.hex}`} aria-hidden="true"></div>
+          <div class="swatch-meta">
+            <span class="swatch-name">{c.name}</span>
+            <code class="swatch-hex">{c.hex}</code>
+            <span class="swatch-note">{c.note}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="brand-section" id="typography">
+    <header class="brand-section-head">
+      <h2>Typography</h2>
+      <p>
+        <strong>Orbitron</strong> for the wordmark and display headlines —
+        gives the logotype its technical, terminal-adjacent feel.
+        <strong>JetBrains Mono</strong> everywhere code shows up.
+      </p>
+    </header>
+    <div class="brand-type">
+      <div class="type-row" style="font-family: var(--gitoui-wordmark-font);">
+        <span class="type-label">Orbitron</span>
+        <span class="type-sample" style="font-size: 2.5rem;">gitoui — Say <em>oui</em>.</span>
+      </div>
+      <div class="type-row" style="font-family: var(--sl-font-mono, ui-monospace, 'JetBrains Mono', monospace);">
+        <span class="type-label">JetBrains Mono</span>
+        <span class="type-sample" style="font-size: 1.25rem;">$ git log --grep="oui" → ∞ results.</span>
+      </div>
+    </div>
+  </section>
+</StarlightPage>
+
+<style>
+  .brand-intro {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    max-width: 60ch;
+    margin-bottom: 2.5rem;
+  }
+
+  .brand-section {
+    margin-block: 3rem;
+  }
+  .brand-section-head {
+    margin-bottom: 1.5rem;
+  }
+  .brand-section-head h2 {
+    margin: 0 0 0.5rem;
+    font-family: var(--gitoui-wordmark-font, "Orbitron", system-ui);
+    font-size: 1.75rem;
+    font-weight: 700;
+  }
+  .brand-section-head p {
+    margin: 0;
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    max-width: 60ch;
+    line-height: 1.6;
+  }
+  .brand-section-head code {
+    font-size: 0.9em;
+    padding: 0.1em 0.35em;
+    background: var(--sl-color-gray-6, rgba(255, 255, 255, 0.05));
+    border-radius: 0.2em;
+  }
+
+  /* ── asset grid ──────────────────────────────────────────────────── */
+  .brand-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+  }
+  .brand-card {
+    margin: 0;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.25rem;
+    overflow: hidden;
+    background: var(--sl-color-bg-nav);
+    transition: border-color 180ms ease, transform 180ms ease;
+  }
+  .brand-card:hover {
+    border-color: var(--sl-color-gray-4);
+    transform: translateY(-1px);
+  }
+  .brand-preview {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 16 / 9;
+    padding: 1.5rem;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.02), transparent),
+      var(--sl-color-bg);
+  }
+  /* Light-variant cards (black logos, off-white plate variants) need a
+     light backdrop so they're actually visible. */
+  .brand-card[data-variant="light"] .brand-preview {
+    background:
+      linear-gradient(135deg, #f5f4f2 0%, #ffffff 100%);
+  }
+  .brand-preview img {
+    max-width: 100%;
+    max-height: 6rem;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .brand-card figcaption {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.65rem 0.9rem;
+    border-top: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-bg-nav);
+    font-size: 0.85rem;
+  }
+  .brand-card-label {
+    color: var(--sl-color-text);
+    font-weight: 500;
+  }
+  .brand-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.25rem;
+    color: var(--sl-color-text);
+    text-decoration: none;
+    font-size: 0.78rem;
+    font-weight: 600;
+    transition: border-color 150ms ease, color 150ms ease,
+      background-color 150ms ease;
+  }
+  .brand-download:hover {
+    border-color: #f05133;
+    color: #f05133;
+    background: rgba(240, 81, 51, 0.08);
+  }
+  .brand-download svg { width: 0.85rem; height: 0.85rem; }
+
+  /* ── colors ──────────────────────────────────────────────────────── */
+  .brand-swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 0.75rem;
+    /* Force every row of the grid to take the same height — keeps the
+       swatches pixel-perfect even when notes wrap differently. */
+    grid-auto-rows: 1fr;
+  }
+  .swatch {
+    display: flex;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.25rem;
+    background: var(--sl-color-bg-nav);
+    /* Pin a minimum so every card is at least this tall regardless of
+       whether its note line wraps or not. */
+    min-height: 5rem;
+  }
+  .swatch-chip {
+    flex: 0 0 4rem;
+    border-radius: 0.2rem;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  }
+  .swatch-meta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .swatch-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .swatch-hex {
+    font-family: var(--sl-font-mono, ui-monospace, monospace);
+    font-size: 0.85rem;
+    color: var(--sl-color-text-accent, var(--sl-color-gray-3));
+    background: none;
+    padding: 0;
+  }
+  .swatch-note {
+    font-size: 0.78rem;
+    color: var(--sl-color-gray-3);
+    line-height: 1.4;
+  }
+
+  /* ── typography ──────────────────────────────────────────────────── */
+  .brand-type {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .type-row {
+    display: flex;
+    align-items: baseline;
+    gap: 1.5rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.25rem;
+    background: var(--sl-color-bg-nav);
+    flex-wrap: wrap;
+  }
+  .type-label {
+    font-family: var(--sl-font, system-ui);
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    flex: 0 0 9rem;
+  }
+  .type-sample {
+    color: var(--sl-color-text);
+    line-height: 1.2;
+  }
+  .type-sample em {
+    color: #f05133;
+    font-style: italic;
+  }
+</style>

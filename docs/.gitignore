@@ -9,6 +9,12 @@ node_modules/
 skills-lock.json
 .agents/
 
+# Synced from repo root by the `sync-public` npm script — never edit
+# directly here. Source of truth lives at ../install.sh and
+# ../assets/brand/. Re-runs on every `npm run dev` / `npm run build`.
+public/install.sh
+public/brand/
+
 # environment files
 .env
 .env.production

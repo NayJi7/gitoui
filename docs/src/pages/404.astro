@@ -1,45 +1,85 @@
 ---
-// Custom 404 — overrides Starlight's default so we don't inherit the
-// home-page hero (3 CTAs, scroll hint, animations). Single centered
-// panel, header stays visible, page can't scroll.
+// 404 — clones the home Hero (starfield, typed title, 2-col grid,
+// left-aligned copy, default Starlight font, brand CTA) with three
+// deliberate deltas:
+//   1. Title is "Error 404" instead of "gitoui".
+//   2. The tagline slot holds three vertically stacked lines: the
+//      `git log` command, then "0 results.", then the friendly
+//      explanation. Each fades up in sequence.
+//   3. Right column is empty (no G mark).
+// Page scroll is locked, header stays visible.
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const homeHref = `${base}/`;
+
+const TITLE = `<span class="err-part">Error </span><span class="num-part">404</span>`;
+const TYPED_SPEED_MS = 110;
+const TYPED_START_MS = 700;
+const titleCharCount = "Error 404".length;
+const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
 ---
 
 <StarlightPage frontmatter={{ title: "Error 404", template: "splash" }}>
-  <div class="not-found" aria-live="polite">
-    <p class="nf-eyebrow">Error 404</p>
-    <h1 class="nf-headline">
-      <code
-        ><span class="nf-prompt">$</span> git log --grep="<span
-          class="nf-path"
-          data-base={base}
-          data-default-path="that page">that page</span>" → 0 results.</code
-      >
-    </h1>
-    <p class="nf-sub">Maybe it never made it past code review.</p>
-    <a class="nf-cta" href={homeHref}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-        aria-hidden="true">
-        <path d="M19 12H5M12 19l-7-7 7-7"></path>
-      </svg>
-      <span>Back to home</span>
-    </a>
-  </div>
+  <section class="hero hero-404" data-hero style={`--caret-show: ${titleDoneMs}ms`}>
+    <div class="hero-stars" aria-hidden="true">
+      <div class="hero-stars-drift"></div>
+    </div>
+
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <h1 id="_top" class="hero-title">
+          <span
+            class="hero-typed"
+            data-typed-source={TITLE}
+            data-typed-speed={TYPED_SPEED_MS}
+            data-typed-start={TYPED_START_MS}
+            set:html={TITLE}
+          />
+        </h1>
+
+        <div class="hero-tagline">
+          <p class="nf-line nf-cmd">
+            <span class="nf-prompt">$</span>
+            git log --grep=&quot;<span
+              class="nf-path"
+              data-base={base}
+              data-default-path="that page">that page</span>&quot;
+          </p>
+          <p class="nf-line nf-out">
+            <span class="nf-prompt">&gt;</span>
+            <em>0 results</em>
+          </p>
+          <p class="nf-line nf-sub"
+            >Maybe it never made it past code review <span class="nf-dot"
+              >.</span><span class="nf-dot">.</span><span class="nf-dot">.</span></p>
+        </div>
+
+        <div class="hero-actions">
+          <a class="cta cta-primary" href={homeHref}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+              aria-hidden="true">
+              <path d="M19 12H5M12 19l-7-7 7-7"></path>
+            </svg>
+            <span>Checkout main</span>
+          </a>
+        </div>
+      </div>
+
+      {/* Right column intentionally empty — preserves the 2-col grid
+          so the copy keeps the home hero's horizontal envelope. */}
+      <div class="hero-mark hero-mark-empty" aria-hidden="true"></div>
+    </div>
+  </section>
 </StarlightPage>
 
 <script is:inline>
-  // Inject what the user actually tried into the grep argument so the
-  // message reads "you asked for /install.sh, found nothing".
+  // Replace the placeholder "that page" with the path the user tried.
   (function () {
     const el = document.querySelector(".nf-path");
     if (!el) return;
     let path = window.location.pathname;
-    // Strip the deployment base prefix (`/gitoui`) so the message shows
-    // only the meaningful tail the user typed.
     const base = el.dataset.base || "";
     if (base && path.startsWith(base)) path = path.slice(base.length);
     if (!path || path === "/") path = el.dataset.defaultPath || "that page";
@@ -47,135 +87,377 @@ const homeHref = `${base}/`;
   })();
 </script>
 
+<script>
+  import Typed from "typed.js";
+
+  const start = async () => {
+    const el = document.querySelector<HTMLElement>(".hero-typed");
+    if (!el) return;
+    const html = el.dataset.typedSource;
+    const speed = Number(el.dataset.typedSpeed ?? 110);
+    const startDelay = Number(el.dataset.typedStart ?? 700);
+    if (!html) return;
+    if (document.fonts?.ready) {
+      try { await document.fonts.ready; } catch {}
+    }
+    el.innerHTML = "";
+    el.classList.add("is-ready");
+    const typed = new Typed(el, {
+      strings: [html],
+      typeSpeed: speed,
+      startDelay,
+      showCursor: true,
+      cursorChar: "▏",
+      contentType: "html",
+      loop: false,
+      smartBackspace: false,
+    });
+    requestAnimationFrame(() => {
+      typed.cursor?.classList.add("typed-cursor--blink");
+    });
+  };
+  start();
+  document.addEventListener("astro:page-load", start);
+</script>
+
 <style is:global>
-  /* On the 404 the splash template normally hides the header by zeroing
-     out its slot. We want it BACK. Also kill page scrolling so the
-     centered card owns the whole viewport. */
-  :root:has(.not-found) {
+  /* Lock page scroll and flatten every Starlight wrapper so the hero
+     fills the viewport with no dark strip under the header. */
+  :root:has(.hero-404),
+  :root:has(.hero-404) body {
     overflow: hidden;
+    height: 100%;
   }
-  :root:has(.not-found) header.header {
-    transform: none !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
+  :root:has(.hero-404) main {
+    padding: 0 !important;
+    margin: 0 !important;
   }
-  /* The splash template wraps content in a content panel — let it grow
-     to viewport height so the inner flex can center vertically. */
-  :root:has(.not-found) main {
-    min-height: calc(100vh - var(--sl-nav-height, 3.75rem));
-    display: flex;
+  :root:has(.hero-404) main > .content-panel {
+    padding: 0 !important;
+    margin: 0 !important;
   }
-  /* Splash template emits a leading <h1> with the frontmatter title and
-     a trailing footer (prev/next nav). Both compete with our centered
-     panel — hide them so the 404 owns the viewport. */
-  :root:has(.not-found) main > .content-panel:first-of-type {
+  :root:has(.hero-404) main > .content-panel > .sl-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+  /* Hide the splash title h1, the doc footer, and the site footer —
+     nothing scroll-reachable should render on the 404. */
+  :root:has(.hero-404) main > .content-panel:first-of-type,
+  :root:has(.hero-404) main > .content-panel:last-of-type > .sl-container > footer,
+  :root:has(.hero-404) .site-footer {
     display: none;
-  }
-  :root:has(.not-found) main > .content-panel:last-of-type > .sl-container > footer {
-    display: none;
-  }
-  :root:has(.not-found) .content-panel {
-    flex: 1;
-    display: flex;
-  }
-  :root:has(.not-found) .content-panel > .sl-container {
-    flex: 1;
-    display: flex;
-  }
-  :root:has(.not-found) .content-panel > .sl-container > .sl-markdown-content {
-    flex: 1;
-    display: flex;
   }
 </style>
 
 <style>
-  .not-found {
+  /* ── shape — same envelope as the home hero ──────────────────────── */
+  .hero {
     --brand: #f05133;
     --cream: #f1ecec;
-    flex: 1;
+    --radius: 0.25rem;
+    --nav-h: var(--sl-nav-height, 3.75rem);
+    position: relative;
+    height: calc(100vh - var(--nav-h));
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    isolation: isolate;
+    width: 100vw;
+    padding-inline: clamp(1.5rem, 5vw, 4rem);
+    padding-block: clamp(2rem, 6vh, 4rem);
+  }
+
+  /* ── starfield ────────────────────────────────────────────────────── */
+  .hero-stars {
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background:
+      radial-gradient(
+        ellipse 90% 70% at 50% 35%,
+        rgba(240, 81, 51, 0.06),
+        transparent 70%
+      );
+  }
+  .hero-stars-drift,
+  .hero-stars::before {
+    position: absolute;
+    inset: -10%;
+    content: "";
+    background-image:
+      radial-gradient(1px 1px at 23% 17%, rgba(255, 255, 255, 0.55) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 81% 8%, rgba(255, 255, 255, 0.45) 50%, transparent 100%),
+      radial-gradient(1px 1px at 42% 73%, rgba(255, 255, 255, 0.5) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 12% 88%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(1.4px 1.4px at 67% 32%, rgba(255, 255, 255, 0.55) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 91% 51%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(1px 1px at 7% 41%, rgba(255, 255, 255, 0.35) 50%, transparent 100%),
+      radial-gradient(1.1px 1.1px at 55% 91%, rgba(255, 255, 255, 0.45) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 33% 28%, rgba(240, 81, 51, 0.4) 50%, transparent 100%),
+      radial-gradient(1.3px 1.3px at 76% 60%, rgba(240, 81, 51, 0.32) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 49% 12%, rgba(255, 255, 255, 0.5) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 88% 84%, rgba(255, 255, 255, 0.4) 50%, transparent 100%);
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+  }
+  .hero-stars-drift {
+    animation: hero-drift 22s ease-in-out infinite alternate;
+  }
+  .hero-stars::before {
+    background-image:
+      radial-gradient(1px 1px at 14% 62%, rgba(255, 255, 255, 0.45) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 38% 4%, rgba(255, 255, 255, 0.35) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 63% 21%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 85% 28%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 19% 36%, rgba(240, 81, 51, 0.32) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 70% 79%, rgba(255, 255, 255, 0.35) 50%, transparent 100%),
+      radial-gradient(1px 1px at 27% 53%, rgba(255, 255, 255, 0.4) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 53% 38%, rgba(255, 255, 255, 0.32) 50%, transparent 100%);
+    animation: hero-twinkle 6s ease-in-out infinite;
+  }
+  @keyframes hero-twinkle {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 1; }
+  }
+  @keyframes hero-drift {
+    0%   { transform: translate3d(0, 0, 0); }
+    100% { transform: translate3d(-1.5%, -1%, 0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-stars::before,
+    .hero-stars-drift { animation: none; }
+  }
+
+  /* ── layout — identical 2-col grid to the home hero ──────────────── */
+  .hero-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(2rem, 5vw, 4rem);
+    width: min(100%, 56rem);
+  }
+  @media (max-width: 50rem) {
+    .hero-inner {
+      grid-template-columns: 1fr;
+      gap: 2.5rem;
+      text-align: center;
+    }
+    .hero-copy { align-items: center; }
+    .hero-actions { justify-content: center; }
+    .nf-line { text-align: center; }
+  }
+
+  /* ── copy — left-aligned, exactly like the home hero ────────────── */
+  .hero-copy {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 1.5rem;
-    padding-inline: 1.5rem;
-    /* Pull up slightly so the center looks optically centered against
-       the visible page area (header occupies the top strip). */
-    padding-block: 0;
+    align-items: flex-start;
+    gap: clamp(1.5rem, 3vw, 2.5rem);
   }
-
-  .nf-eyebrow {
-    margin: 0;
-    font-family: var(--gitoui-wordmark-font, "Orbitron", system-ui);
-    font-size: clamp(2.5rem, 8vw, 5rem);
-    font-weight: 700;
-    color: var(--cream);
-    letter-spacing: -0.01em;
-    line-height: 1;
-  }
-  :root[data-theme="light"] .nf-eyebrow { color: #111; }
-
-  .nf-headline {
-    margin: 0;
-    font-size: clamp(0.95rem, 1.6vw, 1.2rem);
+  .hero-typed { display: inline; visibility: hidden; }
+  .hero-typed.is-ready { visibility: visible; }
+  .hero-title :global(.typed-cursor) {
+    color: var(--brand);
     font-weight: 400;
-    max-width: min(100%, 56rem);
+    margin-left: 0.05em;
+    opacity: 1;
+    animation: none !important;
   }
-  .nf-headline code {
-    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+  .hero-title :global(.typed-cursor.typed-cursor--blink) {
+    animation: hero-typed-blink 1.3s step-end infinite !important;
+  }
+  @keyframes hero-typed-blink {
+    0%, 50% { opacity: 1; }
+    50.01%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-title :global(.typed-cursor) { animation: none; }
+  }
+  .hero-title {
+    font-family: var(--gitoui-wordmark-font);
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    margin: 0 0 clamp(0.5rem, 1.5vw, 1.25rem);
+    white-space: nowrap;
+  }
+  .hero-title :global(.err-part) { color: var(--cream); }
+  .hero-title :global(.num-part) { color: var(--brand); }
+  :root[data-theme="light"] .hero-title :global(.err-part) { color: #111; }
+
+  /* ── tagline slot holds 3 stacked lines — same font as the home
+     hero tagline (default Starlight font), same size, same color
+     hierarchy. Just structured as a vertical block instead of a
+     single paragraph. */
+  .hero-tagline {
+    position: relative;
+    margin: 0;
+    padding-bottom: 1.25rem;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .hero-tagline::after {
+    /* Same animated underline wipe as the home hero tagline, kicks in
+       after the last animated dot in the sub line. */
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    width: clamp(8rem, 60%, 16rem);
+    background: var(--brand);
+    clip-path: inset(0 100% 0 0);
+    animation: hero-wipe 900ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+    animation-delay: calc(var(--caret-show, 1.5s) + 2700ms);
+  }
+  @keyframes hero-wipe { to { clip-path: inset(0 0 0 0); } }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-tagline::after { animation: none; clip-path: inset(0 0 0 0); }
+  }
+
+  .nf-line {
+    margin: 0;
+    font-size: clamp(1.05rem, 1.7vw, 1.35rem);
+    line-height: 1.5;
     color: var(--sl-color-text);
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--sl-color-gray-5);
-    padding: 0.6rem 0.9rem;
-    border-radius: 0.25rem;
+    opacity: 0;
+    /* Same fade-up keyframe as the home hero tagline + a stagger so
+       each line lands like a fresh terminal line. */
+    animation: hero-fade-up 700ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  }
+  .nf-cmd {
+    animation-delay: calc(var(--caret-show, 1.5s) + 350ms);
+    /* Keep the command on a single line even with a long path; if it
+       overflows the copy column, let the user scroll horizontally
+       instead of wrapping (which would break the terminal-output feel). */
     white-space: nowrap;
     overflow-x: auto;
     max-width: 100%;
-    display: inline-block;
   }
-  :root[data-theme="light"] .nf-headline code {
-    background: rgba(20, 18, 17, 0.04);
-    border-color: var(--sl-color-gray-5);
+  .nf-out { animation-delay: calc(var(--caret-show, 1.5s) + 850ms); }
+  .nf-sub { animation-delay: calc(var(--caret-show, 1.5s) + 1250ms); }
+  @media (prefers-reduced-motion: reduce) {
+    .nf-line { opacity: 1; animation: none; }
   }
   .nf-prompt {
     color: var(--brand);
-    user-select: none;
+    font-weight: 700;
     margin-right: 0.45em;
+    user-select: none;
   }
   .nf-path {
     color: var(--brand);
     font-weight: 600;
   }
-
+  .nf-out em {
+    color: var(--brand);
+    font-style: italic;
+    font-weight: 600;
+  }
   .nf-sub {
-    margin: 0;
-    font-size: clamp(0.95rem, 1.4vw, 1.05rem);
     color: var(--sl-color-text-accent, var(--sl-color-gray-3));
-    max-width: 38ch;
+    font-size: clamp(0.95rem, 1.5vw, 1.15rem);
+    max-width: 42ch;
+  }
+  /* Each `.` lands one at a time after the sentence has settled —
+     gives the line a "thinking..." beat instead of a hard stop. */
+  .nf-dot {
+    opacity: 0;
+    animation: nf-dot-in 280ms ease forwards;
+  }
+  .nf-dot:nth-of-type(1) { animation-delay: calc(var(--caret-show, 1.5s) + 1950ms); }
+  .nf-dot:nth-of-type(2) { animation-delay: calc(var(--caret-show, 1.5s) + 2200ms); }
+  .nf-dot:nth-of-type(3) { animation-delay: calc(var(--caret-show, 1.5s) + 2450ms); }
+  @keyframes nf-dot-in { to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .nf-dot { opacity: 1; animation: none; }
   }
 
-  .nf-cta {
+  /* ── action — real CTA button, exact home-hero styling ──────────── */
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+  .cta {
+    opacity: 0;
+    animation: hero-fade-up 600ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+    animation-delay: calc(var(--caret-show, 1.5s) + 2900ms);
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.8rem 1.4rem;
-    border-radius: 0.25rem;
-    background: var(--brand);
-    color: #111;
-    border: 1px solid var(--brand);
+    padding: 0.8rem 1.25rem;
+    border-radius: var(--radius);
     font-size: 0.95rem;
     font-weight: 600;
     text-decoration: none;
-    box-shadow: 0 6px 22px -8px rgba(240, 81, 51, 0.5);
-    transition: background-color 180ms ease, transform 180ms ease,
-      box-shadow 180ms ease;
+    transition: transform 180ms ease, background-color 180ms ease,
+      border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
   }
-  .nf-cta:hover {
+  .cta svg { width: 1.05rem; height: 1.05rem; }
+  .cta-primary {
+    background: var(--brand);
+    color: #111;
+    border: 1px solid var(--brand);
+    box-shadow: 0 6px 22px -8px rgba(240, 81, 51, 0.5);
+  }
+  .cta-primary:hover {
     background: #ff6346;
     border-color: #ff6346;
     transform: translateY(-1px);
     box-shadow: 0 10px 28px -10px rgba(240, 81, 51, 0.65);
   }
-  .nf-cta svg { width: 1.05rem; height: 1.05rem; }
+  @media (prefers-reduced-motion: reduce) {
+    .cta { opacity: 1; animation: none; }
+  }
+
+  /* ── mark column placeholder (intentionally empty) ───────────────── */
+  .hero-mark-empty { min-height: 1px; }
+
+  @keyframes hero-fade-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── light theme stars ──────────────────────────────────────────── */
+  :root[data-theme="light"] .hero-stars {
+    background:
+      radial-gradient(
+        ellipse 90% 70% at 50% 35%,
+        rgba(240, 81, 51, 0.08),
+        transparent 70%
+      );
+  }
+  :root[data-theme="light"] .hero-stars-drift,
+  :root[data-theme="light"] .hero-stars::before {
+    background-image:
+      radial-gradient(1px 1px at 23% 17%, rgba(20, 18, 17, 0.5) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 81% 8%, rgba(20, 18, 17, 0.4) 50%, transparent 100%),
+      radial-gradient(1px 1px at 42% 73%, rgba(20, 18, 17, 0.45) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 12% 88%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(1.4px 1.4px at 67% 32%, rgba(20, 18, 17, 0.5) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 91% 51%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(1px 1px at 7% 41%, rgba(20, 18, 17, 0.3) 50%, transparent 100%),
+      radial-gradient(1.1px 1.1px at 55% 91%, rgba(20, 18, 17, 0.4) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 33% 28%, rgba(240, 81, 51, 0.55) 50%, transparent 100%),
+      radial-gradient(1.3px 1.3px at 76% 60%, rgba(240, 81, 51, 0.45) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 49% 12%, rgba(20, 18, 17, 0.45) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 88% 84%, rgba(20, 18, 17, 0.35) 50%, transparent 100%);
+  }
+  :root[data-theme="light"] .hero-stars::before {
+    background-image:
+      radial-gradient(1px 1px at 14% 62%, rgba(20, 18, 17, 0.4) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 38% 4%, rgba(20, 18, 17, 0.3) 50%, transparent 100%),
+      radial-gradient(1.2px 1.2px at 63% 21%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(0.9px 0.9px at 85% 28%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 19% 36%, rgba(240, 81, 51, 0.45) 50%, transparent 100%),
+      radial-gradient(0.7px 0.7px at 70% 79%, rgba(20, 18, 17, 0.3) 50%, transparent 100%),
+      radial-gradient(1px 1px at 27% 53%, rgba(20, 18, 17, 0.35) 50%, transparent 100%),
+      radial-gradient(0.8px 0.8px at 53% 38%, rgba(20, 18, 17, 0.3) 50%, transparent 100%);
+  }
 </style>

@@ -4,6 +4,9 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
+    "sync-public": "mkdir -p public/brand && cp ../install.sh public/install.sh && cp ../assets/brand/*.svg public/brand/",
+    "predev": "npm run sync-public",
+    "prebuild": "npm run sync-public",
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
