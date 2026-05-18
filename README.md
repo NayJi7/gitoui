@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/brand/mixed-nobg.svg">
-    <img src="./assets/brand/mixed-nobg-black.svg" alt="gitoui" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/brand/mixed-nobg.svg">
+    <img src="https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/brand/mixed-nobg-black.svg" alt="gitoui" width="420">
   </picture>
 </p>
 
@@ -20,7 +20,7 @@
 
 <p align="center">
   <!-- ▶ demo GIF — full app walkthrough -->
-  <img src="./assets/readme/demo.gif" alt="gitoui demo" width="900">
+  <img src="https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/demo.gif" alt="gitoui demo" width="900">
 </p>
 
 **gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie) — a beautifully-rendered `git log --graph` viewer — and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.

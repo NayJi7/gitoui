@@ -22,7 +22,7 @@ Each row carries:
 The top row is a synthetic **Uncommitted Changes** entry. Drilling into it
 opens the [Uncommitted view](/features/uncommitted/) for staging + commit.
 
-{/* PHOTO of the commit graph home with a busy history — multiple branches, a merge commit, a tag glyph, a stash, HEAD highlighted in orange, the synthetic Uncommitted row on top. */}
+![Commit graph — busy history with branches, merge, tag, stash, HEAD in orange, Uncommitted row on top](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/home-commit-graph.png)
 
 ## Search
 
@@ -41,7 +41,7 @@ case-insensitive off. Inline toggles while the search is active:
 The search bar's toggle state persists per-session via `[core.search]` in
 the config.
 
-{/* PHOTO gif of the search flow — press `f`, type a query, watch matches highlight live; toggle `s` (case) and `z` (fuzzy) and see the match count update, then press Enter and jump between matches with `n` / `N`. */}
+![Search flow — `f` to open, live highlight, toggle case + fuzzy, `n`/`N` to jump between matches](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/search-flow.gif)
 
 ## 2-commit comparison
 
@@ -57,7 +57,7 @@ the config.
 
 `Ctrl+click` is the mouse equivalent. `Esc` clears the mark at any point.
 
-{/* PHOTO gif of the 2-commit compare flow — press Space on commit A (chip appears), scroll, press Space on commit B, the Compare view opens showing the cumulative diff. */}
+![2-commit compare — Space on A, scroll, Space on B, Compare view opens with the cumulative diff](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/compare-2-commits.gif)
 
 ## Lazy load
 
@@ -74,3 +74,18 @@ A filesystem watcher on `.git/` keeps the list in sync with external git
 operations (commits from another shell, fetch, branch switches…). The
 graph re-renders when needed without you having to press `r`.
 </Aside>
+
+## Inline badges on the affected commit row
+
+Some transient repo states surface directly on the row they apply to —
+no need to hunt through a sidebar:
+
+- `⚠ N conflicts` (red) — on the Uncommitted row, when there are
+  unmerged paths from a merge / cherry-pick / rebase conflict.
+- `↻ REBASING` (yellow) — on the Uncommitted row, whenever a rebase
+  is in progress on the branch.
+- `⏸ rebase paused` (yellow) — on the **exact commit git is paused
+  on** (read from `.git/rebase-merge/stopped-sha`). Press `e` from the
+  commit list to jump to the
+  [resume banner](/features/interactive-rebase/#resume-mode) and `c`
+  continue / `s` skip / `a` abort.

@@ -255,6 +255,22 @@ list of keys.
 | `cycle_file_next` | `+`     | Jump to the next file in the current diff.         |
 | `cycle_file_prev` | `-`     | Jump to the previous file.                         |
 
+### User commands
+
+User-defined shell commands (configured under `[core.user_command]`)
+bind through synthetic actions named `user_command_N`, where `N` matches
+the `commands_N` entry. None ship with a default key — every binding is
+user-set.
+
+```toml
+[keybind]
+user_command_1 = ["f5"]
+user_command_2 = ["f6"]
+```
+
+Full setup, placeholders and execution types live on the
+[User commands](/features/user-command/) page.
+
 ## Scoped — `[keybind.scope.<path>]`
 
 Each scope below ships with its own default key map. **Anything you
@@ -271,6 +287,18 @@ Inherits from: `[keybind]` (global).
 
 `h` is `navigate_left` globally; in the list view it has no left/right
 semantics so the scope reuses it for "jump to HEAD".
+
+### `[keybind.scope.detail]` — Commit detail
+
+Inherits from: `[keybind]` (global).
+
+| Action   | Default | What it does                                                         |
+|----------|---------|----------------------------------------------------------------------|
+| `revert` | `v`     | Open the Revert confirmation dialog for the focused commit.          |
+
+`v` globally is `clean_untracked` (uncommitted view). In commit-detail
+there's nothing to clean, so the scope re-purposes `v` for `revert` —
+matches the action shown in the Git Actions panel (`Revert (v)`).
 
 ### `[keybind.scope.pr]` — Pull Request
 

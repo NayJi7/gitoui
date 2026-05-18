@@ -70,6 +70,7 @@ scope.
 | Scope path                         | View                                       |
 |------------------------------------|--------------------------------------------|
 | `list`                             | Commit list (the home screen).             |
+| `detail`                           | Commit detail — currently hosts `revert` (`v`), which would otherwise collide with `clean_untracked` in the uncommitted view. |
 | `pr`                               | Pull Request — actions on the open PR.     |
 | `pr.list`                          | PR list (browse all PRs).                  |
 | `pr.conversation`                  | PR Conversation tab (card-local actions).  |
@@ -107,4 +108,4 @@ the new key in the footer.
 A clean way to see your effective bindings is the in-app Help page (`?` or
 `F1`) — every shortcut listed there is computed from your live config.
 
-{/* PHOTO of the in-app Help page opened with `?` — sectioned grid of shortcuts per scope (List / PR / Issues / Rebase / Conflict / Compose), each key drawn from the live keybind map so a rebind in `config.toml` shows up immediately here. */}
+![In-app Help page — sectioned grid of shortcuts per scope, keys drawn from the live keybind map](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/home-help.png)

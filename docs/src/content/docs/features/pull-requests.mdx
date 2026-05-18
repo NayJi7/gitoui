@@ -18,7 +18,7 @@ GitHub Auth section.
 | Author   | Login + avatar (when avatars are enabled).      |
 | Status   | Open / Merged / Closed + draft indicator.       |
 
-{/* PHOTO of the PR list — bordered panel with sub-header "Pull Requests", columns #N / Title / Author + avatar / Status, label chips on titles, cursor row highlighted. */}
+![PR list — bordered panel, #N / Title / Author / Status columns, label chips, cursor row highlighted](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-list.png)
 
 | Press        | Action                                              |
 |--------------|-----------------------------------------------------|
@@ -31,10 +31,10 @@ GitHub Auth section.
 
 ## PR detail
 
-Four tabs across the top: **Conversation**, **Files**, **Commits**,
-**References**. Switch with `← / →`. The right edge of the tab bar shows
-state-action shortcuts (`Ctrl+X close`, `Ctrl+D to draft`, etc.) that
-follow the current PR state.
+Five tabs across the top: **Conversation**, **Files**, **Commits**,
+**Checks**, **References**. Switch with `← / →`. The right edge of the
+tab bar shows state-action shortcuts (`Ctrl+X close`, `Ctrl+D to draft`,
+etc.) that follow the current PR state.
 
 ### PR-wide actions (any tab)
 
@@ -65,7 +65,7 @@ Shows the PR description card, then every comment, review, review-comment,
 and timeline event in chronological order. The selected card has a
 **top-border ribbon** with card-local actions:
 
-{/* PHOTO of a PR Conversation tab — PR description card on top, two comment cards below with avatars + names + reaction chips, the focused card carrying the top-border action ribbon (`c new / Shift+R quote / e edit / d delete / + react`). */}
+![PR Conversation tab — description card, comment cards with avatars/reactions, focused card action ribbon](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-conversation.png)
 
 | Press     | Action                                                |
 |-----------|-------------------------------------------------------|
@@ -75,6 +75,8 @@ and timeline event in chronological order. The selected card has a
 | `d`       | Delete your own comment (confirmation dialog).        |
 | `+`       | React (emoji picker — toggle on/off, your reactions highlighted). |
 | `↵`       | Open the first `#N` reference inside the focused card. |
+
+![PR quote-reply — Shift+R on a comment seeds the editor with a quoted block, type the reply, Ctrl+S to submit](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-quote-reply.gif)
 
 `#N` mentions are styled inline and clickable. The picker is mouse-aware.
 
@@ -93,6 +95,21 @@ hunk navigation and in-diff search.
 Shows the commits in the PR with author + avatar + date. `Enter` drills
 into a commit's detail view, where every diff / blame / file-history flow
 works as in the main app.
+
+</TabItem>
+
+<TabItem label="Checks">
+
+Mirrors the CI run on github.com's `/pull/<n>/checks` page — every check
+run grouped under its parent workflow. Workflows are **collapsed by
+default**; the cursor lands on workflow headers first so you can scan
+status at a glance.
+
+| Press        | Action                                                              |
+|--------------|---------------------------------------------------------------------|
+| `↑↓ / j / k` | Move through workflow headers and (when expanded) their check rows. |
+| `Enter` / click on a header | Expand / collapse the workflow group.                |
+| `Enter` / click on a check row | Open the **"Open on GitHub"** dialog — log streaming isn't local, the dialog confirms and `o` jumps to the run URL in your browser. |
 
 </TabItem>
 
@@ -121,8 +138,6 @@ on a reference navigates cross-view.
 
 The body field also supports word-jump editing — `Ctrl+H` / `Ctrl+W` /
 `Ctrl+Backspace` delete word left, `Ctrl+Left` / `Ctrl+Right` jump by word.
-
-{/* PHOTO gif of the PR compose form — type a Title, jump to Body with Tab, type `#` to open the mention popup, pick an issue with ↑↓ + Enter, then submit with Ctrl+S. Right column shows the live markdown preview updating as you type. */}
 
 <Aside type="note">
 The OAuth token used by these features is stored at

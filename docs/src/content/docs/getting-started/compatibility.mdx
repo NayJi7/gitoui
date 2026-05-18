@@ -12,9 +12,9 @@ speak one of three image protocols.
 
 | Terminal               | Kitty | iTerm2 | Sixel | Notes                              |
 |------------------------|-------|--------|-------|------------------------------------|
-| **Kitty**              | ✅    | —      | —     | Reference implementation.          |
-| **Ghostty**            | ✅    | —      | —     | Kitty-compatible.                  |
-| **WezTerm**            | ✅    | ✅     | ✅    | Auto-detects; picks Kitty first.   |
+| **Ghostty**            | ✅    | —      | —     | **Recommended** — what <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is developed on, all features tested first here. |
+| **Kitty**              | ✅    | —      | —     | Reference implementation of the protocol. |
+| **WezTerm**            | ✅    | ✅     | ✅    | Auto-detects; picks Kitty graphics first. |
 | **iTerm2** (macOS)     | —     | ✅     | —     |                                    |
 | **Konsole**            | ✅    | —      | ✅    | Kitty since 22.04, Sixel optional. |
 | **foot** (Wayland)     | —     | —      | ✅    | Sixel native; very fast.           |
@@ -31,7 +31,7 @@ speak one of three image protocols.
 When in doubt, run `gitoui --protocol sixel` (or `kitty`, `iterm2`) to force a
 specific protocol and bypass auto-detect.
 
-{/* PHOTO of a side-by-side comparison of the commit graph in Kitty (pretty SVG rendering) vs the same view forced to `--protocol unicode` (ASCII glyph fallback). Same repo, same range, two terminals. */}
+{/* PHOTO of a side-by-side comparison of the commit graph in Kitty (pretty SVG rendering) vs the same view forced to `--protocol unicode` (ASCII glyph fallback). Same repo, same range, two terminals. Needs the unicode fallback to ship first. */}
 
 ## Keyboard protocol
 

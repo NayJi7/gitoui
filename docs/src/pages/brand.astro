@@ -63,13 +63,19 @@ const sections: Section[] = [
     id: "wordmark",
     title: "Wordmark",
     description:
-      "The `gitoui` wordmark. The default keeps `git` in orange and `oui` in the brand cream; the wide variant adds breathing room for headers.",
+      "The `gitoui` wordmark. `git` always stays orange; `oui` ships in three palettes — cream (default, for dark UIs), near-black (light UIs), and orange + near-black (the `-color` variant, picked automatically by the app when the active theme has a light background, including custom user themes).",
     assets: [
       {
         src: assetUrl("wordmark-nobg.svg"),
-        alt: "gitoui wordmark, default spacing, transparent",
+        alt: "gitoui wordmark, default spacing, cream oui",
         label: "Default",
         variant: "dark",
+      },
+      {
+        src: assetUrl("wordmark-nobg-color.svg"),
+        alt: "gitoui wordmark, default spacing, orange + near-black",
+        label: "Color (light theme)",
+        variant: "light",
       },
       {
         src: assetUrl("wordmark-nobg-black.svg"),
@@ -79,9 +85,15 @@ const sections: Section[] = [
       },
       {
         src: assetUrl("wordmark-nobg-wide.svg"),
-        alt: "gitoui wordmark, wide spacing, transparent",
+        alt: "gitoui wordmark, wide spacing, cream oui",
         label: "Wide",
         variant: "dark",
+      },
+      {
+        src: assetUrl("wordmark-nobg-wide-color.svg"),
+        alt: "gitoui wordmark, wide spacing, orange + near-black",
+        label: "Wide · color",
+        variant: "light",
       },
       {
         src: assetUrl("wordmark-nobg-wide-black.svg"),
@@ -104,6 +116,12 @@ const sections: Section[] = [
         variant: "dark",
       },
       {
+        src: assetUrl("mixed-nobg-color.svg"),
+        alt: "gitoui combined mark in color (orange + near-black), transparent",
+        label: "Color · transparent",
+        variant: "light",
+      },
+      {
         src: assetUrl("mixed-nobg-black.svg"),
         alt: "gitoui combined mark, near-black, transparent",
         label: "Black · transparent",
@@ -113,6 +131,12 @@ const sections: Section[] = [
         src: assetUrl("mixed.svg"),
         alt: "gitoui combined mark on an off-white plate",
         label: "On off-white plate",
+        variant: "light",
+      },
+      {
+        src: assetUrl("mixed-color.svg"),
+        alt: "gitoui combined mark in color on an off-white plate",
+        label: "Color on off-white plate",
         variant: "light",
       },
       {

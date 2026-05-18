@@ -47,7 +47,7 @@ diagnostic at boot.
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
 | `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
 | `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |
-| `initial_load_count`| usize / `1000`                            | Number of commits loaded on startup. |
+| `initial_load_count`| usize / `1000` (clamped `10..99_999`)     | Number of commits loaded on startup. Editable from the Configuration view (`p`) as a text input — takes effect on the **next launch**. |
 | `load_more_count`   | usize / `200`                             | Step size each time you press `LoadMore` (`]`). |
 
 ## `[core.search]`
@@ -148,4 +148,4 @@ GITOUI_CONFIG_FILE=/tmp/bad.toml gitoui
 ```
 </Aside>
 
-{/* PHOTO of a boot-time diagnostic block — `gitoui` refused to start, the styled error pane shows the offending key with a caret pointer, line:column, and the expected schema (e.g. a typo on `core.option.theme` or an unknown event in `[keybind]`). */}
+![Config error diagnostic — gitoui refuses to start, styled error pane with caret pointer + line:column + expected schema](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/config-error-diagnostic.png)

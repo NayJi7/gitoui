@@ -3,56 +3,117 @@ title: User commands
 description: Bind your own shell commands to in-app shortcuts.
 ---
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> lets you wire up custom shell commands to numbered keybinds — useful
-for project-specific actions (e.g. open the deploy log, run a test, open
-the current commit in a code review tool).
+import { Aside } from "@astrojs/starlight/components";
+
+Custom shell commands wired to a keybind — for project-specific actions
+(run a test suite, open the current commit in `tig` / `lazygit`, ping a
+deploy script, …). The command and the key are configured separately:
+the command lives under `[core.user_command]`, the key under `[keybind]`.
 
 ## Define commands
 
-In `config.toml`:
+Each command is an entry `commands_N` (where `N` is the command's ID):
 
 ```toml
-[core.user_command.1]
-key = "shift-1"           # bind any key (within the modifier-cap rules)
-name = "Run tests"        # label shown in the user command view
-command = "cargo test --workspace"
-
-[core.user_command.2]
-key = "shift-2"
-name = "Open in code-review tool"
-command = "review-this ${commit_hash}"
+[core.user_command]
+commands_1 = { name = "Run tests", commands = ["cargo", "test", "--workspace"] }
+commands_2 = { name = "Open in tig", type = "suspend", commands = ["tig", "{{target_hash}}"] }
+commands_3 = { name = "Notify deploy", type = "silent", commands = ["notify-send", "deploy started"] }
+tab_width = 4
 ```
 
-The `${commit_hash}` placeholder expands to the SHA of the **currently
-selected commit** when the command fires. Other placeholders:
+| Field      | Type                                  | Description                                                                            |
+|------------|---------------------------------------|----------------------------------------------------------------------------------------|
+| `name`     | string                                | Label shown in the user-command output view.                                           |
+| `commands` | array of strings                      | Program + arguments. First element is the binary, rest are args.                       |
+| `type`     | `inline` (default) / `silent` / `suspend` | How the command runs — see below.                                                 |
+| `refresh`  | bool (default `false`)                | After execution, refresh the commit list. **Incompatible with `inline`** (validated at config-load). |
+| `tab_width`| int (sibling of `commands_N`)         | Display width for `\t` characters in command output. Applies to all commands.          |
 
-| Token              | Value                                                                |
-|--------------------|----------------------------------------------------------------------|
-| `${commit_hash}`   | Full SHA of the focused commit.                                      |
-| `${short_hash}`    | Short SHA (`git rev-parse --short`).                                 |
-| `${branch_name}`   | Current branch name (`HEAD` if detached).                            |
-| `${file_path}`     | Focused file path (Diff / Uncommitted / Blame / File History views). |
-| `${repo_path}`     | Absolute path to the repo root.                                      |
+### Execution types
 
-## Run a command
+- **`inline`** — output renders inside a gitoui pane. Gitoui stays alive,
+  you can scroll the output. Best for `git diff`, `git log`,
+  static-output inspection.
+- **`silent`** — output discarded. Best for fire-and-forget commands
+  (`notify-send`, background `&`, …).
+- **`suspend`** — gitoui drops alt-screen + raw mode, the command takes
+  over the terminal, gitoui resumes on exit. Best for interactive
+  editors (`vim`, `nano`) and full-screen TUIs (`tig`, `lazygit`).
 
-The bound key fires the command in a subshell. <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> suspends the TUI
-(leaves the alt-screen + raw mode), runs the command, prints any output to
-the underlying terminal, then resumes once it exits — same flow as
-`git commit` opening your `$EDITOR`.
+## Bind a key
 
-For background commands that don't need output, append `&` (or `nohup`):
+The command entry itself **does not** carry a key. To bind a shortcut,
+use `[keybind]` with the special `user_command_N` action name where `N`
+matches the command's ID:
 
 ```toml
-command = "notify-send 'deploy started' && deploy.sh &"
+[keybind]
+user_command_1 = ["f5"]
+user_command_2 = ["f6"]
+user_command_3 = ["ctrl-d"]
 ```
 
-{/* PHOTO gif of a user command firing — focus a commit, press Shift+2, the TUI suspends, the command output streams to the underlying terminal (e.g. `cargo test` running), then gitoui resumes back to the same view on exit. */}
+When you press the bound key, gitoui dispatches `UserCommand(N)` →
+opens the user-command view → runs `commands_N`.
+
+<Aside type="tip" title="Pick stable keys">
+**F-keys** (`f1` … `f12`), **ctrl+letter** or **alt+letter** behave the
+same across terminals and keyboard layouts. **Shift+digit** (e.g.
+`shift-1`) is fragile — QWERTY US sends `!` instead of `shift+1`, while
+AZERTY FR sends `shift+1` literally. Stick to F-keys / ctrl-/ alt- for
+predictable bindings.
+</Aside>
+
+<Aside type="caution" title="Overrides drop the default">
+Binding `user_command_1 = ["t"]` in `[keybind]` **replaces** the default
+`add_tag = ["t"]` — `t` no longer adds a tag. Mirror it to keep both:
+`add_tag = ["t", "ctrl-t"]` (or pick a free key in the first place).
+</Aside>
+
+## Placeholders
+
+Inside the `commands` array, these tokens are substituted at runtime
+with values from the focused commit / view:
+
+| Token                       | Value                                                                 |
+|-----------------------------|-----------------------------------------------------------------------|
+| `{{target_hash}}`           | Full SHA of the focused commit.                                       |
+| `{{first_parent_hash}}`     | Full SHA of the focused commit's first parent.                        |
+| `{{parent_hashes}}`         | All parent SHAs, space-separated (useful for merges).                 |
+| `{{refs}}`                  | All refs pointing at the commit (branches + remote branches + tags).  |
+| `{{branches}}`              | Local branch names at the commit.                                     |
+| `{{remote_branches}}`       | Remote branch names at the commit.                                    |
+| `{{tags}}`                  | Tag names at the commit.                                              |
+| `{{area_width}}`            | Width (cells) of the user-command output pane.                        |
+| `{{area_height}}`           | Height (cells) of the output pane.                                    |
+
+`{{area_width}}` / `{{area_height}}` are handy for tools that take a
+`--width` / `--columns` flag — pass the pane size so output wraps
+correctly inside gitoui rather than against your terminal width.
+
+## Full worked example
+
+```toml
+[core.user_command]
+commands_1 = { name = "git diff (colored)", type = "inline", commands = [
+  "git", "--no-pager", "diff", "--color=always",
+  "{{first_parent_hash}}", "{{target_hash}}",
+] }
+commands_2 = { name = "Open in tig", type = "suspend", commands = ["tig", "{{target_hash}}"] }
+commands_3 = { name = "Run tests", commands = ["cargo", "test", "--workspace"], refresh = true }
+
+[keybind]
+user_command_1 = ["f5"]
+user_command_2 = ["f6"]
+user_command_3 = ["f7"]
+```
 
 ## Limits
 
-- Commands run with the same env as the <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> process — no isolation.
-- Output is shown verbatim; if your command produces ANSI escape codes
-  they'll render through.
-- Long-running commands block the UI until exit. For "fire and forget"
-  flows, use `&` or background them via a wrapper.
+- Commands run with the same env as the gitoui process — no isolation,
+  no sandbox.
+- Output renders verbatim; ANSI escape codes (colors, cursor moves)
+  pass through.
+- `inline` blocks the UI until the command exits. Prefer `suspend` for
+  interactive tools, or background with `&` + `silent`.
