@@ -183,18 +183,19 @@ impl<'a> ListView<'a> {
                 UserEvent::AbortOperation => {
                     self.tx.send(AppEvent::CheckAbortOperation);
                 }
-                UserEvent::Rebase => {
-                    // `e` from the commit list resumes a paused rebase
-                    // (the chip `⏸ rebase paused (e:resume)` advertises
-                    // this) — outside the rebase-in-progress case it has
-                    // no meaning here, so silently no-op. Empty
-                    // `base_hash` routes through the resume short-circuit
-                    // in `open_dialog` / `OpenInteractiveRebase`.
-                    if crate::git::rebase::rebase_in_progress(self.ctx.repo_path.as_path()) {
-                        self.tx.send(AppEvent::OpenInteractiveRebase {
-                            base_hash: String::new(),
-                        });
-                    }
+                // `e` from the commit list resumes a paused rebase
+                // (the chip `⏸ rebase paused (e:resume)` advertises
+                // this). Outside the rebase-in-progress case the event
+                // has no meaning here — falls through to the `_` arm
+                // for a silent no-op. Empty `base_hash` routes through
+                // the resume short-circuit in `open_dialog` /
+                // `OpenInteractiveRebase`.
+                UserEvent::Rebase
+                    if crate::git::rebase::rebase_in_progress(self.ctx.repo_path.as_path()) =>
+                {
+                    self.tx.send(AppEvent::OpenInteractiveRebase {
+                        base_hash: String::new(),
+                    });
                 }
                 UserEvent::Config => {
                     self.tx.send(AppEvent::OpenConfig);

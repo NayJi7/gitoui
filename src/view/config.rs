@@ -503,39 +503,29 @@ impl<'a> ConfigView<'a> {
                 self.editing_value.insert(self.editing_cursor, c);
                 self.editing_cursor += c.len_utf8();
             }
-            KeyCode::Backspace => {
-                if self.editing_cursor > 0 {
-                    let start = prev_char_boundary(&self.editing_value, self.editing_cursor);
-                    self.editing_value.drain(start..self.editing_cursor);
-                    self.editing_cursor = start;
-                }
+            KeyCode::Backspace if self.editing_cursor > 0 => {
+                let start = prev_char_boundary(&self.editing_value, self.editing_cursor);
+                self.editing_value.drain(start..self.editing_cursor);
+                self.editing_cursor = start;
             }
             KeyCode::Delete if ctrl => {
                 self.editor_delete_word_right();
             }
-            KeyCode::Delete => {
-                if self.editing_cursor < self.editing_value.len() {
-                    let end = next_char_boundary(&self.editing_value, self.editing_cursor);
-                    self.editing_value.drain(self.editing_cursor..end);
-                }
+            KeyCode::Delete if self.editing_cursor < self.editing_value.len() => {
+                let end = next_char_boundary(&self.editing_value, self.editing_cursor);
+                self.editing_value.drain(self.editing_cursor..end);
             }
             KeyCode::Left if ctrl => {
                 self.editing_cursor = editor_word_left(&self.editing_value, self.editing_cursor);
             }
-            KeyCode::Left => {
-                if self.editing_cursor > 0 {
-                    self.editing_cursor =
-                        prev_char_boundary(&self.editing_value, self.editing_cursor);
-                }
+            KeyCode::Left if self.editing_cursor > 0 => {
+                self.editing_cursor = prev_char_boundary(&self.editing_value, self.editing_cursor);
             }
             KeyCode::Right if ctrl => {
                 self.editing_cursor = editor_word_right(&self.editing_value, self.editing_cursor);
             }
-            KeyCode::Right => {
-                if self.editing_cursor < self.editing_value.len() {
-                    self.editing_cursor =
-                        next_char_boundary(&self.editing_value, self.editing_cursor);
-                }
+            KeyCode::Right if self.editing_cursor < self.editing_value.len() => {
+                self.editing_cursor = next_char_boundary(&self.editing_value, self.editing_cursor);
             }
             KeyCode::Home => {
                 self.editing_cursor = 0;
@@ -573,7 +563,7 @@ impl<'a> ConfigView<'a> {
                 // user could clear it entirely with Backspace).
                 if let Some(s) = value.as_ref() {
                     if let Ok(n) = s.parse::<usize>() {
-                        let clamped = n.max(INITIAL_LOAD_COUNT_MIN).min(INITIAL_LOAD_COUNT_MAX);
+                        let clamped = n.clamp(INITIAL_LOAD_COUNT_MIN, INITIAL_LOAD_COUNT_MAX);
                         self.core_config.option.initial_load_count = clamped;
                     }
                 }
