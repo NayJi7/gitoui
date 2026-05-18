@@ -286,9 +286,12 @@ pub fn run() -> Result<()> {
     // Filesystem watcher on .git/ — keeps the UI in sync with external git
     // operations (commits from another shell, push/pull/fetch, branch
     // switches, …). Held alive for the whole `run()` lifetime; dropping it
-    // stops the watcher thread. Created at most once on the first iteration
-    // where the .git directory becomes available.
+    // stops the watcher thread. We track the watched path so a `cd` into
+    // a different repo can rebuild the watcher onto the new `.git/` —
+    // otherwise the old watcher keeps firing for the *previous* repo and
+    // gitoui takes those phantom events as a reason to full-refresh.
     let mut _git_watcher: Option<_> = None;
+    let mut watched_git_dir: Option<std::path::PathBuf> = None;
 
     let ret = loop {
         // First iteration uses the diagnostic-bearing loader so any
@@ -500,10 +503,20 @@ pub fn run() -> Result<()> {
             }
         };
 
-        // Start the filesystem watcher once per run() — the repo path is
-        // stable across config-reload iterations.
-        if _git_watcher.is_none() {
-            _git_watcher = watcher::start(repository.path(), ec.sender());
+        // (Re)start the filesystem watcher whenever the repo path changes
+        // (first launch, or after `cd`-into-another-repo). Config-reload
+        // iterations keep the same path and reuse the existing watcher.
+        // Dropping the old debouncer first stops its thread cleanly so we
+        // don't leak handles or get cross-talk events from the old path.
+        let current_git_dir = repository.path().to_path_buf();
+        let needs_rebind = watched_git_dir
+            .as_ref()
+            .map(|p| p != &current_git_dir)
+            .unwrap_or(true);
+        if needs_rebind {
+            _git_watcher = None;
+            _git_watcher = watcher::start(&current_git_dir, ec.sender());
+            watched_git_dir = Some(current_git_dir);
         }
 
         // Compute (ahead, behind) of the current branch vs its upstream so

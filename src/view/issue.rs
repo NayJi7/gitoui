@@ -62,6 +62,10 @@ pub struct IssuesView<'a> {
     conversation_scroll_to_selected: bool,
     conversation_comment_spans: Vec<(usize, usize, usize)>,
     conversation_comment_count: usize,
+    /// Vertical scroll offset for the Timeline tab. The tab is a flat
+    /// chronological list with no selected-item concept, so the scroll
+    /// is driven directly by NavigateUp/Down + wheel + PageUp/Down.
+    timeline_scroll: u16,
     /// Open editor in either New or Edit mode — routes raw keys.
     comment_editor: Option<CommentEditor>,
     comment_editor_cursor_pos: Option<(u16, u16)>,
@@ -428,6 +432,7 @@ impl<'a> IssuesView<'a> {
             conversation_scroll_to_selected: true,
             conversation_comment_spans: Vec::new(),
             conversation_comment_count: 1,
+            timeline_scroll: 0,
             comment_editor: None,
             comment_editor_cursor_pos: None,
             editor_body_area: None,
@@ -552,6 +557,7 @@ impl<'a> IssuesView<'a> {
         self.active_tab = Tab::Conversation;
         self.conversation_scroll = 0;
         self.conversation_selected = 0;
+        self.timeline_scroll = 0;
         // Refresh the index and load the new issue's detail.
         if let Ok(v) = crate::github::issue::list_issues(&self.token, &self.coords) {
             self.items = v;
@@ -811,57 +817,94 @@ impl<'a> IssuesView<'a> {
                 return;
             }
             (Mode::Detail, UserEvent::NavigateUp) => {
-                if matches!(self.active_tab, Tab::References) {
-                    self.references_move(-n);
-                } else {
-                    self.detail_move_selected(-n);
+                match self.active_tab {
+                    Tab::References => self.references_move(-n),
+                    Tab::Timeline => {
+                        self.timeline_scroll = self.timeline_scroll.saturating_sub(n as u16)
+                    }
+                    _ => self.detail_move_selected(-n),
                 }
                 return;
             }
             (Mode::Detail, UserEvent::NavigateDown) => {
-                if matches!(self.active_tab, Tab::References) {
-                    self.references_move(n);
-                } else {
-                    self.detail_move_selected(n);
+                match self.active_tab {
+                    Tab::References => self.references_move(n),
+                    Tab::Timeline => {
+                        self.timeline_scroll = self.timeline_scroll.saturating_add(n as u16)
+                    }
+                    _ => self.detail_move_selected(n),
                 }
                 return;
             }
             (Mode::Detail, UserEvent::PageUp) => {
-                self.detail_move_selected(-10 * n);
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = self.timeline_scroll.saturating_sub(10 * n as u16);
+                } else {
+                    self.detail_move_selected(-10 * n);
+                }
                 return;
             }
             (Mode::Detail, UserEvent::PageDown) => {
-                self.detail_move_selected(10 * n);
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = self.timeline_scroll.saturating_add(10 * n as u16);
+                } else {
+                    self.detail_move_selected(10 * n);
+                }
                 return;
             }
             (Mode::Detail, UserEvent::GoToTop) => {
-                self.conversation_selected = 0;
-                self.conversation_scroll_to_selected = true;
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = 0;
+                } else {
+                    self.conversation_selected = 0;
+                    self.conversation_scroll_to_selected = true;
+                }
                 return;
             }
             (Mode::Detail, UserEvent::GoToBottom) => {
-                self.conversation_selected = self.conversation_comment_count.saturating_sub(1);
-                self.conversation_scroll_to_selected = true;
+                if matches!(self.active_tab, Tab::Timeline) {
+                    // Large value clamped to events.len() at render time.
+                    self.timeline_scroll = u16::MAX;
+                } else {
+                    self.conversation_selected = self.conversation_comment_count.saturating_sub(1);
+                    self.conversation_scroll_to_selected = true;
+                }
                 return;
             }
             (Mode::Detail, UserEvent::ScrollUp) => {
-                self.conversation_scroll = self.conversation_scroll.saturating_sub(n as usize);
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = self.timeline_scroll.saturating_sub(n as u16);
+                } else {
+                    self.conversation_scroll = self.conversation_scroll.saturating_sub(n as usize);
+                }
                 return;
             }
             (Mode::Detail, UserEvent::ScrollDown) => {
-                self.conversation_scroll = self.conversation_scroll.saturating_add(n as usize);
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = self.timeline_scroll.saturating_add(n as u16);
+                } else {
+                    self.conversation_scroll = self.conversation_scroll.saturating_add(n as usize);
+                }
                 return;
             }
-            // Ctrl+U / Ctrl+D globally — scroll the conversation half a
+            // Ctrl+U / Ctrl+D globally — scroll the active tab half a
             // viewport (~5 lines). Previously these were hardcoded char
             // matches; routing through UserEvent lets a user rebind
             // `half_page_*` globally and have it apply here too.
             (Mode::Detail, UserEvent::HalfPageUp) => {
-                self.conversation_scroll = self.conversation_scroll.saturating_sub(5);
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = self.timeline_scroll.saturating_sub(5);
+                } else {
+                    self.conversation_scroll = self.conversation_scroll.saturating_sub(5);
+                }
                 return;
             }
             (Mode::Detail, UserEvent::HalfPageDown) => {
-                self.conversation_scroll = self.conversation_scroll.saturating_add(5);
+                if matches!(self.active_tab, Tab::Timeline) {
+                    self.timeline_scroll = self.timeline_scroll.saturating_add(5);
+                } else {
+                    self.conversation_scroll = self.conversation_scroll.saturating_add(5);
+                }
                 return;
             }
             (Mode::Detail, UserEvent::Cancel) => {
@@ -2370,6 +2413,7 @@ impl<'a> IssuesView<'a> {
         self.active_tab = Tab::Conversation;
         self.conversation_scroll = 0;
         self.conversation_selected = 0;
+        self.timeline_scroll = 0;
         self.conversation_scroll_to_selected = true;
         if !self.detail_cache.contains_key(&number) && self.loading_for != Some(number) {
             self.spawn_detail_fetch(number);
@@ -3392,6 +3436,7 @@ impl<'a> IssuesView<'a> {
         self.active_tab = Tab::Conversation;
         self.conversation_scroll = 0;
         self.conversation_selected = 0;
+        self.timeline_scroll = 0;
         self.conversation_scroll_to_selected = true;
         // Fire all four fetches eagerly: detail / timeline / linked
         // populate the tab counts before the user has to switch tabs,
@@ -4419,17 +4464,30 @@ impl<'a> IssuesView<'a> {
             }
             lines.push(line);
         }
-        f.render_widget(Paragraph::new(lines), area);
+        // Clamp scroll so the user can't drag content entirely off-
+        // screen by overshooting (e.g. PgDn spam, GoToBottom). The
+        // last line stays anchored to the last viewport row.
+        let max_scroll = (lines.len() as u16).saturating_sub(area.height.max(1));
+        if self.timeline_scroll > max_scroll {
+            self.timeline_scroll = max_scroll;
+        }
+        let scroll = self.timeline_scroll;
+        f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
         let theme_bg = self.ctx.color_theme.bg;
         for (login, col, row) in paints {
-            if row >= area.height {
+            // Translate the logical row (event index) to the rendered
+            // row by subtracting the scroll offset. Drop avatars whose
+            // row is now negative (scrolled off the top) or past the
+            // bottom of the area.
+            let logical = row as i32 - scroll as i32;
+            if logical < 0 || logical >= area.height as i32 {
                 continue;
             }
             self.pending_avatar_paints.push((
                 crate::view::pr::PaintedAvatar {
                     login,
                     screen_x: area.x + col,
-                    screen_y: area.y + row,
+                    screen_y: area.y + logical as u16,
                     is_selected: false,
                 },
                 theme_bg,

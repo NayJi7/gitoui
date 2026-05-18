@@ -600,6 +600,12 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 ),
                 sg(kb, UserEvent::Checkout, "Checkout this commit"),
                 sg(kb, UserEvent::CherryPick, "Cherry-pick"),
+                ss(
+                    kb,
+                    &["detail"],
+                    "revert",
+                    "Revert this commit (opens confirmation dialog)",
+                ),
                 sg(kb, UserEvent::Drop, "Drop commit (uses interactive rebase)"),
                 sg(kb, UserEvent::Merge, "Merge"),
                 sg(kb, UserEvent::Rebase, "Open interactive rebase from here"),

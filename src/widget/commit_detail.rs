@@ -168,6 +168,16 @@ pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, crate::e
     }
 }
 
+/// Map a `UserEvent` to its `[scope.detail]` action name when the
+/// event has no global binding (Revert today — `v` is already taken
+/// globally by `clean_untracked`).
+fn scoped_action_name(event: crate::event::UserEvent) -> Option<&'static str> {
+    match event {
+        crate::event::UserEvent::Revert => Some("revert"),
+        _ => None,
+    }
+}
+
 pub const STASH_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
     ("Apply Stash", crate::event::UserEvent::ApplyStash),
     ("Pop Stash", crate::event::UserEvent::PopStash),
@@ -418,7 +428,21 @@ impl CommitDetail<'_> {
                 style = style.fg(c).add_modifier(Modifier::BOLD);
             }
             let key_style = style.add_modifier(Modifier::BOLD);
-            let key = self.ctx.keybind.primary_global_key(*event);
+            // Most actions resolve through the global keymap. Revert is
+            // an exception — `v` is bound globally to `clean_untracked`
+            // (uncommitted view) and re-scoped to `revert` in
+            // [scope.detail]; we fall through to the scoped lookup when
+            // the global one comes up empty so the panel still surfaces
+            // the actual bound key.
+            let mut key = self.ctx.keybind.primary_global_key(*event);
+            if key.is_empty() {
+                if let Some(scoped_name) = scoped_action_name(*event) {
+                    key = self
+                        .ctx
+                        .keybind
+                        .primary_scoped_key(&["detail"], scoped_name);
+                }
+            }
             let mut spans = vec![Span::styled(effective_label.to_string(), style)];
             if !key.is_empty() {
                 spans.push(Span::styled(format!(" ({})", key), key_style));

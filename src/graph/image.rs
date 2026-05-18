@@ -89,6 +89,14 @@ impl<'a> GraphImageManager<'a> {
         std::mem::take(&mut self.pending_uploads)
     }
 
+    /// Read-only handle on the graph topology the manager is bound to.
+    /// Lets the caller hand it back to `check::decide_cell_width_type`
+    /// when resolving a live `graph_width` change without re-borrowing
+    /// state up the call chain.
+    pub fn graph(&self) -> &Graph<'a> {
+        self.graph
+    }
+
     pub fn clear_prepared_images(&mut self) {
         self.prepared_image_map.clear();
         self.image_ids.clear();
@@ -99,6 +107,37 @@ impl<'a> GraphImageManager<'a> {
     /// Clears all cached images so they get re-generated with the new color.
     pub fn update_background_color(&mut self, r: u8, g: u8, b: u8) {
         self.image_params.background_color = image::Rgba([r, g, b, 0xff]);
+        self.clear_prepared_images();
+    }
+
+    /// Swap the corner-rendering style (Rounded / Angular / Smooth) at
+    /// runtime and drop the image cache so the next render rebakes the
+    /// rows with the new style. Used by the Config view's live exit
+    /// path so toggling `graph_style` doesn't need a full app restart.
+    pub fn update_graph_style(&mut self, graph_style: GraphStyle) {
+        if self.graph_style == graph_style {
+            return;
+        }
+        self.graph_style = graph_style;
+        self.clear_prepared_images();
+    }
+
+    /// Swap the cell width (Single / Double) at runtime. Recomputes
+    /// `ImageParams` and the `DrawingPixels` cache (both keyed on
+    /// `cell_width_type`), then drops the image cache so the next
+    /// render rebakes the rows with the new pixel grid. Same goal as
+    /// `update_graph_style` — live apply, no full app restart.
+    pub fn update_cell_width_type(
+        &mut self,
+        cell_width_type: CellWidthType,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        if self.cell_width_type == cell_width_type {
+            return;
+        }
+        self.cell_width_type = cell_width_type;
+        self.image_params = ImageParams::new(graph_color_set, cell_width_type);
+        self.drawing_pixels = DrawingPixels::new(&self.image_params);
         self.clear_prepared_images();
     }
 

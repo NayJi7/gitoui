@@ -244,6 +244,20 @@ pub fn rebase_in_progress(repo: &Path) -> bool {
     git_dir.join("rebase-merge").is_dir() || git_dir.join("rebase-apply").is_dir()
 }
 
+/// Cheap stat-and-read for `.git/rebase-merge/stopped-sha` — returns the
+/// full SHA git is paused on, or `None` if no rebase is paused (or the
+/// file just doesn't exist, e.g. on `git rebase --skip`'s narrow window).
+/// Used by the commit-list renderer to badge the paused row directly,
+/// without the cost of `read_resume_state` (which parses todo + done +
+/// runs `git status`).
+pub fn read_stopped_sha(repo: &Path) -> Option<String> {
+    let path = repo.join(".git").join("rebase-merge").join("stopped-sha");
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Resolve a revision expression like `HEAD^^` to a full SHA. Returns
 /// `Err` when git can't resolve the ref (e.g. the commit has no
 /// grandparent because its parent is the repo root).

@@ -542,6 +542,41 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
+    /// Live-update the graph corner style (Rounded / Angular / Smooth).
+    /// Clears the image cache so the next render rebakes with the new
+    /// style. Lets the Config view apply `graph_style` changes without
+    /// a full app refresh.
+    pub fn update_graph_style(&mut self, style: crate::graph::GraphStyle) {
+        self.graph_image_manager.update_graph_style(style);
+        self.graph_render_state = None;
+        self.avatar_stable_key = None;
+        self.avatars_fully_prepared = false;
+    }
+
+    /// Live-update the graph cell width (Single / Double). Recomputes
+    /// the image params + drawing pixels + clears the cache so the
+    /// next render rebakes with the new cell sizing. Used by the
+    /// Config view's smooth-exit path for `graph_width` changes.
+    pub fn update_cell_width_type(
+        &mut self,
+        cell_width_type: crate::graph::CellWidthType,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        self.graph_image_manager
+            .update_cell_width_type(cell_width_type, graph_color_set);
+        self.graph_render_state = None;
+        self.avatar_stable_key = None;
+        self.avatars_fully_prepared = false;
+    }
+
+    /// Read-only access to the underlying graph topology — used by the
+    /// live `graph_width` exit path so the caller can resolve the
+    /// `Option<GraphWidthType>` (Auto / Single / Double) into a
+    /// concrete `CellWidthType` via `check::decide_cell_width_type`.
+    pub fn graph(&self) -> &crate::graph::Graph<'a> {
+        self.graph_image_manager.graph()
+    }
+
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
         let mut image_ids: Vec<u32> = self
             .graph_image_manager
@@ -1565,6 +1600,15 @@ impl CommitList<'_> {
         if area.is_empty() || max_width == 0 {
             return;
         }
+        // Pulled out of the render loop — `stopped-sha` is a single tiny
+        // file. Mirror of the `↻ REBASING` badge on the Uncommitted row,
+        // but anchored on the EXACT commit git is paused on so the user
+        // sees where the rebase will resume from.
+        let paused_sha = if !self.ctx.repo_path.as_os_str().is_empty() {
+            crate::git::rebase::read_stopped_sha(&self.ctx.repo_path)
+        } else {
+            None
+        };
         let mut items: Vec<ListItem> = Vec::new();
         for (i, commit_info) in state
             .commits
@@ -1600,8 +1644,26 @@ impl CommitList<'_> {
             }
 
             let ref_spans_width: usize = spans.iter().map(|s| s.width()).sum();
-            let max_width = max_width.saturating_sub(ref_spans_width);
+            // Reserve room for the paused-rebase badge BEFORE deciding
+            // where to truncate the commit message. Without this the
+            // badge appended below would be the first thing ratatui
+            // clips when the terminal is narrow — exactly the opposite
+            // of what we want (it has to stay visible because it's the
+            // call-to-action telling the user to press `e`).
             let commit = commit_info.commit;
+            let paused_here = paused_sha
+                .as_deref()
+                .map(|s| s == commit.commit_hash.as_str())
+                .unwrap_or(false);
+            const PAUSED_BADGE_TEXT: &str = "  ⏸ rebase paused";
+            let paused_badge_width = if paused_here {
+                console::measure_text_width(PAUSED_BADGE_TEXT)
+            } else {
+                0
+            };
+            let max_width = max_width
+                .saturating_sub(ref_spans_width)
+                .saturating_sub(paused_badge_width);
             if max_width > ELLIPSIS.len() {
                 // Always take the first line only: %s should already be single-line
                 // but defensively guard against any embedded newlines.
@@ -1634,6 +1696,17 @@ impl CommitList<'_> {
                 };
 
                 spans.extend(sub_spans)
+            }
+            // ⏸ badge on the exact commit git is paused on. Width is
+            // reserved up in the truncation block so the badge always
+            // fits — same call-to-action role as `⚠ N conflicts` on
+            // the Uncommitted row, can't be the first thing clipped.
+            if paused_here {
+                spans.push(
+                    Span::raw(PAUSED_BADGE_TEXT)
+                        .fg(self.ctx.color_theme.status_warn_fg)
+                        .add_modifier(Modifier::BOLD),
+                );
             }
             items.push(self.to_commit_list_item(i, spans, state));
         }

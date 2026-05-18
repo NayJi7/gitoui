@@ -805,7 +805,7 @@ fn auto_pick_syntax_theme(theme: &ColorTheme) -> String {
 /// luminance formula (rec. 601 coefficients) for RGB; named colors
 /// fall back to a hard-coded best-guess. Unknown / `Reset` is treated
 /// as dark since terminals overwhelmingly default to a dark background.
-fn is_dark_color(c: Color) -> bool {
+pub(crate) fn is_dark_color(c: Color) -> bool {
     match c {
         Color::Rgb(r, g, b) => {
             let lum = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);

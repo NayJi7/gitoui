@@ -90,12 +90,13 @@ impl<'a> DetailView<'a> {
         let event = event_with_count.event;
         let count = event_with_count.count;
 
-        // Per-view shortcut: `v` triggers Revert from commit details only.
-        // Globally `v` fires UserEvent::CleanUntracked (handled in the
-        // uncommitted view), so this raw-key intercept is how we get a
-        // per-view binding without breaking the global keymap.
-        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-        if key.code == KeyCode::Char('v') && key.modifiers == KeyModifiers::NONE {
+        // Per-view shortcut: `revert` is scoped to [scope.detail] because
+        // `v` is taken globally by `clean_untracked` (uncommitted view).
+        // Going through the scope resolver — instead of a raw-key
+        // intercept — means a user rebinding `[keybind.detail] revert`
+        // works without any extra wiring, and the action panel can
+        // surface the actual bound key.
+        if let Some("revert") = self.ctx.keybind.resolve_scoped(&["detail"], key) {
             self.tx.send(AppEvent::OpenDialog(DialogKind::Revert {
                 target: self.commit.commit_hash.as_str().into(),
             }));

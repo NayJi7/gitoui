@@ -204,6 +204,12 @@ pub struct App<'a> {
     brand_pending_uploads: Vec<String>,
     spinner_frames: Vec<crate::protocol::PreparedImage>,
     spinner_pending_uploads: Vec<String>,
+    /// Theme bg the brand PNGs were last baked against. Compared to
+    /// the current theme bg in `rebake_brand_with_theme_bg` so a
+    /// no-op keystroke in the Config view doesn't trigger a useless
+    /// re-render + re-upload (which was causing a visible double
+    /// blink when exiting the Config view).
+    last_brand_bg: Option<(u8, u8, u8)>,
     // Header image skip-optimisation: None = unrendered/dirty; Some(id) = last uploaded.
     // id = None means static G logo; Some(fidx) means animation frame fidx.
     header_logo_last: Option<Option<usize>>,
@@ -396,20 +402,30 @@ impl<'a> App<'a> {
                 prepared
             })
         };
+        // Bake the active theme's bg into the brand PNGs so transparent
+        // pixels show the theme bg (light themes) instead of the
+        // terminal's own default (usually dark) via Kitty's image
+        // compositor. Only Rgb-colored themes get the treatment; other
+        // Color variants (Reset, Named, Indexed) fall back to a
+        // transparent PNG — same as before this change.
+        let brand_bg = match ctx.color_theme.bg {
+            ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
+        };
         let brand_logo = prepare_brand(
-            crate::brand::render_logo_png(),
+            crate::brand::render_logo_png(brand_bg),
             crate::brand::LOGO_CELL_WIDTH,
             0x0B_2A_1D,
         );
         let brand_wordmark = prepare_brand(
-            crate::brand::render_wordmark_png(),
+            crate::brand::render_wordmark_png(brand_bg),
             crate::brand::WORDMARK_CELL_WIDTH,
             0x0B_2A_1E,
         );
 
         // Pre-render the 28-frame G spinner animation.
         let (spinner_frames, spinner_pending_uploads) = {
-            let pngs = crate::brand::render_spinner_frames();
+            let pngs = crate::brand::render_spinner_frames(brand_bg);
             let mut frames = Vec::with_capacity(pngs.len());
             let mut uploads = Vec::new();
             for (i, png) in pngs.iter().enumerate() {
@@ -437,6 +453,7 @@ impl<'a> App<'a> {
             brand_pending_uploads,
             spinner_frames,
             spinner_pending_uploads,
+            last_brand_bg: brand_bg,
             header_logo_last: None,
             header_wordmark_rendered: false,
             dir_input: crate::dir_input::DirInputState::default(),
@@ -462,6 +479,18 @@ impl<'a> App<'a> {
         if let Some(context) = refresh_view_context {
             app.init_with_context(context);
         }
+
+        // Seed the auto-refresh throttle window so the first FilesystemChanged
+        // event after a Ret::Refresh (typically a `cd` into a new repo) is
+        // suppressed. The FS watcher rebinds onto the new `.git/` and the
+        // initial `git log / rev-list` walks gitoui itself runs can wake
+        // inotify within the debouncer's 1.5 s window — without this seed,
+        // the first user keypress would consume that queued event and
+        // trigger a full second Refresh (visible as a screen clear right
+        // after the first navigation). 2 s of "we just settled, ignore FS
+        // noise" matches the existing THROTTLE in the FilesystemChanged
+        // handler.
+        app.app_status.last_auto_refresh = Some(std::time::Instant::now());
 
         app
     }
@@ -1845,8 +1874,71 @@ impl App<'_> {
                 ctx.graph_color_set =
                     crate::color::build_graph_color_set(&color_theme, &ctx.graph_config.color);
                 self.view.update_color_theme(color_theme);
+                // The brand logo / wordmark / spinner PNGs bake the
+                // theme bg into the pixmap (see `brand::render_logo_png`),
+                // so a live theme switch must re-render and re-upload
+                // them — otherwise the header keeps painting the logo
+                // over the previous theme's bg.
+                self.rebake_brand_with_theme_bg();
             }
         }
+    }
+
+    /// Re-render the brand PNGs (logo + wordmark + spinner frames) with
+    /// the current theme bg pre-filled into the pixmap, then queue the
+    /// new upload bytes and dirty the header skip-state so the next
+    /// frame re-emits the cells. Same image_ids are reused — Kitty
+    /// replaces the storage on `a=T` for an existing id.
+    fn rebake_brand_with_theme_bg(&mut self) {
+        let brand_bg = match self.ctx.color_theme.bg {
+            ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
+        };
+        // Guard: don't re-render + re-upload the brand PNGs when the
+        // theme hasn't actually changed. Without this, every keystroke
+        // in the Config view triggered a fresh upload — visible as a
+        // double blink on exit because two consecutive frames each
+        // pushed a full image refresh.
+        if self.last_brand_bg == brand_bg {
+            return;
+        }
+        self.last_brand_bg = brand_bg;
+        let protocol = &self.ctx.image_protocol;
+
+        if let Some(bytes) = crate::brand::render_logo_png(brand_bg) {
+            let mut prepared =
+                protocol.prepare_image(&bytes, crate::brand::LOGO_CELL_WIDTH, 0x0B_2A_1D);
+            if let Some(upload) = prepared.take_upload_data() {
+                self.brand_pending_uploads.push(upload);
+            }
+            self.brand_logo = Some(prepared);
+        }
+        if let Some(bytes) = crate::brand::render_wordmark_png(brand_bg) {
+            let mut prepared =
+                protocol.prepare_image(&bytes, crate::brand::WORDMARK_CELL_WIDTH, 0x0B_2A_1E);
+            if let Some(upload) = prepared.take_upload_data() {
+                self.brand_pending_uploads.push(upload);
+            }
+            self.brand_wordmark = Some(prepared);
+        }
+
+        let pngs = crate::brand::render_spinner_frames(brand_bg);
+        let mut new_frames = Vec::with_capacity(pngs.len());
+        for (i, png) in pngs.iter().enumerate() {
+            let id = 0x0B_2B_00 + i as u32;
+            let mut prepared =
+                protocol.prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
+            if let Some(upload) = prepared.take_upload_data() {
+                self.spinner_pending_uploads.push(upload);
+            }
+            new_frames.push(prepared);
+        }
+        self.spinner_frames = new_frames;
+
+        // Mark the header cells dirty so the next render writes the
+        // new image bytes + cell attrs (skip=false on this frame).
+        self.header_logo_last = None;
+        self.header_wordmark_rendered = false;
     }
 
     fn flush_pending_graph_uploads(&mut self) -> Result<(), std::io::Error> {
@@ -1945,12 +2037,12 @@ impl App<'_> {
                 if blink_on {
                     // `virtual_cursor_fg` is `Color::Reset` in every shipped
                     // theme — using it as bg produces a transparent block
-                    // (cursor invisible). Hard-code #f8f8f2 (the warm
-                    // off-white shared with the wordmark's "oui") — visible
-                    // across themes, matches the brand palette.
+                    // Inverted cursor — bg = theme.fg, fg = theme.bg.
+                    // Tracks the active theme so the block stays
+                    // visible on both light and dark palettes.
                     let style = Style::default()
                         .fg(self.ctx.color_theme.bg)
-                        .bg(ratatui::style::Color::Rgb(0xf8, 0xf8, 0xf2));
+                        .bg(self.ctx.color_theme.fg);
                     f.buffer_mut()
                         .set_string(cursor_x, anchor_y, &cursor_char, style);
                 }
@@ -2191,8 +2283,12 @@ impl App<'_> {
         ])
         .areas(right_area);
 
-        let white = ratatui::style::Color::White;
-        let dim_white = ratatui::style::Color::Rgb(160, 160, 160);
+        // Header text uses theme-aware colors so the path stays readable
+        // on light themes too. Hardcoded white/Rgb(160,160,160) here
+        // would render invisible on Catppuccin Latte / Solarized Light
+        // / Gruvbox Light / etc.
+        let path_fg = self.ctx.color_theme.fg;
+        let path_prefix_fg = self.ctx.color_theme.detail_label_fg;
 
         // When the dir-input overlay is active, replace the pwd display with
         // an editable text line. The real terminal cursor is positioned via
@@ -2211,7 +2307,7 @@ impl App<'_> {
                 Span::styled(" ".to_string(), ratatui::style::Style::default()),
                 Span::styled(
                     self.dir_input.text.clone(),
-                    ratatui::style::Style::default().fg(white),
+                    ratatui::style::Style::default().fg(path_fg),
                 ),
             ]);
             f.render_widget(Paragraph::new(input_line), left_area);
@@ -2233,7 +2329,7 @@ impl App<'_> {
                 };
                 path_spans.push(Span::styled(
                     format!(" {}", prefix_truncated),
-                    ratatui::style::Style::default().fg(dim_white),
+                    ratatui::style::Style::default().fg(path_prefix_fg),
                 ));
             } else {
                 path_spans.push(Span::raw(" "));
@@ -2241,7 +2337,7 @@ impl App<'_> {
             path_spans.push(Span::styled(
                 repo_name,
                 ratatui::style::Style::default()
-                    .fg(white)
+                    .fg(path_fg)
                     .add_modifier(ratatui::style::Modifier::BOLD),
             ));
 
@@ -2270,6 +2366,20 @@ impl App<'_> {
             );
         }
 
+        // Fill the icon area with the theme bg BEFORE writing the logo
+        // cells. The right_area sits to the right of the path; its cells
+        // would otherwise stay at the buffer default (Color::Reset) and
+        // the terminal would render them with its own configured bg —
+        // typically dark, even on light themes. That dark band leaked
+        // through the brand SVG's transparent pixels and showed up as a
+        // dark rectangle behind the logo. Painting the area with the
+        // theme bg first ensures Kitty's alpha-composite reveals the
+        // theme background.
+        f.render_widget(
+            ratatui::widgets::Block::default().bg(self.ctx.color_theme.bg),
+            right_area,
+        );
+
         // Icon: [G logo OR spinner frame] + gap + wordmark, or text fallback.
         // The spinner animation lives here in the header (safe zone — not the last row).
         if has_brand {
@@ -2295,6 +2405,16 @@ impl App<'_> {
             let x_logo = right_area.right().saturating_sub(total + 1);
             let x_wordmark = x_logo + logo_cell_w + crate::brand::GAP_COLS;
 
+            // Brand SVGs are transparent (`nobg`), and the Kitty image
+            // protocol composites over the cell BACKGROUND. With
+            // `Style::default()`, the cell bg falls through to the
+            // terminal's own default — usually dark — so on light
+            // themes a dark rectangle bleeds through behind the logo.
+            // Anchor the cells' bg to the active theme so the alpha
+            // composite reveals the theme bg instead. The bg has to be
+            // set on EVERY frame (regardless of `skip`) so a live
+            // theme switch propagates without a re-upload.
+            let theme_bg = self.ctx.color_theme.bg;
             // Write logo cells (or just set skip=true to preserve the existing Kitty image).
             {
                 let logo_img: &crate::protocol::PreparedImage = if let Some(fidx) = logo_id {
@@ -2311,6 +2431,7 @@ impl App<'_> {
                             cell.set_symbol(ic.symbol());
                             cell.set_style(ic.style());
                         }
+                        cell.set_bg(theme_bg);
                         cell.set_skip(logo_skip);
                     }
                 }
@@ -2327,6 +2448,7 @@ impl App<'_> {
                             cell.set_symbol(ic.symbol());
                             cell.set_style(ic.style());
                         }
+                        cell.set_bg(theme_bg);
                         cell.set_skip(wordmark_skip);
                     }
                 }
@@ -2342,7 +2464,7 @@ impl App<'_> {
             let icon_line = Line::from(vec![Span::styled(
                 " ◈ gitoui ",
                 ratatui::style::Style::default()
-                    .fg(white)
+                    .fg(path_fg)
                     .add_modifier(ratatui::style::Modifier::BOLD),
             )]);
             f.render_widget(
@@ -2351,11 +2473,12 @@ impl App<'_> {
             );
         }
 
-        // Separator row: full-width line.
+        // Separator row: full-width line. Uses the theme's divider
+        // token so it stays visible on light backgrounds too.
         let sep = Line::from(
             "─"
                 .repeat(area.width as usize)
-                .fg(ratatui::style::Color::White),
+                .fg(self.ctx.color_theme.divider_fg),
         );
         f.render_widget(Paragraph::new(sep), separator_row);
     }
@@ -2813,6 +2936,11 @@ impl App<'_> {
                 let unstaged = changes.unstaged.len();
                 let untracked = changes.untracked.len();
 
+                // (Rebase-paused chip used to live here. It now anchors
+                // directly on the paused commit's row in the commit list
+                // — same pattern as the `⚠ N conflicts` / `↻ REBASING`
+                // badges on the Uncommitted row. See
+                // `widget::commit_list::render_commit_message`.)
                 if changes.is_dirty() {
                     // No trailing space after the bar — each indicator below
                     // already starts with a leading space, which doubles as
@@ -4839,7 +4967,25 @@ impl<'a> App<'a> {
             let core = view.core_config().clone();
             let ui = view.ui_config().clone();
             let github_auth_state = view.github_auth_state().clone();
-            let old_mouse = self.ctx.ui_config.common.mouse_enabled;
+            // Field-level diff. Each branch below applies the changed
+            // setting in-place, no full app refresh — that path used to
+            // delete every Kitty image placement before re-rendering,
+            // producing a visible double blink when transitioning back
+            // to the commit list. Settings that only matter at startup
+            // (initial_load_count, protocol, order, initial_selection,
+            // load_more_count) are persisted on ctx and applied on the
+            // next launch; the user explicitly opted in by editing
+            // them, no surprise here.
+            let old_core = self.ctx.core_config.clone();
+            let theme_changed = old_core.option.theme != core.option.theme
+                || old_core.option.syntax_theme != core.option.syntax_theme;
+            let graph_style_changed = old_core.option.graph_style != core.option.graph_style;
+            let graph_width_changed = old_core.option.graph_width != core.option.graph_width;
+            let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
+            let mouse_changed =
+                self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
+            let auth_changed = github_auth_state != self.ctx.github_auth_state;
+
             self.view = view.take_before_view();
             let github_avatars = core.github_avatars();
             let ctx = Rc::make_mut(&mut self.ctx);
@@ -4855,17 +5001,20 @@ impl<'a> App<'a> {
                 crate::color::build_graph_color_set(&ctx.color_theme, &ctx.graph_config.color);
             ctx.ui_config = ui.clone();
             ctx.github_auth_state = github_auth_state.clone();
-            ctx.avatar_manager
-                .lock()
-                .unwrap()
-                .set_github_token(github_auth_state.token.clone());
-            ctx.avatar_manager
-                .lock()
-                .unwrap()
-                .set_github_avatars(github_avatars);
-            let new_mouse = ui.common.mouse_enabled;
-            if old_mouse != new_mouse {
-                let _ = if new_mouse {
+            if auth_changed || github_avatars_changed {
+                ctx.avatar_manager
+                    .lock()
+                    .unwrap()
+                    .set_github_token(github_auth_state.token.clone());
+                ctx.avatar_manager
+                    .lock()
+                    .unwrap()
+                    .set_github_avatars(github_avatars);
+            }
+
+            // Mouse capture toggles on the terminal directly.
+            if mouse_changed {
+                let _ = if ui.common.mouse_enabled {
                     ratatui::crossterm::execute!(
                         std::io::stdout(),
                         ratatui::crossterm::event::EnableMouseCapture
@@ -4877,16 +5026,31 @@ impl<'a> App<'a> {
                     )
                 };
             }
-            // Force full app refresh so config changes (graph style, protocol, etc.) take effect
-            self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
-                list_context: crate::view::ListRefreshViewContext {
-                    commit_hash: String::new(),
-                    selected: 0,
-                    height: 20,
-                    scroll_to_top: false,
-                },
-                pending_notification: None,
-            }));
+
+            // Live-apply the graph-image rebake settings on the list
+            // view (only relevant when the inner view is the List).
+            if let View::List(ref mut list_view) = self.view {
+                let palette = self.ctx.graph_color_set.clone();
+                if graph_style_changed {
+                    list_view
+                        .update_graph_style(self.ctx.core_config.option.graph_style.into());
+                }
+                if graph_width_changed {
+                    if let Some(new_cwt) =
+                        list_view.resolve_cell_width(self.ctx.core_config.option.graph_width)
+                    {
+                        list_view.update_cell_width_type(new_cwt, &palette);
+                    }
+                }
+            }
+
+            // Theme/graph-style/graph-width changes require purging
+            // Kitty's stored graph images so the next `a=T` re-upload
+            // installs the freshly-baked pixels. Without this delete,
+            // some Kitty setups keep displaying the previous bake.
+            if theme_changed || graph_style_changed || graph_width_changed {
+                let _ = self.cleanup_graph_images();
+            }
         }
     }
 

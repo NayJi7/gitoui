@@ -64,10 +64,15 @@ pub struct InteractiveRebaseView<'a> {
     /// `len() == 0` means there's nothing to rebase — handled with a
     /// gentle empty-state instead of an error.
     items: Vec<RebaseItem>,
-    /// Index of the focused row. Both keyboard arrows and mouse hover
-    /// drive it directly — single-cursor model so the user never sees two
-    /// rows highlighted at once.
+    /// Index of the focused row — moved by keyboard arrows + explicit
+    /// clicks only. Mouse hover does NOT touch this (see `hovered`).
     selected: usize,
+    /// Mouse-hovered row index, if any. Used as a SOFT visual cue
+    /// (subtle highlight + caret hint) — independent of `selected`
+    /// so pointer drift never yanks the cursor. Frozen while
+    /// `grabbed = true` so a grabbed commit doesn't drag through
+    /// neighbour rows on hover.
+    hovered: Option<usize>,
     /// Effective layout mode — read once from config at view creation.
     mode: RebaseViewMode,
     /// Vertical scroll inside the list. Auto-anchors on `selected`.
@@ -127,6 +132,7 @@ impl<'a> InteractiveRebaseView<'a> {
             reword_editing: None,
             reword_screen_pos: None,
             grabbed: false,
+            hovered: None,
             row_rects: Vec::new(),
             last_error: None,
             resume,
@@ -274,11 +280,16 @@ impl<'a> InteractiveRebaseView<'a> {
         }
         let len = self.items.len() as isize;
         let from = self.selected as isize;
-        let to = from + delta;
-        if to < 0 || to >= len {
+        let to = (from + delta).clamp(0, len - 1);
+        if to == from {
             return;
         }
-        self.items.swap(from as usize, to as usize);
+        // Slide semantics (not swap): pull the grabbed item out, then
+        // re-insert at the target index. Every commit between `from` and
+        // `to` shifts by one slot so the list reads like the user dragged
+        // the row through the chain rather than punching two positions.
+        let item = self.items.remove(from as usize);
+        self.items.insert(to as usize, item);
         self.selected = to as usize;
         self.scroll_delta = 0;
     }
@@ -707,45 +718,59 @@ impl<'a> InteractiveRebaseView<'a> {
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
-        // Click anywhere on a row cycles its action. Mirrors the single-
-        // cursor UX: there's no separate "select" gesture — the mouse
-        // already drives `selected` via handle_mouse_move, so clicking
-        // means "act on this row". If the new action is Reword, open the
-        // inline editor right away (same flow as pressing `r`).
+        // Two distinct click semantics depending on grab state:
+        //
+        // - `grabbed = false` (normal): clicking a row moves the
+        //   cursor there AND cycles its action (and opens the inline
+        //   reword editor when the new action is Reword).
+        // - `grabbed = true`: clicking a row REPLACES the grabbed
+        //   commit's destination — we move the held row to the clicked
+        //   position, then release the grab. Lets the user grab a
+        //   commit and drop it anywhere with one click, instead of
+        //   having to step through the chain with arrows.
         let hit = self
             .row_rects
             .iter()
             .find(|r| r.row == row && col >= r.full_x && col < r.full_x_end)
             .cloned();
-        if let Some(hit) = hit {
-            self.selected = hit.item_idx;
-            // cycle_action now opens the inline editor itself when it
-            // lands on Reword — no need to duplicate that here.
+        let Some(hit) = hit else { return };
+        if self.grabbed {
+            // Grab in flight — slide the held commit to the clicked row
+            // but KEEP it grabbed, identical to nudging with arrow keys.
+            // The user releases the grab explicitly (Enter / Esc / click
+            // on the same row) instead of every click dropping it.
+            let target = hit.item_idx;
+            let delta = target as isize - self.selected as isize;
+            if delta != 0 {
+                self.reorder(delta);
+            }
+            return;
+        }
+        // First click on a row just moves the cursor there — no action
+        // change. Re-clicking the already-selected row is what cycles
+        // the action (and opens the inline reword editor when the new
+        // action lands on Reword). Avoids a frustrating "I just wanted
+        // to focus this row" misfire.
+        if hit.item_idx == self.selected {
             self.cycle_action(hit.item_idx, true);
+        } else {
+            self.selected = hit.item_idx;
         }
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
-        // Single-cursor model: the mouse drives `selected` directly so the
-        // keyboard arrows and the pointer never end up on different rows
-        // (no more "two cursors with conflicting highlights"). Re-anchor
-        // scroll so the new selection stays centred just like a keyboard
-        // arrow move would.
+        // Hover updates a separate `hovered` index used only for
+        // visual feedback (subtle row highlight). It NEVER moves
+        // `selected` — that's keyboard / explicit-click only — so it's
+        // safe to keep tracking under the cursor even while a grab is
+        // in flight (the grabbed row keeps its own bg, the hover glyph
+        // shows on the row the user is about to drop on).
         let hit = self
             .row_rects
             .iter()
             .find(|r| r.row == row && col >= r.full_x && col < r.full_x_end)
             .map(|r| r.item_idx);
-        if let Some(idx) = hit {
-            if idx != self.selected {
-                // Same commit-on-leave logic as move_selection so the
-                // typed reword isn't lost when the mouse drifts to
-                // another row.
-                self.commit_reword();
-                self.selected = idx;
-                self.scroll_delta = 0;
-            }
-        }
+        self.hovered = hit;
     }
 
     // -------------------------- rendering --------------------------
@@ -1260,11 +1285,21 @@ impl<'a> InteractiveRebaseView<'a> {
     ) -> (Line<'static>, (u16, u16)) {
         let theme = &self.ctx.color_theme;
         let is_selected = idx == self.selected;
+        // `hovered` only fires when the pointer sits on a different
+        // row than `selected`. Stays live during grab so the user can
+        // see exactly which row the held commit will slide to when
+        // they click. Selected vs hover stay visually distinct
+        // (selected = solid bg + ▶, hover = soft outline + ▷ glyph).
+        let is_hovered = self.hovered == Some(idx) && !is_selected;
 
-        // Single ▶ cursor on the keyboard-selected row. Mouse hover now
-        // sets `self.selected` directly in handle_mouse_move (single
-        // source of truth), so no separate hover glyph is needed.
-        let cursor_glyph = if is_selected { "▶ " } else { "  " };
+        // ▶ on the keyboard-selected row, ▷ on the mouse-hovered row.
+        let cursor_glyph = if is_selected {
+            "▶ "
+        } else if is_hovered {
+            "▷ "
+        } else {
+            "  "
+        };
         let cursor_span = Span::styled(
             cursor_glyph.to_string(),
             Style::default()
@@ -1363,12 +1398,13 @@ impl<'a> InteractiveRebaseView<'a> {
             ));
         }
 
-        // Row background — only the cursor row gets a bg, never the hover.
-        // Hover is shown via the ▷ glyph in the gutter (see cursor_glyph
-        // above) so the user can never see two rows highlighted at once.
+        // Row background:
         // - Grabbed cursor → list_compare_marked_bg/fg (saturated accent).
         // - Cursor         → list_selected_bg/fg.
-        // - Hovered-only / idle → no bg.
+        // - Hover-only     → no bg change — the ▷ glyph in the gutter
+        //   is the entire signal. Two filled rows would confuse the
+        //   "this is what I'm acting on" cue.
+        // - Idle           → no bg.
         let mut line = Line::from(spans);
         if is_selected && self.grabbed {
             line.style = Style::default()

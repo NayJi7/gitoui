@@ -183,6 +183,19 @@ impl<'a> ListView<'a> {
                 UserEvent::AbortOperation => {
                     self.tx.send(AppEvent::CheckAbortOperation);
                 }
+                UserEvent::Rebase => {
+                    // `e` from the commit list resumes a paused rebase
+                    // (the chip `⏸ rebase paused (e:resume)` advertises
+                    // this) — outside the rebase-in-progress case it has
+                    // no meaning here, so silently no-op. Empty
+                    // `base_hash` routes through the resume short-circuit
+                    // in `open_dialog` / `OpenInteractiveRebase`.
+                    if crate::git::rebase::rebase_in_progress(self.ctx.repo_path.as_path()) {
+                        self.tx.send(AppEvent::OpenInteractiveRebase {
+                            base_hash: String::new(),
+                        });
+                    }
+                }
                 UserEvent::Config => {
                     self.tx.send(AppEvent::OpenConfig);
                 }
@@ -384,19 +397,62 @@ impl<'a> ListView<'a> {
     }
 
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
-        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme;
-        // Use the freshly rebuilt graph_color_set (app.rs::handle_view_event
-        // updates it on the ctx before calling here) so the new theme's
-        // branch colours + bg get baked into the next-frame images. Falling
-        // back to just-bg-update would keep the previous branch palette.
-        let palette = self.ctx.graph_color_set.clone();
+        // Re-derive the palette from the freshly-set theme rather than
+        // reading `ctx.graph_color_set`. The shared `AppContext` is
+        // held via `Rc`: when `apply_live_config_theme` mutates
+        // `app.ctx` via `Rc::make_mut`, the runtime forks the inner
+        // value because the view also holds an `Rc` clone — so the
+        // view's local `ctx.graph_color_set` keeps pointing at the
+        // PREVIOUS palette and the rebake uses stale bg + branch
+        // colours. Computing from the new `color_theme` here sidesteps
+        // the fork and guarantees the bake matches the active theme.
+        let new_palette = crate::color::build_graph_color_set(
+            &theme,
+            &self.ctx.graph_config.color,
+        );
+        let ctx = std::rc::Rc::make_mut(&mut self.ctx);
+        ctx.color_theme = theme;
+        ctx.graph_color_set = new_palette.clone();
         self.as_mut_list_state()
-            .invalidate_image_caches_with_palette(&palette);
+            .invalidate_image_caches_with_palette(&new_palette);
         self.ctx
             .avatar_manager
             .lock()
             .unwrap()
             .clear_prepared_images();
+    }
+
+    /// Apply a graph corner style change live (no full app refresh).
+    /// Drops the image cache so the next render rebakes with the
+    /// requested style. Called from `App::close_config` when the user
+    /// flips `graph_style` in the Config view.
+    pub fn update_graph_style(&mut self, style: crate::graph::GraphStyle) {
+        self.as_mut_list_state().update_graph_style(style);
+    }
+
+    /// Apply a graph cell-width change live (no full app refresh).
+    /// Recomputes pixel params from the new width + active palette,
+    /// drops the image cache. Called from `App::close_config` when
+    /// the user flips `graph_width` in the Config view.
+    pub fn update_cell_width_type(
+        &mut self,
+        cell_width_type: crate::graph::CellWidthType,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        self.as_mut_list_state()
+            .update_cell_width_type(cell_width_type, graph_color_set);
+    }
+
+    /// Resolve a `Option<GraphWidthType>` (config-level setting, with
+    /// `Auto` deciding from terminal width vs the graph's max column)
+    /// to a concrete `CellWidthType` using the same logic as startup.
+    /// Returns `None` if the terminal size query fails — caller should
+    /// then skip the update gracefully.
+    pub fn resolve_cell_width(
+        &self,
+        graph_width: Option<crate::GraphWidthType>,
+    ) -> Option<crate::graph::CellWidthType> {
+        crate::check::decide_cell_width_type(self.as_list_state().graph(), graph_width).ok()
     }
 
     pub fn refresh(&self) {

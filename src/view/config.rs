@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Padding, Paragraph},
+    widgets::{Block, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -29,18 +29,22 @@ use crate::{
 //   5  Rebase Mode       ← interactive-rebase editor layout
 //   6  Order             ← commit order: chrono vs topo
 //   7  Initial Selection
-//   8  Mouse
-//   9  Date Format
-//  10  Image Protocol
-//  11  Git Name          ← TEXT_EDIT_START_INDEX
-//  12  Git Email
-//  13  Default Branch
-//  14  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  15  Github Avatars    ← GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 16;
-const TEXT_EDIT_START_INDEX: usize = 11;
-const GITHUB_AUTH_INDEX: usize = 14;
-const GITHUB_AVATARS_INDEX: usize = 15;
+//   8  Initial Load Count ← INITIAL_LOAD_COUNT_INDEX (text input, digits only, [10..99999])
+//   9  Mouse
+//  10  Date Format
+//  11  Image Protocol
+//  12  Git Name          ← TEXT_EDIT_START_INDEX
+//  13  Git Email
+//  14  Default Branch
+//  15  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  16  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 17;
+const INITIAL_LOAD_COUNT_INDEX: usize = 8;
+const TEXT_EDIT_START_INDEX: usize = 12;
+const GITHUB_AUTH_INDEX: usize = 15;
+const GITHUB_AVATARS_INDEX: usize = 16;
+const INITIAL_LOAD_COUNT_MIN: usize = 10;
+const INITIAL_LOAD_COUNT_MAX: usize = 99_999;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -99,6 +103,7 @@ impl<'a> ConfigView<'a> {
             rebase_view_display(self.ui_config.common.rebase_view),
             commit_order_display(self.core_config.order()),
             initial_selection_display(self.core_config.initial_selection()),
+            self.core_config.option.initial_load_count.to_string(),
             mouse_display(self.ui_config.common.mouse_enabled),
             self.core_config
                 .date_time_format()
@@ -133,6 +138,7 @@ impl<'a> ConfigView<'a> {
             "Rebase Mode",
             "Order",
             "Initial Select",
+            "Load Count",
             "Mouse",
             "Date Format",
             "Image Protocol",
@@ -342,9 +348,10 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            11 => self.core_config.user_name().unwrap_or("").to_string(),
-            12 => self.core_config.user_email().unwrap_or("").to_string(),
-            13 => self.core_config.default_branch().unwrap_or("").to_string(),
+            INITIAL_LOAD_COUNT_INDEX => self.core_config.option.initial_load_count.to_string(),
+            12 => self.core_config.user_name().unwrap_or("").to_string(),
+            13 => self.core_config.user_email().unwrap_or("").to_string(),
+            14 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -454,6 +461,13 @@ impl<'a> ConfigView<'a> {
         use ratatui::crossterm::event::KeyModifiers;
         match key.code {
             KeyCode::Char(c) => {
+                // Numeric-only fields filter at the keystroke level so
+                // the user never sees an invalid character land in the
+                // buffer. Right now only `Initial Load Count` (index
+                // INITIAL_LOAD_COUNT_INDEX) is digit-restricted.
+                if self.selected == INITIAL_LOAD_COUNT_INDEX && !c.is_ascii_digit() {
+                    return;
+                }
                 self.editing_value.push(c);
             }
             KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -491,9 +505,23 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            11 => self.core_config.set_user_name(value),
-            12 => self.core_config.set_user_email(value),
-            13 => self.core_config.set_default_branch(value),
+            INITIAL_LOAD_COUNT_INDEX => {
+                // Parse + clamp into the allowed window. Empty input
+                // or non-digit junk reverts to the previous value
+                // (the buffer is digit-filtered during entry but a
+                // user could clear it entirely with Backspace).
+                if let Some(s) = value.as_ref() {
+                    if let Ok(n) = s.parse::<usize>() {
+                        let clamped = n
+                            .max(INITIAL_LOAD_COUNT_MIN)
+                            .min(INITIAL_LOAD_COUNT_MAX);
+                        self.core_config.option.initial_load_count = clamped;
+                    }
+                }
+            }
+            12 => self.core_config.set_user_name(value),
+            13 => self.core_config.set_user_email(value),
+            14 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -578,16 +606,21 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            8 => {
+            INITIAL_LOAD_COUNT_INDEX => {
+                // Text-input field — no left/right cycle. Press Enter
+                // to edit; arrows fall through to the no-op default
+                // and the row stays unchanged.
+            }
+            9 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            9 => {
+            10 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            10 => {
+            11 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -684,16 +717,19 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(next);
             }
-            8 => {
+            INITIAL_LOAD_COUNT_INDEX => {
+                // Text input — no cycle. See cycle_option_prev for the rationale.
+            }
+            9 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            9 => {
+            10 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            10 => {
+            11 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -842,6 +878,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Initial Select",
                 initial_selection_display(self.core_config.initial_selection()),
+                false,
+            ),
+            (
+                "Load Count",
+                self.core_config.option.initial_load_count.to_string(),
                 false,
             ),
             (
@@ -1054,6 +1095,10 @@ impl<'a> ConfigView<'a> {
             rebase_view_description(self.ui_config.common.rebase_view),
             "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children — branches stay grouped, like `git log --topo-order`.".into(),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
+            format!(
+                "Number of commits loaded into the graph on startup.\n\nDigits only, between {} and {}. Applied at the next launch of gitoui — the current session keeps its existing window.",
+                INITIAL_LOAD_COUNT_MIN, INITIAL_LOAD_COUNT_MAX,
+            ),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
             "Terminal image protocol used for rendering commit graph images.".into(),
@@ -1170,7 +1215,10 @@ impl<'a> ConfigView<'a> {
             }
         }
 
-        let right_paragraph = Paragraph::new(right_lines);
+        // Soft-wrap so long description lines don't clip at the right
+        // edge of the pane. `trim: false` keeps explicit `\n` breaks in
+        // the source intact instead of collapsing whitespace.
+        let right_paragraph = Paragraph::new(right_lines).wrap(Wrap { trim: false });
         f.render_widget(right_paragraph, right_area);
 
         if preview_active {
@@ -1794,7 +1842,7 @@ fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -
         } else {
             ""
         }
-    } else if selected >= TEXT_EDIT_START_INDEX {
+    } else if selected >= TEXT_EDIT_START_INDEX || selected == INITIAL_LOAD_COUNT_INDEX {
         "Enter:edit"
     } else {
         "Enter/⇆:cycle"
@@ -1831,6 +1879,10 @@ enum ConfigValueKind {
 fn config_value_kind(index: usize) -> ConfigValueKind {
     if index == GITHUB_AUTH_INDEX {
         ConfigValueKind::Button
+    } else if index == INITIAL_LOAD_COUNT_INDEX {
+        // Text-input field sandwiched between cycle items — has to be
+        // classified explicitly because it sits below TEXT_EDIT_START_INDEX.
+        ConfigValueKind::Input
     } else if index == GITHUB_AVATARS_INDEX || index < TEXT_EDIT_START_INDEX {
         ConfigValueKind::Cycle
     } else {

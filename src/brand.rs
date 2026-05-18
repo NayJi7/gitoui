@@ -1,7 +1,12 @@
 use resvg::{tiny_skia, usvg};
 
 static LOGO_SVG: &[u8] = include_bytes!("../assets/brand/logo-nobg.svg");
+// Two wordmark variants — the `oui` letters are off-white in the default
+// variant (designed for dark UIs) and near-black in the `-color` variant
+// (designed for light UIs). The runtime swap happens in
+// `render_wordmark_png` based on the theme bg's perceived luminance.
 static WORDMARK_SVG: &[u8] = include_bytes!("../assets/brand/wordmark-nobg.svg");
+static WORDMARK_COLOR_SVG: &[u8] = include_bytes!("../assets/brand/wordmark-nobg-color.svg");
 
 // 16 cells of the G logo in spiral build order (path data, fill color).
 // SVG viewBox: 0 0 809 1008.  The y=601 on cells 12/15/16 is the 1-px fix that
@@ -63,12 +68,12 @@ fn visible_for_frame(f: usize) -> Box<dyn Iterator<Item = usize>> {
 /// preventing vertical overflow that would scroll the terminal from the last row.
 /// Right-aligned to match `render_logo_png` so the spinner sits in the same
 /// pixel position as the static G logo it replaces.
-pub fn render_spinner_frames() -> Vec<Vec<u8>> {
+pub fn render_spinner_frames(bg: Option<(u8, u8, u8)>) -> Vec<Vec<u8>> {
     let px = (SPINNER_CELL_WIDTH * 16) as u32; // 32×32 square
     (0..SPINNER_FRAME_COUNT)
         .filter_map(|f| {
             let svg = build_frame_svg(visible_for_frame(f));
-            render_svg_to_png_aligned(svg.as_bytes(), px, px, HAlign::Right)
+            render_svg_to_png_aligned(svg.as_bytes(), px, px, HAlign::Right, bg)
         })
         .collect()
 }
@@ -86,7 +91,36 @@ pub const WORDMARK_CELL_WIDTH: usize = 4;
 pub const GAP_COLS: u16 = 1;
 
 fn render_svg_to_png(svg_data: &[u8], px_w: u32, px_h: u32) -> Option<Vec<u8>> {
-    render_svg_to_png_aligned(svg_data, px_w, px_h, HAlign::Center)
+    render_svg_to_png_aligned(svg_data, px_w, px_h, HAlign::Center, None)
+}
+
+fn render_svg_to_png_bg(
+    svg_data: &[u8],
+    px_w: u32,
+    px_h: u32,
+    bg: Option<(u8, u8, u8)>,
+) -> Option<Vec<u8>> {
+    render_svg_to_png_aligned(svg_data, px_w, px_h, HAlign::Center, bg)
+}
+
+/// Strip Figma's drop-shadow `filter="url(#filter…)"` references from
+/// the SVG before rasterization. The shadow is a near-black 25%-alpha
+/// halo that's invisible on dark themes (the background eats it) but
+/// shows up as a dark cloud around the logo on light themes (Catppuccin
+/// Latte, Solarized Light, …). At the 8×16-pixel cell density we
+/// rasterize to, the shadow adds nothing legible anyway. The matching
+/// `<filter>` definitions stay in `<defs>` — unused, free to ignore.
+fn strip_filter_attr(svg: &[u8]) -> Vec<u8> {
+    let s = match std::str::from_utf8(svg) {
+        Ok(v) => v,
+        Err(_) => return svg.to_vec(),
+    };
+    // OnceLock so the regex is compiled at most once per process.
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#"\s*filter="url\(#filter[^"]+\)""#).expect("static regex")
+    });
+    re.replace_all(s, "").into_owned().into_bytes()
 }
 
 #[derive(Clone, Copy)]
@@ -100,9 +134,11 @@ fn render_svg_to_png_aligned(
     px_w: u32,
     px_h: u32,
     halign: HAlign,
+    bg: Option<(u8, u8, u8)>,
 ) -> Option<Vec<u8>> {
+    let cleaned = strip_filter_attr(svg_data);
     let opts = usvg::Options::default();
-    let tree = usvg::Tree::from_data(svg_data, &opts).ok()?;
+    let tree = usvg::Tree::from_data(&cleaned, &opts).ok()?;
     let sx = px_w as f32 / tree.size().width();
     let sy = px_h as f32 / tree.size().height();
     // Use uniform scale so we never distort the SVG within the pixmap.
@@ -114,6 +150,16 @@ fn render_svg_to_png_aligned(
     };
     let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, 0.0);
     let mut pixmap = tiny_skia::Pixmap::new(px_w, px_h)?;
+    // Bake an opaque background into the pixmap when one is provided.
+    // The Kitty image protocol composites a transparent PNG over the
+    // terminal's window bg, NOT the cell SGR bg — so leaving the PNG
+    // transparent makes the logo render over the terminal's default
+    // (usually dark) bg even when the active theme is light. Pre-
+    // filling the pixmap with `theme.bg` produces an opaque PNG that
+    // matches the surrounding header, no compositing involved.
+    if let Some((r, g, b)) = bg {
+        pixmap.fill(tiny_skia::Color::from_rgba8(r, g, b, 255));
+    }
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     pixmap.encode_png().ok()
 }
@@ -123,9 +169,9 @@ fn render_svg_to_png_aligned(
 /// The SVG is portrait (0.8:1), so it's height-limited in the square canvas — that
 /// leaves ~1.58 display-px of horizontal slack. We right-align the rendered G so the
 /// slack sits on the LEFT of the image, putting the G flush against the wordmark.
-pub fn render_logo_png() -> Option<Vec<u8>> {
+pub fn render_logo_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
     let px = (LOGO_CELL_WIDTH * 32) as u32; // 64×64 square
-    render_svg_to_png_aligned(LOGO_SVG, px, px, HAlign::Right)
+    render_svg_to_png_aligned(LOGO_SVG, px, px, HAlign::Right, bg)
 }
 
 /// Render the "gitoui" wordmark.
@@ -133,10 +179,25 @@ pub fn render_logo_png() -> Option<Vec<u8>> {
 /// (4 cols × cell_w : 1 row × cell_h = 4×8 : 1×16 = 32:16 = 2:1).
 /// The SVG (1.6:1) is narrower than the canvas (2:1) → scale is height-limited
 /// → text fills the full row height, matching the G logo.
-pub fn render_wordmark_png() -> Option<Vec<u8>> {
+pub fn render_wordmark_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
     let px_w = (WORDMARK_CELL_WIDTH * 32) as u32; // 128
     let px_h = px_w / 2; // 64  (128:64 = 2:1)
-    render_svg_to_png(WORDMARK_SVG, px_w, px_h)
+    // Pick the wordmark variant whose `oui` letters contrast against
+    // the active theme bg. `WORDMARK_SVG` has off-white `oui` for dark
+    // themes; `WORDMARK_COLOR_SVG` has near-black `oui` for light
+    // themes. Detection reuses `themes::is_dark_color`, the same
+    // routine that auto-picks the syntect theme — so custom user
+    // themes work out of the box.
+    let svg: &[u8] = match bg {
+        Some((r, g, b)) if !crate::themes::is_dark_color(
+            ratatui::style::Color::Rgb(r, g, b),
+        ) =>
+        {
+            WORDMARK_COLOR_SVG
+        }
+        _ => WORDMARK_SVG,
+    };
+    render_svg_to_png_bg(svg, px_w, px_h, bg)
 }
 
 /// Render the standalone G logomark at the given cell size (centered in canvas).

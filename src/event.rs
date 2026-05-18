@@ -889,6 +889,21 @@ impl EventController {
                 Ok(true) => match ratatui::crossterm::event::read() {
                     Ok(e) => match e {
                         ratatui::crossterm::event::Event::Key(mut key) => {
+                            // The kitty keyboard disambiguation flag we
+                            // push at startup makes terminals emit
+                            // Press / Repeat / Release events for every
+                            // key. We dispatch on Press / Repeat only —
+                            // Release events would double-fire actions
+                            // (e.g. `p` opens config on press, then
+                            // re-fires UserEvent::Config on release,
+                            // which the config view treats as toggle →
+                            // closes immediately).
+                            if matches!(
+                                key.kind,
+                                ratatui::crossterm::event::KeyEventKind::Release
+                            ) {
+                                continue;
+                            }
                             // Normalize the modifier-state bits before
                             // dispatch. Once we push the kitty keyboard
                             // protocol disambiguation flag (see

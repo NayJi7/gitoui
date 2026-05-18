@@ -148,6 +148,13 @@ file_history = ["shift-h"]
 [scope.list]
 select_head_commit = ["h"]
 
+# Commit detail view — `v` globally fires `clean_untracked` (uncommitted
+# view's "remove untracked files" dialog). In the detail view there's
+# nothing to clean, so we re-scope `v` to `revert` — opens the Revert
+# confirmation dialog for the focused commit.
+[scope.detail]
+revert = ["v"]
+
 # PR view — actions on the open Pull Request as a whole.
 [scope.pr]
 reload             = ["r"]
