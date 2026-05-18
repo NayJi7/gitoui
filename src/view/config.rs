@@ -73,8 +73,27 @@ pub struct ConfigView<'a> {
     github_auth_state: GithubAuthState,
     github_auth_pending: bool,
     pending_github_device: Option<PendingGithubDevice>,
+    /// Last `selected` value seen by `render()` — used to gate the
+    /// "snap viewport to keep selected visible" logic so it only fires
+    /// when the SELECTION moved (arrow keys / click on a row), not on
+    /// every paint. Without this, the mouse wheel can never scroll past
+    /// the selected row because the snap pulls the viewport right back.
+    last_rendered_selected: Option<usize>,
+    /// Last (col, row) reported by `handle_mouse_move`. Used to filter
+    /// out synthetic mouse-move events emitted by terminals AFTER a
+    /// scroll wheel tick (the cursor is stationary, but the content
+    /// under it changed because the viewport scrolled). When the new
+    /// position equals the previous one, we treat it as synthetic and
+    /// skip the selection update — that's what lets the wheel scroll
+    /// past the focused row without dragging it along.
+    last_mouse_pos: Option<(u16, u16)>,
     editing_text: bool,
     editing_value: String,
+    /// Byte index into `editing_value` where the next char insert lands.
+    /// Updated by Left/Right/Home/End/Ctrl+Left/Ctrl+Right and the delete
+    /// keys. Stays a byte index (not a char index) so byte-level
+    /// `String::insert` / `drain` calls don't have to convert.
+    editing_cursor: usize,
     theme_preview: Option<SyntaxHighlighter>,
     graph_preview: Option<GraphPreview>,
     pending_preview_uploads: Vec<String>,
@@ -201,8 +220,11 @@ impl<'a> ConfigView<'a> {
             github_auth_state,
             github_auth_pending: false,
             pending_github_device: None,
+            last_rendered_selected: None,
+            last_mouse_pos: None,
             editing_text: false,
             editing_value: String::new(),
+            editing_cursor: 0,
             theme_preview: None,
             graph_preview: None,
             pending_preview_uploads: Vec::new(),
@@ -253,7 +275,7 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
-                } else if self.selected >= TEXT_EDIT_START_INDEX {
+                } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
                     self.cycle_option();
@@ -266,7 +288,7 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
-                } else if self.selected >= TEXT_EDIT_START_INDEX {
+                } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
                     self.cycle_option();
@@ -279,7 +301,7 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option_prev();
                     }
-                } else if self.selected >= TEXT_EDIT_START_INDEX {
+                } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
                     self.cycle_option_prev();
@@ -355,6 +377,7 @@ impl<'a> ConfigView<'a> {
             _ => return,
         };
         self.editing_text = true;
+        self.editing_cursor = current_value.len();
         self.editing_value = current_value;
     }
 
@@ -459,8 +482,17 @@ impl<'a> ConfigView<'a> {
             _ => {}
         }
         use ratatui::crossterm::event::KeyModifiers;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Char(c) => {
+            // Word-jump delete-left — Ctrl+H, Ctrl+W, Ctrl+Backspace all
+            // mean "wipe the previous word" in most modern editors.
+            KeyCode::Char('h') | KeyCode::Char('w') if ctrl => {
+                self.editor_delete_word_left();
+            }
+            KeyCode::Backspace if ctrl => {
+                self.editor_delete_word_left();
+            }
+            KeyCode::Char(c) if !ctrl => {
                 // Numeric-only fields filter at the keystroke level so
                 // the user never sees an invalid character land in the
                 // buffer. Right now only `Initial Load Count` (index
@@ -468,33 +500,62 @@ impl<'a> ConfigView<'a> {
                 if self.selected == INITIAL_LOAD_COUNT_INDEX && !c.is_ascii_digit() {
                     return;
                 }
-                self.editing_value.push(c);
-            }
-            KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                while self
-                    .editing_value
-                    .chars()
-                    .last()
-                    .map(|c| !c.is_alphanumeric())
-                    .unwrap_or(false)
-                {
-                    self.editing_value.pop();
-                }
-                while self
-                    .editing_value
-                    .chars()
-                    .last()
-                    .map(|c| c.is_alphanumeric())
-                    .unwrap_or(false)
-                {
-                    self.editing_value.pop();
-                }
+                self.editing_value.insert(self.editing_cursor, c);
+                self.editing_cursor += c.len_utf8();
             }
             KeyCode::Backspace => {
-                self.editing_value.pop();
+                if self.editing_cursor > 0 {
+                    let start = prev_char_boundary(&self.editing_value, self.editing_cursor);
+                    self.editing_value.drain(start..self.editing_cursor);
+                    self.editing_cursor = start;
+                }
+            }
+            KeyCode::Delete if ctrl => {
+                self.editor_delete_word_right();
+            }
+            KeyCode::Delete => {
+                if self.editing_cursor < self.editing_value.len() {
+                    let end = next_char_boundary(&self.editing_value, self.editing_cursor);
+                    self.editing_value.drain(self.editing_cursor..end);
+                }
+            }
+            KeyCode::Left if ctrl => {
+                self.editing_cursor = editor_word_left(&self.editing_value, self.editing_cursor);
+            }
+            KeyCode::Left => {
+                if self.editing_cursor > 0 {
+                    self.editing_cursor =
+                        prev_char_boundary(&self.editing_value, self.editing_cursor);
+                }
+            }
+            KeyCode::Right if ctrl => {
+                self.editing_cursor = editor_word_right(&self.editing_value, self.editing_cursor);
+            }
+            KeyCode::Right => {
+                if self.editing_cursor < self.editing_value.len() {
+                    self.editing_cursor =
+                        next_char_boundary(&self.editing_value, self.editing_cursor);
+                }
+            }
+            KeyCode::Home => {
+                self.editing_cursor = 0;
+            }
+            KeyCode::End => {
+                self.editing_cursor = self.editing_value.len();
             }
             _ => {}
         }
+    }
+
+    fn editor_delete_word_left(&mut self) {
+        let new_pos = editor_word_left(&self.editing_value, self.editing_cursor);
+        self.editing_value.drain(new_pos..self.editing_cursor);
+        self.editing_cursor = new_pos;
+    }
+
+    fn editor_delete_word_right(&mut self) {
+        let new_pos = editor_word_right(&self.editing_value, self.editing_cursor);
+        self.editing_value.drain(self.editing_cursor..new_pos);
     }
 
     fn finish_text_edit(&mut self) {
@@ -512,9 +573,7 @@ impl<'a> ConfigView<'a> {
                 // user could clear it entirely with Backspace).
                 if let Some(s) = value.as_ref() {
                     if let Ok(n) = s.parse::<usize>() {
-                        let clamped = n
-                            .max(INITIAL_LOAD_COUNT_MIN)
-                            .min(INITIAL_LOAD_COUNT_MAX);
+                        let clamped = n.max(INITIAL_LOAD_COUNT_MIN).min(INITIAL_LOAD_COUNT_MAX);
                         self.core_config.option.initial_load_count = clamped;
                     }
                 }
@@ -1040,23 +1099,34 @@ impl<'a> ConfigView<'a> {
         // "there's more" when there isn't.
         let viewport_h = left_area.height as usize;
         let total_lines = lines.len();
-        if self.selected == 0 {
-            self.left_scroll = 0;
-        } else if self.selected + 1 >= CONFIG_ITEM_COUNT {
-            self.left_scroll = total_lines.saturating_sub(viewport_h);
-        } else if let Some(sel_row) = self
-            .left_item_rows
-            .iter()
-            .position(|r| r == &Some(self.selected))
-        {
-            if viewport_h > 0 {
-                if sel_row < self.left_scroll {
-                    self.left_scroll = sel_row;
-                } else if sel_row >= self.left_scroll + viewport_h {
-                    self.left_scroll = sel_row + 1 - viewport_h;
+        // Snap viewport to keep `selected` visible — but ONLY when the
+        // selection actually changed since the last frame (arrow key,
+        // click on a row, etc.). The mouse wheel just nudges
+        // `left_scroll` directly; if we re-ran the snap every frame the
+        // wheel could never push the viewport past the focused row.
+        let selection_changed = self.last_rendered_selected != Some(self.selected);
+        if selection_changed {
+            if self.selected == 0 {
+                self.left_scroll = 0;
+            } else if self.selected + 1 >= CONFIG_ITEM_COUNT {
+                self.left_scroll = total_lines.saturating_sub(viewport_h);
+            } else if let Some(sel_row) = self
+                .left_item_rows
+                .iter()
+                .position(|r| r == &Some(self.selected))
+            {
+                if viewport_h > 0 {
+                    if sel_row < self.left_scroll {
+                        self.left_scroll = sel_row;
+                    } else if sel_row >= self.left_scroll + viewport_h {
+                        self.left_scroll = sel_row + 1 - viewport_h;
+                    }
                 }
             }
         }
+        self.last_rendered_selected = Some(self.selected);
+        // Always clamp scroll to in-range so a terminal resize can't
+        // leave the viewport pointing past the end of the content.
         let max_scroll = total_lines.saturating_sub(viewport_h);
         if self.left_scroll > max_scroll {
             self.left_scroll = max_scroll;
@@ -1226,25 +1296,47 @@ impl<'a> ConfigView<'a> {
         }
 
         if self.editing_text
-            && self.selected >= TEXT_EDIT_START_INDEX
+            && config_value_kind(self.selected) == ConfigValueKind::Input
             && self.selected != GITHUB_AUTH_INDEX
             && self.selected != GITHUB_AVATARS_INDEX
         {
-            let cursor_x = left_area.x + 18 + self.editing_value.len() as u16;
+            // Cursor x = label column (18) + visual width of the substring
+            // up to the editing cursor. `measure_text_width` handles
+            // multi-cell glyphs correctly; for ASCII (Load Count digits,
+            // Git Name/Email) it's just the byte count.
+            let prefix = &self.editing_value[..self.editing_cursor.min(self.editing_value.len())];
+            let cursor_x = left_area.x + 18 + console::measure_text_width(prefix) as u16;
+            // Subtract `left_scroll` — the viewport shows lines starting
+            // at `left_scroll`, so a line at original index `row` appears
+            // at screen row `row - left_scroll`. Without this, scrolling
+            // made the cursor land one line below its visible row (or
+            // off-screen on big scrolls).
             let cursor_y = self
                 .left_item_rows
                 .iter()
                 .position(|idx| *idx == Some(self.selected))
-                .map(|row| left_area.y + row as u16)
+                .map(|row| left_area.y + (row.saturating_sub(self.left_scroll)) as u16)
                 .unwrap_or(left_area.y);
             f.set_cursor_position((cursor_x, cursor_y));
         }
     }
 
     pub fn handle_click(&mut self, col: u16, row: u16) {
-        let Some(item_idx) = self.left_area_item_index(col, row) else {
+        let hit = self.left_area_item_index(col, row);
+        // Clicking outside the row currently being edited just **closes
+        // the editor** — and stops there. We don't also cycle / open the
+        // clicked field's edit in the same gesture, otherwise an
+        // accidental click on a Cycle row would silently mutate config.
+        // The next click selects + acts as usual. Resetting
+        // `last_mouse_pos` re-arms hover: the very next move event won't
+        // be filtered as "synthetic", so the highlight follows the
+        // cursor again immediately.
+        if self.editing_text && hit != Some(self.selected) {
+            self.cancel_text_edit();
+            self.last_mouse_pos = None;
             return;
-        };
+        }
+        let Some(item_idx) = hit else { return };
         if item_idx < CONFIG_ITEM_COUNT {
             if item_idx == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
                 return;
@@ -1254,7 +1346,7 @@ impl<'a> ConfigView<'a> {
                 self.handle_github_auth();
             } else if self.selected == GITHUB_AVATARS_INDEX {
                 self.cycle_option();
-            } else if self.selected >= TEXT_EDIT_START_INDEX {
+            } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                 self.start_text_edit();
             } else {
                 self.cycle_option();
@@ -1263,11 +1355,25 @@ impl<'a> ConfigView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
-        let Some(item_idx) = self.left_area_item_index(col, row) else {
+        // Filter out synthetic post-scroll moves: when the wheel ticks,
+        // the cursor stays at the same physical cell but the content
+        // under it changed because the viewport scrolled. Many terminals
+        // (Ghostty, recent Kitty) emit a Moved event at the unchanged
+        // position right after — if we acted on it we'd snap selection
+        // to whatever item just slid under the cursor, dragging the
+        // selection along with the scroll. Same (col, row) as last time
+        // = real cursor didn't move = nothing to do.
+        if self.last_mouse_pos == Some((col, row)) {
             return;
-        };
-        if item_idx < CONFIG_ITEM_COUNT && !self.editing_text {
-            self.selected = item_idx;
+        }
+        self.last_mouse_pos = Some((col, row));
+        if self.editing_text {
+            return;
+        }
+        if let Some(idx) = self.left_area_item_index(col, row) {
+            if idx < CONFIG_ITEM_COUNT {
+                self.selected = idx;
+            }
         }
     }
 
@@ -1896,6 +2002,52 @@ fn config_value_fg(kind: ConfigValueKind, theme: &crate::color::ColorTheme) -> C
         ConfigValueKind::Input => theme.status_success_fg,
         ConfigValueKind::Button => theme.status_warn_fg,
     }
+}
+
+/// Byte index of the char boundary immediately before `cursor`.
+/// Assumes `cursor` is itself on a valid boundary (callers guarantee).
+fn prev_char_boundary(s: &str, cursor: usize) -> usize {
+    let mut i = cursor.saturating_sub(1);
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Byte index of the char boundary immediately after `cursor`.
+fn next_char_boundary(s: &str, cursor: usize) -> usize {
+    let len = s.len();
+    let mut i = (cursor + 1).min(len);
+    while i < len && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
+/// Walk back past non-alphanumeric, then past alphanumeric — same
+/// semantics as Ctrl+Backspace / Ctrl+Left in most editors.
+fn editor_word_left(s: &str, cursor: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = cursor.min(bytes.len());
+    while i > 0 && !bytes[i - 1].is_ascii_alphanumeric() {
+        i -= 1;
+    }
+    while i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
+        i -= 1;
+    }
+    i
+}
+
+fn editor_word_right(s: &str, cursor: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = cursor.min(bytes.len());
+    while i < bytes.len() && !bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    i
 }
 
 fn config_value_modifier(index: usize) -> Modifier {

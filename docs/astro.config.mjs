@@ -75,6 +75,7 @@ export default defineConfig({
           items: [
             { label: "Overview", link: "/keybindings/" },
             { label: "Custom keybindings", link: "/keybindings/custom/" },
+            { label: "User commands", link: "/keybindings/user-command/" },
           ],
         },
         {
@@ -88,7 +89,6 @@ export default defineConfig({
             { label: "Conflict editor", link: "/features/conflict-editor/" },
             { label: "Pull requests", link: "/features/pull-requests/" },
             { label: "Issues", link: "/features/issues/" },
-            { label: "User commands", link: "/features/user-command/" },
           ],
         },
         {

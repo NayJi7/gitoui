@@ -898,10 +898,8 @@ impl EventController {
                             // re-fires UserEvent::Config on release,
                             // which the config view treats as toggle →
                             // closes immediately).
-                            if matches!(
-                                key.kind,
-                                ratatui::crossterm::event::KeyEventKind::Release
-                            ) {
+                            if matches!(key.kind, ratatui::crossterm::event::KeyEventKind::Release)
+                            {
                                 continue;
                             }
                             // Normalize the modifier-state bits before

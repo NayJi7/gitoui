@@ -1926,8 +1926,7 @@ impl App<'_> {
         let mut new_frames = Vec::with_capacity(pngs.len());
         for (i, png) in pngs.iter().enumerate() {
             let id = 0x0B_2B_00 + i as u32;
-            let mut prepared =
-                protocol.prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
+            let mut prepared = protocol.prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
             if let Some(upload) = prepared.take_upload_data() {
                 self.spinner_pending_uploads.push(upload);
             }
@@ -4982,8 +4981,7 @@ impl<'a> App<'a> {
             let graph_style_changed = old_core.option.graph_style != core.option.graph_style;
             let graph_width_changed = old_core.option.graph_width != core.option.graph_width;
             let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
-            let mouse_changed =
-                self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
+            let mouse_changed = self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
             let auth_changed = github_auth_state != self.ctx.github_auth_state;
 
             self.view = view.take_before_view();
@@ -5032,8 +5030,7 @@ impl<'a> App<'a> {
             if let View::List(ref mut list_view) = self.view {
                 let palette = self.ctx.graph_color_set.clone();
                 if graph_style_changed {
-                    list_view
-                        .update_graph_style(self.ctx.core_config.option.graph_style.into());
+                    list_view.update_graph_style(self.ctx.core_config.option.graph_style.into());
                 }
                 if graph_width_changed {
                     if let Some(new_cwt) =

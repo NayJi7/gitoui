@@ -182,17 +182,14 @@ pub fn render_logo_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
 pub fn render_wordmark_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
     let px_w = (WORDMARK_CELL_WIDTH * 32) as u32; // 128
     let px_h = px_w / 2; // 64  (128:64 = 2:1)
-    // Pick the wordmark variant whose `oui` letters contrast against
-    // the active theme bg. `WORDMARK_SVG` has off-white `oui` for dark
-    // themes; `WORDMARK_COLOR_SVG` has near-black `oui` for light
-    // themes. Detection reuses `themes::is_dark_color`, the same
-    // routine that auto-picks the syntect theme — so custom user
-    // themes work out of the box.
+                         // Pick the wordmark variant whose `oui` letters contrast against
+                         // the active theme bg. `WORDMARK_SVG` has off-white `oui` for dark
+                         // themes; `WORDMARK_COLOR_SVG` has near-black `oui` for light
+                         // themes. Detection reuses `themes::is_dark_color`, the same
+                         // routine that auto-picks the syntect theme — so custom user
+                         // themes work out of the box.
     let svg: &[u8] = match bg {
-        Some((r, g, b)) if !crate::themes::is_dark_color(
-            ratatui::style::Color::Rgb(r, g, b),
-        ) =>
-        {
+        Some((r, g, b)) if !crate::themes::is_dark_color(ratatui::style::Color::Rgb(r, g, b)) => {
             WORDMARK_COLOR_SVG
         }
         _ => WORDMARK_SVG,

@@ -406,10 +406,7 @@ impl<'a> ListView<'a> {
         // PREVIOUS palette and the rebake uses stale bg + branch
         // colours. Computing from the new `color_theme` here sidesteps
         // the fork and guarantees the bake matches the active theme.
-        let new_palette = crate::color::build_graph_color_set(
-            &theme,
-            &self.ctx.graph_config.color,
-        );
+        let new_palette = crate::color::build_graph_color_set(&theme, &self.ctx.graph_config.color);
         let ctx = std::rc::Rc::make_mut(&mut self.ctx);
         ctx.color_theme = theme;
         ctx.graph_color_set = new_palette.clone();
