@@ -20,7 +20,7 @@ use std::path::Path;
 /// Which side of a conflict the user wants to keep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HunkResolution {
-    /// No decision yet — file is not safe to save.
+    /// No decision yet, file is not safe to save.
     #[default]
     Unresolved,
     /// Keep only `ours` (HEAD side).
@@ -39,7 +39,7 @@ pub struct ConflictHunk {
     /// Lines on the HEAD/ours side (without the `<<<<<<<` and `=======` markers).
     pub ours: Vec<String>,
     /// Lines from the common ancestor when the file uses diff3 conflict style,
-    /// otherwise `None`. Always trim-only — never used for resolution output.
+    /// otherwise `None`. Always trim-only, never used for resolution output.
     pub base: Option<Vec<String>>,
     /// Lines on the incoming/theirs side (without the `=======` and `>>>>>>>` markers).
     pub theirs: Vec<String>,
@@ -181,7 +181,7 @@ impl ConflictFile {
 /// Parses raw text containing conflict markers into a [`ConflictFile`].
 ///
 /// Marker prefixes are detected as the start of a line; trailing labels are
-/// captured but optional. Standard markers use exactly 7 angle brackets — we
+/// captured but optional. Standard markers use exactly 7 angle brackets, we
 /// match `>= 7` to be forgiving but the renderer always re-emits 7.
 pub fn parse_conflict_text(path: &str, text: &str) -> ConflictFile {
     let mut segments: Vec<FileSegment> = Vec::new();

@@ -19,7 +19,7 @@ use crate::{
     GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection,
 };
 
-// Item indices — listed here so future inserts only have to touch one spot
+// Item indices, listed here so future inserts only have to touch one spot
 // instead of hunting for `selected == N` matches scattered through the file.
 //   0  Theme
 //   1  Graph Style
@@ -73,7 +73,7 @@ pub struct ConfigView<'a> {
     github_auth_state: GithubAuthState,
     github_auth_pending: bool,
     pending_github_device: Option<PendingGithubDevice>,
-    /// Last `selected` value seen by `render()` — used to gate the
+    /// Last `selected` value seen by `render()`, used to gate the
     /// "snap viewport to keep selected visible" logic so it only fires
     /// when the SELECTION moved (arrow keys / click on a row), not on
     /// every paint. Without this, the mouse wheel can never scroll past
@@ -84,7 +84,7 @@ pub struct ConfigView<'a> {
     /// scroll wheel tick (the cursor is stationary, but the content
     /// under it changed because the viewport scrolled). When the new
     /// position equals the previous one, we treat it as synthetic and
-    /// skip the selection update — that's what lets the wheel scroll
+    /// skip the selection update, that's what lets the wheel scroll
     /// past the focused row without dragging it along.
     last_mouse_pos: Option<(u16, u16)>,
     editing_text: bool,
@@ -111,7 +111,7 @@ pub struct ConfigView<'a> {
 impl<'a> ConfigView<'a> {
     fn config_left_width(&self, total_width: u16) -> u16 {
         // NOTE: This array is only used to compute the left column width.
-        // The display order in the UI lives in `render()` — see the `items`
+        // The display order in the UI lives in `render()`, see the `items`
         // vec there for the actual rendering order.
         let values = [
             self.core_config.option.theme.clone(),
@@ -484,7 +484,7 @@ impl<'a> ConfigView<'a> {
         use ratatui::crossterm::event::KeyModifiers;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            // Word-jump delete-left — Ctrl+H, Ctrl+W, Ctrl+Backspace all
+            // Word-jump delete-left, Ctrl+H, Ctrl+W, Ctrl+Backspace all
             // mean "wipe the previous word" in most modern editors.
             KeyCode::Char('h') | KeyCode::Char('w') if ctrl => {
                 self.editor_delete_word_left();
@@ -656,7 +656,7 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_initial_selection(prev);
             }
             INITIAL_LOAD_COUNT_INDEX => {
-                // Text-input field — no left/right cycle. Press Enter
+                // Text-input field, no left/right cycle. Press Enter
                 // to edit; arrows fall through to the no-op default
                 // and the row stays unchanged.
             }
@@ -767,7 +767,7 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_initial_selection(next);
             }
             INITIAL_LOAD_COUNT_INDEX => {
-                // Text input — no cycle. See cycle_option_prev for the rationale.
+                // Text input, no cycle. See cycle_option_prev for the rationale.
             }
             9 => {
                 self.ui_config
@@ -829,7 +829,7 @@ impl<'a> ConfigView<'a> {
         };
         f.render_widget(Paragraph::new(title), title_area);
 
-        // Top-right meta — `vX.Y.Z · <install>`. Kept discreet
+        // Top-right meta, `vX.Y.Z · <install>`. Kept discreet
         // (divider_fg) so it reads like a chrome label, not a
         // primary action. Right-aligned via Paragraph::alignment.
         let meta = format!(
@@ -886,7 +886,7 @@ impl<'a> ConfigView<'a> {
         self.left_area = left_area;
         self.render_vertical_separator(f, separator_area);
 
-        // Items list (left column) — index order MUST stay in sync with the
+        // Items list (left column), index order MUST stay in sync with the
         // constants block at the top of the file (TEXT_EDIT_START_INDEX,
         // GITHUB_AUTH_INDEX, GITHUB_AVATARS_INDEX) and the `match self.selected`
         // arms in `cycle_option`/`cycle_option_prev`/`start_text_edit`/
@@ -1045,7 +1045,7 @@ impl<'a> ConfigView<'a> {
                     .fg(self.ctx.color_theme.fg)
                     .bg(self.ctx.color_theme.list_selected_bg)
             } else if config_value_kind(i) == ConfigValueKind::Input && !is_grayed {
-                // Use the same fg that the commit list uses for messages —
+                // Use the same fg that the commit list uses for messages
                 // it's the theme's "default-readable on any background"
                 // token. Earlier this used `detail_label_fg`, which in
                 // Tokyo Night happens to equal `list_selected_bg`
@@ -1085,11 +1085,11 @@ impl<'a> ConfigView<'a> {
         // Edge anchoring: when the cursor reaches the very FIRST or
         // LAST selectable item, snap the scroll all the way to that
         // edge. Otherwise the section headers above (or trailing blank
-        // rows below) stay clipped — and the `…` marker reads as
+        // rows below) stay clipped, and the `…` marker reads as
         // "there's more" when there isn't.
         let viewport_h = left_area.height as usize;
         let total_lines = lines.len();
-        // Snap viewport to keep `selected` visible — but ONLY when the
+        // Snap viewport to keep `selected` visible, but ONLY when the
         // selection actually changed since the last frame (arrow key,
         // click on a row, etc.). The mouse wheel just nudges
         // `left_scroll` directly; if we re-ran the snap every frame the
@@ -1128,7 +1128,7 @@ impl<'a> ConfigView<'a> {
             .take(viewport_h)
             .collect();
         // Top / bottom `…` markers signal more content past the viewport
-        // — same convention as the Help page.
+        //, same convention as the Help page.
         if total_lines > viewport_h && !visible.is_empty() {
             let dots_style = Style::default().fg(self.ctx.color_theme.divider_fg);
             let dots = Line::from(Span::styled("  …", dots_style));
@@ -1153,10 +1153,10 @@ impl<'a> ConfigView<'a> {
             diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
             rebase_view_description(self.ui_config.common.rebase_view),
-            "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children — branches stay grouped, like `git log --topo-order`.".into(),
-            "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.".into(),
+            "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children, branches stay grouped, like `git log --topo-order`.".into(),
+            "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.\n\nWill update at next launch of gitoui.".into(),
             format!(
-                "Number of commits loaded into the graph on startup.\n\nDigits only, between {} and {}. Applied at the next launch of gitoui — the current session keeps its existing window.",
+                "Number of commits loaded into the graph on startup.\n\nDigits only, between {} and {}.\n\nWill update at next launch of gitoui.",
                 INITIAL_LOAD_COUNT_MIN, INITIAL_LOAD_COUNT_MAX,
             ),
             "Enable mouse support for clicking and scrolling.".into(),
@@ -1259,7 +1259,7 @@ impl<'a> ConfigView<'a> {
             _ => {}
         }
 
-        // Leaving the Graph Style / Graph Width items — pre-clear the cells
+        // Leaving the Graph Style / Graph Width items, pre-clear the cells
         // that previously held the preview so labels/image-trailing-spaces
         // are overwritten with plain spaces. Paragraph rendering will then
         // write the new content (e.g. the theme code preview) over those
@@ -1296,7 +1296,7 @@ impl<'a> ConfigView<'a> {
             // Git Name/Email) it's just the byte count.
             let prefix = &self.editing_value[..self.editing_cursor.min(self.editing_value.len())];
             let cursor_x = left_area.x + 18 + console::measure_text_width(prefix) as u16;
-            // Subtract `left_scroll` — the viewport shows lines starting
+            // Subtract `left_scroll`, the viewport shows lines starting
             // at `left_scroll`, so a line at original index `row` appears
             // at screen row `row - left_scroll`. Without this, scrolling
             // made the cursor land one line below its visible row (or
@@ -1314,7 +1314,7 @@ impl<'a> ConfigView<'a> {
     pub fn handle_click(&mut self, col: u16, row: u16) {
         let hit = self.left_area_item_index(col, row);
         // Clicking outside the row currently being edited just **closes
-        // the editor** — and stops there. We don't also cycle / open the
+        // the editor**, and stops there. We don't also cycle / open the
         // clicked field's edit in the same gesture, otherwise an
         // accidental click on a Cycle row would silently mutate config.
         // The next click selects + acts as usual. Resetting
@@ -1349,7 +1349,7 @@ impl<'a> ConfigView<'a> {
         // the cursor stays at the same physical cell but the content
         // under it changed because the viewport scrolled. Many terminals
         // (Ghostty, recent Kitty) emit a Moved event at the unchanged
-        // position right after — if we acted on it we'd snap selection
+        // position right after, if we acted on it we'd snap selection
         // to whatever item just slid under the cursor, dragging the
         // selection along with the scroll. Same (col, row) as last time
         // = real cursor didn't move = nothing to do.
@@ -1376,7 +1376,7 @@ impl<'a> ConfigView<'a> {
         }
         // `left_item_rows` is the FULL line list (headers / blanks / config
         // rows), not the visible viewport. After scroll, screen row 0 maps
-        // to logical row `left_scroll`, so add it before indexing — without
+        // to logical row `left_scroll`, so add it before indexing, without
         // it hover lands on the wrong row by `left_scroll` lines.
         let row_idx = (row - self.left_area.y) as usize + self.left_scroll;
         self.left_item_rows.get(row_idx).and_then(|idx| *idx)
@@ -1385,7 +1385,7 @@ impl<'a> ConfigView<'a> {
     fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
         let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
         // Resolve "Auto" to the same Double/Single mapping the runtime uses
-        // — Sixel + KittyUnicode prefer Single cells, everything else Double.
+        //, Sixel + KittyUnicode prefer Single cells, everything else Double.
         let cell_width = match self.core_config.graph_width() {
             GraphWidthType::Double => crate::graph::CellWidthType::Double,
             GraphWidthType::Single => crate::graph::CellWidthType::Single,
@@ -1453,7 +1453,7 @@ impl<'a> ConfigView<'a> {
         // wider previous frame (e.g. Double → Single) can't leave leftover
         // label characters past the new label's right edge. Paragraph
         // rendering only writes cells that contain glyphs, not the trailing
-        // ones — without this clear, switching cell widths produced ghost
+        // ones, without this clear, switching cell widths produced ghost
         // text like "ie" hanging next to the new "main" label.
         let bg_style = ratatui::style::Style::default().bg(self.ctx.color_theme.bg);
         for i in 0..preview.rows.len() {
@@ -1772,7 +1772,7 @@ fn rebase_view_display(mode: RebaseViewMode) -> String {
 /// (GitKraken-style), Split = list on top + Result preview block.
 ///
 /// Each preview is framed by a box rendered at runtime with `frame_lines`
-/// so every line is padded to the same width — no fragile alignment
+/// so every line is padded to the same width, no fragile alignment
 /// of static strings across the three layouts.
 fn rebase_view_description(mode: RebaseViewMode) -> String {
     let intro = "Layout used by the interactive-rebase editor (opened \
@@ -1921,7 +1921,7 @@ fn github_avatars_description(state: &GithubAuthState, _enabled: bool) -> String
 }
 
 fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -> String {
-    // `o:open config file` is always available — let the user pop the config
+    // `o:open config file` is always available, let the user pop the config
     // into $EDITOR from any row. Prepended to the per-row hint with
     // the same `▕▏` separator the app footer uses elsewhere.
     let row_hint = if selected == GITHUB_AUTH_INDEX {
@@ -1976,7 +1976,7 @@ fn config_value_kind(index: usize) -> ConfigValueKind {
     if index == GITHUB_AUTH_INDEX {
         ConfigValueKind::Button
     } else if index == INITIAL_LOAD_COUNT_INDEX {
-        // Text-input field sandwiched between cycle items — has to be
+        // Text-input field sandwiched between cycle items, has to be
         // classified explicitly because it sits below TEXT_EDIT_START_INDEX.
         ConfigValueKind::Input
     } else if index == GITHUB_AVATARS_INDEX || index < TEXT_EDIT_START_INDEX {
@@ -2014,7 +2014,7 @@ fn next_char_boundary(s: &str, cursor: usize) -> usize {
     i
 }
 
-/// Walk back past non-alphanumeric, then past alphanumeric — same
+/// Walk back past non-alphanumeric, then past alphanumeric, same
 /// semantics as Ctrl+Backspace / Ctrl+Left in most editors.
 fn editor_word_left(s: &str, cursor: usize) -> usize {
     let bytes = s.as_bytes();

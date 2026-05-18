@@ -2,7 +2,7 @@
 //!
 //! Returns a flat `Vec<BlameLine>` covering every line of the file at HEAD,
 //! each annotated with the commit that last touched it. Built for the
-//! dedicated `BlameView` — see `src/view/blame.rs`.
+//! dedicated `BlameView`, see `src/view/blame.rs`.
 //!
 //! Porcelain format (per `git-blame(1)`):
 //! ```text
@@ -18,7 +18,7 @@
 //! filename <name>
 //! <TAB><content>
 //! ```
-//! Subsequent lines from the same commit reuse the header — only the
+//! Subsequent lines from the same commit reuse the header, only the
 //! `<sha> <orig> <final>` line and the `\t<content>` line are emitted.
 
 use std::collections::HashMap;
@@ -36,19 +36,19 @@ pub struct BlameLine {
     /// `alice@example.com`. Empty string when git didn't provide one.
     pub author_mail: String,
     /// Author time in the local timezone. None if porcelain didn't provide
-    /// it (defensive — shouldn't happen with vanilla git).
+    /// it (defensive, shouldn't happen with vanilla git).
     pub author_time: Option<DateTime<Local>>,
     pub summary: String,
     /// 1-based line number in the file at HEAD.
     pub line_no: u32,
     pub content: String,
-    /// True when this line falls on a boundary commit (rare — usually means
+    /// True when this line falls on a boundary commit (rare, usually means
     /// the line was last touched at a commit outside the visible history).
     #[allow(dead_code)]
     pub boundary: bool,
 }
 
-/// Aggregated header for a single commit — built up as we parse the first
+/// Aggregated header for a single commit, built up as we parse the first
 /// occurrence's full porcelain record and reused for all subsequent lines
 /// from the same SHA.
 #[derive(Debug, Clone, Default)]
@@ -86,7 +86,7 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
         // Header line: "<sha> <orig> <final> [<num>]"
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 3 || parts[0].len() != 40 {
-            // Not a hash header — skip stray lines (defensive).
+            // Not a hash header, skip stray lines (defensive).
             continue;
         }
         let sha = parts[0].to_string();
@@ -107,7 +107,7 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
                 match key {
                     "author" => header.author = value.to_string(),
                     "author-mail" => {
-                        // git outputs `<email@domain>` — strip angle brackets.
+                        // git outputs `<email@domain>`, strip angle brackets.
                         header.author_mail = value
                             .trim_start_matches('<')
                             .trim_end_matches('>')
@@ -122,7 +122,7 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
             }
         }
 
-        // Cache the header — subsequent occurrences of this SHA reuse it.
+        // Cache the header, subsequent occurrences of this SHA reuse it.
         headers.insert(sha.clone(), header.clone());
 
         let short_hash: String = sha.chars().take(7).collect();
@@ -146,11 +146,11 @@ pub fn parse_porcelain(input: &str) -> Vec<BlameLine> {
     out
 }
 
-/// Compact "x ago" formatter — keeps the annotation column narrow. Falls back
-/// to "—" when the timestamp wasn't parsed.
+/// Compact "x ago" formatter, keeps the annotation column narrow. Falls back
+/// to "-" when the timestamp wasn't parsed.
 pub fn relative_time(dt: Option<&DateTime<Local>>) -> String {
     let Some(dt) = dt else {
-        return "—".to_string();
+        return "-".to_string();
     };
     let now = Local::now();
     let delta = now.signed_duration_since(*dt);
@@ -268,6 +268,6 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 3 3
         assert!(relative_time(Some(&hours_ago)).contains("h ago"));
         let days_ago = now - chrono::Duration::days(2);
         assert!(relative_time(Some(&days_ago)).contains("d ago"));
-        assert_eq!(relative_time(None), "—");
+        assert_eq!(relative_time(None), "-");
     }
 }

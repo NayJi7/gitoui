@@ -50,7 +50,7 @@ enum StatusLine {
     NotificationWarn(String),
     NotificationError(String),
     /// Persistent search-match status. Stays on screen as long as the
-    /// list view's search is applied — never auto-clears via the 2 s
+    /// list view's search is applied, never auto-clears via the 2 s
     /// notification timer. `warn` = true picks the warn color (used
     /// when the current query has zero matches).
     SearchStatus {
@@ -133,7 +133,7 @@ pub struct AppContext {
     pub graph_color_set: GraphColorSet,
     /// User's `[graph]` TOML section. Carried alongside `graph_color_set` so
     /// the live theme-cycle path can rebuild the set against the user's
-    /// branches/edge/background after a theme change — without re-reading
+    /// branches/edge/background after a theme change, without re-reading
     /// the file. The set is derived; this is the source of truth.
     pub graph_config: crate::config::GraphConfig,
     /// (ahead, behind) commit counts of the current branch vs its upstream.
@@ -184,7 +184,7 @@ struct AppStatus {
     spinner_active: bool,
     spinner_frame: usize,
     /// Wall-clock of the last auto-refresh (FilesystemChanged → view.refresh()).
-    /// Used to throttle bursts of refreshes — the watcher already debounces and
+    /// Used to throttle bursts of refreshes, the watcher already debounces and
     /// fingerprint-compares, but two distinct legitimate changes within a
     /// couple seconds (e.g. checkout immediately followed by a fetch in
     /// another shell) still shouldn't double-flicker the screen.
@@ -214,7 +214,7 @@ pub struct App<'a> {
     // id = None means static G logo; Some(fidx) means animation frame fidx.
     header_logo_last: Option<Option<usize>>,
     header_wordmark_rendered: bool,
-    /// Global `d`-overlay state — when active, the header pwd becomes a text
+    /// Global `d`-overlay state, when active, the header pwd becomes a text
     /// input and a dropdown appears below. Hijacks key input until Esc/Enter.
     dir_input: crate::dir_input::DirInputState,
     /// Persistent list of recently-visited directories (front = most recent).
@@ -224,7 +224,7 @@ pub struct App<'a> {
     /// delete Kitty graphics rows underneath after the buffered draw.
     /// Without this clear the commit-graph images bleed on top of the popup.
     dir_dropdown_area: Option<ratatui::layout::Rect>,
-    /// `(x, y)` of the input line's left edge — recorded by `render_header`
+    /// `(x, y)` of the input line's left edge, recorded by `render_header`
     /// when the overlay is open, consumed by `render()` at the very end to
     /// place the terminal cursor (same pattern as the search input).
     dir_input_cursor_anchor: Option<(u16, u16)>,
@@ -240,20 +240,20 @@ pub struct App<'a> {
     dir_error_message: Option<(String, std::time::Instant)>,
     /// Navigation stack for PR-originated drilldowns. Each entry
     /// describes the view to rebuild when the current sub-page
-    /// closes — so `Esc` walks back through the chain
+    /// closes, so `Esc` walks back through the chain
     /// `DiffView → CommitDetail → PR view` instead of jumping
     /// straight to the commit graph. Empty when no PR drilldown
     /// is in flight.
     pr_nav_stack: Vec<PrNavRestore>,
     /// Cached result of `RepoCoords::from_repo(self.repository.path())`
-    /// — `true` when this repo has at least one GitHub-hosted remote.
+    ///, `true` when this repo has at least one GitHub-hosted remote.
     /// Computed once at startup since the remote set doesn't change
     /// during a session; the alternative would be spawning a
     /// `git remote -v` process on every footer render / keystroke.
     has_github_remote: bool,
 }
 
-/// One step of the PR-originated drilldown stack — the view kind
+/// One step of the PR-originated drilldown stack, the view kind
 /// to restore when the user backs out one level.
 #[derive(Debug, Clone)]
 enum PrNavRestore {
@@ -310,7 +310,7 @@ impl<'a> App<'a> {
                         .filter(|f| f.status == crate::git::status::StatusType::Unmerged)
                         .count();
                     // Match the #808080 used by graph::image for the uncommitted
-                    // line — keeps the marker `│` and the message text visually
+                    // line, keeps the marker `│` and the message text visually
                     // consistent with the graph rendering.
                     CommitInfo::new_uncommitted(
                         commit,
@@ -407,7 +407,7 @@ impl<'a> App<'a> {
         // terminal's own default (usually dark) via Kitty's image
         // compositor. Only Rgb-colored themes get the treatment; other
         // Color variants (Reset, Named, Indexed) fall back to a
-        // transparent PNG — same as before this change.
+        // transparent PNG, same as before this change.
         let brand_bg = match ctx.color_theme.bg {
             ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
             _ => None,
@@ -484,7 +484,7 @@ impl<'a> App<'a> {
         // event after a Ret::Refresh (typically a `cd` into a new repo) is
         // suppressed. The FS watcher rebinds onto the new `.git/` and the
         // initial `git log / rev-list` walks gitoui itself runs can wake
-        // inotify within the debouncer's 1.5 s window — without this seed,
+        // inotify within the debouncer's 1.5 s window, without this seed,
         // the first user keypress would consume that queued event and
         // trigger a full second Refresh (visible as a screen clear right
         // after the first navigation). 2 s of "we just settled, ignore FS
@@ -515,7 +515,7 @@ impl App<'_> {
 
             // Debounced filesystem read for the dir-input overlay's
             // suggestion dropdown. The edit methods (insert_char,
-            // backspace, etc.) only mark the input as dirty — the actual
+            // backspace, etc.) only mark the input as dirty, the actual
             // `read_dir()` happens here, once the user has stopped typing
             // for `SUGGESTIONS_DEBOUNCE`. Fires regardless of `needs_draw`
             // because the Tick that wakes us up (spinner_active during
@@ -542,14 +542,14 @@ impl App<'_> {
                 // Popup resize → graph re-sync. The Kitty Unicode-placeholder
                 // protocol creates a placement when a placeholder cell is
                 // first emitted and DOESN'T drop it when that cell is later
-                // overwritten — so we manually re-issue the cleanup whenever
+                // overwritten, so we manually re-issue the cleanup whenever
                 // the dropdown's height changes:
                 //   GROW: new rows previously held graph placeholders that
                 //         became placements; those placements still display
                 //         on top of the popup until we delete the image ids.
                 //   SHRINK: rows that we cleared earlier now need their
                 //           graph back AND ratatui's diff might leave ghost
-                //           popup cells on screen — terminal.clear() forces
+                //           popup cells on screen, terminal.clear() forces
                 //           a full re-emit. The reset of `view.clear_graph_images`
                 //           triggers a fresh upload on the next frame so
                 //           placements regenerate everywhere outside the
@@ -558,10 +558,10 @@ impl App<'_> {
                     let height = self.dir_dropdown_area.map(|a| a.height).unwrap_or(0);
                     if height != self.dir_input.last_rendered_height {
                         // Delete only graph image placements + reset their
-                        // manager state — avatars (placed past the popup's
+                        // manager state, avatars (placed past the popup's
                         // right edge) keep their cache intact, so the full
                         // window doesn't blink, only the graph column does.
-                        // We do NOT `continue` here — an extra immediate
+                        // We do NOT `continue` here, an extra immediate
                         // redraw would re-run flush_pending_graph_uploads,
                         // moving the terminal cursor around via Kitty image
                         // placement escapes (the source of the caret-jump
@@ -576,7 +576,7 @@ impl App<'_> {
             // When an animation is in flight (spinner, notification countdown,
             // file streaming, or debounce window) we need to wake up on a
             // regular cadence even with no user input. Otherwise we block
-            // indefinitely — no spurious 50 ms wakeups while browsing.
+            // indefinitely, no spurious 50 ms wakeups while browsing.
             let animated = self.app_status.spinner_active
                 || self.app_status.notification_timestamp.is_some()
                 || !self.file_stream.is_empty()
@@ -589,7 +589,7 @@ impl App<'_> {
                         Some(ev)
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        // Animation tick — advance time-based state.
+                        // Animation tick, advance time-based state.
                         let notif_expiring = self
                             .app_status
                             .notification_timestamp
@@ -632,7 +632,7 @@ impl App<'_> {
             match event {
                 AppEvent::Key(key) => {
                     // The change-directory overlay hijacks every key while
-                    // open — typing extends the input, Esc cancels, Enter
+                    // open, typing extends the input, Esc cancels, Enter
                     // commits. Handled before the keybind dispatch so the
                     // user can freely type letters that are otherwise bound
                     // to view actions (`d`, `b`, etc.).
@@ -646,7 +646,7 @@ impl App<'_> {
                         // re-uploaded images come back via the next
                         // prepare_graph_uploads cycle.
                         if was_active && !self.dir_input.active && target_path.is_none() {
-                            // Esc / cancel — force the graph re-render. The
+                            // Esc / cancel, force the graph re-render. The
                             // popup-open path deleted the graph placements
                             // from Kitty, so we need the manager to see
                             // "nothing uploaded" and queue fresh uploads on
@@ -656,7 +656,7 @@ impl App<'_> {
                             continue;
                         }
                         if let Some(target) = target_path {
-                            // Reject invalid targets *before* doing the cd —
+                            // Reject invalid targets *before* doing the cd
                             // a transient footer message is friendlier than
                             // tearing down the overlay and re-opening the
                             // current repo. The overlay stays open so the
@@ -742,7 +742,7 @@ impl App<'_> {
                             }
                         }
                         StatusLine::SearchStatus { .. } => {
-                            // Sticky — stays the whole search-applied
+                            // Sticky, stays the whole search-applied
                             // session. The list view clears it itself
                             // on cancel_search / clear_search_query.
                         }
@@ -771,7 +771,7 @@ impl App<'_> {
 
                     match user_event {
                         Some(UserEvent::ForceQuit) => {
-                            // Ctrl+C always quits — it cannot produce a printable char.
+                            // Ctrl+C always quits, it cannot produce a printable char.
                             self.ec.send(AppEvent::Quit);
                         }
                         Some(UserEvent::Quit) if !text_input_active => {
@@ -783,7 +783,7 @@ impl App<'_> {
                                 && !matches!(self.view, View::Issues(_))
                                 && self.github_features_available() =>
                         {
-                            // Global shortcut — open the PR view from
+                            // Global shortcut, open the PR view from
                             // anywhere EXCEPT when we're already inside
                             // it OR inside the Issues view. In both of
                             // those, `R` is reserved for the in-view
@@ -791,7 +791,7 @@ impl App<'_> {
                             // to the view's own handle_event. Gated on
                             // (auth + github-hosted remote) so the key
                             // is a no-op when the feature can't actually
-                            // work — matches the footer's behaviour.
+                            // work, matches the footer's behaviour.
                             self.ec.send(AppEvent::OpenPullRequests);
                         }
                         Some(UserEvent::Issues)
@@ -807,7 +807,7 @@ impl App<'_> {
                                 && !self.view.is_input_active() =>
                         {
                             // `d` on the commit list doubles as "change
-                            // directory" — `drop_commit` is only ever
+                            // directory", `drop_commit` is only ever
                             // relevant in the Detail view anyway, where the
                             // event falls through to the standard handler.
                             // We additionally bail out when ANY input is
@@ -815,12 +815,12 @@ impl App<'_> {
                             // edit) so the user can freely type the letter
                             // `d` while writing.
                             self.dir_input.open(&self.dir_recents);
-                            // Only nuke the GRAPH placements — the popup
+                            // Only nuke the GRAPH placements, the popup
                             // overlays the graph column at the left, so
                             // those need to disappear. Avatars sit at the
                             // far-right columns (well past the popup width)
                             // so we leave both their Kitty placements AND
-                            // the avatar-manager cache untouched — that's
+                            // the avatar-manager cache untouched, that's
                             // what makes the open instant; re-uploading
                             // every avatar SVG would otherwise add ~1s of
                             // latency on busy repos.
@@ -835,7 +835,7 @@ impl App<'_> {
                             self.app_status.spinner_frame = 0;
                             self.header_logo_last = None;
                             self.app_status.numeric_prefix.clear();
-                            // Hide the real terminal cursor — we draw a fake
+                            // Hide the real terminal cursor, we draw a fake
                             // one into the buffer so image-protocol writes
                             // (avatars, graph) can't visibly teleport the
                             // hardware caret around the screen.
@@ -909,7 +909,7 @@ impl App<'_> {
                                     // Accumulate numeric prefix.
                                     self.app_status.numeric_prefix.push(c);
                                 } else {
-                                    // Globally unbound — forward to the
+                                    // Globally unbound, forward to the
                                     // view so its scoped resolver gets
                                     // a chance. Without this, every
                                     // view-scoped action whose key
@@ -927,7 +927,7 @@ impl App<'_> {
                                     )?;
                                 }
                             } else {
-                                // Non-char unbound keys (F-keys, etc.) —
+                                // Non-char unbound keys (F-keys, etc.)
                                 // same story: forward to the view.
                                 self.app_status.numeric_prefix.clear();
                                 self.handle_view_event_clearing_detail_avatar(
@@ -1089,13 +1089,13 @@ impl App<'_> {
                 }
                 AppEvent::FilesystemChanged => {
                     // Auto-refresh from external git activity. Three guards:
-                    // 1. Don't disrupt user input — skip while a dialog or any
+                    // 1. Don't disrupt user input, skip while a dialog or any
                     //    text-input (commit message, search bar, …) is active.
                     // 2. Throttle to at most one refresh every 2 s. The watcher
                     //    already debounces + fingerprint-compares, but a heavy
                     //    burst of legitimate changes shouldn't trigger
                     //    repeated terminal redraws within a few seconds.
-                    // 3. Don't refresh if a spinner is active — gitoui itself
+                    // 3. Don't refresh if a spinner is active, gitoui itself
                     //    is currently running a git command, the post-action
                     //    refresh path will handle the UI update.
                     const THROTTLE: std::time::Duration = std::time::Duration::from_secs(2);
@@ -1139,7 +1139,7 @@ impl App<'_> {
                 }
                 AppEvent::SetSearchStatus { msg, warn } => {
                     self.stop_spinner();
-                    // No timestamp — auto-clear loop skips this variant
+                    // No timestamp, auto-clear loop skips this variant
                     // entirely so the message persists as long as
                     // search-applied state is on.
                     self.app_status.status_line = StatusLine::SearchStatus { msg, warn };
@@ -1279,7 +1279,7 @@ impl App<'_> {
                     // close_conflict_editor() enqueues AppEvent::Refresh, which
                     // returns Ret::Refresh on its turn and re-initialises the
                     // whole app (clearing the terminal as part of that re-entry).
-                    // No need to clear manually here — doing so flashed the
+                    // No need to clear manually here, doing so flashed the
                     // commit list twice on every save.
                     self.close_conflict_editor();
                 }
@@ -1324,7 +1324,7 @@ impl App<'_> {
                     self.open_issues();
                 }
                 AppEvent::CloseIssues => {
-                    // Same as ClosePullRequests — wipe lingering
+                    // Same as ClosePullRequests, wipe lingering
                     // image-protocol placements so the avatars from
                     // the Issues view don't ghost onto the next
                     // view (commit list) we're about to render.
@@ -1716,7 +1716,7 @@ impl App<'_> {
     }
 
     /// Route a key to the dir-input overlay. Returns `Some(target)` when the
-    /// user pressed Enter on a valid resolution — the caller is responsible
+    /// user pressed Enter on a valid resolution, the caller is responsible
     /// for the actual `set_current_dir` + `Ret::Refresh`. `None` means "stay
     /// in the overlay, redraw on next iteration".
     fn handle_dir_input_key(
@@ -1738,7 +1738,7 @@ impl App<'_> {
             }
             KeyCode::Enter => {
                 // The user may have hit Enter while typing inside the
-                // debounce window — force a sync refresh so `.resolve()`
+                // debounce window, force a sync refresh so `.resolve()`
                 // sees up-to-date suggestions (Enter prefers the focused
                 // suggestion when one is selected). Without this, fast
                 // typist → Enter could commit a stale completion.
@@ -1759,7 +1759,7 @@ impl App<'_> {
                 // Tab = pick the currently focused suggestion as if the user
                 // had typed it, so they can keep refining (e.g. completing
                 // `~/work/` → `~/work/api/`). Force a sync refresh first in
-                // case the debounce window is still pending — we want the
+                // case the debounce window is still pending, we want the
                 // *current* selected suggestion, not a stale snapshot.
                 let recents = self.dir_recents.clone();
                 self.dir_input.force_refresh(&recents);
@@ -1815,7 +1815,7 @@ impl App<'_> {
             }
             // Some terminals (xterm, alacritty…) emit Ctrl+Backspace as the
             // BS (0x08) or DEL (0x7F) control char rather than as
-            // `KeyCode::Backspace` with the Ctrl modifier — catch them both
+            // `KeyCode::Backspace` with the Ctrl modifier, catch them both
             // explicitly before the generic Char arm so they trigger the
             // word-delete instead of inserting a control character.
             KeyCode::Char(c)
@@ -1857,7 +1857,7 @@ impl App<'_> {
 
     /// Re-read the Config view's current theme and push it into the
     /// shared `AppContext`. Called after every input path that can
-    /// cycle the option (keyboard + mouse) — without this the theme
+    /// cycle the option (keyboard + mouse), without this the theme
     /// only swapped on key events, leaving click-to-cycle visually
     /// stale.
     fn apply_live_config_theme(&mut self) {
@@ -1877,7 +1877,7 @@ impl App<'_> {
                 // The brand logo / wordmark / spinner PNGs bake the
                 // theme bg into the pixmap (see `brand::render_logo_png`),
                 // so a live theme switch must re-render and re-upload
-                // them — otherwise the header keeps painting the logo
+                // them, otherwise the header keeps painting the logo
                 // over the previous theme's bg.
                 self.rebake_brand_with_theme_bg();
             }
@@ -1887,7 +1887,7 @@ impl App<'_> {
     /// Re-render the brand PNGs (logo + wordmark + spinner frames) with
     /// the current theme bg pre-filled into the pixmap, then queue the
     /// new upload bytes and dirty the header skip-state so the next
-    /// frame re-emits the cells. Same image_ids are reused — Kitty
+    /// frame re-emits the cells. Same image_ids are reused, Kitty
     /// replaces the storage on `a=T` for an existing id.
     fn rebake_brand_with_theme_bg(&mut self) {
         let brand_bg = match self.ctx.color_theme.bg {
@@ -1896,7 +1896,7 @@ impl App<'_> {
         };
         // Guard: don't re-render + re-upload the brand PNGs when the
         // theme hasn't actually changed. Without this, every keystroke
-        // in the Config view triggered a fresh upload — visible as a
+        // in the Config view triggered a fresh upload, visible as a
         // double blink on exit because two consecutive frames each
         // pushed a full image refresh.
         if self.last_brand_bg == brand_bg {
@@ -2008,11 +2008,11 @@ impl App<'_> {
         self.render_status_line(f, status_line_area);
 
         // Dir-input caret: a "block" cursor painted directly into the
-        // buffer — we overwrite the char that sits at the insertion point
+        // buffer, we overwrite the char that sits at the insertion point
         // with the SAME char in reversed colors (theme bg on the cursor's
         // accent color) so the letter stays visible "through" the cursor.
         // The real terminal caret is hidden on overlay-open so it can't be
-        // teleported around by graph/avatar image escapes — the block on
+        // teleported around by graph/avatar image escapes, the block on
         // screen is always exactly where we paint it.
         //
         // Blinking is driven manually off `spinner_frame` (Tick fires every
@@ -2035,8 +2035,8 @@ impl App<'_> {
                 let blink_on = (self.app_status.spinner_frame % 12) < 6;
                 if blink_on {
                     // `virtual_cursor_fg` is `Color::Reset` in every shipped
-                    // theme — using it as bg produces a transparent block
-                    // Inverted cursor — bg = theme.fg, fg = theme.bg.
+                    // theme, using it as bg produces a transparent block
+                    // Inverted cursor, bg = theme.fg, fg = theme.bg.
                     // Tracks the active theme so the block stays
                     // visible on both light and dark palettes.
                     let style = Style::default()
@@ -2045,7 +2045,7 @@ impl App<'_> {
                     f.buffer_mut()
                         .set_string(cursor_x, anchor_y, &cursor_char, style);
                 }
-                // blink_on == false: paint nothing — the input-line render
+                // blink_on == false: paint nothing, the input-line render
                 // above already drew the underlying char with its normal
                 // style, so that's the "off" half of the blink.
             }
@@ -2106,13 +2106,13 @@ impl App<'_> {
 
         // Record the area so the run loop can react to popup growth (and
         // re-clear the graph in the newly covered rows). The actual delete
-        // happens AFTER `terminal.draw` returns — doing it here would emit
+        // happens AFTER `terminal.draw` returns, doing it here would emit
         // escape sequences in the middle of ratatui's flush, garbling the
         // screen.
         self.dir_dropdown_area = Some(area);
 
         // Clear the cell buffer so we don't bleed terminal content through.
-        // `Cell::reset()` zeroes EVERY style component first — using
+        // `Cell::reset()` zeroes EVERY style component first, using
         // `set_style` alone leaves `fg` untouched when the passed style only
         // specifies `bg`, and Kitty's Unicode-placeholder protocol encodes
         // the image ID in the foreground colour: a leftover fg is enough
@@ -2159,7 +2159,7 @@ impl App<'_> {
                 };
                 // Icon column padded so both kinds line up before the `│`
                 // separator. The clock glyph renders as a single cell on most
-                // terminals while the folder emoji renders as two cells —
+                // terminals while the folder emoji renders as two cells
                 // without the extra trailing space the clock rows would sit
                 // one column to the left of the folder rows.
                 let kind_prefix = match s.kind {
@@ -2236,7 +2236,7 @@ impl App<'_> {
                 String::new()
             };
 
-        // Right icon area: [logo] [gap] [wordmark]  — or text fallback (9 cols).
+        // Right icon area: [logo] [gap] [wordmark] , or text fallback (9 cols).
         let has_brand = self.brand_logo.is_some() && self.brand_wordmark.is_some();
         let icon_cell_width = if has_brand {
             crate::brand::LOGO_CELL_WIDTH as u16
@@ -2248,7 +2248,7 @@ impl App<'_> {
 
         // Numeric prefix (vim-style count, e.g. "10" before `j` to skip 10
         // commits). Rendered in the header to the left of the logo, separated
-        // by a vertical bar — when empty, no extra space is reserved and the
+        // by a vertical bar, when empty, no extra space is reserved and the
         // layout falls back to the previous path-then-logo arrangement.
         let prefix_str = self.app_status.numeric_prefix.as_str();
         let prefix_block_width: u16 = if prefix_str.is_empty() {
@@ -2368,7 +2368,7 @@ impl App<'_> {
         // Fill the icon area with the theme bg BEFORE writing the logo
         // cells. The right_area sits to the right of the path; its cells
         // would otherwise stay at the buffer default (Color::Reset) and
-        // the terminal would render them with its own configured bg —
+        // the terminal would render them with its own configured bg
         // typically dark, even on light themes. That dark band leaked
         // through the brand SVG's transparent pixels and showed up as a
         // dark rectangle behind the logo. Painting the area with the
@@ -2380,7 +2380,7 @@ impl App<'_> {
         );
 
         // Icon: [G logo OR spinner frame] + gap + wordmark, or text fallback.
-        // The spinner animation lives here in the header (safe zone — not the last row).
+        // The spinner animation lives here in the header (safe zone, not the last row).
         if has_brand {
             // Determine current logo "identity": None = static G, Some(idx) = animation frame.
             let logo_id: Option<usize> =
@@ -2407,7 +2407,7 @@ impl App<'_> {
             // Brand SVGs are transparent (`nobg`), and the Kitty image
             // protocol composites over the cell BACKGROUND. With
             // `Style::default()`, the cell bg falls through to the
-            // terminal's own default — usually dark — so on light
+            // terminal's own default, usually dark, so on light
             // themes a dark rectangle bleeds through behind the logo.
             // Anchor the cells' bg to the active theme so the alpha
             // composite reveals the theme bg instead. The bg has to be
@@ -2489,7 +2489,7 @@ impl App<'_> {
         let is_search_querying = self.view.is_search_querying();
         let is_config_active = self.view.is_config_active();
         // 2-commit compare flow: when a mark is active in the list view, the
-        // entire footer swaps over to a dedicated mode — left side shows the
+        // entire footer swaps over to a dedicated mode, left side shows the
         // "Comparison: <a> → <b>" indicator (with the cursor side updating
         // live as the user navigates), right side replaces the usual shortcut
         // bar with compare-specific actions.
@@ -2609,7 +2609,7 @@ impl App<'_> {
                     )]
                 }
                 StatusLine::Spinner(msg) => {
-                    // The G animation plays in the header logo — status bar is text-only.
+                    // The G animation plays in the header logo, status bar is text-only.
                     const FRAMES: [&str; 10] = [
                         "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}",
                         "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
@@ -2634,7 +2634,7 @@ impl App<'_> {
 
         let status_area = if show_shortcuts || self.dir_input.active {
             let shortcut_text: String = if self.dir_input.active {
-                // Dedicated cd-mode hints — only the keys that actually do
+                // Dedicated cd-mode hints, only the keys that actually do
                 // something while the overlay is open. The animated label
                 // lives on the LEFT side (see the spans build above).
                 "⌘ ↑↓:navigate▕▏Tab:complete▕▏Enter:cd▕▏Esc:cancel".into()
@@ -2653,7 +2653,7 @@ impl App<'_> {
                 let case_k = kb.primary_global_key(UserEvent::IgnoreCaseToggle);
                 let fuzzy_k = kb.primary_global_key(UserEvent::FuzzyToggle);
                 // Regex toggle reuses the `Discard` event (see
-                // `view::list::set_search_regex`) — no dedicated
+                // `view::list::set_search_regex`), no dedicated
                 // UserEvent. Look that up so a `discard` rebind
                 // surfaces here too.
                 let regex_k = kb.primary_global_key(UserEvent::Discard);
@@ -2665,7 +2665,7 @@ impl App<'_> {
                     .config_footer_hint()
                     .unwrap_or_else(|| "⌘ Enter/⇆:cycle".into())
             } else if compare_pending.is_some() {
-                // Dedicated compare-pending shortcut bar — completely
+                // Dedicated compare-pending shortcut bar, completely
                 // replaces the usual list view shortcuts so the user knows
                 // unambiguously which actions are relevant in this mode.
                 "⌘ Space:compare▕▏↑↓:navigate▕▏Esc:cancel".into()
@@ -2730,7 +2730,7 @@ impl App<'_> {
                     ),
                     View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm".into(),
                     // All branch / tag actions live in the right-hand action
-                    // bar — see `LOCAL_BRANCH_ACTIONS` / `REMOTE_BRANCH_ACTIONS`
+                    // bar, see `LOCAL_BRANCH_ACTIONS` / `REMOTE_BRANCH_ACTIONS`
                     // / `TAG_ACTIONS`. The footer only keeps what's NOT in the
                     // panel (fetch).
                     View::BranchDetail(_) => format!("⌘ {}", g(UserEvent::Refresh, "fetch")),
@@ -2837,7 +2837,7 @@ impl App<'_> {
                 Some(c) if c != marked => short(c.as_str()),
                 _ => "...".to_string(),
             };
-            // The "Comparison: " label keeps the violet bg badge — it's the
+            // The "Comparison: " label keeps the violet bg badge, it's the
             // mode indicator. The two SHAs themselves render in the regular
             // commit-list hash color (no bg) so they look exactly like the
             // SHA column the user is reading from.
@@ -2937,11 +2937,11 @@ impl App<'_> {
 
                 // (Rebase-paused chip used to live here. It now anchors
                 // directly on the paused commit's row in the commit list
-                // — same pattern as the `⚠ N conflicts` / `↻ REBASING`
+                //, same pattern as the `⚠ N conflicts` / `↻ REBASING`
                 // badges on the Uncommitted row. See
                 // `widget::commit_list::render_commit_message`.)
                 if changes.is_dirty() {
-                    // No trailing space after the bar — each indicator below
+                    // No trailing space after the bar, each indicator below
                     // already starts with a leading space, which doubles as
                     // the separator from one indicator to the next.
                     spans.push(Span::styled(" │", dim_separator));
@@ -3070,7 +3070,7 @@ impl<'a> App<'a> {
     }
 
     fn close_detail(&mut self) -> bool {
-        // Walk the PR nav stack — when the Detail view sits on top
+        // Walk the PR nav stack, when the Detail view sits on top
         // of a PR drilldown, Esc pops one level and rebuilds the
         // restore target instead of falling through to the commit
         // graph. `CommitDetail` shouldn't normally appear at this
@@ -3223,14 +3223,14 @@ impl<'a> App<'a> {
             View::List(ref mut view) => view.take_list_state(),
             _ => return,
         };
-        // Mark is consumed on opening — UX described in the plan.
+        // Mark is consumed on opening, UX described in the plan.
         commit_list_state.clear_compare_mark();
 
         let repo_path = self.repository.path().to_path_buf();
 
         // Order detection: find both commits in the loaded list and pick the
         // older one as the diff base. Falls back to (from, to) if either
-        // can't be located (rare — only if hashes drifted out of the loaded
+        // can't be located (rare, only if hashes drifted out of the loaded
         // window between marking and confirming).
         let (older, newer) = {
             let from = self
@@ -3277,7 +3277,7 @@ impl<'a> App<'a> {
 
     fn close_diff(&mut self) {
         self.file_stream.clear();
-        // Pop one level off the PR nav stack — DiffView typically
+        // Pop one level off the PR nav stack, DiffView typically
         // sits on top of a CommitDetail (Esc → that detail) or a
         // PR view (PR → file shortcut, Esc → PR).
         if let Some(top) = self.pr_nav_stack.pop() {
@@ -3292,7 +3292,7 @@ impl<'a> App<'a> {
             let commit_list_state = view.take_list_state().unwrap();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
         } else if let View::Compare(ref mut view) = self.view {
-            // CompareView shares CloseDiff with the regular diff close path —
+            // CompareView shares CloseDiff with the regular diff close path
             // it owns the commit list state directly and returns to List view.
             let commit_list_state = view.take_list_state().unwrap();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
@@ -3300,7 +3300,7 @@ impl<'a> App<'a> {
     }
 
     fn close_diff_to_detail(&mut self) {
-        // PR-driven diffs walk the stack — Esc on DiffView pops one
+        // PR-driven diffs walk the stack, Esc on DiffView pops one
         // level (typically a CommitDetail for the PR commit), so the
         // user backs out one step at a time through the chain.
         if let Some(top) = self.pr_nav_stack.pop() {
@@ -3334,7 +3334,7 @@ impl<'a> App<'a> {
     }
 
     fn open_file_history(&mut self, file_path: String) {
-        // Load history FIRST — same rationale as `open_blame`: if git log
+        // Load history FIRST, same rationale as `open_blame`: if git log
         // errors (rare for valid paths, but possible for files outside the
         // worktree), don't tear down the source view's state.
         let repo_path = self.repository.path().to_path_buf();
@@ -3378,7 +3378,7 @@ impl<'a> App<'a> {
         // Load the blame BEFORE we touch the source view's state. If git
         // blame errors (e.g. file doesn't exist in the working tree, like a
         // path that was renamed or deleted in a later commit), the source
-        // view stays intact — taking its list_state before would leave it in
+        // view stays intact, taking its list_state before would leave it in
         // a half-broken state that panics on the next render.
         let repo_path = self.repository.path().to_path_buf();
         let lines = match crate::git::blame::load_blame(&repo_path, &file_path) {
@@ -3462,7 +3462,7 @@ impl<'a> App<'a> {
                 // lands on the same commit row.
                 let list_context = crate::view::ListRefreshViewContext::from(&state);
                 self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
-                // FULL refresh — the repository caches uncommitted_changes,
+                // FULL refresh, the repository caches uncommitted_changes,
                 // so a partial RefreshUncommitted would leave the conflict
                 // badge stale ("⚠ 1 conflict") even after the file has been
                 // staged. AppEvent::Refresh reloads the repository so the
@@ -3477,7 +3477,7 @@ impl<'a> App<'a> {
     }
 
     /// Non-interactive squash: combine the target commit with its parent
-    /// via the existing rebase machinery. Single notify on completion —
+    /// via the existing rebase machinery. Single notify on completion
     /// no dialog, no editor. Refuses gracefully for initial commits,
     /// merge commits, and when a previous rebase is unfinished (in
     /// which case we surface the same "press A to abort" guidance the
@@ -3491,7 +3491,7 @@ impl<'a> App<'a> {
                     "Squashed {} into its parent",
                     short
                 )));
-                // Repository state changed — force a full list refresh so
+                // Repository state changed, force a full list refresh so
                 // the collapsed history is rendered. We re-anchor at the
                 // top: the original SHA no longer exists, no point trying
                 // to preserve selection.
@@ -3509,13 +3509,13 @@ impl<'a> App<'a> {
             Ok(crate::git::rebase::RebaseOutcome::Paused(msg)) => {
                 let head = msg.lines().next().unwrap_or("rebase stopped");
                 self.ec.send(AppEvent::NotifyWarn(format!(
-                    "Squash hit a conflict — {}. Open the rebase view (e) to recover.",
+                    "Squash hit a conflict, {}. Open the rebase view (e) to recover.",
                     head
                 )));
             }
             Ok(crate::git::rebase::RebaseOutcome::AlreadyInProgress) => {
                 self.ec.send(AppEvent::NotifyError(
-                    "A previous rebase is still in progress — abort it first.".into(),
+                    "A previous rebase is still in progress, abort it first.".into(),
                 ));
             }
             Err(e) => {
@@ -3668,7 +3668,7 @@ impl<'a> App<'a> {
         };
         let tx = self.ec.sender();
         std::thread::spawn(move || {
-            // Run the two calls sequentially — most PRs only need one
+            // Run the two calls sequentially, most PRs only need one
             // of them, and chaining keeps error reporting simple.
             let mut result: Result<(), String> = Ok(());
             if !to_remove.is_empty() {
@@ -3736,7 +3736,7 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Walk one frame off the PR nav stack — re-build whichever
+    /// Walk one frame off the PR nav stack, re-build whichever
     /// view the frame describes. Returns `true` when the transition
     /// happened, `false` when we couldn't honour it (e.g. missing
     /// GitHub auth) and the caller should fall through to its
@@ -3802,7 +3802,7 @@ impl<'a> App<'a> {
                     self.ec.sender(),
                 );
                 // The remaining stack frame (if any) is a
-                // PullRequest{n} — tag the Detail with that origin
+                // PullRequest{n}, tag the Detail with that origin
                 // so its title still reads `· PR #N`.
                 let pr_origin = self.pr_nav_stack.iter().rev().find_map(|f| match f {
                     PrNavRestore::PullRequest { pr_number } => Some(*pr_number),
@@ -3836,7 +3836,7 @@ impl<'a> App<'a> {
                 return;
             }
         };
-        // Push the "return to PR" frame once — the second pass of
+        // Push the "return to PR" frame once, the second pass of
         // this function (post-fetch) re-enters here and would
         // duplicate the entry otherwise.
         if !matches!(
@@ -3853,7 +3853,7 @@ impl<'a> App<'a> {
             self.build_pr_commit_detail_view(pr_number, sha);
             return;
         }
-        // Re-entry post-fetch and the SHA is still missing — both
+        // Re-entry post-fetch and the SHA is still missing, both
         // git fetch passes inside `fetch_pull_request_commit` ran
         // but didn't bring the commit in. Happens on squash-merged
         // PRs whose branch was deleted upstream. Surface the
@@ -3883,7 +3883,7 @@ impl<'a> App<'a> {
                 &sha,
             );
             match result {
-                // We can't touch `self.view` from this thread — fire an
+                // We can't touch `self.view` from this thread, fire an
                 // event back to the main loop and let it build the
                 // Detail view there. `after_fetch: true` short-circuits
                 // the spinner loop above if the commit is still missing
@@ -3893,7 +3893,7 @@ impl<'a> App<'a> {
                     sha,
                     after_fetch: true,
                 }),
-                // Network error / git unreachable — same dialog, the
+                // Network error / git unreachable, same dialog, the
                 // user can still try GitHub web. NotifyError swallowed
                 // here so we don't surface two layers of failure.
                 Err(_) => tx.send(AppEvent::OpenPrCommitDetail {
@@ -3922,7 +3922,7 @@ impl<'a> App<'a> {
             self.pr_nav_stack.clear();
             return;
         }
-        // Reach across to whichever view holds the list state — when
+        // Reach across to whichever view holds the list state, when
         // bouncing back from a file-diff (CommitDetail → DiffView →
         // Esc), the Detail view owns it.
         let commit_list_state = match self.view {
@@ -3960,7 +3960,7 @@ impl<'a> App<'a> {
             self.ec.sender(),
         );
         // Tag the view so its title row reads `Commit Details · PR #N`
-        // — keeps the PR origin visible while the user navigates files.
+        //, keeps the PR origin visible while the user navigates files.
         if let View::Detail(ref mut v) = self.view {
             v.set_pr_origin(Some(pr_number));
         }
@@ -4045,7 +4045,7 @@ impl<'a> App<'a> {
                     // After fetch, kick off the diff-open on the
                     // main thread (via a dedicated event so the
                     // worker doesn't touch UI state directly).
-                    // `after_fetch: true` is a safety belt — the
+                    // `after_fetch: true` is a safety belt, the
                     // 2-pass fetch already validates the commit
                     // landed, but the guard prevents a spinner loop
                     // if it didn't (dialog fires instead).
@@ -4056,7 +4056,7 @@ impl<'a> App<'a> {
                         after_fetch: true,
                     });
                 }
-                // Network error / git unreachable — surface the
+                // Network error / git unreachable, surface the
                 // orphan dialog so the user can fall back to GitHub
                 // web. Same path as a successful-but-empty fetch.
                 Err(_) => {
@@ -4076,14 +4076,14 @@ impl<'a> App<'a> {
         // Reuse the standard "open diff for one file at commit"
         // helper. It expects a commit hash + path and synthesises
         // the DiffView with the proper old/new content from `git
-        // show`. The Detail view's commit_list_state isn't needed —
+        // show`. The Detail view's commit_list_state isn't needed
         // the standalone constructor lives on App.
         self.open_uncommitted_or_commit_file_diff(sha, file_path);
     }
 
     /// Build a DiffView for `file_path` at `commit_hash` from
     /// scratch (no commit-list state). Used when the user drills
-    /// into a file from the PR view — they're not coming from a
+    /// into a file from the PR view, they're not coming from a
     /// list of commits, so we open a "lonely" diff that returns to
     /// the PR view on Esc via `return_to_pr`.
     fn open_uncommitted_or_commit_file_diff(&mut self, commit_hash: String, file_path: String) {
@@ -4111,7 +4111,7 @@ impl<'a> App<'a> {
             ));
             return;
         };
-        // List of file paths within the diff — usually just the one
+        // List of file paths within the diff, usually just the one
         // we're opening, but DiffView supports prev/next file nav.
         let all_paths = vec![(file_path.clone(), true)];
         self.view = View::of_diff_with_entries(
@@ -4146,7 +4146,7 @@ impl<'a> App<'a> {
             Some(t) if !t.is_empty() => t.clone(),
             _ => {
                 self.ec.send(AppEvent::NotifyWarn(
-                    "GitHub authentication required — connect via the config view first.".into(),
+                    "GitHub authentication required, connect via the config view first.".into(),
                 ));
                 return;
             }
@@ -4190,7 +4190,7 @@ impl<'a> App<'a> {
             if let Some(state) = list_state {
                 self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
             } else {
-                // No prior list state — force a fresh refresh.
+                // No prior list state, force a fresh refresh.
                 self.ec
                     .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
                         list_context: crate::view::ListRefreshViewContext {
@@ -4210,7 +4210,7 @@ impl<'a> App<'a> {
             Some(t) if !t.is_empty() => t.clone(),
             _ => {
                 self.ec.send(AppEvent::NotifyWarn(
-                    "GitHub authentication required — connect via the config view first.".into(),
+                    "GitHub authentication required, connect via the config view first.".into(),
                 ));
                 return;
             }
@@ -4326,7 +4326,7 @@ impl<'a> App<'a> {
         };
         if !resume_mode && items.is_empty() {
             self.ec.send(AppEvent::NotifyWarn(
-                "Nothing to rebase — branch is already at the picked commit".into(),
+                "Nothing to rebase, branch is already at the picked commit".into(),
             ));
             return;
         }
@@ -4335,7 +4335,7 @@ impl<'a> App<'a> {
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::Refs(ref mut view) => Some(view.take_list_state()),
             View::Dialog(ref mut view) => {
-                // Came in through the Rebase dialog — `take_before_view`
+                // Came in through the Rebase dialog, `take_before_view`
                 // gives us the underlying View, but for now we just lose
                 // its list state. Acceptable.
                 let _ = view;
@@ -4368,7 +4368,7 @@ impl<'a> App<'a> {
                         pending_notification: None,
                     }));
             } else {
-                // No list state to restore — just trigger a refresh from a
+                // No list state to restore, just trigger a refresh from a
                 // blank list context.
                 self.ec
                     .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
@@ -4398,14 +4398,14 @@ impl<'a> App<'a> {
                 hash.as_str()
             };
             self.ec.send(AppEvent::NotifyWarn(format!(
-                "Commit {} is not in the loaded history — press `]` to load more.",
+                "Commit {} is not in the loaded history, press `]` to load more.",
                 short
             )));
             return;
         }
 
         // Carry the file path forward when the user dives into a commit from a
-        // file-centric view — the new Detail view will pre-select that file in
+        // file-centric view, the new Detail view will pre-select that file in
         // its change list so the user lands exactly where they were looking.
         let preselect_file: Option<String> = match self.view {
             View::Blame(ref view) => Some(view.file_path().to_string()),
@@ -4555,7 +4555,7 @@ impl<'a> App<'a> {
             return;
         }
 
-        // Hunk-level staging — we always load the combined staged+unstaged
+        // Hunk-level staging, we always load the combined staged+unstaged
         // diff so the view shows every hunk linearly with its own indicator.
         // `is_staged` only drives the initial scroll position so the user
         // lands on the first hunk of the side they clicked from.
@@ -4598,7 +4598,7 @@ impl<'a> App<'a> {
     /// reflects the new state. Preserves the user's scroll position and
     /// re-focuses the same hunk so toggling doesn't snap them back to row 0.
     /// If the user has edited the file between the view render and the click,
-    /// hunk_idx may no longer line up — in which case `git apply` itself
+    /// hunk_idx may no longer line up, in which case `git apply` itself
     /// surfaces an error verbatim.
     fn toggle_hunk_stage(&mut self, file_path: String, hunk_idx: usize, currently_staged: bool) {
         let repo_path = self.repository.path().to_path_buf();
@@ -4885,7 +4885,7 @@ impl<'a> App<'a> {
     /// (with a sensible fallback chain), then resume. The file is
     /// created on first use so the editor always lands on a valid path.
     /// The reload-on-Refresh path picks up any edits when the user
-    /// quits the editor — no app restart needed.
+    /// quits the editor, no app restart needed.
     fn open_config_file_in_editor(&mut self) {
         let Some(path) = crate::config::resolve_config_file_path() else {
             self.ec.send(AppEvent::NotifyError(
@@ -4903,7 +4903,7 @@ impl<'a> App<'a> {
         if !path.exists() {
             // Seed with a header so the editor opens on something
             // meaningful instead of a blank file.
-            let seed = "# gitoui config — see https://nayji7.github.io/gitoui/configurations/\n";
+            let seed = "# gitoui config, see https://nayji7.github.io/gitoui/configurations/\n";
             if let Err(e) = std::fs::write(&path, seed) {
                 self.ec
                     .send(AppEvent::NotifyError(format!("create config file: {e}")));
@@ -4933,7 +4933,7 @@ impl<'a> App<'a> {
 
         match exec_result {
             Ok(s) if s.success() => {
-                // Bubble a Refresh up via the pending_refresh slot —
+                // Bubble a Refresh up via the pending_refresh slot
                 // same pattern as the directory-switch flow. The main
                 // run() loop drains it and re-enters lib::run, which
                 // reloads the config from disk so edits take effect
@@ -4967,7 +4967,7 @@ impl<'a> App<'a> {
             let ui = view.ui_config().clone();
             let github_auth_state = view.github_auth_state().clone();
             // Field-level diff. Each branch below applies the changed
-            // setting in-place, no full app refresh — that path used to
+            // setting in-place, no full app refresh, that path used to
             // delete every Kitty image placement before re-rendering,
             // producing a visible double blink when transitioning back
             // to the commit list. Settings that only matter at startup
@@ -4983,6 +4983,20 @@ impl<'a> App<'a> {
             let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
             let mouse_changed = self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
             let auth_changed = github_auth_state != self.ctx.github_auth_state;
+            // Two settings can't be applied without rebuilding the
+            // entire app:
+            //  - `order` (chrono / topo) gates `git log` itself in
+            //    `Repository::load`; the in-memory commit list was built
+            //    with the OLD order.
+            //  - `protocol` selects the image-protocol encoder held on
+            //    `AppContext.image_protocol` AND baked into every
+            //    `GraphImageManager` placement.
+            // For those, we fall through to a full Ret::Refresh after
+            // persisting + saving, visible flicker, but the change
+            // actually takes effect.
+            let order_changed = old_core.option.order != core.option.order;
+            let protocol_changed = old_core.option.protocol != core.option.protocol;
+            let needs_refresh = order_changed || protocol_changed;
 
             self.view = view.take_before_view();
             let github_avatars = core.github_avatars();
@@ -5025,6 +5039,19 @@ impl<'a> App<'a> {
                 };
             }
 
+            // Sync the inner view's ctx with the freshly-mutated one.
+            // `Rc::make_mut` above COWed the inner data (the inner view
+            // held a second Rc clone), so without this swap the view
+            // keeps reading the PRE-change ctx, date_format,
+            // github_avatars, diff_mode, conflict_view, rebase_view
+            // changes would silently no-op until the next full Refresh.
+            // The widget (CommitList et al.) is rebuilt per frame from
+            // the view's `ctx.clone()` so the next render picks up
+            // everything the new ctx exposes.
+            if let View::List(ref mut list_view) = self.view {
+                list_view.replace_ctx(self.ctx.clone());
+            }
+
             // Live-apply the graph-image rebake settings on the list
             // view (only relevant when the inner view is the List).
             if let View::List(ref mut list_view) = self.view {
@@ -5047,6 +5074,30 @@ impl<'a> App<'a> {
             // some Kitty setups keep displaying the previous bake.
             if theme_changed || graph_style_changed || graph_width_changed {
                 let _ = self.cleanup_graph_images();
+            }
+
+            // `order` / `protocol` need a full restart, the smooth
+            // path can't reach them. Trigger a Refresh from the list
+            // view's current state so the user lands back on the same
+            // commit after the rebuild.
+            if needs_refresh {
+                let list_context = if let View::List(ref mut list_view) = self.view {
+                    Some(crate::view::ListRefreshViewContext::from(
+                        list_view.as_list_state(),
+                    ))
+                } else {
+                    None
+                };
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: list_context.unwrap_or(crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        }),
+                        pending_notification: None,
+                    }));
             }
         }
     }
@@ -5245,7 +5296,7 @@ impl<'a> App<'a> {
             MouseEventKind::Down(MouseButton::Left) => {
                 use ratatui::crossterm::event::KeyModifiers;
                 // When the dir-input overlay is open it owns every mouse
-                // event — a click inside the dropdown completes the entry
+                // event, a click inside the dropdown completes the entry
                 // into the input (same as Tab) so the user can keep refining
                 // before pressing Enter. Clicks outside are swallowed so the
                 // underlying commit list can't be interacted with.
@@ -5254,8 +5305,8 @@ impl<'a> App<'a> {
                         if let Some(s) = self.dir_input.suggestions.get(idx).cloned() {
                             // Two-step click: first click on a suggestion just
                             // fills the input (Tab semantics). Clicking the
-                            // exact same suggestion a second time — i.e. the
-                            // input text already equals what we'd write —
+                            // exact same suggestion a second time, i.e. the
+                            // input text already equals what we'd write
                             // commits the cd (Enter semantics). Lets the user
                             // both refine and confirm with the mouse alone.
                             if self.dir_input.text == s.display {
@@ -5295,7 +5346,7 @@ impl<'a> App<'a> {
                                                 ratatui::crossterm::cursor::Show
                                             );
                                             // Bubble the rebuild up via the
-                                            // pending_refresh slot — the main
+                                            // pending_refresh slot, the main
                                             // loop will drain it right after
                                             // handle_mouse_event returns and
                                             // exit with Ret::Refresh, the same
@@ -5345,7 +5396,7 @@ impl<'a> App<'a> {
                         }
                     }
                     // Click outside dropdown while overlay is active: do
-                    // nothing — explicitly NOT propagating to view.handle_click.
+                    // nothing, explicitly NOT propagating to view.handle_click.
                     return Ok(true);
                 }
                 if mouse.modifiers.contains(KeyModifiers::CONTROL) {
@@ -5353,7 +5404,7 @@ impl<'a> App<'a> {
                 } else {
                     self.view.handle_click(mouse.column, mouse.row);
                 }
-                // Click in the Config view can cycle the theme — mirror
+                // Click in the Config view can cycle the theme, mirror
                 // the live-apply that the keyboard path runs.
                 self.apply_live_config_theme();
                 true
@@ -5394,7 +5445,7 @@ impl<'a> App<'a> {
     fn stop_spinner(&mut self) {
         self.app_status.spinner_active = false;
         self.header_logo_last = None; // logo switches from animated back to static
-                                      // Clear the status line too — the spinner renderer keeps
+                                      // Clear the status line too, the spinner renderer keeps
                                       // showing `Spinner(msg)` until *something* overwrites it,
                                       // and not every caller dispatches a Notify* afterwards
                                       // (e.g. opening a dialog leaves no replacement). Without
@@ -5447,7 +5498,7 @@ impl<'a> App<'a> {
     // Phase 2 - Dialog management
     fn open_dialog(&mut self, kind: DialogKind) {
         // Short-circuit the Rebase dialog when a previous rebase is still
-        // paused — the user can't sensibly plan a NEW rebase until they
+        // paused, the user can't sensibly plan a NEW rebase until they
         // resolve / abort the running one. Route straight to the editor
         // so its resume panel takes over.
         if matches!(&kind, DialogKind::Rebase { .. })
@@ -5645,7 +5696,7 @@ impl<'a> App<'a> {
         } else {
             None
         };
-        // Skip the "Rebasing…" spinner when the user picked Interactive —
+        // Skip the "Rebasing…" spinner when the user picked Interactive
         // the action handler will hand off to InteractiveRebaseView via an
         // early-return, and the spinner would otherwise replace the footer
         // shortcuts with the spinner text for the entire editor session.
@@ -5731,7 +5782,7 @@ impl<'a> App<'a> {
                 )
             }
             GitAction::SquashWithParent => {
-                // Like the interactive rebase hijack above — squash uses
+                // Like the interactive rebase hijack above, squash uses
                 // its own machinery and reports via notifications, not
                 // through the standard GitResult path.
                 self.close_dialog();

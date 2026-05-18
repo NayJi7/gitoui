@@ -153,7 +153,7 @@ impl From<Option<InitialSelection>> for app::InitialSelection {
 }
 
 /// Top-level error type returned by `gitoui::run()` and the entry points it
-/// composes. Variants are deliberately coarse — finer-grained domain errors
+/// composes. Variants are deliberately coarse, finer-grained domain errors
 /// (e.g. `git::actions` returning `Result<_, String>`) are surfaced as `String`
 /// inside their respective variants so the user sees the underlying message
 /// verbatim.
@@ -240,7 +240,7 @@ pub fn run() -> Result<()> {
         }
     };
 
-    // `--update` is the explicit escape hatch — always prompts, ignores
+    // `--update` is the explicit escape hatch, always prompts, ignores
     // the cache + the "never_ask" preference, and exits afterwards.
     // Splash is shown above the check just like the --help / --version
     // paths so the brand surfaces on every entry point.
@@ -253,14 +253,14 @@ pub fn run() -> Result<()> {
     // bails out fast (no network) when the cache is fresh, the user has
     // chosen "never", or we're not attached to a TTY. On `Updated` it
     // already exec'd the new binary and never returns. Splash only
-    // prints if we're actually about to prompt — silent paths stay
+    // prints if we're actually about to prompt, silent paths stay
     // silent.
     if !args.no_update_check {
         let proto = protocol::auto_detect();
         let _ = update::maybe_check_at_startup(|| print_no_repo_splash(proto));
     }
 
-    // Validate the user config FIRST — before we pay the cost of
+    // Validate the user config FIRST, before we pay the cost of
     // initialising syntect (which loads ~100 syntax definitions and a
     // dozen theme files) or spawning the event thread. A misformatted
     // TOML or unknown theme name otherwise added ~half a second of
@@ -283,11 +283,11 @@ pub fn run() -> Result<()> {
     // commit list. Multiplies `core.option.load_more_count` to compute the
     // current commit cap when the CLI did not pass an explicit `-n`.
     let mut load_more_count: usize = 0;
-    // Filesystem watcher on .git/ — keeps the UI in sync with external git
+    // Filesystem watcher on .git/, keeps the UI in sync with external git
     // operations (commits from another shell, push/pull/fetch, branch
     // switches, …). Held alive for the whole `run()` lifetime; dropping it
     // stops the watcher thread. We track the watched path so a `cd` into
-    // a different repo can rebuild the watcher onto the new `.git/` —
+    // a different repo can rebuild the watcher onto the new `.git/`
     // otherwise the old watcher keeps firing for the *previous* repo and
     // gitoui takes those phantom events as a reason to full-refresh.
     let mut _git_watcher: Option<_> = None;
@@ -298,7 +298,7 @@ pub fn run() -> Result<()> {
         // failure renders as a styled --help-style error block and
         // exits cleanly. Subsequent reloads (config reopened from
         // inside the app) go through the legacy `config::load()` and
-        // log the error to stderr — the running session shouldn't
+        // log the error to stderr, the running session shouldn't
         // crash because the user typo'd a hex code mid-edit.
         let (mut core_config, ui_config, mut graph_config, mut color_theme, keybind_patch) =
             if let Some(c) = preflight_config.take() {
@@ -307,7 +307,7 @@ pub fn run() -> Result<()> {
                 c
             } else if terminal.is_none() {
                 // Pre-flight got consumed by an earlier iteration that
-                // bailed (`Ret::Refresh` re-enters this loop, etc.) —
+                // bailed (`Ret::Refresh` re-enters this loop, etc.)
                 // re-load with the diagnostic-bearing path.
                 match config::load_or_diagnose() {
                     Ok(config) => config,
@@ -330,13 +330,13 @@ pub fn run() -> Result<()> {
         // Resolve the configured theme: built-in name OR a user file at
         // `~/.config/gitoui/themes/<name>.toml`. The loader path already
         // validated this returns Ok at boot, so any error here would be from
-        // a config-reload mid-session — fall back silently in that case.
+        // a config-reload mid-session, fall back silently in that case.
         if !core_config.option.theme.is_empty() {
             if let Ok(def) = crate::themes::resolve_or_load(&core_config.option.theme) {
                 color_theme = def.color_theme;
                 core_config.option.syntax_theme = def.syntax_theme;
                 // Theme-tinted graph palette wins over the generic config default
-                // — but only if the theme actually shipped one. An empty Vec means
+                //, but only if the theme actually shipped one. An empty Vec means
                 // "the theme didn't customize the graph", so we leave the user's
                 // `[graph.color.branches]` setting alone.
                 if !color_theme.graph_branches.is_empty() {
@@ -366,7 +366,7 @@ pub fn run() -> Result<()> {
             .or(core_config.option.initial_selection)
             .into();
 
-        // Centralised graph-palette construction — see `build_graph_color_set`
+        // Centralised graph-palette construction, see `build_graph_color_set`
         // for the theme-vs-config precedence and the transparent-background
         // patching logic.
         let graph_color_set = color::build_graph_color_set(&color_theme, &graph_config.color);
@@ -436,14 +436,14 @@ pub fn run() -> Result<()> {
             branch_color_map: rustc_hash::FxHashMap::default(),
             graph_color_set: graph_color_set.clone(),
             graph_config: graph_config.clone(),
-            // Filled after the repository is loaded — see below.
+            // Filled after the repository is loaded, see below.
             current_branch_remote_state: None,
             repo_path: std::path::PathBuf::new(),
         });
 
         // If we were launched from a sub-directory of a repo, jump up to
         // the work-tree root so the header pwd, all `git` invocations,
-        // and the FS watcher anchor at the same place — the repo, not
+        // and the FS watcher anchor at the same place, the repo, not
         // wherever the shell happened to be when the user typed
         // `gitoui`. Failures here are harmless: when the cwd isn't in a
         // repo at all the next `Repository::load(".", ...)` returns the
@@ -567,7 +567,7 @@ pub fn run() -> Result<()> {
             // RIGHT after raw mode + alt-screen are entered. Without
             // this, terminals fall back to xterm's legacy meta encoding
             // (Alt+letter → ESC + letter), which is unreliable when the
-            // two bytes drift apart in the read window — `Alt+c` is
+            // two bytes drift apart in the read window, `Alt+c` is
             // then delivered as a stray `Esc` that closes the active
             // view, with the `c` arriving too late to be combined.
             // Terminals that don't speak the protocol silently ignore
@@ -653,7 +653,7 @@ pub fn run() -> Result<()> {
 /// ```
 ///
 /// Both Kitty (default `C=0`) and iTerm2 advance the cursor by `(cell_w, cell_h-1)`
-/// after rendering — i.e. the cursor lands on the LAST row of the image. Two
+/// after rendering, i.e. the cursor lands on the LAST row of the image. Two
 /// trailing newlines therefore produce exactly one blank separator row before
 /// the prompt. Falls back to a plain text banner when the protocol can't
 /// render inline (e.g. KittyUnicode placeholder mode).
@@ -667,7 +667,7 @@ fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     let wm_w: usize = 21;
     let wm_h: usize = 5;
     let total_h: u16 = wm_h as u16;
-    // Logo and wordmark are now both 5 rows tall — same baseline, no slack.
+    // Logo and wordmark are now both 5 rows tall, same baseline, no slack.
     let logo_y_offset: u16 = 0;
 
     println!();

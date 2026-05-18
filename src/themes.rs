@@ -26,7 +26,7 @@ pub fn list_themes() -> &'static [&'static str] {
 /// Names of every custom theme file found under `<config_dir>/themes/`.
 /// Returns the file stems (no `.toml`), sorted case-insensitively.
 /// Silently returns an empty vec if the dir doesn't exist, isn't readable,
-/// or there's no config dir at all — the config view treats this as
+/// or there's no config dir at all, the config view treats this as
 /// "no custom themes available", same as the empty built-ins case.
 pub fn discover_custom_themes() -> Vec<String> {
     let Some(config_path) = crate::config::resolve_config_file_path() else {
@@ -48,7 +48,7 @@ pub fn discover_custom_themes() -> Vec<String> {
                 .and_then(|s| s.to_str())
                 .map(str::to_owned)
         })
-        // Built-in names take precedence — a custom file shadowing a
+        // Built-in names take precedence, a custom file shadowing a
         // built-in name would be confusing in the cycle.
         .filter(|n| !builtins.contains(n.as_str()))
         .collect();
@@ -58,7 +58,7 @@ pub fn discover_custom_themes() -> Vec<String> {
 
 /// Built-ins + custom themes, in a stable order suitable for the
 /// config view's ←/→ cycle: built-ins first (as listed), then custom
-/// themes sorted alphabetically. Empty vec is never returned — even
+/// themes sorted alphabetically. Empty vec is never returned, even
 /// without custom files we get the 10 built-ins.
 pub fn list_all_themes() -> Vec<String> {
     let mut all: Vec<String> = list_themes().iter().map(|&s| s.to_string()).collect();
@@ -700,8 +700,8 @@ pub fn custom_theme_path(name: &str) -> Option<PathBuf> {
 
 /// Built-in lookup first, disk fall-back second. The fall-back path
 /// is `<config_dir>/themes/<name>.toml`. Empty `name` is treated as
-/// "no theme picked" — same convention as `core.option.theme = ""`
-/// in the main config — and returns `Ok(default)`.
+/// "no theme picked", same convention as `core.option.theme = ""`
+/// in the main config, and returns `Ok(default)`.
 pub fn resolve_or_load(name: &str) -> Result<ThemeDefinition, ThemeLoadError> {
     if name.is_empty() {
         return Ok(default_theme_definition());
@@ -709,7 +709,7 @@ pub fn resolve_or_load(name: &str) -> Result<ThemeDefinition, ThemeLoadError> {
     if let Some(def) = get_theme(name) {
         return Ok(def);
     }
-    // Built-in lookup missed — try disk.
+    // Built-in lookup missed, try disk.
     let Some(path) = custom_theme_path(name) else {
         return Err(ThemeLoadError::NotFound {
             name: name.to_string(),
@@ -772,7 +772,7 @@ fn load_theme_from_path(path: &Path) -> Result<ThemeDefinition, ThemeLoadError> 
 
     // Pick a syntax theme:
     //  1. explicit `syntax_theme = "..."` in the file wins.
-    //  2. else, auto-detect from the resolved bg's luminance — overriding
+    //  2. else, auto-detect from the resolved bg's luminance, overriding
     //     the inherited base. The user can override `bg` to a light color
     //     while keeping `base = "Tokyo Night"`; we don't want the dark
     //     base's syntax then. If they DO want the base's syntax verbatim

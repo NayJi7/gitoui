@@ -12,21 +12,21 @@ speak one of three image protocols.
 
 | Terminal               | Kitty | iTerm2 | Sixel | Notes                              |
 |------------------------|-------|--------|-------|------------------------------------|
-| **Ghostty**            | ✅    | —      | —     | **Recommended** — what <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is developed on, all features tested first here. |
-| **Kitty**              | ✅    | —      | —     | Reference implementation of the protocol. |
+| **Ghostty**            | ✅    |,      |,     | **Recommended**, what <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is developed on, all features tested first here. |
+| **Kitty**              | ✅    |,      |,     | Reference implementation of the protocol. |
 | **WezTerm**            | ✅    | ✅     | ✅    | Auto-detects; picks Kitty graphics first. |
-| **iTerm2** (macOS)     | —     | ✅     | —     |                                    |
-| **Konsole**            | ✅    | —      | ✅    | Kitty since 22.04, Sixel optional. |
-| **foot** (Wayland)     | —     | —      | ✅    | Sixel native; very fast.           |
-| **xterm**              | —     | —      | 🟡    | Needs `xterm -ti vt340`.           |
-| **Alacritty**          | —     | —      | —     | No image protocol — graph falls back to Unicode. |
-| **Terminal.app** (macOS) | —   | —      | —     | Same fallback as Alacritty.        |
-| **gnome-terminal / Ptyxis** | 🟡 | —    | —     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
-| **Windows Terminal**   | —     | —      | —     | Unicode fallback only (as of Windows Terminal 1.x). |
+| **iTerm2** (macOS)     |,     | ✅     |,     |                                    |
+| **Konsole**            | ✅    |,      | ✅    | Kitty since 22.04, Sixel optional. |
+| **foot** (Wayland)     |,     |,      | ✅    | Sixel native; very fast.           |
+| **xterm**              |,     |,      | 🟡    | Needs `xterm -ti vt340`.           |
+| **Alacritty**          |,     |,      |,     | No image protocol, graph falls back to Unicode. |
+| **Terminal.app** (macOS) |,   |,      |,     | Same fallback as Alacritty.        |
+| **gnome-terminal / Ptyxis** | 🟡 |,    |,     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
+| **Windows Terminal**   |,     |,      |,     | Unicode fallback only (as of Windows Terminal 1.x). |
 
 ✅ <Badge text="first-class" variant="success" /> &nbsp;
 🟡 <Badge text="config needed" variant="caution" /> &nbsp;
-— <Badge text="not supported" variant="danger" />
+, <Badge text="not supported" variant="danger" />
 
 When in doubt, run `gitoui --protocol sixel` (or `kitty`, `iterm2`) to force a
 specific protocol and bypass auto-detect.
@@ -41,20 +41,20 @@ flag at startup. This makes `Alt+letter` shortcuts arrive as a single
 KeyEvent on supporting terminals instead of `Esc` + `letter` (which would
 otherwise close the active view before the letter arrived).
 
-Terminals that don't speak the protocol silently ignore the push — Alt-key
+Terminals that don't speak the protocol silently ignore the push, Alt-key
 bindings work where the terminal sends them as proper meta-encoded events
 (most modern terminals do).
 
 <Aside type="caution" title="Alt keys not firing?">
-Switch to `Ctrl+...` for your custom bindings — see
+Switch to `Ctrl+...` for your custom bindings, see
 [Custom keybindings](/keybindings/custom/).
 </Aside>
 
 ## Mouse + clipboard
 
-- **Mouse** — enabled by default (`ui.common.mouse_enabled = true`). Click on
+- **Mouse**, enabled by default (`ui.common.mouse_enabled = true`). Click on
   rows / tabs / chips to interact. Wheel scrolls.
-- **Clipboard** — system clipboard via the
+- **Clipboard**, system clipboard via the
   [`arboard`](https://crates.io/crates/arboard) crate. On Wayland, `wl-copy`
-  is **not** required — `arboard`'s `wayland-data-control` feature talks the
+  is **not** required, `arboard`'s `wayland-data-control` feature talks the
   protocol directly.

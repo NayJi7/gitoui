@@ -1,4 +1,4 @@
-//! Auto-update — checks crates.io for a newer release at startup, prompts
+//! Auto-update, checks crates.io for a newer release at startup, prompts
 //! the user, and runs the update via `cargo install` or the hosted
 //! `install.sh` depending on how gitoui was installed.
 //!
@@ -76,7 +76,7 @@ fn unix_now() -> u64 {
 }
 
 /// Fetch the latest stable version published on crates.io. Returns `None`
-/// on any failure (network, parsing, …) — callers must treat the absence
+/// on any failure (network, parsing, …), callers must treat the absence
 /// as "couldn't check this time" and not as "no update available".
 fn fetch_latest_from_crates() -> Option<String> {
     #[derive(Deserialize)]
@@ -110,7 +110,7 @@ fn is_newer(latest: &str, current: &str) -> bool {
         semver::Version::parse(current),
     ) {
         (Ok(l), Ok(c)) => l > c,
-        // If parsing fails, fall back to string inequality — better than
+        // If parsing fails, fall back to string inequality, better than
         // ignoring a release because of a version-string oddity.
         _ => latest != current && !latest.is_empty(),
     }
@@ -127,7 +127,7 @@ fn detect_install_method() -> InstallMethod {
     let exe_str = exe.to_string_lossy();
     // Standard cargo install prefix on every OS we support.
     if exe_str.contains("/.cargo/bin/") || exe_str.contains("\\.cargo\\bin\\") {
-        // Sanity check that `cargo` is actually on PATH — if not, the
+        // Sanity check that `cargo` is actually on PATH, if not, the
         // user removed it after installing; fall back to the script.
         if which("cargo") {
             return InstallMethod::Cargo;
@@ -187,14 +187,14 @@ fn run_update(keep_welcome: bool) -> io::Result<()> {
     match method {
         InstallMethod::Cargo => {
             // `--quiet` mutes cargo's "Compiling …" stream but still
-            // surfaces warnings / errors — gives the same visual
+            // surfaces warnings / errors, gives the same visual
             // calm as install.sh's progress lines.
             let status = Command::new("cargo")
                 .args(["install", "gitoui", "--locked", "--force", "--quiet"])
                 .status()?;
             if !status.success() {
                 return Err(io::Error::other(
-                    "cargo install exited non-zero — leaving current binary in place",
+                    "cargo install exited non-zero, leaving current binary in place",
                 ));
             }
             // Cargo doesn't print a quick-start hint; we do it
@@ -223,7 +223,7 @@ fn run_update(keep_welcome: bool) -> io::Result<()> {
                 .status()?;
             if !status.success() {
                 return Err(io::Error::other(
-                    "install.sh exited non-zero — leaving current binary in place",
+                    "install.sh exited non-zero, leaving current binary in place",
                 ));
             }
         }
@@ -243,7 +243,7 @@ fn print_post_update_welcome() {
         ("", "", "", "")
     };
     println!();
-    println!("  {bold}Quick start{reset} — inside any git repo:");
+    println!("  {bold}Quick start{reset}, inside any git repo:");
     println!("    {orange}{bold}gitoui{reset}        {dim}open the commit-graph viewer{reset}");
     println!("    {orange}{bold}gitoui --help{reset} {dim}all flags and options{reset}");
     println!();
@@ -271,13 +271,13 @@ fn current_target_triple() -> Option<&'static str> {
 /// running platform is published yet. Returns:
 /// - `Some(true)`  → archive exists, safe to run install.sh
 /// - `Some(false)` → archive 404s (release was just tagged, build CI
-///   still running — we mustn't prompt the user yet)
+///   still running, we mustn't prompt the user yet)
 /// - `None`        → network error or unsupported platform, caller
 ///   should err on the side of "ask anyway".
 ///
 /// Avoids the race where `crates.io` already publishes a new version
 /// (parallel `publish-crate` job finishes in seconds) but the multi-arch
-/// `release` job hasn't uploaded the binaries yet — running install.sh
+/// `release` job hasn't uploaded the binaries yet, running install.sh
 /// in that window resolves an older tag and silently exits "up to date".
 fn github_release_ready(version: &str) -> Option<bool> {
     let target = current_target_triple()?;
@@ -299,7 +299,7 @@ fn github_release_ready(version: &str) -> Option<bool> {
 ///
 /// 1. `current_exe()` as-is if the file still exists at that path
 ///    (true when install.sh wrote elsewhere, or on macOS).
-/// 2. Strip a literal " (deleted)" suffix — Linux readlink(/proc/self/exe)
+/// 2. Strip a literal " (deleted)" suffix, Linux readlink(/proc/self/exe)
 ///    appends that when the original inode was unlinked or replaced
 ///    (which is exactly what `mv -f` inside `install_binary` does).
 /// 3. `PATH`-based lookup of `gitoui` as a last resort, for the case
@@ -326,12 +326,12 @@ fn resolved_self_path() -> io::Result<PathBuf> {
     }
     Err(io::Error::new(
         io::ErrorKind::NotFound,
-        "gitoui binary not found after install — re-run `gitoui` manually",
+        "gitoui binary not found after install, re-run `gitoui` manually",
     ))
 }
 
 /// Args to forward to the re-execed binary. Drops `--update` so the new
-/// binary doesn't immediately loop into another update check — we just
+/// binary doesn't immediately loop into another update check, we just
 /// finished updating, the user's intent is satisfied.
 fn forwarded_args() -> Vec<String> {
     env::args().skip(1).filter(|a| a != "--update").collect()
@@ -356,7 +356,7 @@ fn exec_self() -> io::Result<()> {
     std::process::exit(status.code().unwrap_or(0));
 }
 
-/// Outcome of a startup check — used by `lib::run()` to decide whether
+/// Outcome of a startup check, used by `lib::run()` to decide whether
 /// to keep going into the UI or not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckOutcome {
@@ -365,7 +365,7 @@ pub enum CheckOutcome {
     Continue,
     /// User declined this time but didn't disable future checks.
     Skipped,
-    /// User picked `N` — preference persisted, won't ask again.
+    /// User picked `N`, preference persisted, won't ask again.
     SilencedForever,
     /// Update succeeded; `lib::run()` should NOT enter the UI (we're
     /// about to `exec` the new binary).
@@ -376,7 +376,7 @@ pub enum CheckOutcome {
 /// when a newer version is found. Returns the chosen outcome.
 ///
 /// `splash` is invoked just before the prompt so the brand artwork
-/// shows above it — same convention as `--help` / `--version` /
+/// shows above it, same convention as `--help` / `--version` /
 /// no-repo paths in the main binary.
 pub fn maybe_check_at_startup(splash: impl FnOnce()) -> CheckOutcome {
     if !user_wants_checks() {
@@ -409,7 +409,7 @@ pub fn maybe_check_at_startup(splash: impl FnOnce()) -> CheckOutcome {
         return CheckOutcome::Continue;
     }
     // For curl-installed binaries, only prompt once GitHub has the
-    // matching archive — otherwise the user says yes and install.sh
+    // matching archive, otherwise the user says yes and install.sh
     // resolves the OLD tag, prints a misleading "already up to date".
     // Silent skip here: a tomorrow-startup check will surface the
     // version when the binaries land.
@@ -434,7 +434,7 @@ pub fn force_check(splash: impl FnOnce()) -> CheckOutcome {
     let latest = match fetch_latest_from_crates() {
         Some(v) => v,
         None => {
-            eprintln!("Couldn't reach crates.io — no update check this time.");
+            eprintln!("Couldn't reach crates.io, no update check this time.");
             return CheckOutcome::Continue;
         }
     };
@@ -462,7 +462,7 @@ pub fn force_check(splash: impl FnOnce()) -> CheckOutcome {
         return CheckOutcome::Continue;
     }
     // Explicit `--update` is a one-shot intent: print the install.sh-
-    // style welcome at the end and exit — don't drop the user into the
+    // style welcome at the end and exit, don't drop the user into the
     // TUI like the startup-prompt path does.
     prompt_and_act(&latest, /* relaunch_after = */ false)
 }
@@ -470,7 +470,7 @@ pub fn force_check(splash: impl FnOnce()) -> CheckOutcome {
 fn prompt_and_act(latest: &str, relaunch_after: bool) -> CheckOutcome {
     println!();
     println!(
-        "  gitoui v{latest} is available — you have v{}.",
+        "  gitoui v{latest} is available, you have v{}.",
         current_version()
     );
     print!("  Update now? [y = yes, n = skip, N = never ask again]: ");
@@ -493,7 +493,7 @@ fn prompt_and_act(latest: &str, relaunch_after: bool) -> CheckOutcome {
         Choice::Yes => match run_update(/* keep_welcome = */ !relaunch_after) {
             Ok(()) => {
                 if relaunch_after {
-                    // Startup path — hop into the freshly-installed
+                    // Startup path, hop into the freshly-installed
                     // binary so the user lands in the TUI they wanted
                     // to launch in the first place.
                     match exec_self() {
@@ -505,7 +505,7 @@ fn prompt_and_act(latest: &str, relaunch_after: bool) -> CheckOutcome {
                         }
                     }
                 } else {
-                    // Explicit `--update` — install.sh (or our cargo
+                    // Explicit `--update`, install.sh (or our cargo
                     // helper above) already printed the Quick-start
                     // welcome. Exit cleanly so the user can re-run
                     // `gitoui` themselves when they're ready.
@@ -521,7 +521,7 @@ fn prompt_and_act(latest: &str, relaunch_after: bool) -> CheckOutcome {
         Choice::No => CheckOutcome::Skipped,
         Choice::Never => {
             disable_in_user_config();
-            println!("OK — gitoui won't ask about updates again.");
+            println!("OK, gitoui won't ask about updates again.");
             if let Some(p) = crate::config::resolve_config_file_path() {
                 println!(
                     "(Re-enable by removing `check_updates = false` from {} \
@@ -545,7 +545,7 @@ enum Choice {
 /// Probe `[core.option] check_updates` directly from the user config
 /// file. Done with a minimal parse rather than `crate::config::load()`
 /// so the check runs before the full config layer (syntect themes, …)
-/// pays its cost — and so a broken config doesn't block the update
+/// pays its cost, and so a broken config doesn't block the update
 /// check itself.
 fn user_wants_checks() -> bool {
     let Some(path) = crate::config::resolve_config_file_path() else {
@@ -616,7 +616,7 @@ mod tests {
         // Empty latest is treated as "no update".
         assert!(!is_newer("", "0.1.3"));
         // Garbage version that fails semver still returns true if
-        // strings differ — better than missing a release.
+        // strings differ, better than missing a release.
         assert!(is_newer("nightly-1234", "0.1.3"));
     }
 }

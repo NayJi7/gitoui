@@ -104,7 +104,7 @@ pub struct CommitDetail<'a> {
     ctx: Rc<AppContext>,
     head_branch_name: Option<String>,
     is_head_commit: bool,
-    /// `Some(n)` when this commit was opened from a PR drilldown —
+    /// `Some(n)` when this commit was opened from a PR drilldown
     /// surfaces as `· PR #n` next to the panel title so the user
     /// always sees the originating context.
     pr_origin: Option<u64>,
@@ -140,7 +140,7 @@ impl<'a> CommitDetail<'a> {
 
 /// Display label + the global `UserEvent` it dispatches. The on-screen
 /// key glyph is looked up from `KeyBinds` at render time so a rebind
-/// in the user's config shows up in the panel automatically — no need
+/// in the user's config shows up in the panel automatically, no need
 /// to keep these strings in sync with `assets/default-keybind.toml`.
 pub const COMMIT_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
     ("Add Tag", crate::event::UserEvent::AddTag),
@@ -169,7 +169,7 @@ pub fn commit_actions(is_head_commit: bool) -> &'static [(&'static str, crate::e
 }
 
 /// Map a `UserEvent` to its `[scope.detail]` action name when the
-/// event has no global binding (Revert today — `v` is already taken
+/// event has no global binding (Revert today, `v` is already taken
 /// globally by `clean_untracked`).
 fn scoped_action_name(event: crate::event::UserEvent) -> Option<&'static str> {
     match event {
@@ -215,7 +215,7 @@ impl StatefulWidget for CommitDetail<'_> {
             ])
             .areas(content_inner);
 
-        // Render centered title — appends ` · PR #N` in accent
+        // Render centered title, appends ` · PR #N` in accent
         // colour when the commit was opened from a PR drilldown.
         let pr_suffix = self
             .pr_origin
@@ -293,7 +293,7 @@ impl StatefulWidget for CommitDetail<'_> {
                 state.avatar_row = Some(content_scroll_area.top());
             }
         } else if state.avatar_row.is_some() {
-            // Avatar scrolled out of view — schedule row-scoped deletion
+            // Avatar scrolled out of view, schedule row-scoped deletion
             state.pending_avatar_delete_row = state.avatar_row.take();
         }
         self.render_action_bar(action_bar_area, buf, state);
@@ -412,7 +412,7 @@ impl CommitDetail<'_> {
             let is_hovered = state.hovered_action == Some(i);
             // While a rebase is in progress, the "Rebase current on" slot
             // re-labels to "Resume rebase" (yellow) and dispatches into the
-            // resume view. The bound key still drives both — the action
+            // resume view. The bound key still drives both, the action
             // just means something different in this state.
             let (effective_label, label_color) = if rebasing && *label == "Rebase current on" {
                 ("Resume rebase", Some(self.ctx.color_theme.status_warn_fg))
@@ -429,7 +429,7 @@ impl CommitDetail<'_> {
             }
             let key_style = style.add_modifier(Modifier::BOLD);
             // Most actions resolve through the global keymap. Revert is
-            // an exception — `v` is bound globally to `clean_untracked`
+            // an exception, `v` is bound globally to `clean_untracked`
             // (uncommitted view) and re-scoped to `revert` in
             // [scope.detail]; we fall through to the scoped lookup when
             // the global one comes up empty so the panel still surfaces

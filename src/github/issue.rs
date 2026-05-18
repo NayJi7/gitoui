@@ -1,26 +1,26 @@
-//! GitHub Issues data layer — mirrors `github::pr` for read +
+//! GitHub Issues data layer, mirrors `github::pr` for read +
 //! write endpoints. Issues and PRs share the same `/issues/*`
 //! comments + reactions surface, so the conversation rendering on
 //! the view side reuses the PR `ConversationEntry` shape.
 //!
 //! Endpoints used (all REST v3):
-//! - `GET /repos/{o}/{r}/issues?state=…` — list summaries (filters PRs out)
-//! - `GET /repos/{o}/{r}/issues/{n}` — full detail
-//! - `GET /repos/{o}/{r}/issues/{n}/comments` — conversation thread
+//! - `GET /repos/{o}/{r}/issues?state=…`, list summaries (filters PRs out)
+//! - `GET /repos/{o}/{r}/issues/{n}`, full detail
+//! - `GET /repos/{o}/{r}/issues/{n}/comments`, conversation thread
 
 use serde::{Deserialize, Serialize};
 
 use super::pr::{ConversationEntry, ConversationKind, Label, ReactionCounts};
 use super::{http_client, RepoCoords};
 
-/// Compact issue summary — populates the list panel.
+/// Compact issue summary, populates the list panel.
 #[derive(Debug, Clone)]
 pub struct Issue {
     pub number: u64,
     pub title: String,
     pub author: String,
     pub state: IssueState,
-    /// `Some(reason)` when the issue is closed — `completed` vs
+    /// `Some(reason)` when the issue is closed, `completed` vs
     /// `not_planned`. Drives the closed-state colour (purple for
     /// completed, grey for not-planned).
     pub state_reason: Option<IssueStateReason>,
@@ -44,7 +44,7 @@ pub enum IssueStateReason {
     Reopened,
 }
 
-/// Full issue payload — populates the detail view's Conversation
+/// Full issue payload, populates the detail view's Conversation
 /// tab. We don't need a parallel-fetch architecture like PRs do:
 /// issues only have a single secondary endpoint (`/comments`), so
 /// the body + comments are pulled in two sequential calls.
@@ -65,11 +65,11 @@ pub struct IssueDetail {
     /// Relative timestamp ("3h ago") for the opened-this-issue card.
     pub opened_when: String,
     /// Reactions on the issue body itself (the description card).
-    /// Distinct from per-comment reactions in `conversation` — this
+    /// Distinct from per-comment reactions in `conversation`, this
     /// is what the `/issues/{n}` payload's inline `reactions` field
     /// carries.
     pub reactions: ReactionCounts,
-    /// Mix of issue comments — chronological. Empty when the
+    /// Mix of issue comments, chronological. Empty when the
     /// `/comments` endpoint returns nothing.
     pub conversation: Vec<ConversationEntry>,
 }
@@ -108,7 +108,7 @@ pub fn list_issues(token: &str, coords: &RepoCoords) -> Result<Vec<Issue>, Strin
         .collect())
 }
 
-/// Fetch a single issue's full detail. Two sequential REST calls —
+/// Fetch a single issue's full detail. Two sequential REST calls
 /// the issue endpoint then the comments endpoint. Body + comments
 /// land on the returned `IssueDetail`.
 pub fn fetch_issue_detail(
@@ -142,7 +142,7 @@ pub fn fetch_issue_detail(
     let issue: ApiIssue =
         serde_json::from_str(&issue_body).map_err(|e| format!("Issue JSON: {}", e))?;
 
-    // Comments — pulled even when comment count is 0 because the
+    // Comments, pulled even when comment count is 0 because the
     // /issues endpoint doesn't inline them. One call covers a
     // typical small / mid issue; >50 comments would need paging
     // (revisit when we see one in the wild).
@@ -234,7 +234,7 @@ fn parse_state_reason(s: &str) -> Option<IssueStateReason> {
     }
 }
 
-/// Compact relative time formatter — reused from the PR view's
+/// Compact relative time formatter, reused from the PR view's
 /// `short_relative` so PR and Issue cards format the same.
 fn short_relative(iso: &str) -> String {
     use chrono::DateTime;
@@ -275,7 +275,7 @@ struct ApiIssue {
     user: Option<ApiUser>,
     #[serde(default)]
     state: String,
-    /// `completed` / `not_planned` / `reopened` — set when the
+    /// `completed` / `not_planned` / `reopened`, set when the
     /// issue is closed (or when it was reopened post-close).
     #[serde(default)]
     state_reason: Option<String>,
@@ -296,7 +296,7 @@ struct ApiIssue {
     #[serde(default)]
     closed_at: Option<String>,
     /// Present on /issues endpoint when the entry is a pull request
-    /// — used to filter PRs out of the list.
+    ///, used to filter PRs out of the list.
     #[serde(default)]
     pull_request: Option<serde_json::Value>,
     /// Inline reactions object on the issue body. `None` when the
@@ -654,7 +654,7 @@ pub fn create_issue(
     Ok(created.number)
 }
 
-/// List repo labels — drives the labels picker. Same response shape
+/// List repo labels, drives the labels picker. Same response shape
 /// as the PR module's equivalent call but kept local so issue.rs can
 /// be lifted out independently.
 pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, String> {
@@ -700,7 +700,7 @@ pub fn list_repo_assignees(token: &str, coords: &RepoCoords) -> Result<Vec<Strin
     Ok(raw.into_iter().map(|u| u.login).collect())
 }
 
-/// List open milestones — the picker shows only open ones since
+/// List open milestones, the picker shows only open ones since
 /// closed milestones can't be set on a new issue.
 pub fn list_repo_milestones(token: &str, coords: &RepoCoords) -> Result<Vec<Milestone>, String> {
     let client = http_client()?;
@@ -729,7 +729,7 @@ pub fn list_repo_milestones(token: &str, coords: &RepoCoords) -> Result<Vec<Mile
         .collect())
 }
 
-/// Issue timeline events — the Timeline tab pulls this. Each entry
+/// Issue timeline events, the Timeline tab pulls this. Each entry
 /// is a structured event (label added/removed, assigned, mentioned,
 /// closed, reopened, cross-referenced, etc.). We project the raw
 /// payload into `TimelineEvent` and let the renderer pick an icon +
@@ -761,7 +761,7 @@ pub fn list_issue_timeline(
     Ok(raw.into_iter().filter_map(project_event).collect())
 }
 
-/// Linked PRs — runs a code-search-style query that finds open and
+/// Linked PRs, runs a code-search-style query that finds open and
 /// closed PRs whose body / commits / commit messages mention the
 /// issue number. Surfaced in the Linked tab.
 pub fn list_linked_prs(
@@ -800,7 +800,7 @@ pub fn list_linked_prs(
 /// Try to load the body of the first issue template found under
 /// `.github/ISSUE_TEMPLATE/` (or the alternative single-file paths
 /// GitHub recognises). Returns `None` when no template is
-/// configured. The lookup is path-based — we don't go through the
+/// configured. The lookup is path-based, we don't go through the
 /// API because the user already has the repo on disk. All paths are
 /// resolved relative to `repo_path` so gitoui works even when run
 /// from a sub-directory of the worktree.
@@ -856,7 +856,7 @@ pub(crate) fn load_first_template_at(
 }
 
 /// Strip the leading `---\n...\n---` YAML frontmatter from a
-/// template — that block is metadata for GitHub's web UI, not body
+/// template, that block is metadata for GitHub's web UI, not body
 /// content we want to seed into the compose buffer.
 pub(crate) fn strip_template_frontmatter(s: &str) -> String {
     let mut lines = s.lines();
@@ -1016,7 +1016,7 @@ fn project_event(raw: ApiTimelineEvent) -> Option<TimelineEvent> {
         "pinned" => TimelineKind::Pinned,
         "unpinned" => TimelineKind::Unpinned,
         // Comments are inlined here too but we render them in the
-        // Conversation tab — skip in Timeline to avoid duplication.
+        // Conversation tab, skip in Timeline to avoid duplication.
         "commented" => return None,
         other => TimelineKind::Other {
             kind: other.to_string(),

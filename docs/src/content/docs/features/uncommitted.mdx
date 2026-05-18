@@ -1,6 +1,6 @@
 ---
 title: Uncommitted & staging
-description: Stage hunks, stash, commit — without leaving gitoui.
+description: Stage hunks, stash, commit, without leaving gitoui.
 ---
 
 import { Steps, Aside, LinkCard } from "@astrojs/starlight/components";
@@ -16,7 +16,7 @@ Three side-by-side panels:
 
 `← / →` switch between panels, `↑ / ↓` move the cursor within a panel.
 
-![Uncommitted view — Unstaged / Staged / Untracked panels with a `⚠ conflict` badge](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/uncommitted-3panels.png)
+![Uncommitted view, Unstaged / Staged / Untracked panels with a `⚠ conflict` badge](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/uncommitted-3panels.png)
 
 ## File-level operations
 
@@ -36,27 +36,27 @@ Three side-by-side panels:
 
 1. `Enter` on a file → opens the **interactive diff** for that file.
 2. Cursor moves between hunks with `↑ / ↓`.
-3. Press `Enter` on a hunk to stage (or unstage) just that hunk —
+3. Press `Enter` on a hunk to stage (or unstage) just that hunk
    exactly what `git add -p` does, but visual.
 4. The hunk migrates Unstaged → Staged live; refresh the side panels
    with `r` if you opened other tools in parallel.
 
 </Steps>
 
-![Hunk-level staging — multi-hunk file, Enter on a hunk moves it from Unstaged to Staged](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/stage-hunks.gif)
+![Hunk-level staging, multi-hunk file, Enter on a hunk moves it from Unstaged to Staged](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/stage-hunks.gif)
 
 ## Commit, stash, branch
 
 | Press   | Action                                                                                 |
 |---------|----------------------------------------------------------------------------------------|
-| `w`     | Open the **commit message editor** — multi-line, supports `Ctrl+H` / `Ctrl+W` word-delete and `Ctrl+Enter` / `Ctrl+S` submit. |
+| `w`     | Open the **commit message editor**, multi-line, supports `Ctrl+H` / `Ctrl+W` word-delete and `Ctrl+Enter` / `Ctrl+S` submit. |
 | `i`     | Stash the working tree (with optional message + include-untracked flag dialog).        |
 
 ## Conflict editor
 
 Unmerged files (the result of a paused merge, rebase or cherry-pick) show a
 `⚠ N conflict(s)` badge on the row. `a` on such a file opens the conflict
-editor — pick OURS / THEIRS / BOTH per hunk and save.
+editor, pick OURS / THEIRS / BOTH per hunk and save.
 
 <LinkCard title="3-way conflict editor →" href="../conflict-editor/"
   description="OURS / THEIRS / BOTH per hunk, two-pane or inline layout." />
@@ -65,7 +65,7 @@ editor — pick OURS / THEIRS / BOTH per hunk and save.
 
 <Aside type="note">
 The footer dynamically shows only the shortcuts that apply to the current
-state — `stage-all` only appears when something is unstaged,
+state, `stage-all` only appears when something is unstaged,
 `unstage-all` only when something is staged, etc. Same goes for the
 `H:history` chip (off when the focused file row is empty).
 </Aside>

@@ -171,7 +171,7 @@ impl<'a> UncommittedView<'a> {
                 {
                     if file.status == StatusType::Unmerged {
                         // Enter (or click) on a conflicted file opens the
-                        // three-way resolve editor directly — no dedicated
+                        // three-way resolve editor directly, no dedicated
                         // key, the default action does the right thing.
                         self.tx.send(AppEvent::OpenConflictEditor {
                             file_path: file.path.clone(),
@@ -362,7 +362,7 @@ impl<'a> UncommittedView<'a> {
                         .selected_file(&self.unstaged, &self.staged, &self.untracked)
                 {
                     if file.status == StatusType::Unmerged {
-                        // Click on a conflicted file opens the resolve editor —
+                        // Click on a conflicted file opens the resolve editor
                         // same default action as Enter, no extra hotkey needed.
                         self.tx.send(AppEvent::OpenConflictEditor {
                             file_path: file.path.clone(),
@@ -479,7 +479,7 @@ impl<'a> UncommittedView<'a> {
             .map(|f| f.path.as_str())
     }
 
-    /// Returns true when an unmerged file is present — must mirror the
+    /// Returns true when an unmerged file is present, must mirror the
     /// banner-rendering condition in `widget/uncommitted.rs` so click/hover
     /// row maths stay aligned with what the user sees.
     fn has_conflicts(&self) -> bool {
@@ -582,7 +582,7 @@ impl<'a> UncommittedView<'a> {
             parts.push(global(crate::event::UserEvent::Unstage, "unstage"));
             if has_staged {
                 // `unstage_all` shares the `U` key with `pull` via the
-                // view's event-merge — surface the canonical Pull key
+                // view's event-merge, surface the canonical Pull key
                 // so footer + behaviour stay consistent.
                 parts.push(global(crate::event::UserEvent::Pull, "unstage-all"));
             }
@@ -594,7 +594,7 @@ impl<'a> UncommittedView<'a> {
             }
         }
         // commit (w), stash (i) and clean-untracked (v) are deliberately
-        // omitted here — they all live in the right-hand "Git Actions" panel
+        // omitted here, they all live in the right-hand "Git Actions" panel
         // (see `widget/uncommitted.rs::render_action_bar`). Repeating them
         // here would just clutter the bottom strip.
         if !self.unstaged.is_empty() || !self.staged.is_empty() || !self.untracked.is_empty() {

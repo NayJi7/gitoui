@@ -1,4 +1,4 @@
-//! Git blame view — GitKraken-style annotation of a file at HEAD.
+//! Git blame view, GitKraken-style annotation of a file at HEAD.
 //!
 //! Layout (single column, full terminal width):
 //! ```text
@@ -63,7 +63,7 @@ pub struct BlameView<'a> {
     commit_list_state: Option<CommitListState<'a>>,
     file_path: String,
     lines: Vec<BlameLine>,
-    /// Grouped commit blocks — see `BlameBlock`.
+    /// Grouped commit blocks, see `BlameBlock`.
     blocks: Vec<BlameBlock>,
     /// Index into `blocks` of the keyboard-focused commit group. Drives the
     /// row-wide grey highlight and `Enter` → open-commit target.
@@ -157,7 +157,7 @@ impl<'a> BlameView<'a> {
     /// called for every visible row on every frame.
     fn cached_relative_time(&mut self, dt: Option<&chrono::DateTime<chrono::Local>>) -> String {
         let Some(dt) = dt else {
-            return "—".to_string();
+            return "-".to_string();
         };
         let key = dt.timestamp();
         if let Some((s, computed_at)) = self.rel_time_cache.get(&key) {
@@ -336,7 +336,7 @@ impl<'a> BlameView<'a> {
         if line_idx >= self.lines.len() {
             return;
         }
-        // Click jumps straight into the commit — no two-step "select then
+        // Click jumps straight into the commit, no two-step "select then
         // confirm" dance. Update the focused block first so the UI reflects
         // which line was actually clicked while the Detail view loads.
         if let Some(block_idx) = self.block_at_line(line_idx) {
@@ -382,7 +382,7 @@ impl<'a> BlameView<'a> {
         let title_line = Line::from(vec![
             Span::raw("  "),
             // `▤` (square with horizontal lines) reads as "stacked
-            // rows of annotation" — the blame view's whole purpose.
+            // rows of annotation", the blame view's whole purpose.
             // Blue keeps it visually distinct from the warm-toned
             // PR / Issues icons.
             Span::styled(
@@ -476,7 +476,7 @@ impl<'a> BlameView<'a> {
             + if show_subject { sep_mid } else { 0 };
         let code_w = total_w.saturating_sub(actual_left).max(1);
 
-        // Initialise a syntax highlighter once for this file — `highlight_line`
+        // Initialise a syntax highlighter once for this file, `highlight_line`
         // is stateful (multi-line context).
         let mut highlighter = SyntaxHighlighter::new_with_theme(
             &self.file_path,
@@ -523,13 +523,13 @@ impl<'a> BlameView<'a> {
         f.render_widget(Paragraph::new(visible_lines), content);
 
         // ── Avatar image pass (3-path like commit_list) ─────────────────────
-        // Kitty images live in a separate terminal layer — written directly into
+        // Kitty images live in a separate terminal layer, written directly into
         // the buffer AFTER the Paragraph so text layout is already finalised.
         //
-        // Path 1 — fully stable (scroll + selection unchanged): skip all cells.
-        // Path 2 — selective (only selection changed): update only the two block
+        // Path 1, fully stable (scroll + selection unchanged): skip all cells.
+        // Path 2, selective (only selection changed): update only the two block
         //           heads that gained/lost active state; skip everything else.
-        // Path 3 — full (scroll changed): re-render every visible row.
+        // Path 3, full (scroll changed): re-render every visible row.
         //
         // Paths 1 and 2 emit O(1) Kitty APCs even for large files; only path 3
         // scales with row count (and it only fires on actual scrolls).
@@ -604,7 +604,7 @@ impl<'a> BlameView<'a> {
                         write_head!(j, i, is_now_active);
                     } else {
                         // Continuation of a block that changed active state:
-                        // bg needs updating. No image to delete — plain space.
+                        // bg needs updating. No image to delete, plain space.
                         let row_bg = if is_now_active { sel_bg } else { normal_bg };
                         for x in 0..2u16 {
                             let cell = &mut buf[(avatar_x + x, y)];
@@ -615,7 +615,7 @@ impl<'a> BlameView<'a> {
                     }
                 }
             } else {
-                // ── Path 3: scroll changed — full render ─────────────────────
+                // ── Path 3: scroll changed, full render ─────────────────────
                 for (j, i) in visible_range.enumerate() {
                     let y = content.top() + j as u16;
                     let is_head = self.is_block_head(i);
@@ -626,7 +626,7 @@ impl<'a> BlameView<'a> {
                     if is_head && !self.lines[i].author_mail.is_empty() {
                         write_head!(j, i, is_now_active);
                     } else {
-                        // Continuation or missing email — clear any stale image.
+                        // Continuation or missing email, clear any stale image.
                         for x in 0..2u16 {
                             let cell = &mut buf[(avatar_x + x, y)];
                             cell.set_symbol(clear_cell.symbol());
@@ -701,7 +701,7 @@ impl<'a> BlameView<'a> {
 
     /// Scroll-into-view (no pin): if the focused block's first line is
     /// already visible, leave the viewport alone. Otherwise scroll just
-    /// enough to bring it back into the viewport — at the top if it was
+    /// enough to bring it back into the viewport, at the top if it was
     /// above, at the bottom if it was below. This avoids the "every ← /
     /// → press resets the scroll" feel.
     fn scroll_to_focused(&mut self) {
@@ -720,12 +720,12 @@ impl<'a> BlameView<'a> {
                         .saturating_sub(self.view_height)
                         .min(max_scroll);
                 }
-                // Otherwise the block is already visible — no scroll.
+                // Otherwise the block is already visible, no scroll.
             }
         }
     }
 
-    /// True viewport scroll — doesn't touch focus. Used by the mouse wheel
+    /// True viewport scroll, doesn't touch focus. Used by the mouse wheel
     /// and page-up/down so the user can survey context around the focused
     /// block without losing it.
     fn scroll_lines(&mut self, delta: isize) {
@@ -765,7 +765,7 @@ impl<'a> BlameView<'a> {
         COMMIT_PALETTE[idx % COMMIT_PALETTE.len()]
     }
 
-    /// True if the previous row belongs to a different commit — drives the
+    /// True if the previous row belongs to a different commit, drives the
     /// "show full annotation on the first line of a block, blank on the rest"
     /// pattern.
     fn is_block_head(&self, idx: usize) -> bool {
@@ -793,7 +793,7 @@ impl<'a> BlameView<'a> {
         highlighter: Option<&mut SyntaxHighlighter>,
     ) -> Line<'static> {
         let bar_color = self.commit_color(&bl.hash);
-        // Same grey highlight for both keyboard focus and mouse hover — hover
+        // Same grey highlight for both keyboard focus and mouse hover, hover
         // wins when set so the highlight follows the mouse, otherwise focus
         // stays put. Matches the hunk row highlight in the Diff view exactly.
         let active_block = self.hovered_block.or(self.focused_block);
@@ -806,7 +806,7 @@ impl<'a> BlameView<'a> {
             self.ctx.color_theme.bg
         };
 
-        // Foreground palette aligned with the commit list — same token per
+        // Foreground palette aligned with the commit list, same token per
         // column so the user's eye treats them identically. `divider_fg` is
         // the same grey the Diff view uses for line numbers; we promote it
         // to the main `fg` on active rows so the dim grey doesn't drown in
@@ -835,7 +835,7 @@ impl<'a> BlameView<'a> {
         ));
         spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
 
-        // Avatar placeholder — 2 image cells + 1 separator space. The actual
+        // Avatar placeholder, 2 image cells + 1 separator space. The actual
         // Kitty image bytes are written directly to the buffer AFTER the
         // Paragraph renders (see the avatar image pass in render()). Here we
         // just reserve the space so the following text columns don't overlap.
@@ -876,7 +876,7 @@ impl<'a> BlameView<'a> {
                 spans.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
             }
         } else {
-            // Continuation of a block — pad the annotation columns blank.
+            // Continuation of a block, pad the annotation columns blank.
             let blank_w = hash_w
                 + 1
                 + author_w

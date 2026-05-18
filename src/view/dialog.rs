@@ -65,12 +65,12 @@ impl<'a> DialogView<'a> {
             DialogKind::CreateBranch { .. } => (vec![false], 0),
             DialogKind::CherryPick { .. } => (vec![false, false], 0),
             DialogKind::Merge { .. } => (vec![true, false, false], 0),
-            // Both checkboxes default to false — matches git's native
+            // Both checkboxes default to false, matches git's native
             // behaviour (no -i, preserves author dates).
             DialogKind::Rebase { .. } => (vec![false, false], 0),
             DialogKind::Reset { .. } => (vec![], 1),
             DialogKind::Squash { .. } => (vec![], 0),
-            // Default to "squash" — by far the most common choice when
+            // Default to "squash", by far the most common choice when
             // merging a PR in a team workflow.
             DialogKind::MergePullRequest { .. } => (vec![], 1),
             DialogKind::PushBranch { .. } => (vec![false], 0),
@@ -89,7 +89,7 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmDeleteIssueComment { .. } => (vec![], 0),
             DialogKind::ConfirmPullRequestStateChange { .. } => (vec![], 0),
             DialogKind::ConfirmPullRequestDraftToggle { .. } => (vec![], 0),
-            // Multi-select pickers — seed `checkboxes` from the
+            // Multi-select pickers, seed `checkboxes` from the
             // caller's selection so the dialog opens reflecting the
             // PR's current state.
             DialogKind::PullRequestLabels { selected, .. } => (selected.clone(), 0),
@@ -114,7 +114,7 @@ impl<'a> DialogView<'a> {
                 (vec![], chosen)
             }
             // ConfirmCloseIssue is a 2-option radio (`Completed` /
-            // `Not planned`) — radios use `dropdown_selected`, not
+            // `Not planned`), radios use `dropdown_selected`, not
             // `checkboxes`, so leave the latter empty.
             DialogKind::ConfirmCloseIssue { .. } => (vec![], 0),
             DialogKind::AddWorktree => (vec![false], 0),
@@ -144,7 +144,7 @@ impl<'a> DialogView<'a> {
         ) {
             DialogElement::Radio(dropdown_selected)
         } else if matches!(kind, DialogKind::ConfirmReopenIssue { .. }) {
-            // Reopen has no radio choice — go straight to Validate so
+            // Reopen has no radio choice, go straight to Validate so
             // Enter is a one-keystroke confirm.
             DialogElement::Validate
         } else if !checkboxes.is_empty() {
@@ -278,7 +278,7 @@ impl<'a> DialogView<'a> {
 
     /// Returns true when the `▸` cursor indicator should point at this
     /// element. The cursor follows the mouse hover when one exists,
-    /// otherwise it follows the keyboard focus — never both at once.
+    /// otherwise it follows the keyboard focus, never both at once.
     fn is_pointed_at(&self, element: DialogElement) -> bool {
         match self.hovered {
             Some(h) => h == element,
@@ -357,14 +357,14 @@ impl<'a> DialogView<'a> {
                 }
                 if key.code == KeyCode::Down {
                     if !self.input_value.contains('\n') {
-                        // No body yet — arrow down moves focus to expand button.
+                        // No body yet, arrow down moves focus to expand button.
                         self.focused = DialogElement::BodyExpand;
                     } else {
                         let (line_idx, _) =
                             Self::cursor_line_col(&self.input_value, self.input_cursor);
                         let total_lines = self.input_value.split('\n').count();
                         if line_idx + 1 >= total_lines {
-                            // Already on last line — leave input and go to next element.
+                            // Already on last line, leave input and go to next element.
                             self.focus_next();
                         } else {
                             self.move_cursor_down();
@@ -566,7 +566,7 @@ impl<'a> DialogView<'a> {
                 DialogElement::Radio(i) => {
                     // For dialogs with a dedicated Validate button
                     // (close/reopen confirmation), Enter on a radio row
-                    // only updates the selection — the user must press
+                    // only updates the selection, the user must press
                     // Enter on Validate to actually fire the API. For
                     // other radio dialogs (Reset, Merge, …) the old
                     // pick-and-commit behaviour is preserved.
@@ -590,7 +590,7 @@ impl<'a> DialogView<'a> {
             UserEvent::Cancel => self.tx.send(AppEvent::DialogCancel),
             UserEvent::Close => self.tx.send(AppEvent::DialogCancel),
             UserEvent::NavigateDown => match self.focused {
-                // Radio rows: ↑/↓ moves the focus arrow only — the
+                // Radio rows: ↑/↓ moves the focus arrow only, the
                 // selection commits on Enter, not on every cursor
                 // step. Keeps the UX in line with checkbox rows.
                 DialogElement::Radio(i) if i + 1 < self.radio_count() => {
@@ -657,7 +657,7 @@ impl<'a> DialogView<'a> {
     /// into the body area. Used by the `[ ↵ add body ]` button and Alt+Enter.
     fn insert_body_newline(&mut self) {
         // Always append to the end of the first line (subject), regardless
-        // of cursor position — the body button always starts a new body.
+        // of cursor position, the body button always starts a new body.
         let subject_end = self
             .input_value
             .find('\n')
@@ -808,7 +808,7 @@ impl<'a> DialogView<'a> {
 
         f.render_widget(block, dialog_area);
         f.render_widget(Paragraph::new(lines), inner);
-        // GitHub avatars for the IssueAssignees picker — painted on
+        // GitHub avatars for the IssueAssignees picker, painted on
         // top of the rendered Paragraph so the rounded edges blend
         // over the dialog's bg.
         if matches!(self.kind, DialogKind::IssueAssignees { .. }) {
@@ -952,7 +952,7 @@ impl<'a> DialogView<'a> {
                 ));
             }
             DialogKind::Squash { target } => {
-                // Centered layout — the squash dialog has no fields/options,
+                // Centered layout, the squash dialog has no fields/options,
                 // so visually anchoring the text in the middle reads cleaner
                 // than left-aligned with the standard 2-space gutter.
                 lines.push(
@@ -1000,11 +1000,11 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("Mode:", dim_fg));
                 self.radio_rows.push(lines.len());
-                lines.push(self.radio_line(0, "Soft  — Keep all changes, reset head"));
+                lines.push(self.radio_line(0, "Soft  : keep all changes, reset head"));
                 self.radio_rows.push(lines.len());
-                lines.push(self.radio_line(1, "Mixed — Keep working tree, reset index"));
+                lines.push(self.radio_line(1, "Mixed : keep working tree, reset index"));
                 self.radio_rows.push(lines.len());
-                lines.push(self.radio_line(2, "Hard  — Discard all changes"));
+                lines.push(self.radio_line(2, "Hard  : discard all changes"));
             }
             DialogKind::MergePullRequest {
                 number, pr_title, ..
@@ -1018,11 +1018,11 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 lines.push(label_line("Method:", dim_fg));
                 self.radio_rows.push(lines.len());
-                lines.push(self.radio_line(0, "Merge commit — keep history of branch"));
+                lines.push(self.radio_line(0, "Merge commit : keep history of branch"));
                 self.radio_rows.push(lines.len());
-                lines.push(self.radio_line(1, "Squash — collapse into a single commit"));
+                lines.push(self.radio_line(1, "Squash       : collapse into a single commit"));
                 self.radio_rows.push(lines.len());
-                lines.push(self.radio_line(2, "Rebase — replay each commit onto base"));
+                lines.push(self.radio_line(2, "Rebase       : replay each commit onto base"));
             }
             DialogKind::RenameBranch { branch } => {
                 lines.push(info_line("Current:", branch, dim_fg, yellow));
@@ -1162,7 +1162,7 @@ impl<'a> DialogView<'a> {
                     ),
                 ]));
                 lines.push(Line::from(""));
-                // Body preview — full markdown rendering (bold, italic,
+                // Body preview, full markdown rendering (bold, italic,
                 // code, lists, blockquotes, links, GFM task lists) so
                 // what the user sees matches the actual comment they're
                 // deleting. Capped so the popup stays compact.
@@ -1236,7 +1236,7 @@ impl<'a> DialogView<'a> {
                     )));
                 } else {
                     // Currently-attached chip row (GitHub-style colored
-                    // pills) — gives instant context for what's on the
+                    // pills), gives instant context for what's on the
                     // PR before scanning the togglable list.
                     let attached: Vec<&crate::github::pr::Label> = all_labels
                         .iter()
@@ -1262,7 +1262,7 @@ impl<'a> DialogView<'a> {
                     lines.push(Line::from(""));
                     for (i, lab) in all_labels.iter().enumerate() {
                         // The clickable row is the first line returned
-                        // — continuation rows (long descriptions) sit
+                        //, continuation rows (long descriptions) sit
                         // below but aren't independently selectable.
                         let rendered = self.checkbox_line_labelled(i, lab, inner_width);
                         self.checkbox_rows.push(lines.len());
@@ -1284,7 +1284,7 @@ impl<'a> DialogView<'a> {
                     // GitHub forbids the PR author from being a reviewer
                     // of their own PR (HTTP 422 on request), so we filter
                     // them out client-side. On a solo repo this leaves
-                    // the list empty — make that clear instead of the
+                    // the list empty, make that clear instead of the
                     // vague "no users found".
                     lines.push(Line::from(Span::styled(
                         "No reviewers available.".to_string(),
@@ -1301,7 +1301,7 @@ impl<'a> DialogView<'a> {
                 } else {
                     // Currently-requested reviewers as a @user list
                     // above the picker, same idea as the labels chip
-                    // row — quick visual summary of the PR's state.
+                    // row, quick visual summary of the PR's state.
                     let requested: Vec<&String> = all_users
                         .iter()
                         .enumerate()
@@ -1405,7 +1405,7 @@ impl<'a> DialogView<'a> {
                 } else {
                     // Custom row builder so each assignee gets its
                     // GitHub avatar (when enabled) and the login
-                    // renders in `list_name_fg` (green) — same
+                    // renders in `list_name_fg` (green), same
                     // convention as the author column elsewhere.
                     let theme = &self.ctx.color_theme;
                     let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
@@ -1534,7 +1534,7 @@ impl<'a> DialogView<'a> {
                         Style::default().fg(row_fg)
                     };
                     // `▶` on focused row makes the keyboard cursor
-                    // explicit — same visual treatment as the
+                    // explicit, same visual treatment as the
                     // commit list / PR list selection marker.
                     let arrow = if is_focused { "▶ " } else { "  " };
                     lines.push(Line::from(vec![
@@ -1669,7 +1669,7 @@ impl<'a> DialogView<'a> {
                 lines.push(Line::from(""));
                 if *is_dirty {
                     lines.push(warning_line(
-                        "Worktree has uncommitted changes — will use --force.",
+                        "Worktree has uncommitted changes, will use --force.",
                         warn_fg,
                     ));
                 } else {
@@ -1736,7 +1736,7 @@ impl<'a> DialogView<'a> {
                 }
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "Not available locally — likely the PR was squash-merged".to_string(),
+                    "Not available locally, likely the PR was squash-merged".to_string(),
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(Span::styled(
@@ -1802,7 +1802,7 @@ impl<'a> DialogView<'a> {
                 ]));
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "gitoui can't run or display CI logs locally — the".to_string(),
+                    "gitoui can't run or display CI logs locally, the".to_string(),
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(Span::styled(
@@ -1814,7 +1814,7 @@ impl<'a> DialogView<'a> {
                     Span::styled("Validate", Style::default().fg(dim_fg)),
                     Span::styled(" opens:".to_string(), Style::default().fg(dim_fg)),
                 ]));
-                // Centered, ellipsis-truncated, blue+underlined URL —
+                // Centered, ellipsis-truncated, blue+underlined URL
                 // same treatment as the OrphanedPrCommit dialog so the
                 // two "open on GitHub" prompts read identically.
                 let max_url_w = (inner_width as usize).saturating_sub(2).max(4);
@@ -1919,14 +1919,14 @@ impl<'a> DialogView<'a> {
             DialogKind::ConfirmReopenIssue { .. } => " Reopen Issue ",
             DialogKind::AddRemote => " Add Remote ",
             DialogKind::ConfirmDeleteRemote { .. } => " Remove Remote ",
-            DialogKind::ChooseRemote { .. } => " Push — Set Upstream ",
+            DialogKind::ChooseRemote { .. } => " Push, Set Upstream ",
             DialogKind::SetUpstream { .. } => " Set Upstream ",
             DialogKind::ConfirmAbortOperation { .. } => " Abort Operation ",
             DialogKind::AmendMessage { .. } => " Amend Commit ",
             DialogKind::ConfirmSwitchWorktree { .. } => " Switch Worktree ",
             DialogKind::ConfirmDeleteWorktree { .. } => " Remove Worktree ",
             DialogKind::AddWorktree => " Add Worktree ",
-            DialogKind::CheckoutHasLocalChanges { .. } => " Checkout — Local Changes ",
+            DialogKind::CheckoutHasLocalChanges { .. } => " Checkout, Local Changes ",
             DialogKind::OrphanedPrCommit { file_path, .. } => {
                 if file_path.is_some() {
                     " File not in local repo "
@@ -2103,7 +2103,7 @@ impl<'a> DialogView<'a> {
     }
 
     /// Same as `checkbox_line` but renders a GitHub-style coloured
-    /// chip for the label instead of plain text — used by the
+    /// chip for the label instead of plain text, used by the
     /// `PullRequestLabels` picker so the row reads like the chip
     /// row above it.
     fn checkbox_line_labelled(
@@ -2123,7 +2123,7 @@ impl<'a> DialogView<'a> {
             Span::styled("○ ", Style::default().fg(theme.divider_fg))
         };
         // Width of the indicator + checkmark + chip + the 2-space
-        // gap before the description — descriptions wrap onto
+        // gap before the description, descriptions wrap onto
         // continuation lines indented to this offset so they line
         // up under the description instead of the row's left edge.
         let chip_width = label.name.chars().count() + 2; // ` name `
@@ -2199,7 +2199,7 @@ impl<'a> DialogView<'a> {
         let c_start = (start + validate_text.len() + spacing) as u16;
         let c_end = (start + validate_text.len() + spacing + cancel_text.len()) as u16;
 
-        // Buttons are mutually exclusive — only one can ever be the
+        // Buttons are mutually exclusive, only one can ever be the
         // active target. Use `is_pointed_at` (mouse hover overrides
         // keyboard focus) so we never paint both Validate and Cancel
         // as selected at once.
@@ -2235,7 +2235,7 @@ impl<'a> DialogView<'a> {
     }
 
     fn confirm(&mut self) {
-        // Orphaned PR commit — Validate opens the GitHub web URL
+        // Orphaned PR commit, Validate opens the GitHub web URL
         // (the commit isn't in local git, no GitAction to run).
         if let DialogKind::OrphanedPrCommit {
             pr_number,
@@ -2282,7 +2282,7 @@ impl<'a> DialogView<'a> {
             self.tx.send(AppEvent::SwitchWorktree { path });
             return;
         }
-        // Check on GitHub — Validate opens the run's html_url. Like
+        // Check on GitHub, Validate opens the run's html_url. Like
         // OrphanedPrCommit, no GitAction to run since the data lives on
         // GitHub Actions, not in the local repo.
         if let DialogKind::OpenCheckOnGitHub { url, .. } = &self.kind {
@@ -2298,7 +2298,7 @@ impl<'a> DialogView<'a> {
             }
             return;
         }
-        // Issue picker confirmations don't go through GitAction — they
+        // Issue picker confirmations don't go through GitAction, they
         // dispatch directly back to the view via AppEvent. Handle them
         // up-front and return.
         match &self.kind {
@@ -2315,7 +2315,7 @@ impl<'a> DialogView<'a> {
                     .map(|(_, l)| l.name.clone())
                     .collect();
                 // Send CloseDialog FIRST so the underlying view is
-                // restored before the picker payload lands — the app
+                // restored before the picker payload lands, the app
                 // handler matches on `View::Issues`, which is only
                 // visible after the dialog wrapper is unwrapped.
                 if *for_compose {
@@ -2555,7 +2555,7 @@ impl<'a> DialogView<'a> {
             } => {
                 // Compose-PR uses the same dialog as the existing-PR
                 // labels picker, but on confirm it shouldn't dispatch
-                // a GitAction — the PR doesn't exist yet. Send the
+                // a GitAction, the PR doesn't exist yet. Send the
                 // picked labels to the view to store on the compose
                 // state instead.
                 if *for_compose {
@@ -2875,7 +2875,7 @@ fn info_line(label: &str, value: &str, label_fg: Color, value_fg: Color) -> Line
     ])
 }
 
-/// Same shape as `pr_header_line` but for issues — `#NUM · title`.
+/// Same shape as `pr_header_line` but for issues, `#NUM · title`.
 fn issue_header_line(
     issue_number: u64,
     issue_title: &str,
@@ -2897,7 +2897,7 @@ fn issue_header_line(
     ])
 }
 
-/// PR identification header for dialogs — same colour split as the
+/// PR identification header for dialogs, same colour split as the
 /// sub-header: `#NUM` uses the hash accent, the title uses fg BOLD,
 /// `·` separator is muted. Single source of truth so close / draft /
 /// labels / reviewers all read the same.
@@ -2922,7 +2922,7 @@ fn pr_header_line(
     ])
 }
 
-/// Render a single GitHub label as a coloured chip — `bg` is the
+/// Render a single GitHub label as a coloured chip, `bg` is the
 /// label's own colour, `fg` flips to black or white based on a
 /// brightness heuristic so the name stays readable.
 fn label_chip_spans(label: &crate::github::pr::Label, fallback_fg: Color) -> Vec<Span<'static>> {
@@ -2952,7 +2952,7 @@ fn wrap_description(text: &str, width: usize) -> Vec<String> {
     for word in text.split_whitespace() {
         let word_w = word.chars().count();
         if word_w > width {
-            // Word longer than the line — flush current then
+            // Word longer than the line, flush current then
             // hard-split the word.
             if !current.is_empty() {
                 out.push(std::mem::take(&mut current));
@@ -2994,7 +2994,7 @@ fn wrap_description(text: &str, width: usize) -> Vec<String> {
     out
 }
 
-/// Parse a `rrggbb` hex string and return `(bg, contrast_fg)` —
+/// Parse a `rrggbb` hex string and return `(bg, contrast_fg)`
 /// black foreground on light backgrounds, white on dark.
 fn label_chip_colours(hex: &str) -> Option<(Color, Color)> {
     let h = hex.trim_start_matches('#');
@@ -3004,7 +3004,7 @@ fn label_chip_colours(hex: &str) -> Option<(Color, Color)> {
     let r = u8::from_str_radix(&h[0..2], 16).ok()?;
     let g = u8::from_str_radix(&h[2..4], 16).ok()?;
     let b = u8::from_str_radix(&h[4..6], 16).ok()?;
-    // Perceptual luminance — same coefficients GitHub uses in CSS
+    // Perceptual luminance, same coefficients GitHub uses in CSS
     // to pick the contrast foreground for label chips.
     let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
     let fg = if luminance > 140.0 {

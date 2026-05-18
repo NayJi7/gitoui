@@ -22,13 +22,13 @@ pub struct Hunk {
     pub origin: HunkOrigin,
 }
 
-/// Origin of a hunk — used to drive the staged/unstaged indicator and
+/// Origin of a hunk, used to drive the staged/unstaged indicator and
 /// stage/unstage toggle in the Uncommitted view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HunkOrigin {
-    /// `git diff --cached` — already in the index.
+    /// `git diff --cached`, already in the index.
     Staged,
-    /// `git diff` — modified but not yet in the index.
+    /// `git diff`, modified but not yet in the index.
     Unstaged,
     /// Untracked file rendered as a synthetic diff (all additions).
     Untracked,
@@ -90,7 +90,7 @@ impl DiffEntry {
         parse_diff(&stdout)
     }
 
-    /// Cumulative diff between two arbitrary commits — used by the 2-commit
+    /// Cumulative diff between two arbitrary commits, used by the 2-commit
     /// comparison mode (Space / Ctrl+click on two rows).
     /// Runs `git diff <from>..<to>` so changes appear as if going from the
     /// older endpoint to the newer one. Order detection is the caller's
@@ -299,7 +299,7 @@ impl DiffEntry {
             return Err("binary".to_string());
         }
 
-        // Read the file — detect binary by scanning for null bytes in the first 8KB
+        // Read the file, detect binary by scanning for null bytes in the first 8KB
         let content = std::fs::read(&full_path).map_err(|e| format!("Cannot read file: {}", e))?;
 
         if content.contains(&0u8) {

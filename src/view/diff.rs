@@ -63,7 +63,7 @@ pub struct DiffView<'a> {
     /// Uncommitted view to detect which hunk the user clicked. Empty unless
     /// the diff contains hunks with `HunkOrigin::Staged` or `Unstaged`.
     hunk_spans: Vec<HunkRowSpan>,
-    /// File path used when toggling a hunk's stage state — derived from the
+    /// File path used when toggling a hunk's stage state, derived from the
     /// title for the Uncommitted view, empty for committed diffs.
     uncommitted_file_path: Option<String>,
     /// Index into `hunk_spans` of the hunk currently under the mouse cursor.
@@ -104,7 +104,7 @@ enum ExpandDirection {
     Down,
 }
 
-/// What the unified arrow-key focus currently points at — either one of the
+/// What the unified arrow-key focus currently points at, either one of the
 /// expand buttons in a gap, or one of the stage-able hunks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusKind {
@@ -252,7 +252,7 @@ impl<'a> DiffView<'a> {
 
     /// Tell the next render to restore the focus to the hunk whose underlying
     /// `hunk_idx` matches, and to roll back the scroll offset. Wins over
-    /// `set_initial_scroll_origin` — and explicitly clears it, so we never
+    /// `set_initial_scroll_origin`, and explicitly clears it, so we never
     /// fall back to "scroll to first hunk of origin X" right after a toggle
     /// (which is what would make focus jump to the next hunk).
     pub fn set_restore_focus(&mut self, hunk_idx: usize, scroll_offset: usize) {
@@ -331,7 +331,7 @@ impl<'a> DiffView<'a> {
     ) -> Vec<GapState> {
         let mut states = Vec::new();
         if let Some(entry) = diff_entries.first() {
-            // Gap before first hunk — no lines shown by default, single button
+            // Gap before first hunk, no lines shown by default, single button
             if let Some(first_new) = entry.hunks.first().and_then(|h| {
                 h.lines.iter().find_map(|l| {
                     if l.line_type == DiffLineType::Context {
@@ -351,7 +351,7 @@ impl<'a> DiffView<'a> {
                 }
             }
 
-            // Gaps between hunks — show some context by default
+            // Gaps between hunks, show some context by default
             for hunk_idx in 1..entry.hunks.len() {
                 if let (Some(prev), Some(curr)) =
                     (entry.hunks.get(hunk_idx - 1), entry.hunks.get(hunk_idx))
@@ -384,7 +384,7 @@ impl<'a> DiffView<'a> {
                 }
             }
 
-            // Gap after last hunk — no lines shown by default, single button
+            // Gap after last hunk, no lines shown by default, single button
             if let Some(last_new) = entry.hunks.last().and_then(|h| {
                 h.lines.iter().rev().find_map(|l| {
                     if l.line_type == DiffLineType::Context {
@@ -741,7 +741,7 @@ impl<'a> DiffView<'a> {
             diff_area
         };
 
-        // The search bar is now rendered globally via StatusLine::Input — no
+        // The search bar is now rendered globally via StatusLine::Input, no
         // need to carve a row out of the content area for an inline bar.
         self.diff_content_area = Some(content_area);
 
@@ -758,7 +758,7 @@ impl<'a> DiffView<'a> {
                 // Priority 1: restore the hunk the user just toggled, anchored
                 // at the same scroll position so the view doesn't snap back
                 // to the top after stage/unstage. Restore always wins over
-                // `initial_scroll_origin` — `restored=true` is set even when
+                // `initial_scroll_origin`, `restored=true` is set even when
                 // the underlying hunk_idx no longer maps cleanly (which can
                 // happen if new_start shifted enough to reorder the hunks),
                 // and we fall back to the hunk closest to the restored
@@ -858,7 +858,7 @@ impl<'a> DiffView<'a> {
             }
         }
 
-        // Hunk hover / focus highlight — extend the row across the entire
+        // Hunk hover / focus highlight, extend the row across the entire
         // width (commit-list style) AND brighten the green/red bg for changed
         // lines so the modification colour stays readable. Context lines that
         // had no bg get the neutral `list_selected_bg` grey. The padding span
@@ -867,7 +867,7 @@ impl<'a> DiffView<'a> {
         //
         // Hover (mouse) wins over focus (keyboard) so the mouse always paints
         // what the user is pointing at; otherwise keyboard navigation locks
-        // the highlight and mouse hover appears to do nothing — especially in
+        // the highlight and mouse hover appears to do nothing, especially in
         // Raw mode where there's no banner to fall back on.
         let active_hunk_span = self
             .hovered_hunk
@@ -878,7 +878,7 @@ impl<'a> DiffView<'a> {
             // Recompute the 4 diff bgs the same way `build_base_lines` does so
             // we can match span bgs and swap to the hover variant. The hover
             // variants sit roughly midway between the normal and the strong
-            // (word-diff) bgs — bright enough to read as "selected" but dark
+            // (word-diff) bgs, bright enough to read as "selected" but dark
             // enough that the dim line-number fg stays visible on top of it.
             let bg_is_light = match self.ctx.color_theme.bg {
                 Color::Rgb(r, g, b) => {
@@ -907,7 +907,7 @@ impl<'a> DiffView<'a> {
                 Color::Rgb(111, 45, 52)
             };
             let neutral_bg = self.ctx.color_theme.list_selected_bg;
-            // Line numbers (and other "chrome" spans) use `divider_fg` — a dim
+            // Line numbers (and other "chrome" spans) use `divider_fg`, a dim
             // grey that gets swallowed by the hover bg. Promote them to the
             // theme's main `fg` so they stay legible on the selected row.
             let dim_fg = self.ctx.color_theme.divider_fg;
@@ -1086,14 +1086,14 @@ impl<'a> DiffView<'a> {
         }
         // If the content hasn't changed and we have a cached count, use it
         if !self.needs_rebuild {
-            return 0; // height already known to be minimal — avoid rebuild
+            return 0; // height already known to be minimal, avoid rebuild
         }
         let dummy_area = Rect::new(0, 0, width, 1);
         self.build_diff_lines(&dummy_area).len()
     }
 
     fn build_diff_lines(&mut self, diff_area: &Rect) -> Vec<Line<'static>> {
-        // Reset hunk row tracking — populated per-mode (currently only Raw
+        // Reset hunk row tracking, populated per-mode (currently only Raw
         // tracks precisely; the other modes can be wired up later).
         self.hunk_spans.clear();
         match self.ctx.ui_config.common.diff_mode {
@@ -1109,13 +1109,13 @@ impl<'a> DiffView<'a> {
     /// by row so a "modification" shows the old and new variants on the same
     /// row. Pure deletions get an empty right cell, pure additions an empty
     /// left cell. Headers (file / hunk) span the full width on their own line.
-    /// Long content is truncated with `…` rather than wrapped — wrapping each
+    /// Long content is truncated with `…` rather than wrapped, wrapping each
     /// half independently would misalign the pair.
     fn build_sbs_diff_lines(&mut self, diff_area: &Rect) -> Vec<Line<'static>> {
         use crate::git::diff::DiffLineType;
 
         let total_width = diff_area.width as usize;
-        // Layout: [half] [│] [half] — 1 col reserved for the separator.
+        // Layout: [half] [│] [half], 1 col reserved for the separator.
         let half = total_width.saturating_sub(1) / 2;
         if half == 0 {
             return Vec::new();
@@ -1165,14 +1165,14 @@ impl<'a> DiffView<'a> {
 
         let mut sbs_hunk_spans: Vec<HunkRowSpan> = Vec::new();
         for (entry_idx, entry) in self.diff_entries.iter().enumerate() {
-            // File path banner — full width.
+            // File path banner, full width.
             if let Some(path) = entry.new_path.as_ref().or(entry.old_path.as_ref()) {
                 push_full(&mut lines, format!("── {} ──", path), dim_style);
             }
 
             for (hunk_idx, hunk) in entry.hunks.iter().enumerate() {
                 let hunk_row_start = lines.len();
-                // Per-hunk opening banner — only shown when the hunk has a
+                // Per-hunk opening banner, only shown when the hunk has a
                 // staged/unstaged origin. For SBS Raw we use indent=0 since
                 // there are no line-number columns.
                 if let Some(banner) =
@@ -1267,7 +1267,7 @@ impl<'a> DiffView<'a> {
     /// `build_base_lines` exactly (skips hunk headers, computes `─── N lines
     /// unchanged ───` gap markers between hunks, displays visible_up/down
     /// context from `new_file_lines`) but emits paired left/right rows. The
-    /// `show more` buttons are not yet rendered in this mode — the click
+    /// `show more` buttons are not yet rendered in this mode, the click
     /// area / gap-state plumbing is tightly bound to the single-column
     /// rendering. Switch to Enhanced for gap navigation.
     fn build_sbs_enhanced_diff_lines(&mut self, diff_area: &Rect) -> Vec<Line<'static>> {
@@ -1296,7 +1296,7 @@ impl<'a> DiffView<'a> {
         let mut highlighter =
             SyntaxHighlighter::new_with_theme(file_path, &self.ctx.core_config.option.syntax_theme);
 
-        // Theme-aware backgrounds — same logic as build_base_lines so the
+        // Theme-aware backgrounds, same logic as build_base_lines so the
         // visual feel matches Enhanced exactly.
         let bg_is_light = match self.ctx.color_theme.bg {
             ratatui::style::Color::Rgb(r, g, b) => {
@@ -1441,7 +1441,7 @@ impl<'a> DiffView<'a> {
         let visible_default = 3usize;
 
         // Render a gap. `edge`: None=middle, Some(true)=top, Some(false)=bottom.
-        // For SBS we don't yet emit clickable buttons — the `─── N lines
+        // For SBS we don't yet emit clickable buttons, the `─── N lines
         // unchanged ───` marker spans the full width, and visible_up/down
         // context lines are emitted as paired rows.
         let render_gap = |lines: &mut Vec<Line<'static>>,
@@ -1528,7 +1528,7 @@ impl<'a> DiffView<'a> {
             }
         };
 
-        // (No extra file banner — the diff view already renders
+        // (No extra file banner, the diff view already renders
         // "── Diff: <path> +N -M ──" above this content. Mirroring Enhanced.)
 
         // ── top gap (before first hunk) ─────────────────────────────────
@@ -1567,7 +1567,7 @@ impl<'a> DiffView<'a> {
             }
 
             let hunk_row_start = lines.len();
-            // Per-hunk opening banner — SBS Enhanced has no global indent, the
+            // Per-hunk opening banner, SBS Enhanced has no global indent, the
             // bg highlighting starts at column 0 on each half.
             if let Some(banner) =
                 self.hunk_banner_line(hunk.origin, 0, diff_area.width, false, false)
@@ -1575,14 +1575,14 @@ impl<'a> DiffView<'a> {
                 lines.push(banner);
             }
 
-            // Hunk content — skip(1) to drop the @@ HunkHeader line.
+            // Hunk content, skip(1) to drop the @@ HunkHeader line.
             let h_lines: Vec<&crate::git::diff::DiffLine> = hunk.lines.iter().skip(1).collect();
             let mut i = 0;
             while i < h_lines.len() {
                 let l = h_lines[i];
                 match l.line_type {
                     DiffLineType::FileHeader | DiffLineType::HunkHeader => {
-                        // Defensive — should already be skipped by skip(1).
+                        // Defensive, should already be skipped by skip(1).
                         i += 1;
                     }
                     DiffLineType::BinaryNote => {
@@ -1704,7 +1704,7 @@ impl<'a> DiffView<'a> {
         }
     }
 
-    /// Indicator prefix for the hunk header in the Uncommitted view —
+    /// Indicator prefix for the hunk header in the Uncommitted view
     /// `☑ ` (staged) or `☐ ` (unstaged). Empty string otherwise.
     fn hunk_indicator(origin: HunkOrigin) -> &'static str {
         match origin {
@@ -1718,12 +1718,12 @@ impl<'a> DiffView<'a> {
     /// Returns `None` when the origin doesn't carry a stage state (committed
     /// diffs, untracked files).
     ///
-    /// * `indent` — number of blank columns before the banner content; lets
+    /// * `indent`, number of blank columns before the banner content; lets
     ///   the banner align with the hunk's coloured background instead of the
     ///   screen edge in Enhanced mode (where line numbers sit on the left).
-    /// * `available_width` — number of columns the banner content (label +
+    /// * `available_width`, number of columns the banner content (label +
     ///   waves) is allowed to occupy after `indent`.
-    /// * `closing` — when true, emit waves only (no label) so the closing
+    /// * `closing`, when true, emit waves only (no label) so the closing
     ///   banner reads as a tail delimiter.
     fn hunk_banner_line(
         &self,
@@ -1739,7 +1739,7 @@ impl<'a> DiffView<'a> {
             _ => return None,
         };
         // When the hunk is hovered or keyboard-focused we crank up emphasis on
-        // the entire banner — label keeps its colour but adds REVERSED so it
+        // the entire banner, label keeps its colour but adds REVERSED so it
         // pops, and the waves drop the DIM so they stand out too.
         let (label_style, wave_style) = if active {
             (
@@ -1877,7 +1877,7 @@ impl<'a> DiffView<'a> {
                     }
                 }
 
-                // Record this hunk's rendered row range — only when it carries
+                // Record this hunk's rendered row range, only when it carries
                 // a stage state, which is what the Uncommitted view needs to
                 // detect click-to-toggle. Skips committed / untracked hunks.
                 if matches!(hunk.origin, HunkOrigin::Staged | HunkOrigin::Unstaged)
@@ -2314,7 +2314,7 @@ impl<'a> DiffView<'a> {
             gidx + 1
         };
 
-        // Gap before first hunk — single button at top
+        // Gap before first hunk, single button at top
         if let Some(first_hunk) = entry.hunks.first() {
             if let Some(first_new) = hunk_first_new_line(first_hunk) {
                 if first_new > 1 {
@@ -2347,7 +2347,7 @@ impl<'a> DiffView<'a> {
             }
 
             let hunk_row_start = lines.len();
-            // Per-hunk opening banner — only shown when the hunk has a staged/unstaged origin.
+            // Per-hunk opening banner, only shown when the hunk has a staged/unstaged origin.
             if let Some(banner) = hunk_banners_open.get(hunk_idx).and_then(|b| b.clone()) {
                 lines.push(banner);
             }
@@ -2480,7 +2480,7 @@ impl<'a> DiffView<'a> {
             }
         }
 
-        // Gap after last hunk — single button at bottom
+        // Gap after last hunk, single button at bottom
         if let Some(last_hunk) = entry.hunks.last() {
             if let Some(last_new) = hunk_last_new_line(last_hunk) {
                 let file_total = self.new_file_lines.len() as u32;
@@ -2770,7 +2770,7 @@ impl<'a> DiffView<'a> {
                     self.focused_button = found;
                 }
 
-                // Hunk hover detection — find which span (if any) covers this row.
+                // Hunk hover detection, find which span (if any) covers this row.
                 let hovered = self
                     .hunk_spans
                     .iter()
@@ -2784,7 +2784,7 @@ impl<'a> DiffView<'a> {
             }
         }
 
-        // Mouse left the content area entirely — clear selection
+        // Mouse left the content area entirely, clear selection
         if prev_button.is_some() {
             self.focused_button = None;
         }
@@ -2832,7 +2832,7 @@ impl<'a> DiffView<'a> {
 
     fn scroll_to_hunk(&mut self, idx: usize) {
         // When the user cycles through hunks with arrow keys we always pin
-        // the hunk's opening banner to the very top of the viewport — never
+        // the hunk's opening banner to the very top of the viewport, never
         // leave the banner at the bottom or in the middle, since the user
         // wants the staged/unstaged label as the visual anchor.
         if let Some(span) = self.hunk_spans.get(idx) {
@@ -3089,7 +3089,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
 
 /// Truncate `text` to `max_width` cells, replacing the trailing portion with
 /// `…` if it overflows. The result is exactly `max_width` cells wide,
-/// right-padded with spaces if `text` is shorter — keeping the column
+/// right-padded with spaces if `text` is shorter, keeping the column
 /// boundaries fixed in the side-by-side diff renderer.
 fn truncate_to_width(text: &str, max_width: usize) -> String {
     if max_width == 0 {
@@ -3114,7 +3114,7 @@ fn truncate_to_width(text: &str, max_width: usize) -> String {
     }
 }
 
-/// Pad an empty (or short) string to exactly `width` cells of spaces — used
+/// Pad an empty (or short) string to exactly `width` cells of spaces, used
 /// for the empty side of a paired side-by-side row.
 fn pad_to_width(text: &str, width: usize) -> String {
     truncate_to_width(text, width)
@@ -3143,7 +3143,7 @@ fn split_at_width(s: &str, max_chars: usize) -> (&str, &str) {
         let tail = s[ws_byte + 1..].trim_start();
         (head, tail)
     } else {
-        // No whitespace — hard break
+        // No whitespace, hard break
         (&s[..hard_byte], &s[hard_byte..])
     }
 }

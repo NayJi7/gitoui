@@ -16,7 +16,7 @@ defaults for one specific run.
 | Flag                          | Default       | Effect                                              |
 |-------------------------------|---------------|-----------------------------------------------------|
 | `-n`, `--max-count <NUMBER>`  | `1000`        | Initial number of commits to load. Lazy-load grows from there. |
-| `-p`, `--protocol <TYPE>`     | `auto`        | Force an image protocol — one of `kitty`, `iterm2`, `sixel`, `unicode`. |
+| `-p`, `--protocol <TYPE>`     | `auto`        | Force an image protocol, one of `kitty`, `iterm2`, `sixel`, `unicode`. |
 | `-o`, `--order <TYPE>`        | `chrono`      | Commit ordering algorithm. `chrono` (date-based) or `topo` (`git log --topo-order`). |
 | `-g`, `--graph-width <TYPE>`  | `auto`        | Graph image cell width. `auto` / `single` / `double`. |
 | `-s`, `--graph-style <TYPE>`  | `rounded`     | Graph edge style. `rounded` / `angular` / `smooth`. |
@@ -81,6 +81,6 @@ gitoui --order topo
 
 <Aside type="tip">
 CLI flags **override** the corresponding `[core.option]` config keys for a
-single run. To persist a choice, set it in `~/.config/gitoui/config.toml` —
+single run. To persist a choice, set it in `~/.config/gitoui/config.toml`
 see the [config schema](/configurations/config-file-format/).
 </Aside>

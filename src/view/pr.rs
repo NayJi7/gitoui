@@ -1,4 +1,4 @@
-//! Pull Requests view — list + detail panels for the active repo's
+//! Pull Requests view, list + detail panels for the active repo's
 //! GitHub PRs. Read-only in this iteration; review/merge actions live
 //! in a follow-up.
 //!
@@ -19,7 +19,7 @@ use ratatui::{
 };
 use rustc_hash::FxHashMap;
 
-/// GitHub's purple for merged PRs + closed-as-completed issues —
+/// GitHub's purple for merged PRs + closed-as-completed issues
 /// matches the badge color on
 /// github.com so the visual cue is instantly recognizable.
 pub(crate) const MERGED_PURPLE: Color = Color::Rgb(0x89, 0x57, 0xe5);
@@ -51,7 +51,7 @@ pub struct PullRequestsView<'a> {
     commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
     coords: RepoCoords,
     token: String,
-    /// GitHub login of the authenticated user — used to flag comments
+    /// GitHub login of the authenticated user, used to flag comments
     /// the user wrote themselves with a `(me)` suffix. `None` when the
     /// auth state didn't include a login.
     me_login: Option<String>,
@@ -61,7 +61,7 @@ pub struct PullRequestsView<'a> {
     items: Vec<PullRequest>,
     /// Which subset of `items` the list currently shows.
     list_filter: PrListFilter,
-    /// Hit-test rects for the filter tab bar — `(filter, screen rect)`
+    /// Hit-test rects for the filter tab bar, `(filter, screen rect)`
     /// captured during render. Click within a rect switches to that
     /// filter.
     filter_tab_rects: Vec<(PrListFilter, Rect)>,
@@ -74,7 +74,7 @@ pub struct PullRequestsView<'a> {
     /// "Loading…" indicator in the detail panel.
     loading_for: Option<u64>,
     /// Index of the row under the keyboard cursor / mouse hover. Drives
-    /// the row highlight only — opening the PR (loading its detail)
+    /// the row highlight only, opening the PR (loading its detail)
     /// requires an explicit Enter or click.
     hovered: usize,
     /// PR number currently displayed in the detail view, if any. Stored
@@ -87,7 +87,7 @@ pub struct PullRequestsView<'a> {
     mode: Mode,
     /// Active tab when in Detail mode.
     active_tab: Tab,
-    /// Per-tab scroll offsets and selections — kept independent so
+    /// Per-tab scroll offsets and selections, kept independent so
     /// switching tabs preserves where the user was.
     conversation_scroll: usize,
     /// Index of the currently-selected comment in the Conversation tab.
@@ -96,14 +96,14 @@ pub struct PullRequestsView<'a> {
     conversation_selected: usize,
     /// Set to `true` by keyboard nav (↑↓, PgUp/Dn, Home/End) to ask
     /// the next render to scroll the selected comment into view. Mouse
-    /// hover deliberately does NOT set this — the viewport stays still
+    /// hover deliberately does NOT set this, the viewport stays still
     /// while the cursor moves around.
     conversation_scroll_to_selected: bool,
-    /// Active inline comment editor — opened by `c` (new comment), `r`
+    /// Active inline comment editor, opened by `c` (new comment), `r`
     /// (reply), or `e` (edit). When `Some`, all keypresses route to it
     /// until Ctrl+Enter (submit) or Esc (cancel).
     comment_editor: Option<CommentEditor>,
-    /// Screen position where the editor's cursor was last drawn —
+    /// Screen position where the editor's cursor was last drawn
     /// captured each render so we can place the terminal cursor on top
     /// of the editor surface.
     comment_editor_cursor_pos: Option<(u16, u16)>,
@@ -123,18 +123,18 @@ pub struct PullRequestsView<'a> {
     /// Drained and diffed against `prev_painted_avatars` at the
     /// very end of `render()`. Always cleared at frame start.
     pending_avatar_paints: Vec<(PaintedAvatar, Color)>,
-    /// Body rect of the inline editor captured during render — used
+    /// Body rect of the inline editor captured during render, used
     /// to translate clicks inside it into buffer cursor positions.
     editor_body_area: Option<Rect>,
-    /// Logical line range of each comment in the conversation render —
-    /// `(comment_idx, first_line, last_line)` — captured at render time
+    /// Logical line range of each comment in the conversation render
+    /// `(comment_idx, first_line, last_line)`, captured at render time
     /// so mouse hits and auto-scroll can resolve which card sits where.
     conversation_comment_spans: Vec<(usize, usize, usize)>,
     /// Clickable `#N` hit-boxes inside the conversation, captured at
     /// render time. Combined with `conversation_scroll` to resolve
     /// screen coordinates → ref number.
     conversation_ref_links: Vec<crate::view::issue::RefLink>,
-    /// Reference the mouse is currently hovering — drives the
+    /// Reference the mouse is currently hovering, drives the
     /// hover-bg highlight on the matching `#N` span at next render.
     conversation_hovered_ref: Option<(u64, bool)>,
     /// Cache of recently-fetched issue numbers for this repo, used to
@@ -143,7 +143,7 @@ pub struct PullRequestsView<'a> {
     /// a number is an issue or a PR.
     mention_issue_numbers: rustc_hash::FxHashSet<u64>,
     /// True once an issue-number fetch has been spawned or completed
-    /// — guards against duplicate background calls.
+    ///, guards against duplicate background calls.
     mention_issues_fetched: bool,
     /// Floating `#` autocomplete popup state, shared shape with the
     /// Issues view via `crate::view::issue`.
@@ -157,7 +157,7 @@ pub struct PullRequestsView<'a> {
     /// popup opens.
     mention_user_cache: Vec<String>,
     /// In-session log of the viewer's reactions on each conversation
-    /// entry — keyed by `(pr_number, target_idx)`. Same shape as the
+    /// entry, keyed by `(pr_number, target_idx)`. Same shape as the
     /// Issues view: stores `(kind, reaction_id)` so the picker can
     /// highlight my chips red AND a second click can DELETE.
     viewer_reactions:
@@ -170,7 +170,7 @@ pub struct PullRequestsView<'a> {
     checks_scroll: usize,
     checks_hovered: usize,
     /// Workflows the user has expanded in the Checks accordion. Empty
-    /// = everything collapsed (the default — keeps the tab compact so
+    /// = everything collapsed (the default, keeps the tab compact so
     /// the workflow names are scannable at a glance). Persisted only
     /// for the lifetime of the PrView so re-opening the PR restores
     /// which groups were unfolded.
@@ -191,7 +191,7 @@ pub struct PullRequestsView<'a> {
     /// spawns a background fetch; subsequent ones are instant.
     commit_detail_cache: FxHashMap<String, crate::github::pr::CommitDetail>,
     /// Set of commit SHAs whose detail fetch is currently in flight
-    /// — drives the "Loading…" placeholder.
+    ///, drives the "Loading…" placeholder.
     commit_detail_loading: rustc_hash::FxHashSet<String>,
     /// Vertical scroll within the drilled-down commit's diff.
     commits_drilldown_scroll: usize,
@@ -199,7 +199,7 @@ pub struct PullRequestsView<'a> {
     /// `start_compose_pr` from the current local HEAD; cleared on
     /// cancel or successful submission.
     compose: Option<ComposeState>,
-    /// Click hit-test rects for the compose-form fields — populated
+    /// Click hit-test rects for the compose-form fields, populated
     /// during render, consumed by `handle_click`.
     compose_field_rects: Vec<(ComposeField, Rect)>,
     /// Active branch-picker overlay (drawn on top of the compose
@@ -209,17 +209,17 @@ pub struct PullRequestsView<'a> {
     /// the user fired `+` on). When `Some`, key events route to it.
     reaction_picker: Option<ReactionPicker>,
     last_error: Option<String>,
-    /// Rects captured each frame for mouse hit-testing — `None` until the
+    /// Rects captured each frame for mouse hit-testing, `None` until the
     /// first render. Cleared at the top of each render pass.
     list_area: Option<Rect>,
     /// Per-tab bounding rect (the inner content area, not the tab bar).
     tab_content_area: Option<Rect>,
-    /// Tab bar hit-testing — list of `(Tab, screen rect)` entries
+    /// Tab bar hit-testing, list of `(Tab, screen rect)` entries
     /// captured during render. Click within a rect switches to that tab.
     tab_bar_rects: Vec<(Tab, Rect)>,
     /// Tab currently under the mouse (gives visual feedback before click).
     hovered_tab: Option<Tab>,
-    /// First inner row Y of the list panel (rendering coordinate) — used to
+    /// First inner row Y of the list panel (rendering coordinate), used to
     /// translate a click row into a selection index. Captured during render.
     list_inner_y: u16,
     /// Top-of-list scroll offset, kept in sync with what we passed to ratatui
@@ -242,7 +242,7 @@ enum Mode {
     Compose,
 }
 
-/// One field of the compose form — drives `↑↓` cycling, the cursor
+/// One field of the compose form, drives `↑↓` cycling, the cursor
 /// indicator, and which key handler runs for typing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ComposeField {
@@ -284,16 +284,16 @@ impl ComposeField {
 /// the user sees what they're reacting to.
 #[derive(Debug, Clone)]
 struct ReactionPicker {
-    /// Conversation index of the comment being reacted to — feeds
+    /// Conversation index of the comment being reacted to, feeds
     /// back into `selected_conversation_entry` on confirm.
     target_idx: usize,
-    /// 0..8 — which of the eight reactions is currently focused.
+    /// 0..8, which of the eight reactions is currently focused.
     hovered: usize,
     overlay_rect: Option<Rect>,
     row_rects: Vec<Rect>,
 }
 
-/// Scrollable single-select branch picker — opens as an overlay
+/// Scrollable single-select branch picker, opens as an overlay
 /// when the user activates `Head:` or `Base:` in the compose form,
 /// closes back to the form on Enter (selects) or Esc (cancels).
 #[derive(Debug, Clone)]
@@ -304,7 +304,7 @@ struct BranchPicker {
     scroll: usize,
     overlay_rect: Option<Rect>,
     row_rects: Vec<Rect>,
-    /// Inner height captured at the last render — used by keyboard
+    /// Inner height captured at the last render, used by keyboard
     /// nav to keep the hovered row inside the viewport.
     visible_height: usize,
 }
@@ -321,7 +321,7 @@ enum BranchKind {
     Remote,
 }
 
-/// In-progress draft for `Mode::Compose` — every field is editable,
+/// In-progress draft for `Mode::Compose`, every field is editable,
 /// the preview pane is refreshed in the background each time `head`
 /// or `base` change so the user sees what will land on submit.
 #[derive(Debug, Clone)]
@@ -334,18 +334,18 @@ struct ComposeState {
     focused: ComposeField,
     /// Byte cursor inside the field currently being edited (we re-
     /// use the same field for whichever of head/base/title/body has
-    /// focus — they're never edited simultaneously).
+    /// focus, they're never edited simultaneously).
     cursor: usize,
     body_scroll: u16,
     /// Height of the body block's inner area captured at the last
     /// render. Drives mouse-wheel + cursor-anchor clamping without
     /// having to re-derive the layout outside the render path.
     body_last_height: u16,
-    /// Labels the user picked in the compose form — applied right
+    /// Labels the user picked in the compose form, applied right
     /// after the PR is created (REST has no `labels` field on the
     /// create endpoint).
     labels: Vec<crate::github::pr::Label>,
-    /// Preview metadata fetched from `git log base..head` — `None`
+    /// Preview metadata fetched from `git log base..head`, `None`
     /// until the first computation finishes.
     preview: Option<ComposePreview>,
     submitting: bool,
@@ -390,7 +390,7 @@ impl PrListFilter {
         match self {
             PrListFilter::Open => matches!(pr.state, PullState::Open),
             PrListFilter::Merged => matches!(pr.state, PullState::Merged),
-            // "Closed" means closed-without-merge — merged PRs have
+            // "Closed" means closed-without-merge, merged PRs have
             // their own tab, otherwise the two would overlap.
             PrListFilter::Closed => matches!(pr.state, PullState::Closed),
             PrListFilter::All => true,
@@ -412,7 +412,7 @@ enum Tab {
 
 /// State of an inline comment composer (new top-level comment, reply
 /// to a review thread, or edit of an existing own comment). Active
-/// when `comment_editor.is_some()` — the conversation reserves a few
+/// when `comment_editor.is_some()`, the conversation reserves a few
 /// rows at the bottom of the tab content area to render it, and all
 /// keypresses route to the editor until Ctrl+Enter or Esc.
 #[derive(Debug, Clone)]
@@ -424,7 +424,7 @@ struct CommentEditor {
     /// Cursor as a byte offset into `buffer`. Always lies on a char
     /// boundary; helpers maintain that invariant.
     cursor: usize,
-    /// `true` while a POST/PATCH/DELETE is in flight — disables
+    /// `true` while a POST/PATCH/DELETE is in flight, disables
     /// further keypresses and shows a "Sending…" footer.
     submitting: bool,
     /// Top logical row visible in the editor body. The render anchors
@@ -442,7 +442,7 @@ enum CommentEditorKind {
     /// New top-level conversation comment (issues endpoint).
     NewTopLevel,
     /// New top-level comment pre-filled with a markdown blockquote of
-    /// another comment's body — what GitHub's "Quote reply" does when
+    /// another comment's body, what GitHub's "Quote reply" does when
     /// the original isn't an inline review comment (which is the only
     /// kind it lets you natively thread).
     QuoteReply { quoted_author: String },
@@ -529,13 +529,13 @@ enum CheckRow {
 
 /// Per-column widths for the PR list. The "fit" columns (state, number,
 /// title, author) are padded to align tabularly; head/base are *not*
-/// padded — they sit flush against ` → ` so it always reads
+/// padded, they sit flush against ` → ` so it always reads
 /// `branch → branch` rather than `branch     → main`.
 struct PrListColumns {
     state: usize,
     number: usize,
     title: usize,
-    /// Width of the labels column — sized to the worst-case label
+    /// Width of the labels column, sized to the worst-case label
     /// count across visible PRs so rows align. A label chip is
     /// `LABEL_CHIP_WIDTH` cols wide (2 letters + 2 padding spaces).
     labels: usize,
@@ -543,7 +543,7 @@ struct PrListColumns {
 }
 
 /// How many label chips to show inline in the list, max. Beyond
-/// this the row would crowd the title — anyone needing all labels
+/// this the row would crowd the title, anyone needing all labels
 /// can drill into the PR detail to see them.
 const MAX_INLINE_LABELS: usize = 3;
 /// Width of a single short label chip (` XX `). Two letters of the
@@ -562,7 +562,7 @@ impl PrListColumns {
     const ARROW: usize = 3; // " → "
 
     fn compute(items: &[PullRequest], available_width: usize) -> Self {
-        // Floors come from the header labels — otherwise a column would
+        // Floors come from the header labels, otherwise a column would
         // shrink below its title's width.
         let state = items
             .iter()
@@ -651,7 +651,7 @@ fn digits(n: u64) -> usize {
 }
 
 /// Strip the `<user>:` prefix GitHub adds to `head_label` for forked
-/// PRs — the author already appears in its own column, so showing
+/// PRs, the author already appears in its own column, so showing
 /// `alice:feature` next to an `alice` cell is just noise.
 fn strip_head_owner(label: &str) -> &str {
     match label.split_once(':') {
@@ -761,7 +761,7 @@ impl<'a> PullRequestsView<'a> {
             ctx,
             tx,
         };
-        // Do NOT auto-fetch detail on open — the user has to click or
+        // Do NOT auto-fetch detail on open, the user has to click or
         // press Enter on a row to load it. Keeps the initial open snappy
         // and avoids burning a request the user doesn't want.
         view
@@ -802,7 +802,7 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
-    /// Open the given PR's detail view — dispatched from cross-view
+    /// Open the given PR's detail view, dispatched from cross-view
     /// nav (e.g. clicking a `#N` reference in the Issues view).
     /// Also re-anchors the list cursor so returning with Esc lands
     /// the user on the row they navigated through.
@@ -823,7 +823,7 @@ impl<'a> PullRequestsView<'a> {
 
     /// Background fetch of every issue number in this repo so the
     /// PR view can resolve `#N` references in comments (issue vs PR).
-    /// Idempotent — once kicked off it never retries.
+    /// Idempotent, once kicked off it never retries.
     fn spawn_mention_issue_numbers_fetch(&mut self) {
         if self.mention_issues_fetched {
             return;
@@ -868,7 +868,7 @@ impl<'a> PullRequestsView<'a> {
         out
     }
 
-    /// `@` mention universe — repo assignables we've cached plus the
+    /// `@` mention universe, repo assignables we've cached plus the
     /// participants of the currently-open PR (author + comment
     /// authors + reviewers + assignees). De-dup by login, alpha-sort.
     fn mention_user_universe(&self) -> Vec<crate::view::issue::MentionItem> {
@@ -904,7 +904,7 @@ impl<'a> PullRequestsView<'a> {
                 }
             }
         }
-        // Compose mode has no open PR — fall back to the authors
+        // Compose mode has no open PR, fall back to the authors
         // visible in the PR list so `@` proposes something useful
         // while creating a new PR.
         for pr in &self.items {
@@ -1226,7 +1226,7 @@ impl<'a> PullRequestsView<'a> {
         self.follow_reference(link.number, link.is_pr);
     }
 
-    /// Navigate to a `#N` reference — PRs pivot in-place via
+    /// Navigate to a `#N` reference, PRs pivot in-place via
     /// `open_by_number`, issues hop to the Issues view via
     /// cross-view dispatch.
     fn follow_reference(&mut self, number: u64, is_pr: bool) {
@@ -1241,7 +1241,7 @@ impl<'a> PullRequestsView<'a> {
     pub fn footer_hint(&self) -> String {
         // Helper to pull the current binding for a scoped action so the
         // footer mirrors what the user configured. Returns "" if the
-        // action is unbound — we'd still render the hint label, just
+        // action is unbound, we'd still render the hint label, just
         // with no key prefix, so the user notices something's missing.
         let kb = &self.ctx.keybind;
         let scoped = |scope: &[&str], action: &str, label: &str| -> String {
@@ -1264,10 +1264,10 @@ impl<'a> PullRequestsView<'a> {
         }
         // Footer holds the GLOBAL actions only. Card-specific shortcuts
         // (R:reply / R:quote reply / e:edit / d:delete) live inside the
-        // selected comment's top border — that way the footer stays
+        // selected comment's top border, that way the footer stays
         // calm and the available actions are visually attached to the
         // card they target.
-        // Compose owns its own footer hints — `↑↓` nav + submit +
+        // Compose owns its own footer hints, `↑↓` nav + submit +
         // cancel. The branch picker, when open, narrows it further
         // to just nav + select + cancel.
         if matches!(self.mode, Mode::Compose) {
@@ -1339,14 +1339,14 @@ impl<'a> PullRequestsView<'a> {
     /// instead of treating them as UserEvent shortcuts.
     pub fn is_input_active(&self) -> bool {
         // The compose form has real text inputs (title, body) and a
-        // picker that swallows arrow keys — both need raw key events
+        // picker that swallows arrow keys, both need raw key events
         // instead of UserEvent shortcut translations.
         self.comment_editor.is_some() || matches!(self.mode, Mode::Compose)
     }
 
     // ---------- data ----------
 
-    /// Open the currently-hovered PR — sets `opened`, transitions into
+    /// Open the currently-hovered PR, sets `opened`, transitions into
     /// Detail mode (full-screen tabbed view), resets per-tab scroll, and
     /// fires a background fetch on cache miss.
     fn open_hovered(&mut self) {
@@ -1400,7 +1400,7 @@ impl<'a> PullRequestsView<'a> {
         match crate::github::pr::list_pull_requests(&self.token, &self.coords) {
             Ok(items) => {
                 self.items = items;
-                // Keep the opened PR by NUMBER — survives filter changes
+                // Keep the opened PR by NUMBER, survives filter changes
                 // and list re-orders. If the PR no longer exists, clear.
                 self.opened_pr_number =
                     prev_number.filter(|n| self.items.iter().any(|p| p.number == *n));
@@ -1428,7 +1428,7 @@ impl<'a> PullRequestsView<'a> {
     // ---------- events ----------
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
-        // Mention popup overlays the editor — it intercepts keys
+        // Mention popup overlays the editor, it intercepts keys
         // (↑↓/Enter/Esc) and forwards chars/backspaces through so
         // the query stays in sync with what the user types.
         if self.mention_popup.is_some() {
@@ -1447,7 +1447,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // While the inline editor is open, EVERY key must route to it —
+        // While the inline editor is open, EVERY key must route to it
         // no view-level shortcuts (`r` reload, `c` comment, etc.) may
         // hijack the keystroke. Otherwise the user can't type `r`/`c`
         // in their message.
@@ -1460,7 +1460,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // Compose mode owns every key — the form has its own text
+        // Compose mode owns every key, the form has its own text
         // inputs, including `r`, so the view-level reload shortcut
         // must not steal it.
         if matches!(self.mode, Mode::Compose) {
@@ -1468,7 +1468,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // `reload` is a PR-wide action — works in list AND detail modes.
+        // `reload` is a PR-wide action, works in list AND detail modes.
         // Resolved via [scope.pr]; the inner handlers will also resolve
         // their own scopes after this for mode-specific actions.
         if let Some("reload") = self.ctx.keybind.resolve_scoped(&["pr"], key) {
@@ -1486,7 +1486,7 @@ impl<'a> PullRequestsView<'a> {
     fn handle_event_list(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         // PR-list scope: only `new_pr` lives here (parent scope `pr`
         // already handled `reload` in the outer dispatcher). Resolved
-        // via [scope.pr.list] — walking to [scope.pr] for anything
+        // via [scope.pr.list], walking to [scope.pr] for anything
         // not bound in the leaf.
         if let Some("new_pr") = self.ctx.keybind.resolve_scoped(&["pr", "list"], key) {
             self.start_compose_pr();
@@ -1527,7 +1527,7 @@ impl<'a> PullRequestsView<'a> {
 
         // ── Inline comment editor takes all input until Ctrl+Enter / Esc.
         if self.comment_editor.is_some() {
-            // While a submission is in flight, only Esc cancels — every
+            // While a submission is in flight, only Esc cancels, every
             // other key is swallowed.
             if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
                 if matches!(key.code, KeyCode::Esc) {
@@ -1536,7 +1536,7 @@ impl<'a> PullRequestsView<'a> {
                 return;
             }
             // Mouse wheel scrolls the editor viewport without dragging
-            // the cursor — useful for skimming earlier or later parts
+            // the cursor, useful for skimming earlier or later parts
             // of the buffer while typing somewhere else.
             match event_with_count.event {
                 UserEvent::ScrollUp => {
@@ -1549,7 +1549,7 @@ impl<'a> PullRequestsView<'a> {
                 }
                 _ => {}
             }
-            // `submit` is shared with the compose forms — rebindable via
+            // `submit` is shared with the compose forms, rebindable via
             // [scope.compose]. Ctrl+Enter is the canonical "send" combo
             // in most terminals but many don't propagate the modifier
             // with Enter, so Ctrl+S is the reliable fallback baked into
@@ -1560,7 +1560,7 @@ impl<'a> PullRequestsView<'a> {
             }
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             // `true` when the dispatched action moved the cursor or
-            // edited the buffer — we anchor the viewport to the cursor
+            // edited the buffer, we anchor the viewport to the cursor
             // afterwards so typing always stays in view. Manual scroll
             // (PgUp/PgDn, wheel) and non-mutating keys leave the scroll
             // exactly where the user put it.
@@ -1645,7 +1645,7 @@ impl<'a> PullRequestsView<'a> {
                     true
                 }
                 // PgUp / PgDn scroll the viewport without dragging
-                // the cursor — handy for browsing earlier or later
+                // the cursor, handy for browsing earlier or later
                 // sections while typing further along.
                 KeyCode::PageUp => {
                     let page = self
@@ -1678,7 +1678,7 @@ impl<'a> PullRequestsView<'a> {
         }
 
         // ── PR-level action shortcuts (every tab once a PR is opened).
-        //    Resolved through [scope.pr] — rebindable from the user's
+        //    Resolved through [scope.pr], rebindable from the user's
         //    config.toml without touching this code.
         if let Some(action) = self.ctx.keybind.resolve_scoped(&["pr"], key) {
             match action {
@@ -1729,7 +1729,7 @@ impl<'a> PullRequestsView<'a> {
         }
 
         // ── Conversation-tab action shortcuts (no editor open).
-        //    Resolved through [scope.pr.conversation] — falls back to
+        //    Resolved through [scope.pr.conversation], falls back to
         //    [scope.pr] for any key the leaf scope doesn't override.
         if matches!(self.active_tab, Tab::Conversation) {
             if let Some(action) = self
@@ -1838,7 +1838,7 @@ impl<'a> PullRequestsView<'a> {
                 let Some(commit) = detail.commit_list.get(self.commits_hovered) else {
                     return;
                 };
-                // Transition to the existing CommitDetail view —
+                // Transition to the existing CommitDetail view
                 // the app's `OpenPrCommitDetail` handler does the
                 // background `git fetch` if the commit isn't local
                 // yet, then opens `View::Detail`.
@@ -1894,7 +1894,7 @@ impl<'a> PullRequestsView<'a> {
     /// Move the per-tab hovered cursor / scroll. Used by ↑↓ + PgUp/Dn.
     fn tab_nav(&mut self, delta: i32) {
         // While drilled in on a file or commit, ↑↓/PgUp/Dn scroll the
-        // diff content directly — there's no row cursor to track.
+        // diff content directly, there's no row cursor to track.
         if self.active_tab == Tab::Files && self.files_drilldown.is_some() {
             self.files_drilldown_scroll = adjust_scroll(self.files_drilldown_scroll, delta);
             return;
@@ -1925,7 +1925,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn tab_scroll(&mut self, delta: i32) {
-        // Mouse wheel — doesn't move the per-tab cursor, just pans the
+        // Mouse wheel, doesn't move the per-tab cursor, just pans the
         // visible window (or scrolls the body for the Conversation tab
         // which has no hovered cursor).
         if self.active_tab == Tab::Files && self.files_drilldown.is_some() {
@@ -1987,7 +1987,7 @@ impl<'a> PullRequestsView<'a> {
     }
     fn opened_checks_len(&self) -> usize {
         // Navigation operates on the *display* row count (headers +
-        // items in expanded groups), not the raw check_runs count —
+        // items in expanded groups), not the raw check_runs count
         // otherwise the cursor would skip past hidden items or land
         // on positions that don't render.
         self.opened_detail()
@@ -2112,7 +2112,7 @@ impl<'a> PullRequestsView<'a> {
         let detail = self.opened_detail()?;
         let mut counter = 1usize;
         // Re-walk the same render order push_thread uses (top-level
-        // first, then DFS into children) — must match exactly.
+        // first, then DFS into children), must match exactly.
         let by_id: FxHashMap<u64, &ConversationEntry> = detail
             .conversation
             .iter()
@@ -2169,7 +2169,7 @@ impl<'a> PullRequestsView<'a> {
         if self.conversation_selected == 0 {
             let Some(detail) = self.opened_detail() else {
                 self.tx.send(AppEvent::NotifyInfo(
-                    "PR is still loading — try again in a moment.".into(),
+                    "PR is still loading, try again in a moment.".into(),
                 ));
                 return;
             };
@@ -2211,7 +2211,7 @@ impl<'a> PullRequestsView<'a> {
     /// Open a new-top-level editor pre-filled with a GitHub-style
     /// quote of `body` (each line prefixed with `> `, blank lines
     /// preserved as `> ` so paragraph breaks survive). Cursor lands
-    /// two blank lines below the quote — ready for the user's reply.
+    /// two blank lines below the quote, ready for the user's reply.
     fn open_quote_reply_editor(&mut self, author: String, body: String) {
         let mut quoted = String::new();
         if body.is_empty() {
@@ -2246,7 +2246,7 @@ impl<'a> PullRequestsView<'a> {
         let Some(entry) = self.selected_conversation_entry() else {
             return;
         };
-        // Edit is only available on own comments — flagged on the
+        // Edit is only available on own comments, flagged on the
         // entry's author against the cached `me_login`. The footer
         // shortcuts already hide `e:edit` on non-own comments, so an
         // explicit keypress here is silently ignored (no toast).
@@ -2340,7 +2340,7 @@ impl<'a> PullRequestsView<'a> {
         let Some(detail) = self.opened_detail() else {
             return;
         };
-        // Only meaningful when the PR is currently open — closing a
+        // Only meaningful when the PR is currently open, closing a
         // merged or already-closed PR isn't a thing.
         if !matches!(detail.state, PullState::Open) {
             return;
@@ -2398,7 +2398,7 @@ impl<'a> PullRequestsView<'a> {
         let token = self.token.clone();
         let coords = self.coords.clone();
         let tx = self.tx.clone();
-        // Fetch the repo's full label set in the background — when it
+        // Fetch the repo's full label set in the background, when it
         // returns we re-enter the main loop with the picker open.
         std::thread::spawn(
             move || match crate::github::pr::list_repo_labels(&token, &coords) {
@@ -2422,7 +2422,7 @@ impl<'a> PullRequestsView<'a> {
         let pr_number = detail.number;
         let pr_title = detail.title.clone();
         let currently_requested = detail.reviewers.clone();
-        // The PR author can never be a reviewer — bake that into the
+        // The PR author can never be a reviewer, bake that into the
         // pool we send to the picker so the user can't tick themselves
         // and get a 422 on confirm.
         let pr_author = detail.author.clone();
@@ -2489,8 +2489,8 @@ impl<'a> PullRequestsView<'a> {
         let head = current_head_branch(&repo_path).unwrap_or_default();
         let title = latest_commit_subject(&repo_path, &head).unwrap_or_default();
         // Seed the body from a repo-local PR template if one exists.
-        // Mirror GitHub web's lookup order — `.github/`, `docs/`, and
-        // the repo root — covering the three locations the platform
+        // Mirror GitHub web's lookup order, `.github/`, `docs/`, and
+        // the repo root, covering the three locations the platform
         // recognises.
         let body = crate::github::pr::load_pr_template(&repo_path).unwrap_or_default();
         let cursor = body.len();
@@ -2513,7 +2513,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn coords_repo_path(&self) -> std::path::PathBuf {
-        // The view doesn't carry the local repo path directly — but
+        // The view doesn't carry the local repo path directly, but
         // every action that touches local git already passes it
         // through `ctx`. We grab it via the context's accessor.
         self.ctx.repo_path.clone()
@@ -2558,7 +2558,7 @@ impl<'a> PullRequestsView<'a> {
 
         // ── Scoped compose actions ─────────────────────────────────
         // `submit` (Ctrl+S) is rebindable via [scope.compose]. The
-        // word-jump bindings further down are still hardcoded — they
+        // word-jump bindings further down are still hardcoded, they
         // belong to text input, not view dispatch.
         if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
             self.submit_compose_pr();
@@ -2620,7 +2620,7 @@ impl<'a> PullRequestsView<'a> {
             .map(|c| c.focused)
             .unwrap_or(ComposeField::Title);
         match focused {
-            // Head / Base aren't text inputs — they open the picker
+            // Head / Base aren't text inputs, they open the picker
             // overlay. Click + Enter both trigger.
             ComposeField::Head | ComposeField::Base => {
                 if matches!(key.code, KeyCode::Enter) {
@@ -2694,7 +2694,7 @@ impl<'a> PullRequestsView<'a> {
                         KeyCode::Char(c) if !ctrl => compose_field_insert_char(state, c),
                         KeyCode::Enter => compose_field_insert_char(state, '\n'),
                         KeyCode::Tab => {
-                            // 4-space indent inside the body — same
+                            // 4-space indent inside the body, same
                             // convention as the comment editor.
                             for _ in 0..4 {
                                 compose_field_insert_char(state, ' ');
@@ -2721,8 +2721,8 @@ impl<'a> PullRequestsView<'a> {
                 }
                 // Anchor the viewport on the cursor AFTER mutation
                 // so typing past the last visible row scrolls into
-                // view. Mouse wheel doesn't reach this branch — it's
-                // intercepted earlier — so wheel scroll stays sticky.
+                // view. Mouse wheel doesn't reach this branch, it's
+                // intercepted earlier, so wheel scroll stays sticky.
                 self.compose_body_anchor_to_cursor();
                 if let Some((a, c)) = mention_anchor {
                     self.open_mention_popup(a, crate::view::issue::MentionTarget::ComposeBody, c);
@@ -2733,7 +2733,7 @@ impl<'a> PullRequestsView<'a> {
 
     /// Re-anchor `body_scroll` so the body cursor sits inside the
     /// last-rendered viewport. Called from cursor-mutating actions
-    /// (typing, arrow keys, vertical nav, click) — NOT from the
+    /// (typing, arrow keys, vertical nav, click), NOT from the
     /// render path or from mouse-wheel scroll, so wheel scrolling
     /// stays where the user puts it.
     fn compose_body_anchor_to_cursor(&mut self) {
@@ -2758,7 +2758,7 @@ impl<'a> PullRequestsView<'a> {
     fn handle_event_branch_picker(&mut self, key: ratatui::crossterm::event::KeyEvent) {
         use ratatui::crossterm::event::KeyCode;
         // Mouse wheel events arrive as raw KeyCode::Null on most
-        // terminals — handle them in `handle_scroll` instead.
+        // terminals, handle them in `handle_scroll` instead.
         let Some(picker) = self.branch_picker.as_mut() else {
             return;
         };
@@ -2816,10 +2816,10 @@ impl<'a> PullRequestsView<'a> {
     }
 
     /// Mouse-wheel scroll in compose mode. When the picker is open
-    /// we pan its viewport without moving the highlighted row — the
+    /// we pan its viewport without moving the highlighted row, the
     /// user can still arrow up/down to change the selection.
     fn compose_handle_scroll(&mut self, delta: i32) {
-        // Branch picker scroll wins when open — its viewport
+        // Branch picker scroll wins when open, its viewport
         // shouldn't be hijacked by the body underneath.
         if let Some(picker) = self.branch_picker.as_mut() {
             let max = picker.branches.len().saturating_sub(1);
@@ -2928,7 +2928,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     /// Handler called from the app when the user confirms the
-    /// compose-labels picker — stores the chosen subset on the
+    /// compose-labels picker, stores the chosen subset on the
     /// compose state so the next render shows them, and so the
     /// submit step can apply them after PR creation.
     pub fn on_compose_labels_picked(&mut self, labels: Vec<crate::github::pr::Label>) {
@@ -3007,7 +3007,7 @@ impl<'a> PullRequestsView<'a> {
             );
             match result {
                 Ok(number) => {
-                    // Apply labels best-effort — failure is non-fatal
+                    // Apply labels best-effort, failure is non-fatal
                     // (the PR was created successfully, the user can
                     // re-pick labels via the regular flow).
                     if !labels.is_empty() {
@@ -3026,7 +3026,7 @@ impl<'a> PullRequestsView<'a> {
         });
     }
 
-    /// Hook called from the app when `PrCreated` fires — clears the
+    /// Hook called from the app when `PrCreated` fires, clears the
     /// compose draft, reloads the PR list, and opens the new PR.
     pub fn on_pr_created(&mut self, number: u64) {
         self.compose = None;
@@ -3328,13 +3328,13 @@ impl<'a> PullRequestsView<'a> {
             return;
         };
         let body = editor.buffer.trim().to_string();
-        // ApproveReview is the only kind that accepts an empty body —
+        // ApproveReview is the only kind that accepts an empty body
         // everything else (regular comment, reply, edit, RequestChanges)
         // refuses to send.
         let allow_empty = matches!(editor.kind, CommentEditorKind::ApproveReview);
         if body.is_empty() && !allow_empty {
             self.tx.send(AppEvent::NotifyWarn(
-                "Body is empty — nothing to send.".into(),
+                "Body is empty, nothing to send.".into(),
             ));
             return;
         }
@@ -3363,7 +3363,7 @@ impl<'a> PullRequestsView<'a> {
         std::thread::spawn(move || {
             let result = match kind {
                 // Both new-comment and quote-reply post to the same
-                // issue-comments endpoint — quote reply is just a
+                // issue-comments endpoint, quote reply is just a
                 // pre-filled body convenience.
                 CommentEditorKind::NewTopLevel | CommentEditorKind::QuoteReply { .. } => {
                     crate::github::pr::post_issue_comment(&token, &coords, number, &body)
@@ -3627,7 +3627,7 @@ impl<'a> PullRequestsView<'a> {
             }
         }
         if current_row < target_row {
-            // Click was below the last line — clamp to buffer end.
+            // Click was below the last line, clamp to buffer end.
             ed.cursor = ed.buffer.len();
             return;
         }
@@ -3646,7 +3646,7 @@ impl<'a> PullRequestsView<'a> {
 
     /// Push `scroll_offset` just enough to keep the cursor inside the
     /// last-known viewport. Called from every cursor-mutating helper
-    /// so typing / arrow-key navigation always reveals the cursor —
+    /// so typing / arrow-key navigation always reveals the cursor
     /// but unlike a render-time anchor, this leaves a previously-set
     /// manual scroll alone whenever the cursor is still visible.
     fn editor_anchor_scroll_to_cursor(&mut self) {
@@ -3666,7 +3666,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     /// Scroll the editor viewport up by one page without moving the
-    /// cursor. The cursor's logical position stays put — the user is
+    /// cursor. The cursor's logical position stays put, the user is
     /// browsing the buffer, not navigating.
     fn editor_scroll_viewport(&mut self, delta: i32) {
         let Some(ed) = self.comment_editor.as_mut() else {
@@ -3797,7 +3797,7 @@ impl<'a> PullRequestsView<'a> {
                 // for that tab. Files / Commits / Checks all use the
                 // same "rows of items" model. On the Commits + Files
                 // tabs a click also drills into the clicked row (same
-                // outcome as Enter) — matches what users expect from
+                // outcome as Enter), matches what users expect from
                 // GitHub web's PR sub-pages. Checks rows route through
                 // `activate_checks_row` so a header toggles its group
                 // and an item fires the GitHub-open dialog.
@@ -3849,7 +3849,7 @@ impl<'a> PullRequestsView<'a> {
                 // Click on a compose-form field row. Draft toggles;
                 // Head/Base open the picker; Title/Body focus +
                 // position cursor at end (no per-column placement
-                // yet — would need to remember each field's start x).
+                // yet, would need to remember each field's start x).
                 let hit = self
                     .compose_field_rects
                     .iter()
@@ -3863,7 +3863,7 @@ impl<'a> PullRequestsView<'a> {
                     state.cursor = match field {
                         ComposeField::Title => state.title.len(),
                         // Body cursor lands precisely under the
-                        // click, not at the end — handled below.
+                        // click, not at the end, handled below.
                         ComposeField::Body => state.cursor,
                         _ => 0,
                     };
@@ -3918,7 +3918,7 @@ impl<'a> PullRequestsView<'a> {
             }
             return;
         }
-        // While the inline editor is open, the user is typing — mouse
+        // While the inline editor is open, the user is typing, mouse
         // drift should not change selection or focus. Block all hover
         // updates until the editor closes.
         if self.comment_editor.is_some() {
@@ -3926,7 +3926,7 @@ impl<'a> PullRequestsView<'a> {
         }
         match self.mode {
             Mode::List => {
-                // Filter tab hover (visual feedback only — click switches).
+                // Filter tab hover (visual feedback only, click switches).
                 let mut new_hover: Option<PrListFilter> = None;
                 for (filter, rect) in &self.filter_tab_rects {
                     if rect_contains(Some(*rect), col, row) {
@@ -3944,7 +3944,7 @@ impl<'a> PullRequestsView<'a> {
                 }
             }
             Mode::Detail => {
-                // Tab bar hover (visual feedback only — click switches).
+                // Tab bar hover (visual feedback only, click switches).
                 let mut new_hover: Option<Tab> = None;
                 for (tab, rect) in &self.tab_bar_rects {
                     if rect_contains(Some(*rect), col, row) {
@@ -3995,7 +3995,7 @@ impl<'a> PullRequestsView<'a> {
                     }
                     return;
                 }
-                // Hover on a form-field row focuses it — same model
+                // Hover on a form-field row focuses it, same model
                 // as the comment-card hover in Detail mode.
                 let hit = self
                     .compose_field_rects
@@ -4073,7 +4073,7 @@ impl<'a> PullRequestsView<'a> {
             Tab::Checks => self.checks_hovered = idx,
             Tab::Files => self.files_hovered = idx,
             // Conversation tab uses its own per-comment hit-test rather
-            // than row-indexed list addressing — see `row_at_tab`.
+            // than row-indexed list addressing, see `row_at_tab`.
             Tab::Conversation => self.conversation_selected = idx,
         }
     }
@@ -4115,7 +4115,7 @@ impl<'a> PullRequestsView<'a> {
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         // Clear hit-test rects from the previous frame so a stale rect
         // from a different layout never matches a click. Also clear
-        // the terminal cursor position — left over from compose / a
+        // the terminal cursor position, left over from compose / a
         // comment editor it would otherwise stick on the screen after
         // the editor closes (the terminal keeps the cursor wherever
         // we last positioned it).
@@ -4124,7 +4124,7 @@ impl<'a> PullRequestsView<'a> {
         self.editor_body_area = None;
         self.tab_bar_rects.clear();
         self.comment_editor_cursor_pos = None;
-        // Reset the per-frame avatar accumulator — render paths
+        // Reset the per-frame avatar accumulator, render paths
         // push their intents here, then the trailing diff pass at
         // the end of this fn evicts last-frame's stale avatars
         // (e.g. when the previous frame rendered the PR list and
@@ -4153,7 +4153,7 @@ impl<'a> PullRequestsView<'a> {
             Mode::Compose => self.render_compose_mode(f, body_area),
         }
 
-        // Mention popup floats above the actively-edited surface —
+        // Mention popup floats above the actively-edited surface
         // pick its rect by target so it docks near the cursor rather
         // than the top-left default fallback.
         if self.mention_popup.is_some() {
@@ -4182,7 +4182,7 @@ impl<'a> PullRequestsView<'a> {
             }
         }
 
-        // Single avatar diff pass for the whole frame — handles
+        // Single avatar diff pass for the whole frame, handles
         // cross-section transitions cleanly: any avatar in `prev`
         // but missing from `pending` (filter switch, scrolled
         // out of view, tab switch, list → detail, …) gets a
@@ -4191,7 +4191,7 @@ impl<'a> PullRequestsView<'a> {
         // drop pending avatars whose screen position falls inside
         // a currently-open overlay (mention popup, reaction picker)
         // so those overlays don't get image bytes punched through
-        // them — terminal images stack on top of cell content, so
+        // them, terminal images stack on top of cell content, so
         // without this filter the popup body would show the cards'
         // avatars bleeding through.
         let pending = std::mem::take(&mut self.pending_avatar_paints);
@@ -4223,11 +4223,11 @@ impl<'a> PullRequestsView<'a> {
         self.prev_painted_avatars = paint_avatars_with_diff(f, &self.ctx, &prev, pending);
 
         // Place the terminal cursor on the inline comment editor when
-        // it's the active input surface — same convention as the rebase
+        // it's the active input surface, same convention as the rebase
         // reword editor.
         if let Some((cx, cy)) = self.comment_editor_cursor_pos {
             // Suppress while the mention popup overlaps the cursor
-            // position — a blinking cursor on top of the popup body
+            // position, a blinking cursor on top of the popup body
             // reads as a glitch. Popup intercepts every keystroke so
             // the cursor isn't actionable until the popup closes.
             let occluded = self
@@ -4275,7 +4275,7 @@ impl<'a> PullRequestsView<'a> {
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
             ),
             // Repo coords get their own dedicated teal token (REPO_TEAL),
-            // not shared with hash/branch/label palettes — so the name
+            // not shared with hash/branch/label palettes, so the name
             // reads as its own kind of identifier.
             Span::styled(
                 format!("{}/{}", self.coords.owner, self.coords.repo),
@@ -4287,7 +4287,7 @@ impl<'a> PullRequestsView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ),
         ];
-        // Right-aligned ` GitHub` mark — only when the user has opted
+        // Right-aligned ` GitHub` mark, only when the user has opted
         // in to Nerd Font glyphs (no reliable runtime detection exists,
         // so it's an explicit config flag).
         if self.ctx.ui_config.common.nerd_font {
@@ -4339,7 +4339,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn render_list(&mut self, f: &mut Frame, area: Rect) {
-        // Build the filter tabs as the block's title — they replace
+        // Build the filter tabs as the block's title, they replace
         // the static "Pull Requests" label so the panel stays compact.
         let (title_spans, tab_rects) = self.build_filter_title(area);
         self.filter_tab_rects = tab_rects;
@@ -4353,7 +4353,7 @@ impl<'a> PullRequestsView<'a> {
         self.list_area = Some(area);
         // 1-row breathing gap below the filter tabs. We deliberately
         // keep the full inner width so the List widget can paint the
-        // selection bg all the way to the panel border — the per-row
+        // selection bg all the way to the panel border, the per-row
         // right margin is created by reserving 1 col in the column
         // budget (see RIGHT_MARGIN below).
         let body_area = Rect::new(
@@ -4391,7 +4391,7 @@ impl<'a> PullRequestsView<'a> {
         // Keyboard nav (↑↓ etc.) re-anchors the scroll so the hovered
         // row stays on-screen. Mouse-wheel scroll, on the other hand,
         // moves the viewport independently and may leave `hovered`
-        // outside the visible window — that's by design.
+        // outside the visible window, that's by design.
         let visible = body_area.height as usize;
         if visible > 0 && self.hovered >= self.list_scroll_offset + visible {
             self.list_scroll_offset = self.hovered + 1 - visible;
@@ -4427,7 +4427,7 @@ impl<'a> PullRequestsView<'a> {
                 let is_marked = self.hovered == i;
                 let (line, avatar_col) =
                     self.format_pr_row(pr, is_marked, &cols, row_width, avatars_on);
-                // Track only rows currently inside the visible window —
+                // Track only rows currently inside the visible window
                 // the List widget itself clips, so painting an avatar
                 // off-screen would waste a buffer write.
                 if let Some(col) = avatar_col {
@@ -4450,7 +4450,7 @@ impl<'a> PullRequestsView<'a> {
         let mut state = ListState::default();
         state.select(Some(self.hovered));
         *state.offset_mut() = self.list_scroll_offset;
-        // No row-level bg — the label chips paint their own and a
+        // No row-level bg, the label chips paint their own and a
         // List highlight_style would patch over them. We paint the
         // selection bg manually per-span in `format_pr_row` instead,
         // so chips keep their colours intact.
@@ -4459,7 +4459,7 @@ impl<'a> PullRequestsView<'a> {
 
         // Push slot intents into the per-frame accumulator. The
         // single diff pass at the end of `render()` decides what
-        // to clear vs. skip vs. paint — using one `prev` for the
+        // to clear vs. skip vs. paint, using one `prev` for the
         // entire view so cross-section transitions automatically
         // evict stale image placements.
         let slots = std::mem::take(&mut self.list_avatar_slots);
@@ -4532,7 +4532,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     /// Returns the formatted row + the column offset (from the start
-    /// of the row's enclosing area) where the avatar should land —
+    /// of the row's enclosing area) where the avatar should land
     /// just to the left of the author column. `Some(col)` when the
     /// 3-cell pad was reserved (avatars enabled); `None` when avatars
     /// are off so the row layout stays tight.
@@ -4570,7 +4570,7 @@ impl<'a> PullRequestsView<'a> {
         } else {
             Span::raw("  ")
         };
-        // Short label chips — up to MAX_INLINE_LABELS labels, each
+        // Short label chips, up to MAX_INLINE_LABELS labels, each
         // rendered as ` XX ` (2-letter abbreviation) with the label's
         // own colour as background. Empty cells pad to the column
         // width so neighbouring rows stay aligned.
@@ -4604,7 +4604,7 @@ impl<'a> PullRequestsView<'a> {
             }
         }
         // 1-cell gap between label chips and the avatar so they
-        // never touch — image 25 showed `BU` glued to the avatar
+        // never touch, image 25 showed `BU` glued to the avatar
         // without this padding.
         if avatars_on {
             row.push(Span::raw(" "));
@@ -4637,7 +4637,7 @@ impl<'a> PullRequestsView<'a> {
             // red), matching the convention used in the detail sub-header.
             // Not padded so the arrow always reads `branch → branch`
             // instead of `branch       → main`. Fork prefix `user:` is
-            // stripped — the author column already shows who opened it.
+            // stripped, the author column already shows who opened it.
             Span::styled(
                 strip_head_owner(&pr.head_label).to_string(),
                 Style::default()
@@ -4656,7 +4656,7 @@ impl<'a> PullRequestsView<'a> {
             Span::raw("  "),
         ]);
 
-        // Selection bg painted manually per-span — chips already have
+        // Selection bg painted manually per-span, chips already have
         // their own bg and we leave those alone so GitHub colours
         // stay visible on the hovered row. Trailing fill extends the
         // selection across the row's remaining width.
@@ -4712,7 +4712,7 @@ impl<'a> PullRequestsView<'a> {
         if has_labels {
             self.render_pr_labels_row(f, labels_area, cached_detail.as_ref());
         }
-        // Header divider — single `─` row spanning the area width.
+        // Header divider, single `─` row spanning the area width.
         {
             let theme = &self.ctx.color_theme;
             f.render_widget(
@@ -4750,7 +4750,7 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
-    /// Full-screen compose-new-PR view — borrows the Detail layout:
+    /// Full-screen compose-new-PR view, borrows the Detail layout:
     /// a one-row sub-header, a divider, then a side-by-side form /
     /// preview split. Designed to feel like a sibling of the Detail
     /// page so the user never wonders where they are.
@@ -4830,18 +4830,18 @@ impl<'a> PullRequestsView<'a> {
         self.render_compose_form(f, form_area);
         self.render_compose_preview(f, preview_area);
 
-        // Branch picker overlay on top — drawn last so it covers
+        // Branch picker overlay on top, drawn last so it covers
         // the form when open.
         if self.branch_picker.is_some() {
             self.render_branch_picker_overlay(f, area);
         }
     }
 
-    /// Branch-picker overlay — drawn on top of the compose layout
+    /// Branch-picker overlay, drawn on top of the compose layout
     /// when `self.branch_picker.is_some()`. Centered list with
     /// per-row colour by `BranchKind`.
     /// Centered emoji picker overlay for the eight GitHub reactions
-    /// — drawn on top of the conversation when `+` was pressed on a
+    ///, drawn on top of the conversation when `+` was pressed on a
     /// reactable comment. Keyboard arrows move the highlight, Enter
     /// fires the POST, Esc closes.
     fn render_reaction_picker_overlay(&mut self, f: &mut Frame, area: Rect) {
@@ -4855,7 +4855,7 @@ impl<'a> PullRequestsView<'a> {
         let theme = &self.ctx.color_theme;
         let kinds = crate::github::pr::ReactionKind::all();
         // Single-Paragraph rendering so ratatui's double-width
-        // continuation markers stay consistent across spans — fixes
+        // continuation markers stay consistent across spans, fixes
         // 🚀 disappearing into ❤️'s VS16 residue.
         let cell_width: u16 = 5;
         let Some(picker) = self.reaction_picker.as_mut() else {
@@ -4891,7 +4891,7 @@ impl<'a> PullRequestsView<'a> {
             let is_mine = mine.contains(kind);
             let cell_rect = Rect::new(x_cursor, inner.y, cell_width, 1);
             picker.row_rects.push(cell_rect);
-            // Hover on a chip the user already owns stays red — just
+            // Hover on a chip the user already owns stays red, just
             // a deeper shade so the focus indicator reads without
             // erasing the "mine" signal.
             const MINE_RED: Color = Color::Rgb(0xB0, 0x32, 0x32);
@@ -4967,7 +4967,7 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(block, rect);
 
         // Render clamps scroll within bounds but doesn't force the
-        // hovered row back into view — manual wheel scrolling can
+        // hovered row back into view, manual wheel scrolling can
         // legitimately move the viewport away from the selection.
         let visible = inner.height as usize;
         picker.visible_height = visible;
@@ -5005,7 +5005,7 @@ impl<'a> PullRequestsView<'a> {
             };
             let name_style = Style::default().fg(name_color).add_modifier(Modifier::BOLD);
             // Selected row is signalled by the filled `●` marker +
-            // bold name (no row-level bg fill — keeps the chip-like
+            // bold name (no row-level bg fill, keeps the chip-like
             // branch colours intact).
             let line = Line::from(vec![
                 Span::raw(" "),
@@ -5056,7 +5056,7 @@ impl<'a> PullRequestsView<'a> {
             }
         };
 
-        // ── Branch field row (Head or Base) — looks like a button
+        // ── Branch field row (Head or Base), looks like a button
         //    rather than a text input. Shows the current branch in
         //    its branch colour. Enter or click opens the picker.
         let render_branch_row = |f: &mut Frame,
@@ -5106,7 +5106,7 @@ impl<'a> PullRequestsView<'a> {
             self.items.iter().map(|p| p.number).collect();
         let title_issue_set: rustc_hash::FxHashSet<u64> = self.mention_issue_numbers.clone();
 
-        // ── Text-input row (Title) — flat text, no bg fill. Visual
+        // ── Text-input row (Title), flat text, no bg fill. Visual
         //    cue is the focus arrow + a thin underline below the
         //    typed value, like a vintage form field.
         let render_text_input_row = |f: &mut Frame,
@@ -5167,7 +5167,7 @@ impl<'a> PullRequestsView<'a> {
         // Layout walker.
         let mut y = inner.y;
 
-        // Head row — colour from the graph palette so each branch
+        // Head row, colour from the graph palette so each branch
         // gets the same hue as in the commit graph view.
         let head_color =
             branch_color_from_graph_palette(theme, &self.ctx.graph_color_set, &state.head);
@@ -5193,7 +5193,7 @@ impl<'a> PullRequestsView<'a> {
             .push((ComposeField::Title, title_rect));
         y += 2;
 
-        // Body block — uses a Block with a tinted bg so it reads as
+        // Body block, uses a Block with a tinted bg so it reads as
         // a real multi-line text area.
         let body_focused = state.focused == ComposeField::Body;
         let body_label_line = Line::from(vec![
@@ -5222,7 +5222,7 @@ impl<'a> PullRequestsView<'a> {
             inner.width.saturating_sub(INDENT + 2 + 2),
             body_block_height,
         );
-        // Body: bordered Block — accent border when focused, no bg
+        // Body: bordered Block, accent border when focused, no bg
         // fill (which read as gross yellow on some themes).
         let body_block = Block::default()
             .borders(Borders::ALL)
@@ -5236,7 +5236,7 @@ impl<'a> PullRequestsView<'a> {
         self.compose_field_rects
             .push((ComposeField::Body, body_block_rect));
         // Render-time scroll: ONLY clamp against the current max.
-        // We deliberately do NOT re-anchor on the cursor here —
+        // We deliberately do NOT re-anchor on the cursor here
         // that lives in `compose_body_anchor_to_cursor` and is
         // called from cursor-mutating actions only. Re-anchoring at
         // render time would snap the viewport back to the cursor on
@@ -5265,7 +5265,7 @@ impl<'a> PullRequestsView<'a> {
         let issue_set: rustc_hash::FxHashSet<u64> = self.mention_issue_numbers.clone();
         let body_lines: Vec<Line<'static>> = if state.body.is_empty() {
             vec![Line::from(Span::styled(
-                "(type a description — supports markdown)".to_string(),
+                "(type a description, supports markdown)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             ))]
         } else {
@@ -5291,14 +5291,14 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(Paragraph::new(body_lines), body_inner);
         // Expose the body's inner rect so the mention popup can
         // anchor on it (popup positioning reads `editor_body_area`).
-        // Done only when Body is focused — clicks/keys elsewhere
+        // Done only when Body is focused, clicks/keys elsewhere
         // shouldn't be hit-tested against the body.
         if body_focused {
             self.editor_body_area = Some(body_inner);
         }
         y = body_block_rect.y + body_block_rect.height;
 
-        // Labels row — shows the currently-picked chips inline. The
+        // Labels row, shows the currently-picked chips inline. The
         // overlay opens on Enter / click.
         let labels_focused = state.focused == ComposeField::Labels;
         let labels_rect = Rect::new(inner.x, y, inner.width, 1);
@@ -5313,7 +5313,7 @@ impl<'a> PullRequestsView<'a> {
         ];
         if state.labels.is_empty() {
             labels_line_spans.push(Span::styled(
-                "(none — Enter to pick)".to_string(),
+                "(none, Enter to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             ));
         } else {
@@ -5329,7 +5329,7 @@ impl<'a> PullRequestsView<'a> {
             .push((ComposeField::Labels, labels_rect));
         y += 2;
 
-        // Draft toggle row — aligned with the other fields so the
+        // Draft toggle row, aligned with the other fields so the
         // form keeps a consistent `Label:  value` rhythm. The check
         // glyph sits in the value column where the picker chips /
         // input text would, and the human-readable suffix follows.
@@ -5481,7 +5481,7 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(Paragraph::new(lines), inner);
     }
 
-    /// Sub-header below the global header — PR number, title, state chip,
+    /// Sub-header below the global header, PR number, title, state chip,
     /// branches, stats. Equivalent to the top portion of a GitHub PR page.
     /// Inline comment editor reserved at the bottom of the Conversation
     /// tab. 1-row header (title + author hint), N body rows, 1-row footer
@@ -5536,7 +5536,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
 
-        // Whole inner area goes to the body — Ctrl+S / Esc shortcuts
+        // Whole inner area goes to the body, Ctrl+S / Esc shortcuts
         // live in the app footer so we don't burn an editor row on a
         // hint that's already visible at the bottom of the screen.
         // When a submit is in flight we still want a 1-row strip for
@@ -5549,7 +5549,7 @@ impl<'a> PullRequestsView<'a> {
             width: inner.width,
             height: body_height,
         };
-        // Capture for mouse hit-testing — clicks inside translate
+        // Capture for mouse hit-testing, clicks inside translate
         // back to a buffer cursor position.
         self.editor_body_area = Some(body_area);
         let footer_area = Rect {
@@ -5563,7 +5563,7 @@ impl<'a> PullRequestsView<'a> {
         // so we can scroll the body window to keep it visible.
         let (cursor_col, cursor_row) = cursor_screen_pos(&buffer, cursor_byte);
 
-        // Total logical row count — number of `\n` in the buffer plus 1
+        // Total logical row count, number of `\n` in the buffer plus 1
         // (we don't add a trailing empty line for a final `\n`).
         let total_rows = if buffer.is_empty() {
             1
@@ -5571,7 +5571,7 @@ impl<'a> PullRequestsView<'a> {
             buffer.matches('\n').count() as u16 + 1
         };
 
-        // Read the scroll offset as-is — auto-anchoring lives in the
+        // Read the scroll offset as-is, auto-anchoring lives in the
         // cursor-mutating helpers (so manual wheel/PgUp/PgDn don't get
         // snapped back to the cursor on the next render).
         let mut scroll_offset: u16 = self
@@ -5590,7 +5590,7 @@ impl<'a> PullRequestsView<'a> {
 
         // Body: render the buffer's logical lines starting from the
         // scroll offset, up to body_height. Wrap is OFF so screen rows
-        // map 1:1 with logical rows — keeps cursor positioning trivial.
+        // map 1:1 with logical rows, keeps cursor positioning trivial.
         let value = Style::default().fg(theme.fg);
         let pr_fg = theme.list_hash_fg;
         let issue_fg = theme.list_ref_stash_fg;
@@ -5630,7 +5630,7 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(Paragraph::new(body_text), body_area);
 
         // In-editor footer is only used to surface the in-flight
-        // status — Ctrl+S / Esc hints already sit in the app footer.
+        // status, Ctrl+S / Esc hints already sit in the app footer.
         if submitting {
             f.render_widget(
                 Paragraph::new(Span::styled(
@@ -5641,7 +5641,7 @@ impl<'a> PullRequestsView<'a> {
             );
         }
 
-        // Place the terminal cursor on the editor surface — translate
+        // Place the terminal cursor on the editor surface, translate
         // the logical row into the viewport's row by subtracting the
         // current scroll offset.
         let visible_row = cursor_row.saturating_sub(scroll_offset);
@@ -5692,7 +5692,7 @@ impl<'a> PullRequestsView<'a> {
                 detail.author.clone(),
                 Style::default().fg(theme.list_name_fg),
             );
-            // Same fork-prefix strip as the PR list — the author name
+            // Same fork-prefix strip as the PR list, the author name
             // already appears as its own span, no need to repeat it.
             let head_span = Span::styled(
                 strip_head_owner(&detail.head_label).to_string(),
@@ -5716,7 +5716,7 @@ impl<'a> PullRequestsView<'a> {
             let min_gap = 2;
             let measure = |s: &Span<'_>| console::measure_text_width(s.content.as_ref());
             // +3 cells reserved between `by ` and the author for the
-            // GitHub avatar (2 cells image + 1 cell breathing space) —
+            // GitHub avatar (2 cells image + 1 cell breathing space)
             // only when avatars are enabled, otherwise the line stays
             // tight and no empty gap appears.
             let avatar_pad: usize = if avatars_on { 3 } else { 0 };
@@ -5753,7 +5753,7 @@ impl<'a> PullRequestsView<'a> {
             spans.push(by_span);
             if avatars_on {
                 // Capture the col offset where the 2-cell avatar will
-                // be painted — i.e., right after `by `, before the
+                // be painted, i.e., right after `by `, before the
                 // author name. Reserve 3 cells (avatar + breathing).
                 let avatar_col: u16 = spans
                     .iter()
@@ -5795,7 +5795,7 @@ impl<'a> PullRequestsView<'a> {
             spans.extend(badge_spans);
         }
 
-        // Divider intentionally omitted — `render_detail_mode` owns
+        // Divider intentionally omitted, `render_detail_mode` owns
         // a dedicated row for it that sits below the optional labels
         // chip row, so the order on screen is always:
         //   info → [labels] → divider → tabs → divider → content.
@@ -5815,7 +5815,7 @@ impl<'a> PullRequestsView<'a> {
 
     /// One-row strip showing the PR's currently-attached labels as
     /// GitHub-style coloured chips. Sits between the sub-header info
-    /// row and the tab bar — only rendered when the PR actually has
+    /// row and the tab bar, only rendered when the PR actually has
     /// labels (otherwise the row is collapsed by the layout).
     fn render_pr_labels_row(&self, f: &mut Frame, area: Rect, detail: Option<&PullRequestDetail>) {
         let Some(detail) = detail else { return };
@@ -5834,7 +5834,7 @@ impl<'a> PullRequestsView<'a> {
     fn render_tab_bar(&mut self, f: &mut Frame, area: Rect) {
         let theme = &self.ctx.color_theme;
         let detail = self.opened_detail().cloned();
-        // Per-tab counts only show once the PR detail has loaded —
+        // Per-tab counts only show once the PR detail has loaded
         // displaying `Conversation 0  Commits 0  ...` during the
         // fetch would falsely advertise empty tabs.
         let counts: Option<[usize; 4]> = detail.as_ref().map(|d| {
@@ -5884,11 +5884,11 @@ impl<'a> PullRequestsView<'a> {
                 cursor_x += 4;
             }
         }
-        // Right-aligned "Manage" shortcuts — state + meta operations
+        // Right-aligned "Manage" shortcuts, state + meta operations
         // on the PR sit here so the bottom footer stays focused on
         // the daily review verbs. Hidden inside a drill-down (the
         // user only needs `Esc:back` there) AND until the PR detail
-        // has finished loading — surfacing close / draft / labels /
+        // has finished loading, surfacing close / draft / labels /
         // reviewers before we know the PR's state would let the
         // user fire actions against missing data.
         let manage_spans = if detail.is_some()
@@ -5961,7 +5961,7 @@ impl<'a> PullRequestsView<'a> {
         // ▕▏ matches the footer hint separator used elsewhere in the
         // app for visual consistency. `⌘` mirrors the footer prefix
         // so both rows read as a unified shortcut layer. Separator
-        // shares the same colour as the labels — the bottom footer
+        // shares the same colour as the labels, the bottom footer
         // does the same (it renders the whole row as one Span).
         let style = Style::default().fg(theme.detail_label_fg);
         let mut spans: Vec<Span<'static>> = vec![Span::styled("⌘ ".to_string(), style)];
@@ -5975,7 +5975,7 @@ impl<'a> PullRequestsView<'a> {
     }
 
     fn render_tab_conversation(&mut self, f: &mut Frame, area: Rect, detail: &PullRequestDetail) {
-        // Snapshot once so every card uses the same decision — and
+        // Snapshot once so every card uses the same decision, and
         // we don't churn the mutex per push.
         let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         // Reserve the bottom rows for the inline editor when it's open.
@@ -6053,7 +6053,7 @@ impl<'a> PullRequestsView<'a> {
                     }
                 },
                 // PR body itself doesn't surface its reactions here
-                // — they'd need a separate `GET /reactions` call
+                //, they'd need a separate `GET /reactions` call
                 // (the PR endpoint doesn't inline them on the body).
                 reactions: crate::github::pr::ReactionCounts::default(),
                 avatar_login: if avatars_on {
@@ -6090,7 +6090,7 @@ impl<'a> PullRequestsView<'a> {
         }
 
         // 3. Top-level pass: anything without a parent_id, OR a reply
-        //    whose parent we couldn't find (defensive — show it flat).
+        //    whose parent we couldn't find (defensive, show it flat).
         let top_level: Vec<&ConversationEntry> = detail
             .conversation
             .iter()
@@ -6110,7 +6110,7 @@ impl<'a> PullRequestsView<'a> {
             // 1 blank row between the PR description and the first
             // top-level comment, then 1 blank row between each pair of
             // unrelated top-level threads. Inside a thread (parent +
-            // replies), no blank rows — the connector line wires them.
+            // replies), no blank rows, the connector line wires them.
             lines.push(Line::from(""));
             let mut next_idx = 1usize; // 0 was the PR description
             for (i, entry) in top_level.iter().enumerate() {
@@ -6136,7 +6136,7 @@ impl<'a> PullRequestsView<'a> {
         }
         // Auto-scroll the viewport only when the selection moved via
         // keyboard (or programmatic action). Mouse hover changes the
-        // selection without nudging the scroll — see how the flag is
+        // selection without nudging the scroll, see how the flag is
         // set in `tab_nav` / `tab_goto_*` but never in `handle_mouse_move`.
         if self.conversation_scroll_to_selected {
             self.ensure_selected_comment_visible(area.height as usize);
@@ -6299,7 +6299,7 @@ impl<'a> PullRequestsView<'a> {
                 shortcuts.push(d);
             }
         }
-        // Reactions are available on every comment that has an id —
+        // Reactions are available on every comment that has an id
         // i.e. proper issue / review comments, not the synthesized
         // review summary rows (which never carry one).
         if entry.id.is_some() {
@@ -6309,13 +6309,13 @@ impl<'a> PullRequestsView<'a> {
             }
         }
         // `↵:open` chip whenever the body contains a `#N` we can
-        // resolve to an issue or a PR in this repo — clicking on
+        // resolve to an issue or a PR in this repo, clicking on
         // the chip / pressing Enter follows the first reference.
         let has_resolvable_ref = crate::view::issue::extract_hash_refs(&entry.body)
             .into_iter()
             .any(|n| self.resolve_hash_ref(n).is_some());
         if has_resolvable_ref {
-            // Enter is a global UserEvent::Confirm — keep it labelled
+            // Enter is a global UserEvent::Confirm, keep it labelled
             // with the canonical glyph regardless of rebind.
             shortcuts.push("↵:open".to_string());
         }
@@ -6356,7 +6356,7 @@ impl<'a> PullRequestsView<'a> {
         // depth. The gutter is "open" for all-but-last children so the
         // line keeps descending; on the last child it terminates with `└`.
         if has_children {
-            // No gap row between a card and its replies — boxes sit
+            // No gap row between a card and its replies, boxes sit
             // tight against each other and the descending `│` runs
             // through every row (top border, body, bend) on the children
             // side, providing visual continuity without any blank line.
@@ -6496,7 +6496,7 @@ impl<'a> PullRequestsView<'a> {
             return;
         }
         let rows = self.check_display_rows(detail);
-        // Clamp hovered into the current display range — a collapse
+        // Clamp hovered into the current display range, a collapse
         // shrinks the list so an out-of-range cursor needs to snap back.
         if self.checks_hovered >= rows.len() {
             self.checks_hovered = rows.len().saturating_sub(1);
@@ -6529,7 +6529,7 @@ impl<'a> PullRequestsView<'a> {
         let mut state = ListState::default();
         state.select(Some(self.checks_hovered));
         *state.offset_mut() = self.checks_scroll;
-        // Only paint the background on the selected row — the per-span
+        // Only paint the background on the selected row, the per-span
         // foregrounds (sha → list_hash_fg, author → list_name_fg, date →
         // list_date_fg, etc.) stay intact instead of being squashed into
         // a single list_selected_fg. Bold modifier still helps it pop.
@@ -6543,7 +6543,7 @@ impl<'a> PullRequestsView<'a> {
 
     fn render_tab_files(&mut self, f: &mut Frame, area: Rect, detail: &PullRequestDetail) {
         let theme = &self.ctx.color_theme;
-        // Drill-down — replace the list with the file's patch.
+        // Drill-down, replace the list with the file's patch.
         if let Some(idx) = self.files_drilldown {
             self.render_file_drilldown(f, area, detail, idx);
             return;
@@ -6571,7 +6571,7 @@ impl<'a> PullRequestsView<'a> {
         let mut state = ListState::default();
         state.select(Some(self.files_hovered));
         *state.offset_mut() = self.files_scroll;
-        // Only paint the background on the selected row — the per-span
+        // Only paint the background on the selected row, the per-span
         // foregrounds (sha → list_hash_fg, author → list_name_fg, date →
         // list_date_fg, etc.) stay intact instead of being squashed into
         // a single list_selected_fg. Bold modifier still helps it pop.
@@ -6628,7 +6628,7 @@ impl<'a> PullRequestsView<'a> {
                     body_lines.extend(rendered);
                 } else {
                     body_lines.push(Line::from(Span::styled(
-                        "    (no patch — binary or too large)".to_string(),
+                        "    (no patch, binary or too large)".to_string(),
                         Style::default().fg(theme.detail_label_fg),
                     )));
                 }
@@ -6644,7 +6644,7 @@ impl<'a> PullRequestsView<'a> {
         );
     }
 
-    /// Pre-compute the header card height — 2 rows of border + body
+    /// Pre-compute the header card height, 2 rows of border + body
     /// rows (sha/author/date/stats line, then the commit message
     /// split on `\n`). Capped to area.height / 2 so a giant commit
     /// message never eats the whole screen.
@@ -6716,7 +6716,7 @@ impl<'a> PullRequestsView<'a> {
 
         let mut lines: Vec<Line<'static>> = vec![meta, Line::from("")];
         for (i, msg_line) in commit.message.lines().enumerate() {
-            // First line of the commit message is the subject — render
+            // First line of the commit message is the subject, render
             // it bold so it pops over the body.
             let style = if i == 0 {
                 Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)
@@ -6728,7 +6728,7 @@ impl<'a> PullRequestsView<'a> {
         f.render_widget(Paragraph::new(lines), inner);
     }
 
-    /// Full-screen file diff view — framed header card (status, path,
+    /// Full-screen file diff view, framed header card (status, path,
     /// stats, "i / total" counter) on top, scrollable diff body
     /// below. Render mode follows the global `diff_mode` setting so
     /// it matches the local diff view.
@@ -6761,7 +6761,7 @@ impl<'a> PullRequestsView<'a> {
             ));
         } else {
             body_lines.push(Line::from(Span::styled(
-                "    (no patch — binary or too large)".to_string(),
+                "    (no patch, binary or too large)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )));
         }
@@ -6800,8 +6800,8 @@ impl<'a> PullRequestsView<'a> {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        // Split the path into directory / basename — basename bold,
-        // directory muted — mirrors how local file views display it.
+        // Split the path into directory / basename, basename bold,
+        // directory muted, mirrors how local file views display it.
         let (dir, name) = match file.filename.rfind('/') {
             Some(slash) => (&file.filename[..=slash], &file.filename[slash + 1..]),
             None => ("", file.filename.as_str()),
@@ -6872,10 +6872,10 @@ pub(crate) struct CommentCardInput<'a> {
     /// descending line) vs the standard `└` (closes the box cleanly).
     pub(crate) has_children: bool,
     /// When `true`, this card is the currently-selected comment in the
-    /// Conversation tab — the box border switches to the head accent so
+    /// Conversation tab, the box border switches to the head accent so
     /// the user can see which card has focus.
     pub(crate) is_selected: bool,
-    /// `true` when `author` matches the authenticated GitHub login —
+    /// `true` when `author` matches the authenticated GitHub login
     /// we append a small `(me)` chip after the name.
     pub(crate) is_me: bool,
     /// Action shortcuts to surface inline in the top border when this
@@ -6892,7 +6892,7 @@ pub(crate) struct CommentCardInput<'a> {
 
 pub(crate) enum CommentAction {
     Opened,
-    /// Issue-context variant of `Opened` — renders "opened this issue"
+    /// Issue-context variant of `Opened`, renders "opened this issue"
     /// in the top border instead of "opened this PR". Lets the Issues
     /// view reuse `push_comment_card` without dragging in PR semantics.
     OpenedIssue,
@@ -6912,7 +6912,7 @@ pub(crate) const TREE_LEVEL_WIDTH: u16 = 4;
 // Tree-level slot is 4 cols wide. We offset the vertical line by 1 col
 // to the right within that slot so the connector floats next to the
 // parent's box border instead of pretending to attach to it. The bend
-// sits on the FIRST BODY row of the child rather than its top border —
+// sits on the FIRST BODY row of the child rather than its top border
 // the horizontal merges into the child box via a `┤` at its left edge.
 fn gutter_segment_open() -> &'static str {
     " │  "
@@ -6922,7 +6922,7 @@ fn gutter_segment_closed() -> &'static str {
 }
 fn gutter_segment_bend(more_siblings_below: bool) -> &'static str {
     // Trailing space so the bend's horizontal does NOT touch the
-    // child's box border — keeps the connector visibly disconnected
+    // child's box border, keeps the connector visibly disconnected
     // from the box (avoids the colour clash that the `┤` merge made).
     if more_siblings_below {
         " ├─ "
@@ -6975,7 +6975,7 @@ pub(crate) fn build_junction_prefix(
 
 /// One pending avatar paint. Carries the `login` directly (instead
 /// of a borrow) so the slot can outlive the iteration that produced
-/// it — important because the rendering loop borrows `self.detail`
+/// it, important because the rendering loop borrows `self.detail`
 /// while pushing slots, and the paint pass borrows `self` mutably.
 #[derive(Debug, Clone)]
 pub(crate) struct AvatarSlot {
@@ -6985,12 +6985,12 @@ pub(crate) struct AvatarSlot {
     /// Column offset inside that line where the avatar's first
     /// cell lands.
     pub(crate) col: u16,
-    /// Selection state — affects the background blending of the
+    /// Selection state, affects the background blending of the
     /// rendered avatar (selected cards have a different bg).
     pub(crate) is_selected: bool,
 }
 
-/// Materialised avatar position — what was painted on screen during
+/// Materialised avatar position, what was painted on screen during
 /// a particular frame. The diff helper compares the previous frame's
 /// list against the current one to decide which cells to clear vs.
 /// skip vs. paint anew. Equality includes the selected state so a
@@ -7013,12 +7013,12 @@ pub(crate) struct PaintedAvatar {
 ///     left by hover/scroll/filter changes).
 ///   * For slots present in both → marks the cells as `set_skip(true)`
 ///     so ratatui's diff renderer doesn't re-emit the protocol bytes
-///     this frame (kills the hover flicker — image bytes weighing
+///     this frame (kills the hover flicker, image bytes weighing
 ///     thousands of bytes were being shipped on every cursor move).
 ///   * For slots in `current` but not in `prev` (or moved/changed) →
 ///     paints via `paint_login_avatar` as before.
 ///
-/// Returns the new `prev` for the caller to store on the view —
+/// Returns the new `prev` for the caller to store on the view
 /// typically as `self.prev_*_painted_avatars`.
 pub(crate) fn paint_avatars_with_diff(
     f: &mut Frame,
@@ -7035,7 +7035,7 @@ pub(crate) fn paint_avatars_with_diff(
     //    but isn't part of the current set.
     //
     // For Kitty: emit the cursor-position + delete-at-cursor escape
-    // sequence DIRECTLY to stdout — we can't stuff this into the
+    // sequence DIRECTLY to stdout, we can't stuff this into the
     // ratatui buffer cell because the resulting symbol's
     // `unicode-width` ends up at ~11 (`_Ga=d,d=C;` + payload char),
     // and ratatui then marks the next 10 cells as continuation and
@@ -7110,7 +7110,7 @@ pub(crate) fn paint_avatars_with_diff(
 /// hasn't completed). Triggers a prefetch on miss so the next render
 /// has it.
 ///
-/// `bg` is the rounded-edge blend colour — must match the cell
+/// `bg` is the rounded-edge blend colour, must match the cell
 /// background visible BEHIND the slot, otherwise the alpha-blended
 /// circle reads as a misaligned chip. Callers in a list with a row
 /// highlight pass `list_selected_bg` for selected rows and
@@ -7134,7 +7134,7 @@ pub(crate) fn paint_login_avatar(
     if !manager.is_enabled() {
         return;
     }
-    // Try to bring the avatar online — `ensure_uploaded_login` is
+    // Try to bring the avatar online, `ensure_uploaded_login` is
     // idempotent and cheap when the image is already prepared.
     let on_disk = manager.cached_avatar_exists_login(login);
     if on_disk {
@@ -7172,7 +7172,7 @@ pub(crate) struct CommentCardLayout {
     /// author name appears).
     pub(crate) top_line: usize,
     /// `Some((x_offset, login_token_width))` when an avatar slot was
-    /// reserved — `x_offset` is the column offset inside the line
+    /// reserved, `x_offset` is the column offset inside the line
     /// where the avatar's first cell lands; `width` is always 2.
     pub(crate) avatar_slot: Option<u16>,
 }
@@ -7249,7 +7249,7 @@ pub(crate) fn push_comment_card(
     //    happens one row down, on the card's first body row.
     //
     //    Even for the LAST sibling, the descending line still reaches
-    //    this card's top border from above — we force the immediate
+    //    this card's top border from above, we force the immediate
     //    parent's gutter "open" just for this row so the `│` is there.
     //    (Below the bend row, the gutter takes its real "last" status.)
     let mut top_gutters = input.ancestor_gutters.to_vec();
@@ -7264,7 +7264,7 @@ pub(crate) fn push_comment_card(
     // Track where the avatar slot lives so the caller can paint it
     // after this Paragraph renders. The slot sits between the
     // leading `┌─` and the author name, replacing the single space
-    // that already separated them — so layout shifts by exactly 2
+    // that already separated them, so layout shifts by exactly 2
     // cells (avatar width) plus an extra space we add for breathing
     // room.
     let prefix_cells: u16 = top
@@ -7305,7 +7305,7 @@ pub(crate) fn push_comment_card(
     // Inline shortcut chips on the right side of the top border, only
     // when the card is selected. `╶╴` (two short mid-line horizontals,
     // U+2576 + U+2574) keeps the 2-column footprint of the footer's
-    // `▕▏` but sits at the line's midpoint instead of full height —
+    // `▕▏` but sits at the line's midpoint instead of full height
     // reads as a low-key separator that matches the box-drawing family.
     let shortcut_text = if input.is_selected && !input.inline_shortcuts.is_empty() {
         format!(" {} ", input.inline_shortcuts.join("╶╴"))
@@ -7358,7 +7358,7 @@ pub(crate) fn push_comment_card(
         } else {
             build_body_prefix(theme, input.ancestor_gutters)
         };
-        // Box left stays `│` even on the bend row — the connector
+        // Box left stays `│` even on the bend row, the connector
         // doesn't merge into the box (user prefers visibly disconnected
         // over a colour mismatch where ─ and │/┤ are styled differently).
         row.push(Span::styled("│ ".to_string(), border_style));
@@ -7366,7 +7366,7 @@ pub(crate) fn push_comment_card(
         row.push(Span::styled(format!("{} │", " ".repeat(pad)), border_style));
         lines.push(Line::from(row));
     }
-    // Reaction chip row — sits between the body and the bottom
+    // Reaction chip row, sits between the body and the bottom
     // border, drawn only when at least one of the eight reactions
     // has a count. Each chip = `emoji N` in a muted style, with
     // 1-col gaps between chips.
@@ -7384,7 +7384,7 @@ pub(crate) fn push_comment_card(
             if !chip_spans.is_empty() {
                 chip_spans.push(Span::raw("  ".to_string()));
             }
-            // No bg, no brackets — just `emoji count` rendered
+            // No bg, no brackets, just `emoji count` rendered
             // plain. The bold muted count keeps the pair readable
             // without dressing.
             chip_spans.push(Span::styled(
@@ -7528,7 +7528,7 @@ impl CommitColumns {
     }
 }
 
-/// Returns `(line, avatar_col)` — `Some(col)` when the 3-cell pad
+/// Returns `(line, avatar_col)`, `Some(col)` when the 3-cell pad
 /// was reserved for an avatar (avatars enabled + login known),
 /// `None` when the row layout stays tight without a pad.
 fn commit_row(
@@ -7553,7 +7553,7 @@ fn commit_row(
     ];
     // 1-cell gap between the subject and the avatar so dense
     // commit titles don't crash into the avatar. Only when we'll
-    // actually paint an avatar — otherwise the regular 2-cell
+    // actually paint an avatar, otherwise the regular 2-cell
     // gap below covers the column rhythm.
     let want_avatar = avatars_on && !c.author_login.is_empty();
     if want_avatar {
@@ -7668,7 +7668,7 @@ fn check_group_header_line(
             Style::default().fg(theme.detail_label_fg),
         ),
     ];
-    // Per-status breakdown — omit zeroes so simple all-green groups
+    // Per-status breakdown, omit zeroes so simple all-green groups
     // stay visually quiet.
     if success > 0 {
         spans.push(Span::raw("  "));
@@ -7796,7 +7796,7 @@ pub(crate) fn label_chip_spans_local(label: &crate::github::pr::Label) -> Vec<Sp
     }
 }
 
-/// Compact 4-col label chip for the PR list — `LABEL_CHIP_WIDTH` cols
+/// Compact 4-col label chip for the PR list, `LABEL_CHIP_WIDTH` cols
 /// total: leading space + 2-letter abbreviation + trailing space, all
 /// painted in the label's background colour. Two letters are picked
 /// from the start of the label name, uppercased so it reads as a
@@ -7846,7 +7846,7 @@ pub(crate) fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     Some((r, g, b))
 }
 
-/// Inline file header for the drill-down view — tag + filename +
+/// Inline file header for the drill-down view, tag + filename +
 /// `+N -M`, sharing the colour palette of the list rows so they read
 /// the same.
 fn diff_file_header_spans(
@@ -7884,7 +7884,7 @@ fn diff_file_header_spans(
     ]
 }
 
-/// One line inside a parsed unified-diff hunk — kind drives the
+/// One line inside a parsed unified-diff hunk, kind drives the
 /// per-mode rendering decisions (colour, gutter line numbers,
 /// side-by-side bucketing).
 #[derive(Debug, Clone)]
@@ -7906,7 +7906,7 @@ struct PatchHunk {
     old_start: u32,
     new_start: u32,
     /// Trailing context text after the second `@@` marker (e.g.,
-    /// function name) — surfaced in the enhanced gutter header.
+    /// function name), surfaced in the enhanced gutter header.
     header_extra: String,
     lines: Vec<PatchLine>,
 }
@@ -7949,7 +7949,7 @@ fn parse_patch(patch: &str) -> Vec<PatchHunk> {
         let Some(hunk) = hunks.last_mut() else {
             // Lines before the first `@@` (file headers from the
             // raw patch, "No newline at end of file" markers, etc.)
-            // are not meaningful for the diff body — skip them.
+            // are not meaningful for the diff body, skip them.
             continue;
         };
         let (kind, text) = match raw_line.chars().next() {
@@ -7964,7 +7964,7 @@ fn parse_patch(patch: &str) -> Vec<PatchHunk> {
     hunks
 }
 
-/// Background colours for the enhanced diff modes — picked to match
+/// Background colours for the enhanced diff modes, picked to match
 /// the local commit-detail view so PR diffs read the same. Dark and
 /// light themes get distinct values to keep the contrast tasteful.
 struct EnhancedDiffPalette {
@@ -8011,7 +8011,7 @@ fn render_patch_lines(
     }
 }
 
-/// Raw mode — closest to the unified-diff text on the wire. Each
+/// Raw mode, closest to the unified-diff text on the wire. Each
 /// line keeps its leading marker and is fg-coloured by kind.
 fn render_patch_raw(hunks: &[PatchHunk], theme: &crate::color::ColorTheme) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -8042,7 +8042,7 @@ fn render_patch_raw(hunks: &[PatchHunk], theme: &crate::color::ColorTheme) -> Ve
     out
 }
 
-/// Enhanced mode — per-side line-number gutter, full-row background
+/// Enhanced mode, per-side line-number gutter, full-row background
 /// colour for add / del, vertical bar at the left of each diff line
 /// to make the change region pop. Matches the local diff view.
 fn render_patch_enhanced(
@@ -8071,7 +8071,7 @@ fn render_patch_enhanced(
 
     let mut out: Vec<Line<'static>> = Vec::new();
     for hunk in hunks {
-        // Hunk header — single accent row, no bg fill.
+        // Hunk header, single accent row, no bg fill.
         out.push(Line::from(Span::styled(
             format!(
                 " {} @@ -{} +{} @@ {}",
@@ -8140,7 +8140,7 @@ fn render_patch_enhanced(
     out
 }
 
-/// Side-by-side mode — old version on the left, new on the right,
+/// Side-by-side mode, old version on the left, new on the right,
 /// `│` separator in the middle. Modifications (a Delete followed by
 /// an Add inside the same hunk) zip row-by-row so the changed text
 /// aligns horizontally. `enhanced` adds the per-side bg fill +
@@ -8332,7 +8332,7 @@ fn walk_for_index<'a>(
     None
 }
 
-/// Byte index of the next word-boundary to the LEFT of `cursor` —
+/// Byte index of the next word-boundary to the LEFT of `cursor`
 /// skips trailing whitespace then alphanumerics. Mirrors Ctrl+Backspace
 /// in modern editors.
 pub(crate) fn word_left_boundary(buf: &str, mut cursor: usize) -> usize {
@@ -8426,14 +8426,14 @@ fn rect_contains(rect: Option<Rect>, col: u16, row: u16) -> bool {
 /// CommonMark + GFM (task lists, strikethrough, tables) for free.
 ///
 /// Handles:
-/// - Headings (`# `, `## `, `### `) — bold + accent color
+/// - Headings (`# `, `## `, `### `), bold + accent color
 /// - Bold `**text**` and italic `*text*` / `_text_`
 /// - Inline code `` `code` `` (in hash color)
 /// - Fenced code blocks (triple-backtick)
 /// - Bullet lists (`-` / `*`) with `•` glyph
 /// - Blockquotes (`> text`) with a left gutter
 /// - Horizontal rules (`---`, `***`, `___`)
-/// - Links `[label](url)` — just the label, underlined accent
+/// - Links `[label](url)`, just the label, underlined accent
 /// - Word-wrap every visual line at `inner_width` so long paragraphs
 ///   flow naturally instead of being chopped with an ellipsis
 /// - Collapses runs of blank lines down to a single blank line
@@ -8454,7 +8454,7 @@ pub(crate) fn render_markdown_body(
     let normal = Style::default().fg(theme.fg);
     let label = Style::default().fg(theme.detail_label_fg);
     let code_style = Style::default().fg(theme.list_hash_fg);
-    // Heading hierarchy — terminals can't size text, so we lean on
+    // Heading hierarchy, terminals can't size text, so we lean on
     // colour + modifiers to telegraph the level. H1 also gets an
     // underline so it visually outweighs H2 at a glance.
     let h1_style = Style::default()
@@ -8595,7 +8595,7 @@ pub(crate) fn render_markdown_body(
                 Tag::Emphasis => {
                     // Most terminal fonts lack italic glyphs, so we
                     // pin a distinct accent colour on top of the
-                    // ITALIC modifier — that way `*foo*` reads
+                    // ITALIC modifier, that way `*foo*` reads
                     // differently from `**foo**` and from normal
                     // text no matter what the terminal supports.
                     let s = style_stack
@@ -8608,7 +8608,7 @@ pub(crate) fn render_markdown_body(
                 }
                 Tag::Strong => {
                     // Bold gets the head-accent colour in addition to
-                    // the BOLD modifier — terminals that don't thicken
+                    // the BOLD modifier, terminals that don't thicken
                     // text still surface bold via hue.
                     let s = style_stack
                         .last()
@@ -8724,7 +8724,7 @@ pub(crate) fn render_markdown_body(
                 inline.push(Span::styled(s.into_string(), code_style));
             }
             Event::Html(_) | Event::InlineHtml(_) => {
-                // Skip raw HTML — looks ugly in a TUI and most GitHub
+                // Skip raw HTML, looks ugly in a TUI and most GitHub
                 // markdown only uses it for collapsible sections we
                 // can't render anyway.
             }
@@ -8766,7 +8766,7 @@ pub(crate) fn render_markdown_body(
         }
     }
 
-    // Flush anything still buffered (rare — happens on malformed input
+    // Flush anything still buffered (rare, happens on malformed input
     // where a paragraph is never closed).
     flush_inline(
         &mut out,
@@ -8881,7 +8881,7 @@ fn split_into_tokens(s: &str) -> Vec<String> {
 // ─── Compose-form editor helpers ──────────────────────────────────
 
 /// Return a mutable reference to the text buffer for the focused
-/// compose field — None when the focused field isn't text (Draft).
+/// compose field, None when the focused field isn't text (Draft).
 fn compose_field_text_mut(state: &mut ComposeState) -> Option<&mut String> {
     match state.focused {
         ComposeField::Head => Some(&mut state.head),
@@ -9068,7 +9068,7 @@ fn branch_color_from_graph_palette(
 }
 
 /// Enumerate every local + remote branch in the repo. Used to
-/// populate the compose-PR branch picker — local branches come
+/// populate the compose-PR branch picker, local branches come
 /// first, then remotes, each tagged with a `BranchKind` so the UI
 /// can colour them accordingly.
 fn load_local_and_remote_branches(repo_path: &std::path::Path) -> Vec<BranchPickerEntry> {
@@ -9109,7 +9109,7 @@ fn load_local_and_remote_branches(repo_path: &std::path::Path) -> Vec<BranchPick
 
 /// Resolve the local repo's current HEAD branch name. Returns
 /// `None` when HEAD is detached (or the call to `git symbolic-ref`
-/// otherwise fails) — the compose form just falls back to an empty
+/// otherwise fails), the compose form just falls back to an empty
 /// `head` field in that case.
 fn current_head_branch(repo_path: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
@@ -9129,7 +9129,7 @@ fn current_head_branch(repo_path: &std::path::Path) -> Option<String> {
 }
 
 /// Pull the subject (`%s`) of the most recent commit on `branch`.
-/// Used to pre-fill the compose form's title field — the same
+/// Used to pre-fill the compose form's title field, the same
 /// convention the GitHub web UI follows.
 fn latest_commit_subject(repo_path: &std::path::Path, branch: &str) -> Option<String> {
     if branch.is_empty() {
@@ -9184,7 +9184,7 @@ fn compose_preview_commits(
                 sha: parts[0].to_string(),
                 short_sha: parts[1].to_string(),
                 author: parts[2].to_string(),
-                // Local git log fallback — no GitHub login resolution
+                // Local git log fallback, no GitHub login resolution
                 // here; avatar overlay will simply skip these rows.
                 author_login: String::new(),
                 date: short_relative_iso(parts[3]),
@@ -9264,7 +9264,7 @@ fn compose_preview_file_statuses(
             Some('R') => crate::github::pr::FileStatus::Renamed,
             _ => crate::github::pr::FileStatus::Other,
         };
-        // For renames, the format is `R100\told\tnew` — strip to the
+        // For renames, the format is `R100\told\tnew`, strip to the
         // final path.
         let name = name.split('\t').next_back().unwrap_or(name);
         map.insert(name.to_string(), status);

@@ -167,7 +167,7 @@ pub fn load() -> Result<(
 /// Resolve the config file path that `load()` reads from.
 /// `$GITOUI_CONFIG_FILE` first, then `$XDG_CONFIG_HOME/gitoui/config.toml`
 /// (defaulting to `~/.config/gitoui/config.toml`). Returns the path even
-/// if the file doesn't exist yet — callers (e.g. the in-app `o:open file`
+/// if the file doesn't exist yet, callers (e.g. the in-app `o:open file`
 /// shortcut) use it to seed a new config on first edit.
 pub fn resolve_config_file_path() -> Option<PathBuf> {
     config_file_path_from_env().or_else(config_file_path)
@@ -240,7 +240,7 @@ pub struct CoreOptionConfig {
     pub auto_refresh: bool,
     #[default = 500]
     pub auto_refresh_debounce_ms: u64,
-    #[default = 500]
+    #[default = 1000]
     pub initial_load_count: usize,
     #[default = 200]
     pub load_more_count: usize,
@@ -431,7 +431,7 @@ pub enum DiffMode {
     /// Side-by-side layout with the Enhanced styling: per-side line-number
     /// gutter, full-row background color on additions / deletions, and syntax
     /// highlighting on the content. Does not (yet) support the clickable
-    /// "show more" expand buttons of the single-column Enhanced view — for
+    /// "show more" expand buttons of the single-column Enhanced view, for
     /// gap navigation, fall back to the Enhanced mode.
     SideBySideEnhanced,
 }
@@ -456,13 +456,13 @@ pub enum ConflictViewMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum RebaseViewMode {
-    /// Single dense list — closest to the CLI experience.
+    /// Single dense list, closest to the CLI experience.
     Compact,
     /// GitKraken-style: each row followed by an italic explanation of what
     /// the picked action will do, with inline reword editor.
     #[default]
     Inline,
-    /// Compact list on top, live "Result preview" pane below — mirrors
+    /// Compact list on top, live "Result preview" pane below, mirrors
     /// the conflict editor layout.
     Split,
 }
@@ -481,7 +481,7 @@ pub struct UiCommonConfig {
     #[default(RebaseViewMode::Inline)]
     pub rebase_view: RebaseViewMode,
     /// Whether to render Nerd Font glyphs in chrome (e.g. the GitHub
-    /// logomark in the PR / Issues view headers). On by default — users
+    /// logomark in the PR / Issues view headers). On by default, users
     /// without a Nerd Font installed can opt out via the config file
     /// (this field is intentionally not exposed in the in-app config
     /// page; it's a TOML-only knob):
@@ -608,7 +608,7 @@ pub struct GraphColorConfig {
     // Ordered for maximum *consecutive* contrast: adjacent palette indices
     // are far apart in hue/saturation so neighbouring branches in the graph
     // never read as "the same red" or "the same blue". 16 entries instead
-    // of 8 — with the previous palette, any repo with >8 active lanes
+    // of 8, with the previous palette, any repo with >8 active lanes
     // wrapped around and showed three reds (this was the user complaint).
     #[default(vec![
         "#1f77b4".into(), // steel blue
@@ -816,6 +816,21 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
         );
     }
 
+    // Persist the commit-load limits. Both fields were missing from
+    // earlier `save()` calls, the in-memory value updated cleanly
+    // when the user edited them in the Config view but reverted to the
+    // file's previous value on the next launch.
+    set_nested_integer(
+        &mut doc,
+        &["core", "option", "initial_load_count"],
+        core.option.initial_load_count as i64,
+    );
+    set_nested_integer(
+        &mut doc,
+        &["core", "option", "load_more_count"],
+        core.option.load_more_count as i64,
+    );
+
     set_nested_string(
         &mut doc,
         &["ui", "common", "diff_mode"],
@@ -947,6 +962,21 @@ fn set_nested_bool(doc: &mut toml::Table, keys: &[&str], value: bool) {
     );
 }
 
+fn set_nested_integer(doc: &mut toml::Table, keys: &[&str], value: i64) {
+    let mut table = doc;
+    for key in &keys[..keys.len() - 1] {
+        table = table
+            .entry(key.to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+            .as_table_mut()
+            .unwrap();
+    }
+    table.insert(
+        keys.last().unwrap().to_string(),
+        toml::Value::Integer(value),
+    );
+}
+
 fn set_nested_option_string(doc: &mut toml::Table, keys: &[&str], value: &Option<String>) {
     let mut table = doc;
     for key in &keys[..keys.len() - 1] {
@@ -987,7 +1017,7 @@ pub fn load_or_diagnose() -> std::result::Result<
     ),
     ConfigDiagnostic,
 > {
-    // Resolve which file to read — env var beats default path. If
+    // Resolve which file to read, env var beats default path. If
     // GITOUI_CONFIG_FILE is set but missing → hard fail; everything
     // else (no env var, default path missing) gracefully uses the
     // built-in defaults.
@@ -1024,7 +1054,7 @@ pub fn load_or_diagnose() -> std::result::Result<
         .validate()
         .map_err(|e| ConfigDiagnostic::from_validation(&e, chosen_path.clone()))?;
 
-    // Theme name check — empty string means "use the built-in
+    // Theme name check, empty string means "use the built-in
     // default palette", which is allowed. A non-empty string MUST
     // resolve to a known built-in OR a `~/.config/gitoui/themes/<name>.toml`
     // file; otherwise we'd silently fall back to defaults and the user
@@ -1045,7 +1075,7 @@ pub fn load_or_diagnose() -> std::result::Result<
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Config diagnostics — pretty error path for invalid user configs.
+// Config diagnostics, pretty error path for invalid user configs.
 //
 // When `gitoui::run()` boots, the first `config::load()` call may fail
 // for a handful of reasons: a TOML syntax error, an unknown field, a
@@ -1067,17 +1097,17 @@ pub struct ConfigDiagnostic {
     pub title: &'static str,
     /// One-line summary of what went wrong.
     pub summary: String,
-    /// Optional multi-line body — verbatim TOML parse output, a list
+    /// Optional multi-line body, verbatim TOML parse output, a list
     /// of valid options, the offending key, etc.
     pub details: Vec<String>,
     /// Offending file. None for synthetic errors (e.g. CLI args).
     pub path: Option<PathBuf>,
-    /// Tail line in dim — typically a docs URL or a quick remedy.
+    /// Tail line in dim, typically a docs URL or a quick remedy.
     pub hint: Option<String>,
 }
 
 impl ConfigDiagnostic {
-    /// Wrap a `toml::de::Error` (parse failure) — TOML's own message
+    /// Wrap a `toml::de::Error` (parse failure), TOML's own message
     /// already includes "expected" details + a line/col context, so
     /// we drop it in verbatim under the title.
     pub fn from_toml(err: toml::de::Error, path: PathBuf) -> Self {
@@ -1217,13 +1247,13 @@ impl ConfigDiagnostic {
     pub fn write_to_stderr(&self) {
         use std::io::IsTerminal;
         let tty = std::io::stderr().is_terminal();
-        // Brand orange #F05133 for the title — matches the splash.
+        // Brand orange #F05133 for the title, matches the splash.
         let red = if tty { "\x1b[1;38;2;240;81;51m" } else { "" };
         let dim = if tty { "\x1b[2m" } else { "" };
         let reset = if tty { "\x1b[0m" } else { "" };
 
         eprintln!();
-        eprintln!("  {red}gitoui: {}{reset} — {}", self.title, self.summary);
+        eprintln!("  {red}gitoui: {}{reset}, {}", self.title, self.summary);
         if let Some(path) = &self.path {
             eprintln!("  {dim}{}{reset}", path.display());
         }
@@ -1245,14 +1275,14 @@ mod tests {
 
     #[test]
     fn test_config_default() {
-        // Spot-check the defaults users notice when first running gitoui — anything
+        // Spot-check the defaults users notice when first running gitoui, anything
         // that, if silently changed, would surprise the user or affect first-run
         // behavior. The full struct shape is exercised via `Config::default()` as
         // the base in the partial / complete TOML tests below.
         let cfg = Config::default();
 
         // Performance: lazy-load tunables.
-        assert_eq!(cfg.core.option.initial_load_count, 500);
+        assert_eq!(cfg.core.option.initial_load_count, 1000);
         assert_eq!(cfg.core.option.load_more_count, 200);
 
         // Auto-refresh on by default with anti-flicker debounce.
@@ -1340,7 +1370,7 @@ mod tests {
         "##;
         let actual: Config = toml::from_str::<OptionalConfig>(toml).unwrap().into();
 
-        // Build expected by overriding only the fields the TOML changes — defaults
+        // Build expected by overriding only the fields the TOML changes, defaults
         // come from `Config::default()`. Adding a new default no longer requires
         // touching this test.
         let mut expected = Config::default();

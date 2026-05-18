@@ -1,4 +1,4 @@
-//! GitHub API client — used by views that need data beyond what `git`
+//! GitHub API client, used by views that need data beyond what `git`
 //! alone exposes (pull requests, reviews, CI status). All calls go
 //! through the user's OAuth token from `github_auth_state`.
 //!

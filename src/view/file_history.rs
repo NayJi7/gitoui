@@ -17,7 +17,7 @@ use crate::{
     widget::commit_list::CommitListState,
 };
 
-/// Per-row layout numbers — pulled into constants so the click/hover
+/// Per-row layout numbers, pulled into constants so the click/hover
 /// detection and the renderer agree on column boundaries.
 const PREFIX_W: usize = 2; // "▶ " / "  "
 const HASH_W: usize = 7;
@@ -157,7 +157,7 @@ impl<'a> FileHistoryView<'a> {
     }
 
     /// Click anywhere on a row: select it AND open the commit in one gesture.
-    /// Mirrors the Blame view's click flow — no two-step "select then confirm"
+    /// Mirrors the Blame view's click flow, no two-step "select then confirm"
     /// dance.
     pub fn handle_click(&mut self, _col: u16, row: u16) {
         let Some(area) = self.content_area else {
@@ -350,7 +350,7 @@ impl<'a> FileHistoryView<'a> {
             .skip(self.scroll_offset)
             .take(self.view_height)
             .map(|(i, entry)| {
-                // Single active row — mouse hover wins over keyboard
+                // Single active row, mouse hover wins over keyboard
                 // selection so the highlight always follows the mouse when
                 // present. Matches the Blame view exactly so the two
                 // file-centric views feel identical.
@@ -389,7 +389,7 @@ impl<'a> FileHistoryView<'a> {
 
                 // Avatar placeholder (2 image cells + 1 space). The actual
                 // Kitty image bytes are written into the buffer after the
-                // Paragraph renders — these spaces just reserve the columns.
+                // Paragraph renders, these spaces just reserve the columns.
                 let avatar_span = if avatars_enabled {
                     Span::styled("   ".to_string(), Style::default().bg(bg))
                 } else {
@@ -509,7 +509,7 @@ impl<'a> FileHistoryView<'a> {
                     }
                 }
             } else {
-                // ── Path 3: scroll changed — full render ─────────────────────
+                // ── Path 3: scroll changed, full render ─────────────────────
                 for (j, entry) in self
                     .entries
                     .iter()

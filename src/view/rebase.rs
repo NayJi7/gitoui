@@ -1,10 +1,10 @@
-//! Interactive rebase editor — GitKraken-inspired UI in three layouts.
+//! Interactive rebase editor, GitKraken-inspired UI in three layouts.
 //!
 //! Opens from the existing Rebase dialog when the user checks
 //! `Interactive (-i)`. The dialog hands us the base commit; we load the
 //! commits in `base..HEAD` and let the user assign each one an action
 //! (pick / reword / edit / squash / fixup / drop), reorder them, then
-//! apply with Enter — which runs `git rebase -i base` driven by our
+//! apply with Enter, which runs `git rebase -i base` driven by our
 //! prepared todo via GIT_SEQUENCE_EDITOR.
 //!
 //! Three layouts selectable via `[ui.common] rebase_view`:
@@ -61,30 +61,30 @@ pub struct InteractiveRebaseView<'a> {
     repo_path: PathBuf,
     base_hash: String,
     /// Commits to rebase, in chronological order (oldest first).
-    /// `len() == 0` means there's nothing to rebase — handled with a
+    /// `len() == 0` means there's nothing to rebase, handled with a
     /// gentle empty-state instead of an error.
     items: Vec<RebaseItem>,
-    /// Index of the focused row — moved by keyboard arrows + explicit
+    /// Index of the focused row, moved by keyboard arrows + explicit
     /// clicks only. Mouse hover does NOT touch this (see `hovered`).
     selected: usize,
     /// Mouse-hovered row index, if any. Used as a SOFT visual cue
-    /// (subtle highlight + caret hint) — independent of `selected`
+    /// (subtle highlight + caret hint), independent of `selected`
     /// so pointer drift never yanks the cursor. Frozen while
     /// `grabbed = true` so a grabbed commit doesn't drag through
     /// neighbour rows on hover.
     hovered: Option<usize>,
-    /// Effective layout mode — read once from config at view creation.
+    /// Effective layout mode, read once from config at view creation.
     mode: RebaseViewMode,
     /// Vertical scroll inside the list. Auto-anchors on `selected`.
     scroll_delta: i32,
     /// When `Some`, the user is editing the reword message of items[idx].
     /// The String buffer holds the current text + cursor at its end.
     reword_editing: Option<RewordEdit>,
-    /// Screen position (col, row) where the reword input starts — captured
+    /// Screen position (col, row) where the reword input starts, captured
     /// during render so we can place the terminal cursor after drawing.
     /// `None` when the editor isn't visible.
     reword_screen_pos: Option<(u16, u16)>,
-    /// `true` when the user has "grabbed" the selected row — arrows then
+    /// `true` when the user has "grabbed" the selected row, arrows then
     /// move the commit instead of moving the cursor. Toggled with Space.
     grabbed: bool,
     /// Row rects captured during the previous render for mouse hit-testing.
@@ -94,7 +94,7 @@ pub struct InteractiveRebaseView<'a> {
     /// apply. Outlives the transient toast notification so the user can
     /// actually read it.
     last_error: Option<String>,
-    /// When `Some`, we're not editing a plan — we're showing the recovery
+    /// When `Some`, we're not editing a plan, we're showing the recovery
     /// UI for an already-running rebase (`.git/rebase-merge/*` exists).
     /// `items` is empty in this mode; rendering and key handling switch
     /// to the resume panel.
@@ -156,7 +156,7 @@ impl<'a> InteractiveRebaseView<'a> {
             }
         };
 
-        // Resume mode has its own minimal hint — only 4 actions matter.
+        // Resume mode has its own minimal hint, only 4 actions matter.
         if self.resume.is_some() {
             let parts = [
                 scoped(&["rebase", "resume"], "continue_rebase", "continue"),
@@ -185,7 +185,7 @@ impl<'a> InteractiveRebaseView<'a> {
             scoped(&["rebase"], "grab", "grab"),
             "↑↓:nav".to_string(),
         ];
-        // Surface the abort shortcut only when there's something to abort —
+        // Surface the abort shortcut only when there's something to abort
         // keeps the footer quiet on the happy path.
         if crate::git::rebase::rebase_in_progress(&self.repo_path) {
             parts.push(scoped(&["rebase"], "abort_previous", "abort prev"));
@@ -333,13 +333,13 @@ impl<'a> InteractiveRebaseView<'a> {
         }
         // Flush any in-flight reword buffer before applying.
         self.commit_reword();
-        // Clear any stale error from a previous attempt — the result of
+        // Clear any stale error from a previous attempt, the result of
         // this run will overwrite it (or stay cleared on success).
         self.last_error = None;
 
         match crate::git::rebase::apply_rebase(&self.repo_path, &self.base_hash, &self.items) {
             Ok(crate::git::rebase::RebaseOutcome::Clean) => {
-                // Only on a fully clean rebase do we close the view — every
+                // Only on a fully clean rebase do we close the view, every
                 // other branch keeps the user here so they can see the error
                 // and act on it (abort, retry, etc.).
                 self.tx
@@ -378,7 +378,7 @@ impl<'a> InteractiveRebaseView<'a> {
         }
     }
 
-    /// `git rebase --abort` — clears a stale rebase state so the user can
+    /// `git rebase --abort`, clears a stale rebase state so the user can
     /// retry from a clean repo. Triggered by `A` in the editor. Silently
     /// no-ops if there's nothing to abort (the footer hint already gates
     /// this, but a stray `A` shouldn't crash anything).
@@ -389,7 +389,7 @@ impl<'a> InteractiveRebaseView<'a> {
         match crate::git::rebase::abort_rebase(&self.repo_path) {
             Ok(()) => {
                 self.tx.send(AppEvent::NotifySuccess(
-                    "Previous rebase aborted — you can try again now.".into(),
+                    "Previous rebase aborted, you can try again now.".into(),
                 ));
                 self.last_error = None;
             }
@@ -399,7 +399,7 @@ impl<'a> InteractiveRebaseView<'a> {
         }
     }
 
-    /// Resume-mode handlers — these run only when the view is showing the
+    /// Resume-mode handlers, these run only when the view is showing the
     /// recovery panel for an in-progress rebase.
     fn continue_rebase(&mut self) {
         match crate::git::rebase::continue_rebase(&self.repo_path) {
@@ -474,7 +474,7 @@ impl<'a> InteractiveRebaseView<'a> {
         // editor), but we make the next step obvious.
         if crate::git::rebase::rebase_in_progress(&self.repo_path) {
             self.tx.send(AppEvent::NotifyWarn(
-                "Rebase still in progress — reopen the editor and press A, \
+                "Rebase still in progress, reopen the editor and press A, \
                  or run `git rebase --abort` in the shell to roll it back."
                     .into(),
             ));
@@ -487,7 +487,7 @@ impl<'a> InteractiveRebaseView<'a> {
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         use ratatui::crossterm::event::KeyCode;
 
-        // Resume mode hijacks input — only continue / skip / abort / Esc
+        // Resume mode hijacks input, only continue / skip / abort / Esc
         // make sense when there's an in-progress rebase to recover.
         // Bindings live in [scope.rebase.resume].
         if self.resume.is_some() {
@@ -724,7 +724,7 @@ impl<'a> InteractiveRebaseView<'a> {
         //   cursor there AND cycles its action (and opens the inline
         //   reword editor when the new action is Reword).
         // - `grabbed = true`: clicking a row REPLACES the grabbed
-        //   commit's destination — we move the held row to the clicked
+        //   commit's destination, we move the held row to the clicked
         //   position, then release the grab. Lets the user grab a
         //   commit and drop it anywhere with one click, instead of
         //   having to step through the chain with arrows.
@@ -735,7 +735,7 @@ impl<'a> InteractiveRebaseView<'a> {
             .cloned();
         let Some(hit) = hit else { return };
         if self.grabbed {
-            // Grab in flight — slide the held commit to the clicked row
+            // Grab in flight, slide the held commit to the clicked row
             // but KEEP it grabbed, identical to nudging with arrow keys.
             // The user releases the grab explicitly (Enter / Esc / click
             // on the same row) instead of every click dropping it.
@@ -746,7 +746,7 @@ impl<'a> InteractiveRebaseView<'a> {
             }
             return;
         }
-        // First click on a row just moves the cursor there — no action
+        // First click on a row just moves the cursor there, no action
         // change. Re-clicking the already-selected row is what cycles
         // the action (and opens the inline reword editor when the new
         // action lands on Reword). Avoids a frustrating "I just wanted
@@ -761,7 +761,7 @@ impl<'a> InteractiveRebaseView<'a> {
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         // Hover updates a separate `hovered` index used only for
         // visual feedback (subtle row highlight). It NEVER moves
-        // `selected` — that's keyboard / explicit-click only — so it's
+        // `selected`, that's keyboard / explicit-click only, so it's
         // safe to keep tracking under the cursor even while a grab is
         // in flight (the grabbed row keeps its own bg, the hover glyph
         // shows on the row the user is about to drop on).
@@ -904,7 +904,7 @@ impl<'a> InteractiveRebaseView<'a> {
             f.render_widget(body, body_area);
 
             // Skip y + body_height (blank gutter), render hint on the row
-            // after — keeps the error and the action visually separated.
+            // after, keeps the error and the action visually separated.
             let hint_area = Rect {
                 x: inner.x,
                 y: inner.y + body_height + 1,
@@ -919,7 +919,7 @@ impl<'a> InteractiveRebaseView<'a> {
             ));
             f.render_widget(hint, hint_area);
         } else {
-            // Cramped — body only.
+            // Cramped, body only.
             let body = Paragraph::new(Span::styled(
                 msg.clone(),
                 Style::default().fg(theme.status_error_fg),
@@ -929,7 +929,7 @@ impl<'a> InteractiveRebaseView<'a> {
         }
     }
 
-    /// Resume panel — shown when we open the view while a previous rebase
+    /// Resume panel, shown when we open the view while a previous rebase
     /// is still paused mid-flight. Lists what git has already done, what's
     /// still queued, and the recovery actions (Continue / Skip / Abort).
     fn render_resume(&self, f: &mut Frame, area: Rect) {
@@ -1056,7 +1056,7 @@ impl<'a> InteractiveRebaseView<'a> {
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "— resume in-progress rebase",
+                    "(resume in-progress rebase)",
                     Style::default().fg(theme.status_warn_fg),
                 ),
             ])
@@ -1088,7 +1088,7 @@ impl<'a> InteractiveRebaseView<'a> {
         f.render_widget(Paragraph::new(vec![title, divider]), area);
     }
 
-    /// Layout A — single dense list, like the CLI todo file.
+    /// Layout A, single dense list, like the CLI todo file.
     fn render_compact(&mut self, f: &mut Frame, area: Rect) {
         let theme = &self.ctx.color_theme;
         let block = Block::default()
@@ -1164,7 +1164,7 @@ impl<'a> InteractiveRebaseView<'a> {
         }
     }
 
-    /// Layout B — GitKraken style: each row + italic description + inline
+    /// Layout B, GitKraken style: each row + italic description + inline
     /// reword editor when the row is being reworded.
     fn render_inline(&mut self, f: &mut Frame, area: Rect) {
         let theme = &self.ctx.color_theme;
@@ -1247,7 +1247,7 @@ impl<'a> InteractiveRebaseView<'a> {
         }
     }
 
-    /// Layout C — todo list on top + Result preview on the bottom.
+    /// Layout C, todo list on top + Result preview on the bottom.
     fn render_split(&mut self, f: &mut Frame, area: Rect) {
         let [todo_area, result_area] =
             Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).areas(area);
@@ -1359,7 +1359,7 @@ impl<'a> InteractiveRebaseView<'a> {
         if verbose {
             // Use console::measure_text_width to handle multi-cell glyphs
             // (▶ is single-cell, but the cursor / action tag can vary by
-            // theme/font — be defensive). Also fixes a hardcoded "9" that
+            // theme/font, be defensive). Also fixes a hardcoded "9" that
             // under-counted the "  {hash}  " span (actually 11 chars) and
             // pushed the meta column past the right border by 2 cells.
             let measured = |s: &str| console::measure_text_width(s) as u16;
@@ -1367,7 +1367,7 @@ impl<'a> InteractiveRebaseView<'a> {
                 + measured(&action_text)
                 + measured(&format!("  {}  ", short_hash))
                 + measured(&subject);
-            // Author + " · " separator + date — coloured the same way as
+            // Author + " · " separator + date, coloured the same way as
             // the commit list (list_name_fg / list_date_fg) so the rebase
             // editor reads like a focused slice of that view.
             let sep = "  ";
@@ -1401,7 +1401,7 @@ impl<'a> InteractiveRebaseView<'a> {
         // Row background:
         // - Grabbed cursor → list_compare_marked_bg/fg (saturated accent).
         // - Cursor         → list_selected_bg/fg.
-        // - Hover-only     → no bg change — the ▷ glyph in the gutter
+        // - Hover-only     → no bg change, the ▷ glyph in the gutter
         //   is the entire signal. Two filled rows would confuse the
         //   "this is what I'm acting on" cue.
         // - Idle           → no bg.
@@ -1557,8 +1557,8 @@ fn result_line(
 /// remote-branch onto red), so we use 4 colours + outlined/filled variants
 /// to get 6 guaranteed-distinct visual styles in every theme:
 ///
-/// Outlined (fg only) = "keeps the commit"            — Pick / Reword / Squash
-/// Filled (fg on bg)  = "alters or removes"           — Edit / Fixup / Drop
+/// Outlined (fg only) = "keeps the commit"           , Pick / Reword / Squash
+/// Filled (fg on bg)  = "alters or removes"          , Edit / Fixup / Drop
 ///
 /// - Pick   = green   outline
 /// - Reword = yellow  outline   (will keep, edit message)
@@ -1604,7 +1604,7 @@ fn action_style(action: RebaseAction, theme: &crate::color::ColorTheme) -> Style
 }
 
 /// Walk byte-wise back from `cursor` past non-alphanumerics, then past
-/// alphanumerics — same semantics as Ctrl+Backspace in modern editors.
+/// alphanumerics, same semantics as Ctrl+Backspace in modern editors.
 /// Mirrors the helper in `view/dialog.rs`.
 fn word_left(s: &str, cursor: usize) -> usize {
     let bytes = s.as_bytes();

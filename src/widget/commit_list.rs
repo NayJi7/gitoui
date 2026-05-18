@@ -8,7 +8,7 @@ use std::{
 /// Global de-dup for the lazy-load auto-trigger. Stores the cursor
 /// position at which we last fired `LoadMore`. Lives at module scope
 /// so it survives the `CommitListState` rebuild that follows each
-/// reload — without that, every keystroke at the bottom would re-fire
+/// reload, without that, every keystroke at the bottom would re-fire
 /// the loader and the user would see a hard blink per nav event.
 ///
 /// `usize::MAX` is the sentinel for "never fired" so the very first
@@ -215,7 +215,7 @@ struct SearchMatcher {
     fuzzy: bool,
     regex: bool,
     /// Pre-compiled regex when `regex` is on. `None` if regex is off OR the
-    /// pattern failed to compile — in the latter case the matcher returns no
+    /// pattern failed to compile, in the latter case the matcher returns no
     /// matches at all (silent fallback; the empty result list signals the user
     /// that their pattern is invalid).
     regex_compiled: Option<regex::Regex>,
@@ -223,7 +223,7 @@ struct SearchMatcher {
 
 impl SearchMatcher {
     fn new(query: &str, ignore_case: bool, fuzzy: bool, regex: bool) -> Self {
-        // Regex takes precedence over fuzzy when both happen to be enabled —
+        // Regex takes precedence over fuzzy when both happen to be enabled
         // fuzzy is a substring-style matcher, regex is a strict pattern match.
         let regex_compiled = if regex && !query.is_empty() {
             RegexBuilder::new(query)
@@ -336,7 +336,7 @@ pub struct CommitListState<'a> {
     // Tracks the (offset, height, area) of the last graph render so we can skip
     // re-rendering graph image cells when visible commits haven't changed.
     graph_render_state: Option<(usize, usize, Rect)>,
-    // Stable hash of (offset, height, area, visible_emails+prepared flags) — does NOT
+    // Stable hash of (offset, height, area, visible_emails+prepared flags), does NOT
     // include `selected`, so hover-driven selection changes don't trigger a full re-render.
     avatar_stable_key: Option<u64>,
     // Which visual row was selected in the last avatar render.  Tracked separately from
@@ -529,7 +529,7 @@ impl<'a> CommitListState<'a> {
     }
 
     /// Like `invalidate_image_caches` but also swaps the entire graph
-    /// palette (branch colours + circle edge + bg) — used by the live
+    /// palette (branch colours + circle edge + bg), used by the live
     /// theme-cycle path so the next render rebakes images with the new
     /// theme's branch colours, not just its background.
     pub fn invalidate_image_caches_with_palette(
@@ -569,7 +569,7 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
-    /// Read-only access to the underlying graph topology — used by the
+    /// Read-only access to the underlying graph topology, used by the
     /// live `graph_width` exit path so the caller can resolve the
     /// `Option<GraphWidthType>` (Auto / Single / Double) into a
     /// concrete `CellWidthType` via `check::decide_cell_width_type`.
@@ -620,7 +620,7 @@ impl<'a> CommitListState<'a> {
     /// rows past the spot where we last fired a load. The progress
     /// gate is the dedup: without it, every keystroke while the user
     /// is parked at the bottom would re-fire `LoadMore`, and each
-    /// reload takes a frame or two — perceived as a hard blink.
+    /// reload takes a frame or two, perceived as a hard blink.
     ///
     /// The dedup lives in a module-level `AtomicUsize` so it survives
     /// the `CommitListState` rebuild that happens after every reload.
@@ -638,7 +638,7 @@ impl<'a> CommitListState<'a> {
         }
         let last = LAST_LAZY_TRIGGER_POS.load(Ordering::Relaxed);
         // First trigger of the session OR meaningful forward progress
-        // past the last trigger position — both unlock another load.
+        // past the last trigger position, both unlock another load.
         last == usize::MAX || pos >= last.saturating_add(MIN_PROGRESS)
     }
 
@@ -690,7 +690,7 @@ impl<'a> CommitListState<'a> {
             return;
         }
         if self.total <= self.height {
-            // Everything fits on screen — no scroll, just move the cursor.
+            // Everything fits on screen, no scroll, just move the cursor.
             self.selected = index;
             return;
         }
@@ -826,7 +826,7 @@ impl<'a> CommitListState<'a> {
     /// "Match X of Y" footer follows arrow-key / mouse navigation
     /// instead of staying frozen on the last cycle target. No-op when
     /// the selected row isn't a match (keeps the last visited index
-    /// visible — vim-like "anchor" behaviour) or when search isn't
+    /// visible, vim-like "anchor" behaviour) or when search isn't
     /// applied at all.
     pub fn sync_match_index_to_selected(&mut self) {
         if !matches!(self.search_state, SearchState::Applied { .. }) {
@@ -1186,7 +1186,7 @@ impl<'a> CommitListState<'a> {
     }
 
     /// Helper used by every toggle to read the current modifier triple in one
-    /// shot (returns `None` when search is inactive — callers should bail).
+    /// shot (returns `None` when search is inactive, callers should bail).
     fn search_modifiers(&self) -> Option<(bool, bool, bool)> {
         match self.search_state {
             SearchState::Searching {
@@ -1352,7 +1352,7 @@ impl<'a> StatefulWidget for CommitList<'a> {
 
         state.ref_hit_areas.clear();
 
-        // Compute once per render — avoids 4 separate mutex lock/unlock cycles
+        // Compute once per render, avoids 4 separate mutex lock/unlock cycles
         let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
 
         let (header_area, rows_area) = if area.height >= 3 {
@@ -1508,7 +1508,7 @@ impl CommitList<'_> {
                 let _is_selected = i == state.selected
                     && state.hovered_branch.is_none()
                     && state.hovered_tag.is_none();
-                // Pad cell keeps the app background — selection starts at the │ marker
+                // Pad cell keeps the app background, selection starts at the │ marker
                 if pad_x < area.right() {
                     let pad_cell = &mut buf[(pad_x, y)];
                     pad_cell.set_symbol(" ");
@@ -1552,7 +1552,7 @@ impl CommitList<'_> {
                         cell.set_style(image_cell.style().bg(self.ctx.color_theme.bg));
                         cell.set_skip(image_cell.skip());
                     }
-                    // Pad cell keeps the app background — selection starts at the │ marker
+                    // Pad cell keeps the app background, selection starts at the │ marker
                     let pad_x = area.left() + max_graph_width as u16;
                     if pad_x < area.right() {
                         let cell = &mut buf[(pad_x, y)];
@@ -1600,7 +1600,7 @@ impl CommitList<'_> {
         if area.is_empty() || max_width == 0 {
             return;
         }
-        // Pulled out of the render loop — `stopped-sha` is a single tiny
+        // Pulled out of the render loop, `stopped-sha` is a single tiny
         // file. Mirror of the `↻ REBASING` badge on the Uncommitted row,
         // but anchored on the EXACT commit git is paused on so the user
         // sees where the rebase will resume from.
@@ -1647,7 +1647,7 @@ impl CommitList<'_> {
             // Reserve room for the paused-rebase badge BEFORE deciding
             // where to truncate the commit message. Without this the
             // badge appended below would be the first thing ratatui
-            // clips when the terminal is narrow — exactly the opposite
+            // clips when the terminal is narrow, exactly the opposite
             // of what we want (it has to stay visible because it's the
             // call-to-action telling the user to press `e`).
             let commit = commit_info.commit;
@@ -1699,7 +1699,7 @@ impl CommitList<'_> {
             }
             // ⏸ badge on the exact commit git is paused on. Width is
             // reserved up in the truncation block so the badge always
-            // fits — same call-to-action role as `⚠ N conflicts` on
+            // fits, same call-to-action role as `⚠ N conflicts` on
             // the Uncommitted row, can't be the first thing clipped.
             if paused_here {
                 spans.push(
@@ -1784,7 +1784,7 @@ impl CommitList<'_> {
             return;
         }
 
-        // Single lock for the entire avatar render — avoids repeated lock/unlock cycles
+        // Single lock for the entire avatar render, avoids repeated lock/unlock cycles
         let avatar_manager = self.ctx.avatar_manager.lock().unwrap();
 
         // Stable key: excludes `selected` so hover-driven selection changes don't trigger a
@@ -1869,7 +1869,7 @@ impl CommitList<'_> {
                     } else {
                         // No avatar and stable key unchanged (no old image to delete).
                         // Write plain spaces so the List widget's selection background shows
-                        // correctly — using the Kitty delete APC here corrupts the bg.
+                        // correctly, using the Kitty delete APC here corrupts the bg.
                         for x in 0..2 {
                             let cell = &mut buf[(area.left() + x as u16 + 1, y)];
                             cell.set_symbol(" ");
@@ -1878,7 +1878,7 @@ impl CommitList<'_> {
                         }
                     }
                 } else {
-                    // Unchanged row — preserve terminal state
+                    // Unchanged row, preserve terminal state
                     if avatar_manager
                         .prepared_image(email.as_str(), 1, false)
                         .is_some()
@@ -2043,7 +2043,7 @@ impl CommitList<'_> {
             + commit_info.uncommitted_untracked;
         let unmerged = commit_info.uncommitted_unmerged;
         // Same #808080 grey as graph::image's UNCOMMITTED_COLOR and as the
-        // marker `│` for this row — keeps the whole uncommitted line tonally
+        // marker `│` for this row, keeps the whole uncommitted line tonally
         // unified instead of mixing graph grey with default white text.
         let uncommitted_grey = Color::Rgb(0x80, 0x80, 0x80);
         let mut spans: Vec<Span> = vec![
@@ -2054,7 +2054,7 @@ impl CommitList<'_> {
                 .fg(uncommitted_grey)
                 .add_modifier(Modifier::BOLD),
         ];
-        // Conflict badge — visible directly on the commit list so the user
+        // Conflict badge, visible directly on the commit list so the user
         // knows there's a merge in progress without opening Uncommitted Details.
         if unmerged > 0 {
             let noun = if unmerged == 1 {
@@ -2068,7 +2068,7 @@ impl CommitList<'_> {
                     .add_modifier(Modifier::BOLD),
             );
         }
-        // Rebase badge — same anchor as the conflicts marker but yellow,
+        // Rebase badge, same anchor as the conflicts marker but yellow,
         // so the user spots a paused rebase even when there are no current
         // unmerged paths (e.g. paused at an Edit step).
         if !self.ctx.repo_path.as_os_str().is_empty()
@@ -2106,7 +2106,7 @@ impl CommitList<'_> {
             .unwrap_or(false);
 
         if is_marked {
-            // Compare-mark uses its own theme tokens — each theme picks a
+            // Compare-mark uses its own theme tokens, each theme picks a
             // saturated, accent-colored variant of its selection palette so
             // the marked row stands out clearly without clashing.
             line = line
@@ -2287,7 +2287,7 @@ fn refs_spans<'a>(
             current_width += head_text_width;
         }
 
-        // Tags and branches share the same style — `*is_tag` only changes
+        // Tags and branches share the same style, `*is_tag` only changes
         // the leading icon glyph (set below), not the text decoration.
         let style = if is_hovered {
             Style::default()

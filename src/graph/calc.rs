@@ -214,13 +214,13 @@ fn get_available_colour(_start_at: usize, available_colours: &[usize]) -> usize 
     // Always allocate a fresh sequential colour index. Earlier versions
     // reused the lowest "ended" index for tightly packed colour usage, but
     // that produced graphs where every new branch picked palette[0] the
-    // instant the previous lane ended — the user saw three red branches in
+    // instant the previous lane ended, the user saw three red branches in
     // a row even though the palette had 16 entries.
     //
     // Wrap-around is handled later by `ImageParams::edge_color`, which does
     // `palette[index % palette.len()]`. With this change, distinct branches
     // get distinct colours until we exceed the palette size; only then do
-    // colours repeat — and at that point the repeated branches are far
+    // colours repeat, and at that point the repeated branches are far
     // apart in the graph history, where reuse is no longer visually noisy.
     available_colours.len()
 }
@@ -242,7 +242,7 @@ fn determine_path(
         (pid, v.not_on_branch(), v.is_merge(), !v.not_on_branch())
     };
 
-    // No parent in graph — mark processed and return
+    // No parent in graph, mark processed and return
     if parent_id == usize::MAX {
         vertices[start_at].register_parent_processed();
         return;
@@ -883,7 +883,7 @@ mod tests {
 
     /// Locks in the "always allocate a fresh index" semantics of the new
     /// `get_available_colour`. The old algorithm reused the lowest ended
-    /// index — the user complained that this produced three red branches
+    /// index, the user complained that this produced three red branches
     /// in a row. We freeze the new behaviour so future refactors can't
     /// silently revert it.
     #[test]
@@ -891,10 +891,10 @@ mod tests {
         assert_eq!(get_available_colour(0, &[]), 0);
         assert_eq!(get_available_colour(10, &[]), 0);
         // Even when slot 0 has "ended" (entry value <= start_at), we DON'T
-        // reuse it — we hand out the next sequential index.
+        // reuse it, we hand out the next sequential index.
         assert_eq!(get_available_colour(10, &[3]), 1);
         assert_eq!(get_available_colour(10, &[3, 5, 7]), 3);
-        // And `start_at` is ignored entirely — only the slot count matters.
+        // And `start_at` is ignored entirely, only the slot count matters.
         assert_eq!(get_available_colour(0, &[100, 100, 100]), 3);
     }
 
@@ -928,7 +928,7 @@ mod tests {
         );
 
         let graph = calc_graph(&repository);
-        // A linear history yields a single branch on lane 0 — but its
+        // A linear history yields a single branch on lane 0, but its
         // colour index must come out as 0 (first allocation).
         let head_color = graph.commit_color_map[&CommitHash::from("d")];
         assert_eq!(head_color, 0);

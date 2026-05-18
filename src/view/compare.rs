@@ -4,7 +4,7 @@
 //! - **Left**: list of files that differ between the two commits, with status
 //!   indicators (M / A / D / R) and per-file +N -M counters.
 //! - **Right**: full diff of the currently-selected file. Internally this is
-//!   a regular `DiffView` rebuilt on every selection change — it inherits all
+//!   a regular `DiffView` rebuilt on every selection change, it inherits all
 //!   the existing diff features (Enhanced / Raw / SideBySide rendering modes,
 //!   gap navigation with show-more, syntax highlighting, search-within-diff).
 //!
@@ -37,7 +37,7 @@ use crate::{
 
 /// Which "cursor" the user moved last. Both cursors (the highlighted file row
 /// in the left pane and the focused show-more button in the right pane) are
-/// always visible — `ActiveCursor` only tracks which one Enter should
+/// always visible, `ActiveCursor` only tracks which one Enter should
 /// activate. Updated by every navigation key:
 /// - ↑↓ → `File`
 /// - ←→ → `Button`
@@ -99,10 +99,10 @@ pub struct CompareView<'a> {
     file_summaries: Vec<FileSummary>,
 
     /// Index of the file currently shown in the right pane (committed by
-    /// click or by ↑↓ navigation — NOT by hover).
+    /// click or by ↑↓ navigation, NOT by hover).
     selected_file_idx: usize,
     /// Index of the file currently under the mouse, if any. Pure visual
-    /// state — does not change the displayed diff. Cleared when the mouse
+    /// state, does not change the displayed diff. Cleared when the mouse
     /// leaves the file pane.
     hovered_file_idx: Option<usize>,
     /// First visible row of the file list (for scrolling when the list is
@@ -114,11 +114,11 @@ pub struct CompareView<'a> {
     active_cursor: ActiveCursor,
 
     /// The diff pane is delegated to a regular `DiffView`. Rebuilt every time
-    /// the file selection changes — DiffView::new is cheap (no I/O), so this
+    /// the file selection changes, DiffView::new is cheap (no I/O), so this
     /// stays snappy.
     diff_pane: Option<DiffView<'a>>,
 
-    /// Endpoints — older on the left/red, newer on the right/green.
+    /// Endpoints, older on the left/red, newer on the right/green.
     older_hash: String,
     newer_hash: String,
 
@@ -175,7 +175,7 @@ impl<'a> CompareView<'a> {
             return;
         };
         let short = |h: &str| h.chars().take(7).collect::<String>();
-        // Title format mirrors the standalone compare-diff title — the
+        // Title format mirrors the standalone compare-diff title, the
         // status-line / header rendering picks this up to colorize the SHAs.
         let title = format!(
             "Compare {}..{}",
@@ -189,7 +189,7 @@ impl<'a> CompareView<'a> {
             self.tx.clone(),
             title,
             self.newer_hash.clone(),
-            Vec::new(), // no file cycling at the inner level — files navigate through the left pane
+            Vec::new(), // no file cycling at the inner level, files navigate through the left pane
             self.repo_path.clone(),
         ));
     }
@@ -206,7 +206,7 @@ impl<'a> CompareView<'a> {
     }
 
     pub fn refresh(&self) {
-        // No-op for now — gitoui auto-refresh fires on file system changes,
+        // No-op for now, gitoui auto-refresh fires on file system changes,
         // and the compare view is bound to two specific commit SHAs that
         // can't change underneath us. If we later support comparing a
         // commit to HEAD, refresh would re-load the diff.
@@ -237,7 +237,7 @@ impl<'a> CompareView<'a> {
 
         // Vertical navigation always targets the FILE list. Updates
         // `active_cursor` so the next Enter triggers the file action (a no-op
-        // for now — the file is already shown in the right pane).
+        // for now, the file is already shown in the right pane).
         if matches!(
             event,
             UserEvent::NavigateUp
@@ -254,7 +254,7 @@ impl<'a> CompareView<'a> {
 
         // Mouse wheel: route to the pane the cursor is currently over. When
         // hovering the file list the wheel scrolls its offset (no selection
-        // change — the user must click or use ↑↓ to commit a new file);
+        // change, the user must click or use ↑↓ to commit a new file);
         // otherwise the wheel falls through to the inner DiffView.
         if matches!(event, UserEvent::ScrollUp | UserEvent::ScrollDown)
             && self.hovered_file_idx.is_some()
@@ -295,7 +295,7 @@ impl<'a> CompareView<'a> {
         }
 
         // Everything else (scroll, search, in-diff actions) goes to the
-        // diff pane so its existing keyboard surface keeps working —
+        // diff pane so its existing keyboard surface keeps working
         // search-in-diff, copy-path, etc.
         if let Some(pane) = &mut self.diff_pane {
             pane.handle_event(event_with_count, key);
@@ -326,7 +326,7 @@ impl<'a> CompareView<'a> {
     }
 
     /// Scroll the file list offset by `delta` rows (negative = up, positive
-    /// = down). Does NOT change `selected_file_idx` — the user must hover
+    /// = down). Does NOT change `selected_file_idx`, the user must hover
     /// or click to change selection. Bounds the offset so we never scroll
     /// past either end of the list.
     fn scroll_files(&mut self, delta: isize) {
@@ -465,7 +465,7 @@ impl<'a> CompareView<'a> {
         let theme_sel_bg = self.ctx.color_theme.list_selected_bg;
         let theme_sel_fg = self.ctx.color_theme.list_selected_fg;
 
-        // Bordered block on the left pane — border brightens when the file
+        // Bordered block on the left pane, border brightens when the file
         // cursor is the most recently used (signals "Enter would land here").
         let border_style = if self.active_cursor == ActiveCursor::File {
             Style::default().fg(theme_fg).add_modifier(Modifier::BOLD)
@@ -481,7 +481,7 @@ impl<'a> CompareView<'a> {
 
         self.files_height = inner.height as usize;
         // NOTE: do NOT call `ensure_visible()` here. It's only meaningful
-        // after a SELECTION change (↑↓ navigation, click) — not on every
+        // after a SELECTION change (↑↓ navigation, click), not on every
         // render. Calling it at render-time would clamp `files_offset` back
         // toward `selected_file_idx`, instantly undoing any wheel-scroll
         // the user just performed. ensure_visible is invoked from the
@@ -507,7 +507,7 @@ impl<'a> CompareView<'a> {
             let is_hovered = self.hovered_file_idx == Some(i);
 
             // Selection indicator: `▶` in the theme's accent color
-            // (`list_head_fg` — typically cyan/teal/blue, the same colour
+            // (`list_head_fg`, typically cyan/teal/blue, the same colour
             // used for HEAD elsewhere). Same glyph as the FileHistory view
             // so the "selected row" cue feels uniform across the app.
             let leading = if is_selected { "▶" } else { " " };
@@ -543,7 +543,7 @@ impl<'a> CompareView<'a> {
             }
 
             let mut line = Line::from(spans);
-            // Hover indicator: full-row background highlight — strong cue
+            // Hover indicator: full-row background highlight, strong cue
             // that "a click here would commit this row". When the hovered
             // row is also the selected row, both signals stack: bg shows
             // hover, leading `▸` keeps its accent color via per-span style.
@@ -557,7 +557,7 @@ impl<'a> CompareView<'a> {
 
     pub fn update_layout(&mut self, area: Rect) {
         // The header takes 1 row; the rest is the body. We don't actually
-        // need the precise files area height ahead of time — render_files
+        // need the precise files area height ahead of time, render_files
         // computes it from `inner.height`. But forwarding the area to the
         // inner DiffView lets it precompute viewport-dependent state.
         let body_area = if area.height >= 1 {
@@ -612,7 +612,7 @@ impl<'a> CompareView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
-        // File pane hover: pure visual preview — sets `hovered_file_idx`
+        // File pane hover: pure visual preview, sets `hovered_file_idx`
         // without touching `selected_file_idx` or the displayed diff. The
         // user must click to actually swap the right pane.
         let in_files = self

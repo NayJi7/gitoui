@@ -153,7 +153,7 @@ impl ImageProtocol {
     /// outside the Ratatui buffer (e.g. splash screens before TUI init).
     ///
     /// Set `clear_at_cursor = false` when emitting subsequent images that share
-    /// rows with a prior placement — Kitty's `d=C` delete prefix is interpreted
+    /// rows with a prior placement, Kitty's `d=C` delete prefix is interpreted
     /// liberally by Ghostty (deletes the whole row, not just the cursor cell)
     /// and would erase the prior image.
     ///
@@ -207,7 +207,7 @@ impl ImageProtocol {
     pub fn clear_cell(&self) -> PreparedImageCell {
         match self {
             // Persistent Kitty placements (a=T) render on top of terminal content and stay
-            // until explicitly deleted — a bare space does not remove them.  Prefix with
+            // until explicitly deleted, a bare space does not remove them.  Prefix with
             // a=d,d=C so any ghost image at this cell is evicted before the space is written.
             ImageProtocol::Kitty => {
                 PreparedImageCell::new("\x1b_Ga=d,d=C;\x1b\\ ".to_string(), Style::default(), false)
@@ -220,7 +220,7 @@ impl ImageProtocol {
     }
 
     /// Delete all image placements on terminal row `y` (0-based).
-    /// Scoped to a single row — does not touch images on other rows.
+    /// Scoped to a single row, does not touch images on other rows.
     pub fn delete_row(&self, y: u16) -> Result<(), std::io::Error> {
         match self {
             ImageProtocol::Kitty => kitty_delete_row(y),
@@ -551,7 +551,7 @@ fn kitty_encode(bytes: &[u8], cell_width: usize, cell_height: usize, image_id: u
 }
 
 /// Same as `kitty_encode` but skips the `d=C` delete-at-cursor prefix. Use this
-/// when emitting multiple images on overlapping rows in a single splash —
+/// when emitting multiple images on overlapping rows in a single splash
 /// some terminals (Ghostty in particular) widen the "intersect cursor position"
 /// rule to "intersect cursor row", which would erase prior placements.
 fn kitty_encode_no_clear(

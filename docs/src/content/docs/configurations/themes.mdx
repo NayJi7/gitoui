@@ -13,7 +13,7 @@ the `core.option.theme` config key.
 
 | Name              | Vibe              |
 |-------------------|-------------------|
-| `Tokyo Night`     | Default — dark blue / purple.  |
+| `Tokyo Night`     | Default, dark blue / purple.  |
 | `Dracula`         | Iconic purple / pink / green dark. |
 | `Catppuccin Mocha`| Pastel dark.      |
 | `Catppuccin Latte`| Pastel light.     |
@@ -32,10 +32,10 @@ Pick one from the Configuration view (`p` from the list, then ←/→ on the
 theme = "Dracula"
 ```
 
-![2×5 grid — the same commit-list view rendered with each built-in theme](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/themes-grid.png)
+![2×5 grid, the same commit-list view rendered with each built-in theme](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/themes-grid.png)
 
 Each named theme bundles a matching **syntax theme** (the syntect theme used
-for diff highlighting) — that's why setting `theme = "Dracula"` also changes
+for diff highlighting), that's why setting `theme = "Dracula"` also changes
 the syntax highlighter to Dracula. You can override the syntax pick on its
 own with `syntax_theme = "..."`.
 
@@ -62,12 +62,12 @@ The name you set in `core.option.theme` must match the **file stem**
    [core.option]
    theme = "MySuperTheme"
    ```
-3. **Restart `gitoui`** — or use the Configuration view's `←` / `→` cycler
+3. **Restart `gitoui`**, or use the Configuration view's `←` / `→` cycler
    on the theme row to switch live without restart.
 
 </Steps>
 
-![Live theme cycling — Configuration view, ← / → cycles built-ins, UI repaints on each press](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/themes-cycling.gif)
+![Live theme cycling, Configuration view, ← / → cycles built-ins, UI repaints on each press](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/themes-cycling.gif)
 
 ### `base` inheritance
 
@@ -101,7 +101,7 @@ list_match_bg = "11"       # xterm 256 indexed
 detail_label_fg = { Rgb = [100, 100, 100] }  # legacy struct form
 ```
 
-Hex strings are the recommended form — they round-trip cleanly across
+Hex strings are the recommended form, they round-trip cleanly across
 terminals and are unambiguous.
 
 ## All tokens
@@ -120,14 +120,14 @@ isn't defined.
 | `fg` | Default foreground for body text. |
 | `bg` | Default background of the whole UI. |
 
-### Commit list — the home screen
+### Commit list, the home screen
 
 | Token | Paints |
 |---|---|
 | `list_selected_fg` | Foreground of the focused commit row. |
 | `list_selected_bg` | Background of the focused commit row. |
 | `list_compare_marked_fg` | Foreground of a commit marked as endpoint A in the 2-commit compare flow (Space / Ctrl+click). |
-| `list_compare_marked_bg` | Background of the marked endpoint — picks a more saturated, theme-coherent accent. |
+| `list_compare_marked_bg` | Background of the marked endpoint, picks a more saturated, theme-coherent accent. |
 | `list_ref_paren_fg` | The `(` / `)` parentheses around ref glyphs. |
 | `list_ref_branch_fg` | Local branch ref glyph. |
 | `list_ref_remote_branch_fg` | Remote branch ref glyph (`origin/foo`). |
@@ -141,7 +141,7 @@ isn't defined.
 | `list_match_fg` | Foreground of search-matched characters. |
 | `list_match_bg` | Background of search-matched characters. |
 
-### Commit detail — the right pane
+### Commit detail, the right pane
 
 | Token | Paints |
 |---|---|
@@ -158,7 +158,7 @@ isn't defined.
 | `detail_file_change_delete_fg` | `D` marker on deleted files. |
 | `detail_file_change_move_fg` | `R` marker on renamed files. |
 
-### Refs panel — `Tab` from the list
+### Refs panel, `Tab` from the list
 
 | Token | Paints |
 |---|---|
@@ -208,11 +208,11 @@ theme; tokens you keep override it.
 ```toml
 # ~/.config/gitoui/themes/MySuperTheme.toml
 #
-# Optional — inherit from any built-in theme. Tokens you don't list
+# Optional, inherit from any built-in theme. Tokens you don't list
 # below keep their value from the base theme.
 base = "Tokyo Night"
 
-# Optional — force a syntect theme for diff highlighting. Without it,
+# Optional, force a syntect theme for diff highlighting. Without it,
 # gitoui auto-picks `base16-ocean.dark` on dark bg, `InspiredGitHub` on light.
 # syntax_theme = "Dracula"
 
@@ -275,7 +275,7 @@ status_error_fg   = "#f7768e"
 divider_fg = "#565f89"
 
 # ─── Commit graph palette ──────────────────────────────────────────────────
-# 12 colors is the sweet spot — the graph cycles through them as branches
+# 12 colors is the sweet spot, the graph cycles through them as branches
 # diverge. An empty array falls back to the global [graph.color.branches]
 # in your config.toml.
 graph_branches = [
@@ -288,7 +288,7 @@ graph_branches = [
 </TabItem>
 <TabItem label="Minimal (recommended)">
 
-The 90% workflow — pick the closest built-in as `base`, then change only
+The 90% workflow, pick the closest built-in as `base`, then change only
 the handful of tokens you care about. Everything else stays in sync with
 the base palette.
 
@@ -316,7 +316,7 @@ graph_branches = [
 
 <Aside type="note">
 When a named theme is active, individual `[color]` overrides in your
-`config.toml` are **ignored** — the theme replaces the palette wholesale.
+`config.toml` are **ignored**, the theme replaces the palette wholesale.
 To tweak a single token while keeping a theme, fork it into your own
 `themes/<name>.toml`, then change just the tokens you want.
 </Aside>

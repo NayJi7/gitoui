@@ -5,18 +5,18 @@
 //! shown in this order:
 //!   1. Recently-visited dirs (from `crate::recents`) whose path contains the
 //!      typed substring.
-//!   2. Filesystem entries from the directory implied by the typed prefix —
+//!   2. Filesystem entries from the directory implied by the typed prefix
 //!      e.g. `~/work/`, `../`, `/usr/local/`. Only sub-directories are kept
 //!      so the user can't accidentally `cd` into a file.
 //!
 //! Path resolution supports `~` for $HOME, `.` / `..` segments, and both
-//! absolute and relative inputs. Resolution is purely textual — we rely on
+//! absolute and relative inputs. Resolution is purely textual, we rely on
 //! the eventual `std::env::set_current_dir` call to verify the target.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// How many suggestions we keep in memory — the list is still capped here
+/// How many suggestions we keep in memory, the list is still capped here
 /// to bound allocation, but the dropdown only renders `MAX_VISIBLE` rows
 /// at a time and scrolls within them.
 const MAX_SUGGESTIONS: usize = 50;
@@ -25,7 +25,7 @@ const MAX_SUGGESTIONS: usize = 50;
 pub const MAX_VISIBLE: usize = 8;
 /// Idle time after the last text edit before we re-read the parent directory
 /// for filesystem suggestions. Each keystroke would otherwise trigger a
-/// `std::fs::read_dir()` syscall — fine on local SSDs (~1 ms) but visibly
+/// `std::fs::read_dir()` syscall, fine on local SSDs (~1 ms) but visibly
 /// laggy on NFS / network mounts / massive dirs like `~/Downloads`. 150 ms
 /// is short enough that suggestions still feel "live" but long enough to
 /// coalesce a burst of typing into a single read.
@@ -51,11 +51,11 @@ pub struct DirInputState {
     pub text: String,
     /// Byte index inside `text` of the cursor. Always at a char boundary.
     pub cursor: usize,
-    /// Index into `suggestions` (None means "no suggestion focused — Enter
+    /// Index into `suggestions` (None means "no suggestion focused, Enter
     /// uses the typed text as-is").
     pub selected: Option<usize>,
     pub suggestions: Vec<DirSuggestion>,
-    /// First suggestion row visible in the dropdown — drives scrolling when
+    /// First suggestion row visible in the dropdown, drives scrolling when
     /// the suggestion list exceeds `MAX_VISIBLE`.
     pub scroll: usize,
     /// Tallest height the dropdown has ever reached during this overlay
@@ -79,7 +79,7 @@ impl DirInputState {
         self.selected = None;
         self.scroll = 0;
         self.last_rendered_height = 0;
-        // Open is the one place where we still refresh synchronously — the
+        // Open is the one place where we still refresh synchronously, the
         // user expects to see *something* the moment the overlay appears.
         self.text_dirty_since = None;
         self.refresh_suggestions(recents);
@@ -308,7 +308,7 @@ impl DirInputState {
 
     /// Called by the App's main loop before each render: if the input was
     /// mutated more than `SUGGESTIONS_DEBOUNCE` ago, run the filesystem
-    /// read now. Returns `true` if a refresh actually happened — callers
+    /// read now. Returns `true` if a refresh actually happened, callers
     /// use it to flag `needs_draw` so the new suggestions show on screen.
     pub fn flush_pending_refresh(&mut self, recents: &[PathBuf]) -> bool {
         let Some(dirty_at) = self.text_dirty_since else {
@@ -323,7 +323,7 @@ impl DirInputState {
     }
 
     /// Synchronous refresh for actions that need *current* suggestions
-    /// regardless of debounce state — Tab (complete) and Enter (resolve).
+    /// regardless of debounce state, Tab (complete) and Enter (resolve).
     /// Without this, a fast typist + Tab would complete against a stale
     /// suggestion list.
     pub fn force_refresh(&mut self, recents: &[PathBuf]) {
@@ -359,7 +359,7 @@ impl DirInputState {
             }
         }
 
-        // 2. Filesystem entries — only when the user explicitly typed a
+        // 2. Filesystem entries, only when the user explicitly typed a
         //    path-like prefix. Otherwise the dropdown stays focused on
         //    recents and isn't polluted with the current dir's children.
         if !text.is_empty() && looks_like_path(text) && out.len() < MAX_SUGGESTIONS {
@@ -368,7 +368,7 @@ impl DirInputState {
                 let mut matches: Vec<PathBuf> = entries
                     .filter_map(|e| e.ok())
                     .filter(|e| {
-                        // Sub-directories only — we can't cd into a file.
+                        // Sub-directories only, we can't cd into a file.
                         e.file_type().map(|t| t.is_dir()).unwrap_or(false)
                     })
                     .filter(|e| {
@@ -502,7 +502,7 @@ fn split_for_completion(text: &str, home: Option<&Path>) -> (PathBuf, String) {
 ///  - `/...`               → kept as-is
 ///  - bare name (`foo`)    → `cwd/foo`
 ///
-/// `..` and `.` segments inside are collapsed lexically — we don't call
+/// `..` and `.` segments inside are collapsed lexically, we don't call
 /// `canonicalize` because the target might not exist yet.
 pub fn resolve_path(text: &str, cwd: &Path) -> PathBuf {
     let home = home_dir();

@@ -5,8 +5,8 @@ description: Full per-scope reference + worked examples for overriding gitoui sh
 
 import { Tabs, TabItem, Aside, Badge, Steps } from "@astrojs/starlight/components";
 
-This page lists **every rebindable action** in <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> — global UserEvents
-first, then each per-view scope — with the default keys, what each action
+This page lists **every rebindable action** in <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>, global UserEvents
+first, then each per-view scope, with the default keys, what each action
 does, and how to override them.
 
 ## How resolution works
@@ -19,13 +19,13 @@ When you press a key in a given view, <span class="gitoui-wordmark"><span class=
 
 <Steps>
 
-1. **Leaf scope** — the deepest scope the view exposes (e.g.
+1. **Leaf scope**, the deepest scope the view exposes (e.g.
    `pr.conversation`, `rebase.resume`). If the key is bound here, fire
    the action.
-2. **Parent scopes** — walk up one level at a time. From
+2. **Parent scopes**, walk up one level at a time. From
    `pr.conversation` → `pr`. From `rebase.resume` → `rebase`.
-3. **Global** — the `[keybind]` section.
-4. **Literal forward** — neither matched → the view gets the raw key
+3. **Global**, the `[keybind]` section.
+4. **Literal forward**, neither matched → the view gets the raw key
    event for its own char-level matches (rare).
 
 </Steps>
@@ -33,7 +33,7 @@ When you press a key in a given view, <span class="gitoui-wordmark"><span class=
 The key fires the **first** action it matches. Once a leaf binds a key,
 parents are skipped.
 
-### Inheritance — sub-views see their parent's bindings
+### Inheritance, sub-views see their parent's bindings
 
 A sub-view automatically **inherits** every key its parent scope defines.
 You only need to list a binding in the leaf scope if you want it to
@@ -42,7 +42,7 @@ You only need to list a binding in the leaf scope if you want it to
 For example, in the PR view:
 
 - `r` is `reload` (defined in `[scope.pr]`).
-- The Conversation tab inherits that — pressing `r` there still reloads
+- The Conversation tab inherits that, pressing `r` there still reloads
   the PR.
 - But `r` is *also* bindable inside `[scope.pr.conversation]`. If you set
   it there, the conversation-level binding wins **only on that tab**.
@@ -59,11 +59,11 @@ If two actions list the same key in the **same** scope (e.g. `approve =
 to start** and prints a styled diagnostic pointing at the conflict.
 
 This is intentional: there's no useful "which one wins" answer when two
-actions are equally valid in the same context. Pick one — or move the
+actions are equally valid in the same context. Pick one, or move the
 collision to a sub-scope where the override is unambiguous.
 </Aside>
 
-By contrast, the same key **across different scopes** is fine — that's
+By contrast, the same key **across different scopes** is fine, that's
 the whole point of scopes:
 
 ```toml
@@ -71,7 +71,7 @@ the whole point of scopes:
 stage = ["a"]            # global: `a` stages a file in Uncommitted
 
 [keybind.scope.pr]
-approve = ["a"]          # in PR: `a` approves — overrides the global `stage`
+approve = ["a"]          # in PR: `a` approves, overrides the global `stage`
 
 [keybind.scope.issues]
 assignees_picker = ["a"] # in Issues: `a` opens the assignees picker
@@ -81,10 +81,10 @@ When you're in the PR view, `a` fires `approve` (and the global `stage`
 is silent). The global `stage` only fires in views without a scoped
 binding on `a`.
 
-### Merge semantics — overrides REPLACE, not extend
+### Merge semantics, overrides REPLACE, not extend
 
 If your config sets `approve = ["ctrl-a"]`, the **default** `a → approve`
-binding is dropped — only `Ctrl+A` triggers approve. To keep both, list
+binding is dropped, only `Ctrl+A` triggers approve. To keep both, list
 them both explicitly:
 
 ```toml
@@ -96,7 +96,7 @@ Anything you **don't** touch keeps its full default key list.
 
 ### Modifier cap
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> accepts **at most one modifier prefix** per key —
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> accepts **at most one modifier prefix** per key
 <Badge text="ctrl-X" variant="tip" /> <Badge text="alt-X" variant="tip" /> <Badge text="shift-X" variant="tip" />.
 Chained combos like `ctrl-shift-a` are rejected at config-load.
 
@@ -107,7 +107,7 @@ Each key is a string. Format: `[modifier-]base`. Examples: `q`, `ctrl-s`,
 
 | Base key      | Accepted spellings                              |
 |---------------|-------------------------------------------------|
-| Letters       | `a`, `b`, … `z` (case-insensitive — `shift-a` and `A` are the same event). |
+| Letters       | `a`, `b`, … `z` (case-insensitive, `shift-a` and `A` are the same event). |
 | Digits        | `0`–`9`                                         |
 | Function      | `f1` … `f12`                                    |
 | Arrows        | `up`, `down`, `left`, `right`                   |
@@ -124,7 +124,7 @@ Empty array unbinds a default key entirely:
 go_to_parent = []   # no key fires GoToParent
 ```
 
-## Global — `[keybind]`
+## Global, `[keybind]`
 
 Available from every view. Use the action name on the left, give it any
 list of keys.
@@ -185,7 +185,7 @@ list of keys.
 | `load_more`     | `]`         | Load the next `core.option.load_more_count` commits. |
 | `mark_compare`  | `space`     | Mark an endpoint for the 2-commit comparison flow. |
 | `push`          | `shift-p`   | `git push` (current branch).                       |
-| `pull`          | `shift-u`   | `git pull` — also doubles as `unstage_all` / `pull_branch` in their respective views. |
+| `pull`          | `shift-u`   | `git pull`, also doubles as `unstage_all` / `pull_branch` in their respective views. |
 | `short_copy`    | `shift-c`   | Copy short hash / short ref.                       |
 | `full_copy`     | `c`         | Copy full hash / commit message / path.            |
 
@@ -214,7 +214,7 @@ list of keys.
 | `rename_branch`   | `ctrl-r`    | Rename the focused branch.                      |
 | `delete_branch`   | `shift-d`   | Delete the focused branch.                      |
 | `push_branch`     | `shift-q`   | Push the focused branch.                        |
-| `pull_branch`     | (unbound)   | Pull the focused branch — aliased on `shift-u` via the `pull` action in the BranchDetail view. |
+| `pull_branch`     | (unbound)   | Pull the focused branch, aliased on `shift-u` via the `pull` action in the BranchDetail view. |
 | `set_upstream`    | `ctrl-t`    | Set / change the upstream for the focused branch. |
 | `create_archive`  | `shift-e`   | `git archive` the focused branch / tag.         |
 | `unselect_branch` | `shift-t`   | Clear the branch-detail selection.              |
@@ -230,7 +230,7 @@ list of keys.
 | `stage`           | `a`         | Stage the focused file (or open the conflict editor if the file is unmerged). |
 | `stage_all`       | `shift-a`   | Stage every unstaged + untracked file.      |
 | `unstage`         | `u`         | Unstage the focused file.                   |
-| `unstage_all`     | (unbound)   | Unstage every staged file — aliased on `shift-u` via `pull` in the Uncommitted view. |
+| `unstage_all`     | (unbound)   | Unstage every staged file, aliased on `shift-u` via `pull` in the Uncommitted view. |
 | `discard`         | `x`         | Discard the focused unstaged change (confirmation). |
 | `discard_all`     | `shift-x`   | Discard every unstaged + staged change (confirmation). |
 | `stash`           | `i`         | Stash the working tree.                     |
@@ -259,7 +259,7 @@ list of keys.
 
 User-defined shell commands (configured under `[core.user_command]`)
 bind through synthetic actions named `user_command_N`, where `N` matches
-the `commands_N` entry. None ship with a default key — every binding is
+the `commands_N` entry. None ship with a default key, every binding is
 user-set.
 
 ```toml
@@ -271,13 +271,13 @@ user_command_2 = ["f6"]
 Full setup, placeholders and execution types live on the
 [User commands](/keybindings/user-command/) page.
 
-## Scoped — `[keybind.scope.<path>]`
+## Scoped, `[keybind.scope.<path>]`
 
 Each scope below ships with its own default key map. **Anything you
-don't list there keeps its parent / global default** — you only need to
+don't list there keeps its parent / global default**, you only need to
 write the action you want to change.
 
-### `[keybind.scope.list]` — Commit list
+### `[keybind.scope.list]`, Commit list
 
 Inherits from: `[keybind]` (global).
 
@@ -288,7 +288,7 @@ Inherits from: `[keybind]` (global).
 `h` is `navigate_left` globally; in the list view it has no left/right
 semantics so the scope reuses it for "jump to HEAD".
 
-### `[keybind.scope.detail]` — Commit detail
+### `[keybind.scope.detail]`, Commit detail
 
 Inherits from: `[keybind]` (global).
 
@@ -297,10 +297,10 @@ Inherits from: `[keybind]` (global).
 | `revert` | `v`     | Open the Revert confirmation dialog for the focused commit.          |
 
 `v` globally is `clean_untracked` (uncommitted view). In commit-detail
-there's nothing to clean, so the scope re-purposes `v` for `revert` —
+there's nothing to clean, so the scope re-purposes `v` for `revert`
 matches the action shown in the Git Actions panel (`Revert (v)`).
 
-### `[keybind.scope.pr]` — Pull Request
+### `[keybind.scope.pr]`, Pull Request
 
 Inherits from: `[keybind]` (global). Applies on **any tab** inside an
 open PR.
@@ -318,7 +318,7 @@ open PR.
 | `reopen_pr`         | `ctrl-o`    | Reopen a closed PR.                           |
 | `toggle_draft`      | `ctrl-d`    | Toggle ready ↔ draft state.                   |
 
-### `[keybind.scope.pr.list]` — PR list
+### `[keybind.scope.pr.list]`, PR list
 
 Inherits from: `[keybind.scope.pr]` → `[keybind]`.
 
@@ -326,7 +326,7 @@ Inherits from: `[keybind.scope.pr]` → `[keybind]`.
 |----------|---------|-----------------------------------------|
 | `new_pr` | `n`     | Open the new-PR compose form.           |
 
-### `[keybind.scope.pr.conversation]` — PR Conversation tab
+### `[keybind.scope.pr.conversation]`, PR Conversation tab
 
 Inherits from: `[keybind.scope.pr]` → `[keybind]`.
 
@@ -338,7 +338,7 @@ Inherits from: `[keybind.scope.pr]` → `[keybind]`.
 | `delete_own`  | `d`         | Delete your own focused comment (confirmation).       |
 | `react`       | `+`         | Open the emoji picker on the focused comment.         |
 
-### `[keybind.scope.issues]` — Issue
+### `[keybind.scope.issues]`, Issue
 
 Inherits from: `[keybind]` (global). Applies on **any tab** of an
 open issue.
@@ -352,7 +352,7 @@ open issue.
 | `close_or_reopen`  | `x`       | Close an open issue / reopen a closed one (confirmation). |
 | `open_in_browser`  | `o`       | Open the issue's URL in the browser.      |
 
-### `[keybind.scope.issues.list]` — Issues list
+### `[keybind.scope.issues.list]`, Issues list
 
 Inherits from: `[keybind.scope.issues]` → `[keybind]`.
 
@@ -360,7 +360,7 @@ Inherits from: `[keybind.scope.issues]` → `[keybind]`.
 |-------------|---------|-------------------------------------------|
 | `new_issue` | `n`     | Open the new-issue compose form.          |
 
-### `[keybind.scope.issues.detail]` — Issue Conversation / Timeline
+### `[keybind.scope.issues.detail]`, Issue Conversation / Timeline
 
 Inherits from: `[keybind.scope.issues]` → `[keybind]`.
 
@@ -373,22 +373,22 @@ Inherits from: `[keybind.scope.issues]` → `[keybind]`.
 | `delete_own`             | `d`         | Delete your own focused comment (confirmation).       |
 | `react`                  | `+`         | Open the emoji picker on the focused comment.         |
 
-### `[keybind.scope.rebase]` — Interactive rebase plan editor
+### `[keybind.scope.rebase]`, Interactive rebase plan editor
 
 Inherits from: `[keybind]` (global).
 
 | Action           | Default     | What it does                                         |
 |------------------|-------------|------------------------------------------------------|
-| `pick`           | `p`         | Pick — keep the focused commit.                      |
-| `reword`         | `r`         | Reword — keep but open the inline subject editor.    |
-| `edit`           | `e`         | Edit — pause the rebase at this commit.              |
+| `pick`           | `p`         | Pick, keep the focused commit.                      |
+| `reword`         | `r`         | Reword, keep but open the inline subject editor.    |
+| `edit`           | `e`         | Edit, pause the rebase at this commit.              |
 | `squash`         | `s`         | Squash into the previous commit, keep both messages. |
-| `fixup`          | `f`         | Fixup — combine + drop this message.                 |
-| `drop`           | `d`         | Drop — remove the commit.                            |
+| `fixup`          | `f`         | Fixup, combine + drop this message.                 |
+| `drop`           | `d`         | Drop, remove the commit.                            |
 | `grab`           | `space`     | Grab the focused row to reorder it with ↑↓.          |
 | `abort_previous` | `shift-a`   | Abort a stale rebase that's still active on disk.    |
 
-### `[keybind.scope.rebase.resume]` — Resume prompt
+### `[keybind.scope.rebase.resume]`, Resume prompt
 
 Inherits from: `[keybind.scope.rebase]` → `[keybind]`. Shown when a
 rebase is paused.
@@ -399,7 +399,7 @@ rebase is paused.
 | `skip_commit`     | `s` `shift-s`        | `git rebase --skip`.                        |
 | `abort`           | `a` `shift-a`        | `git rebase --abort`.                       |
 
-### `[keybind.scope.rebase.reword_editor]` — Reword inline editor
+### `[keybind.scope.rebase.reword_editor]`, Reword inline editor
 
 Inherits from: `[keybind.scope.rebase]` → `[keybind]`. Word-jump keys
 inside the inline subject editor.
@@ -411,7 +411,7 @@ inside the inline subject editor.
 | `word_left`         | `ctrl-left`                            | Jump cursor one word left.   |
 | `word_right`        | `ctrl-right`                           | Jump cursor one word right.  |
 
-### `[keybind.scope.conflict]` — 3-way conflict editor
+### `[keybind.scope.conflict]`, 3-way conflict editor
 
 Inherits from: `[keybind]` (global).
 
@@ -419,12 +419,12 @@ Inherits from: `[keybind]` (global).
 |--------------------------|-----------|---------------------------------------------|
 | `pick_ours`              | `o`       | Pick OURS for the focused hunk.             |
 | `pick_theirs`            | `t`       | Pick THEIRS.                                |
-| `pick_both_ours_first`   | `b`       | Keep BOTH — OURS lines first.               |
-| `pick_both_theirs_first` | `shift-b` | Keep BOTH — THEIRS lines first.             |
+| `pick_both_ours_first`   | `b`       | Keep BOTH, OURS lines first.               |
+| `pick_both_theirs_first` | `shift-b` | Keep BOTH, THEIRS lines first.             |
 | `next_hunk`              | `n`       | Move to the next conflict hunk.             |
 | `prev_hunk`              | `p`       | Move to the previous conflict hunk.         |
 
-### `[keybind.scope.compose]` — Compose forms
+### `[keybind.scope.compose]`, Compose forms
 
 Inherits from: `[keybind]` (global). Shared by new PR / new Issue /
 new comment / reply editors.
@@ -434,7 +434,7 @@ new comment / reply editors.
 | `submit` | `ctrl-s` | Submit the compose form to the GitHub API.    |
 
 The mention popup (`#`), word-jump editing keys, and Esc to cancel stay
-hardcoded — they're shared text-input semantics, not view actions.
+hardcoded, they're shared text-input semantics, not view actions.
 
 ## Worked examples
 
@@ -450,7 +450,7 @@ half_page_down = ["ctrl-d"]
 
 [keybind.scope.list]
 # Free `h` if you don't want the HEAD-jump action. An empty array drops
-# it — the global `navigate_left` (still `h`) wins.
+# it, the global `navigate_left` (still `h`) wins.
 select_head_commit = []
 ```
 
@@ -533,11 +533,11 @@ exit paths from many views. Test rebinds in a safe repo first.
 
 <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> validates the full keybind tree at boot and refuses to start on:
 
-- **Duplicate key in the same scope** — `a` bound to two different
+- **Duplicate key in the same scope**, `a` bound to two different
   actions under the same `[keybind.scope.<path>]`.
-- **Unknown action name** — typo in a TOML key.
-- **Unknown key spelling** — e.g. `superkey-a`.
-- **More than one modifier** — `ctrl-shift-a`.
+- **Unknown action name**, typo in a TOML key.
+- **Unknown key spelling**, e.g. `superkey-a`.
+- **More than one modifier**, `ctrl-shift-a`.
 
 The diagnostic block points at the offending line, column, scope, and
-expected schema — same style as the TOML-syntax + theme validators.
+expected schema, same style as the TOML-syntax + theme validators.

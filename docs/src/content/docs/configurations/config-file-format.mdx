@@ -8,7 +8,7 @@ import { FileTree, Aside, Tabs, TabItem } from "@astrojs/starlight/components";
 The config file lives at `$XDG_CONFIG_HOME/gitoui/config.toml` (default
 `~/.config/gitoui/config.toml`). Override with `GITOUI_CONFIG_FILE=...`.
 
-Everything below is optional — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships with sensible defaults and only
+Everything below is optional, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships with sensible defaults and only
 reads the keys you specify. Unknown keys are rejected with a styled
 diagnostic at boot.
 
@@ -32,7 +32,7 @@ diagnostic at boot.
 | `[core.external]`| External hooks (clipboard, browser opener).            |
 | `[ui.common]`    | Per-view mode preferences.                             |
 | `[graph.color]`  | Graph palette overrides (independent of the UI theme). |
-| `[color]`        | Theme color tokens — usually populated via a named theme. |
+| `[color]`        | Theme color tokens, usually populated via a named theme. |
 | `[keybind]`      | Keybindings (global section + scoped sub-tables).      |
 
 ## `[core.option]`
@@ -47,7 +47,7 @@ diagnostic at boot.
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
 | `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
 | `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |
-| `initial_load_count`| usize / `1000` (clamped `10..99_999`)     | Number of commits loaded on startup. Editable from the Configuration view (`p`) as a text input — takes effect on the **next launch**. |
+| `initial_load_count`| usize / `1000` (clamped `10..99_999`)     | Number of commits loaded on startup. Editable from the Configuration view (`p`) as a text input, takes effect on the **next launch**. |
 | `load_more_count`   | usize / `200`                             | Step size each time you press `LoadMore` (`]`). |
 
 ## `[core.search]`
@@ -91,16 +91,16 @@ branches = [
 ```
 
 If a named theme defines its own `graph_branches`, that wins over a generic
-`[graph.color.branches]` setting — see [Themes](/configurations/themes/).
+`[graph.color.branches]` setting, see [Themes](/configurations/themes/).
 
 </TabItem>
 
 <TabItem label="[color]">
 
-The full theme palette — ~40 tokens (`fg`, `bg`, `list_selected_fg`, etc.).
+The full theme palette, ~40 tokens (`fg`, `bg`, `list_selected_fg`, etc.).
 Use this section only when you want to override a single token of an active
 named theme. For full custom palettes, prefer
-[`~/.config/gitoui/themes/<name>.toml`](/configurations/themes/) — the same
+[`~/.config/gitoui/themes/<name>.toml`](/configurations/themes/), the same
 schema, in a dedicated file.
 
 Each token accepts:
@@ -115,12 +115,12 @@ Each token accepts:
 
 ## `[keybind]`
 
-Two-layer keybinding system — see the dedicated [Keybindings](/keybindings/)
+Two-layer keybinding system, see the dedicated [Keybindings](/keybindings/)
 page for the full reference.
 
 ```toml
 [keybind]
-# Global UserEvents — same shape as upstream serie.
+# Global UserEvents, same shape as upstream serie.
 quit = ["q"]
 navigate_up = ["k", "up"]
 
@@ -136,9 +136,9 @@ approve = ["ctrl-a"]
 
 - **TOML syntax** errors → file + line + caret pointer to the bad token.
 - **Schema** mismatches (wrong type, unknown key) → which key and what was expected.
-- **Theme** problems — unknown name, missing file under `themes/`, file with
+- **Theme** problems, unknown name, missing file under `themes/`, file with
   invalid TOML, or an unknown `base = "..."` reference.
-- **Keybind** issues — duplicate keys within a scope, unknown event name,
+- **Keybind** issues, duplicate keys within a scope, unknown event name,
   keys with more than one modifier prefix.
 
 <Aside type="tip">
@@ -148,4 +148,4 @@ GITOUI_CONFIG_FILE=/tmp/bad.toml gitoui
 ```
 </Aside>
 
-![Config error diagnostic — gitoui refuses to start, styled error pane with caret pointer + line:column + expected schema](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/config-error-diagnostic.png)
+![Config error diagnostic, gitoui refuses to start, styled error pane with caret pointer + line:column + expected schema](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/config-error-diagnostic.png)

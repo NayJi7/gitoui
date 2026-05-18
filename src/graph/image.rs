@@ -126,7 +126,7 @@ impl<'a> GraphImageManager<'a> {
     /// `ImageParams` and the `DrawingPixels` cache (both keyed on
     /// `cell_width_type`), then drops the image cache so the next
     /// render rebakes the rows with the new pixel grid. Same goal as
-    /// `update_graph_style` — live apply, no full app restart.
+    /// `update_graph_style`, live apply, no full app restart.
     pub fn update_cell_width_type(
         &mut self,
         cell_width_type: CellWidthType,
@@ -143,7 +143,7 @@ impl<'a> GraphImageManager<'a> {
 
     /// Replace the whole palette (branch colours + edge + bg) at once and
     /// drop every cached image so the next render rebakes them with the new
-    /// colours. Called when the theme cycles live in the config view —
+    /// colours. Called when the theme cycles live in the config view
     /// without this, the cached images keep the previous theme's branches
     /// and background even after `update_color_theme` propagates downstream.
     pub fn update_palette(&mut self, graph_color_set: &crate::color::GraphColorSet) {
@@ -316,7 +316,7 @@ impl ImageParams {
     }
 }
 
-// Render one row image with full per-commit context — flags (head /
+// Render one row image with full per-commit context, flags (head /
 // is_stash / is_uncommitted), color, uncommitted lane, and the global
 // branch segments needed for the Smooth style. Public so integration
 // tests can match production rendering exactly; production callers
@@ -772,7 +772,7 @@ fn calc_corner_edge_drawing_pixels(
     pixels
 }
 
-// Per-row render hot path — every commit in the visible graph triggers
+// Per-row render hot path, every commit in the visible graph triggers
 // one call. The 13 args are genuinely independent inputs (geometry,
 // styling, state flags); bundling them into a struct just adds an
 // indirection without making the signature easier to read.
@@ -1387,7 +1387,7 @@ fn draw_smooth_bezier_segment(
     let row_abs_top = row_y as f32 * cell_height;
 
     // Sample the global Bézier and clip to this row's pixel range.
-    // Pure sampling handles the non-monotone y(t) of the S-curve correctly — no inversion needed.
+    // Pure sampling handles the non-monotone y(t) of the S-curve correctly, no inversion needed.
     let steps = 500;
     let margin = radius + 2;
     let mut prev: Option<(i32, i32)> = None;

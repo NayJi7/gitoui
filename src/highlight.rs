@@ -11,7 +11,7 @@ static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {
     // chunks to highlight_line() without trailing '\n'. With the
     // newline-terminated variant, end-of-line-anchored contexts (notably
     // single-line `--` SQL comments) never close, and the parser stays
-    // stuck in "comment" state across subsequent lines — making every
+    // stuck in "comment" state across subsequent lines, making every
     // following line render in the comment color.
     let mut builder = two_face::syntax::extra_no_newlines().into_builder();
     // Allow shipping additional .sublime-syntax files alongside the binary.
@@ -176,7 +176,7 @@ mod tests {
         let _ = h.highlight_line("-- a comment", add_style, None);
         let spans = h.highlight_line("CREATE TABLE foo (id INT);", add_style, None);
         // The first token "CREATE" must NOT be the comment foreground.
-        // We don't pin an exact value (depends on theme) — just check that
+        // We don't pin an exact value (depends on theme), just check that
         // at least two distinct foreground colors appear (keyword vs default).
         let fgs: std::collections::HashSet<_> = spans.iter().map(|s| s.style.fg).collect();
         assert!(

@@ -6,8 +6,8 @@ description: What gitoui is, what it isn't, and why it forked from serie.
 import { Card, CardGrid, Badge } from "@astrojs/starlight/components";
 
 **<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>** ([`/ʒi.tu.i/`](/faq/#how-do-i-pronounce-gitoui)) is a terminal git
-client. It started as a fork of [serie](https://github.com/lusingander/serie) —
-a beautifully-rendered `git log --graph` viewer — and grew into a daily-driver
+client. It started as a fork of [serie](https://github.com/lusingander/serie)
+a beautifully-rendered `git log --graph` viewer, and grew into a daily-driver
 TUI that covers diffs, staging, blame, history, interactive rebase, conflict
 resolution, and GitHub Pull Requests / Issues. <Badge text="pre-1.0" variant="caution" />
 
@@ -52,7 +52,7 @@ SVG/PNG and displays it inline through the terminal's image protocol
     every rename, click a line to open its commit detail.
   </Card>
   <Card title="2-commit comparison" icon="bars">
-    Mark two commits with `Space` — gitoui opens the cumulative
+    Mark two commits with `Space`, gitoui opens the cumulative
     `git diff <a>..<b>` between the endpoints.
   </Card>
   <Card title="Interactive rebase" icon="pencil">
@@ -60,16 +60,16 @@ SVG/PNG and displays it inline through the terminal's image protocol
     resume modes that detect `.git/rebase-merge/` on startup.
   </Card>
   <Card title="3-way conflict editor" icon="warning">
-    Pick **OURS / THEIRS / BOTH** per hunk and `git add` the result —
+    Pick **OURS / THEIRS / BOTH** per hunk and `git add` the result
     no need to drop to vimdiff.
   </Card>
   <Card title="GitHub PRs + Issues" icon="github">
     Full conversation threads, reviews, labels, assignees, milestones,
-    reactions, mention autocomplete, comment CRUD — behind OAuth
+    reactions, mention autocomplete, comment CRUD, behind OAuth
     device-flow auth.
   </Card>
   <Card title="Inline avatars" icon="seti:image">
-    GitHub avatars rendered next to commits, comments, reviews — same
+    GitHub avatars rendered next to commits, comments, reviews, same
     image protocols that draw the graph.
   </Card>
   <Card title="Two-layer keybinds" icon="setting">
@@ -84,10 +84,10 @@ SVG/PNG and displays it inline through the terminal's image protocol
 
 ## What <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is not
 
-- A full-featured git client — there's no remote management UI, no submodule
+- A full-featured git client, there's no remote management UI, no submodule
   workflow, no LFS handling. The focus stays on **reading + reviewing
   history** with the operations you do daily on top of it.
-- A pure ASCII renderer — the inline image protocol is the point. On terminals
+- A pure ASCII renderer, the inline image protocol is the point. On terminals
   that can't speak Kitty / iTerm2 / Sixel, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> falls back to Unicode
   glyphs but you lose the polished graph.
 
@@ -98,11 +98,11 @@ driven on real repos, but the API and config schema may still shift before
 the v1.0 tag.
 
 If you came here from serie and want the bare graph viewer with nothing
-else: that's still the upstream project — go give it a star. <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is the
+else: that's still the upstream project, go give it a star. <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is the
 "with batteries" cousin.
 
 ---
 
 _Built with Rust and [ratatui](https://github.com/ratatui/ratatui). Released
-under the MIT license — see the
+under the MIT license, see the
 [GitHub repo](https://github.com/NayJi7/gitoui) for sources._

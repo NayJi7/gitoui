@@ -1,16 +1,16 @@
-//! Merge-conflict editor — VS Code / GitKraken inspired three-way merge UI.
+//! Merge-conflict editor, VS Code / GitKraken inspired three-way merge UI.
 //!
 //! Opens on a single conflicted file (status = `Unmerged` in the uncommitted
 //! view). The user navigates between conflict hunks with `n`/`p`, picks a
 //! resolution for each (`o`/`t`/`b`/`B`), then saves with `Enter` which writes
 //! the resolved file and stages it via `git add`.
 //!
-//! Layout modes — selectable via `[ui.common] conflict_view`:
+//! Layout modes, selectable via `[ui.common] conflict_view`:
 //! - `three-pane`: Ours | Base | Theirs row + Result preview row below
 //! - `two-pane`  : Ours | Theirs row + Result preview row below
 //! - `inline`    : full-width Ours / Theirs / Result stacked vertically
 //!
-//! All three share the same keyboard map and colour palette — only the
+//! All three share the same keyboard map and colour palette, only the
 //! spatial arrangement of the source panes changes. The Result preview is
 //! always shown so the user can see the file they will end up committing.
 
@@ -52,11 +52,11 @@ enum LineOrigin {
     Unresolved,
 }
 
-/// Visual state of a hunk row — drives the row's background colour, the
+/// Visual state of a hunk row, drives the row's background colour, the
 /// side-bar glyph, and the bold/normal weight of the syntax-coloured text.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HunkState {
-    /// Not part of a hunk — neutral context line.
+    /// Not part of a hunk, neutral context line.
     Context,
     /// Hunk that is neither focused nor under the mouse.
     Idle,
@@ -74,7 +74,7 @@ struct ResultCache {
     inner_width: u16,
     /// Current hunk at the time the cache was built. Must be part of the
     /// key because the "YOU ARE HERE" marker on Unresolved placeholders
-    /// targets the currently-focused hunk — without this, the marker
+    /// targets the currently-focused hunk, without this, the marker
     /// freezes on the first hunk forever.
     current_hunk: usize,
     lines: Vec<RenderedLine>,
@@ -96,10 +96,10 @@ pub struct ConflictView<'a> {
     file: ConflictFile,
     /// Index into `file.hunk_count()` of the currently focused conflict.
     current_hunk: usize,
-    /// Hunk currently under the mouse cursor — drives the "Hovered" visual
+    /// Hunk currently under the mouse cursor, drives the "Hovered" visual
     /// state. Updated on every `handle_mouse_move`.
     hovered_hunk: Option<usize>,
-    /// Effective rendering mode — downgrades ThreePane → TwoPane on narrow
+    /// Effective rendering mode, downgrades ThreePane → TwoPane on narrow
     /// terminals.
     mode: ConflictViewMode,
     /// Vertical scroll DELTA, relative to the auto-anchor that puts the
@@ -160,7 +160,7 @@ impl<'a> ConflictView<'a> {
 
     /// Compute (and cache on first use) the syntax-highlighted spans for
     /// every line of a source pane, in document order. Called once per
-    /// pane's lifetime — subsequent renders reuse the cached vector and
+    /// pane's lifetime, subsequent renders reuse the cached vector and
     /// skip the expensive syntect pass entirely, which is the dominant
     /// cost of a debug-build render (300+ highlight_line calls per frame
     /// otherwise).
@@ -252,7 +252,7 @@ impl<'a> ConflictView<'a> {
     }
 
     /// Apply a resolution to the current hunk WITHOUT auto-advancing.
-    /// The user explicitly steps to the next hunk with ⇆ / n / p / click —
+    /// The user explicitly steps to the next hunk with ⇆ / n / p / click
     /// staying put lets them tweak the same pick (e.g. flip from `b` to
     /// `B`) before moving on.
     fn pick(&mut self, res: HunkResolution) {
@@ -370,7 +370,7 @@ impl<'a> ConflictView<'a> {
         }
     }
 
-    /// Mouse click — if the cursor lands on a hunk row in one of the source
+    /// Mouse click, if the cursor lands on a hunk row in one of the source
     /// panes, focus that hunk so the next o/t/b key picks for it.
     pub fn handle_click(&mut self, col: u16, row: u16) {
         if let Some(hunk_idx) = self.hunk_at(col, row) {
@@ -379,7 +379,7 @@ impl<'a> ConflictView<'a> {
         }
     }
 
-    /// Mouse hover — track which hunk (if any) is under the cursor so the
+    /// Mouse hover, track which hunk (if any) is under the cursor so the
     /// next render can paint it with the Hovered visual state.
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         self.hovered_hunk = self.hunk_at(col, row);
@@ -407,7 +407,7 @@ impl<'a> ConflictView<'a> {
             m => m,
         };
 
-        // Reset the mouse hit-map — render_source_pane() repopulates it
+        // Reset the mouse hit-map, render_source_pane() repopulates it
         // with the rects/rows of every pane it draws this frame.
         self.pane_hit_maps.clear();
 
@@ -420,7 +420,7 @@ impl<'a> ConflictView<'a> {
         // the resolved file shaping up as they pick.
         let [sources_area, result_area] = match effective_mode {
             ConflictViewMode::Inline => {
-                // Inline: vertical stack — Ours, Theirs, Result (each ~33%).
+                // Inline: vertical stack, Ours, Theirs, Result (each ~33%).
                 let [ours, theirs, result] = Layout::vertical([
                     Constraint::Percentage(33),
                     Constraint::Percentage(33),
@@ -520,7 +520,7 @@ impl<'a> ConflictView<'a> {
 
         // Theme-aware accents instead of hard green / red:
         // - Ours uses the local-branch colour (semantically "the branch you
-        //   are on") — every theme already picks a distinct hue for it.
+        //   are on"), every theme already picks a distinct hue for it.
         // - Theirs uses the remote-branch colour ("the branch coming in").
         // - Base falls back to a dim label colour.
         let (title, accent) = match side {
@@ -739,7 +739,7 @@ impl<'a> ConflictView<'a> {
                         out.push(make_line(
                             None,
                             "·",
-                            "(no diff3 base — `git config merge.conflictStyle diff3`)",
+                            "(no diff3 base, `git config merge.conflictStyle diff3`)",
                             theme.divider_fg,
                             theme.divider_fg,
                             state,
@@ -791,12 +791,12 @@ impl<'a> ConflictView<'a> {
 
         // Reuse the same theme-aware accents as the source panes so the
         // result preview is consistent with what's above. Idle intensity
-        // because no row here is "focused" — it's a passive preview.
+        // because no row here is "focused", it's a passive preview.
         let ours_accent = theme.list_ref_branch_fg;
         let theirs_accent = theme.list_ref_remote_branch_fg;
         let ours_bg = hunk_bg(ours_accent, theme_bg, HunkState::Idle).unwrap();
         let theirs_bg = hunk_bg(theirs_accent, theme_bg, HunkState::Idle).unwrap();
-        // Unresolved stays red — it's an actual error state, not a side choice.
+        // Unresolved stays red, it's an actual error state, not a side choice.
         let unres_bg = if dark_bg {
             Color::Rgb(0x55, 0x20, 0x20)
         } else {
@@ -828,7 +828,7 @@ impl<'a> ConflictView<'a> {
                         HunkResolution::Unresolved => {
                             let header = if is_current {
                                 format!(
-                                    "    ⚠  UNRESOLVED  hunk {}  ←  YOU ARE HERE — press [o] / [t] / [b] / [B]",
+                                    "    ⚠  UNRESOLVED  hunk {}  ←  YOU ARE HERE, press [o] / [t] / [b] / [B]",
                                     hunk_idx + 1
                                 )
                             } else {
@@ -882,7 +882,7 @@ impl<'a> ConflictView<'a> {
                             }
                         }
                         HunkResolution::BothOursFirst => {
-                            // Each line is just labelled by its origin — the order
+                            // Each line is just labelled by its origin, the order
                             // in the file (ours first here) tells the rest.
                             for s in &h.ours {
                                 out.push(make_annotated_line(
@@ -916,7 +916,7 @@ impl<'a> ConflictView<'a> {
                             }
                         }
                         HunkResolution::BothTheirsFirst => {
-                            // Reversed both — theirs lines come first in the file.
+                            // Reversed both, theirs lines come first in the file.
                             for s in &h.theirs {
                                 out.push(make_annotated_line(
                                     Some(line_number),
@@ -976,7 +976,7 @@ impl<'a> ConflictView<'a> {
     /// `scroll_delta` on top of that anchor. With delta=0 every pane shows
     /// the current hunk near the top (auto-sync). When the user presses ↓
     /// once, delta becomes 1, so every pane's start advances by 1 from
-    /// wherever its anchor was — no more "scroll-jumps-to-line-0" bug.
+    /// wherever its anchor was, no more "scroll-jumps-to-line-0" bug.
     fn apply_scroll(
         &self,
         lines: &[RenderedLine],
@@ -1198,7 +1198,7 @@ fn highlight_or_plain(
 /// Pick the row background colour for hunks by blending the pane's accent
 /// (taken from theme.list_ref_branch_fg / list_ref_remote_branch_fg, so
 /// it follows the active theme) with the theme background at three
-/// intensities — vivid for the focused hunk, medium for hover, subtle for
+/// intensities, vivid for the focused hunk, medium for hover, subtle for
 /// idle. Context lines return None so they inherit the terminal bg.
 fn hunk_bg(accent: Color, theme_bg: Color, state: HunkState) -> Option<Color> {
     let alpha = match state {
@@ -1211,7 +1211,7 @@ fn hunk_bg(accent: Color, theme_bg: Color, state: HunkState) -> Option<Color> {
 }
 
 /// Linear-blend two RGB colours. Non-RGB ratatui colours (Indexed, named)
-/// fall back to the foreground untouched — themes ship full RGB triples
+/// fall back to the foreground untouched, themes ship full RGB triples
 /// so this branch is rarely hit in practice.
 fn blend(fg: Color, bg: Color, alpha: f32) -> Color {
     let (fr, fg_g, fb) = match fg {

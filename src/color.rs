@@ -103,7 +103,7 @@ pub struct ColorTheme {
     #[default(RatatuiColor::DarkGray)]
     pub divider_fg: RatatuiColor,
 
-    /// Per-theme graph-branch palette. Empty means "no override" — the loader
+    /// Per-theme graph-branch palette. Empty means "no override", the loader
     /// then falls back to `core_config.graph.color.branches` from `[graph.color]`
     /// in the user's TOML. Each shipped theme fills this with its own
     /// 12-colour palette so the commit-graph visually matches its world
@@ -213,7 +213,7 @@ impl GraphColorSet {
 }
 
 /// Build a `GraphColorSet` from the current theme + graph config in a single
-/// place — used both on initial load and every time a theme cycles. Centralises
+/// place, used both on initial load and every time a theme cycles. Centralises
 /// two pieces of logic that used to be inlined: (1) theme-provided
 /// `graph_branches` win over `[graph.color.branches]` from the user TOML, and
 /// (2) a transparent `[graph.color.background]` is filled with the theme's
@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(parse_rgba_color(input), expected);
     }
 
-    /// Baseline for `build_graph_color_set` — pinned ahead of the upcoming
+    /// Baseline for `build_graph_color_set`, pinned ahead of the upcoming
     /// "cache the parsed palette" optimisation. These tests freeze the
     /// theme-vs-config precedence and the transparent-bg patching logic so
     /// the cache layer can't silently flip any case.
@@ -300,7 +300,7 @@ mod tests {
 
             let set = build_graph_color_set(&theme, &cfg);
 
-            // Theme palette won — 2 entries, not the 3 from the config.
+            // Theme palette won, 2 entries, not the 3 from the config.
             assert_eq!(set.colors.len(), 2);
             assert_eq!(set.get(0), GraphColor::from_rgb(0xaa, 0xbb, 0xcc));
             assert_eq!(set.get(1), GraphColor::from_rgb(0xdd, 0xee, 0xff));
@@ -361,7 +361,7 @@ mod tests {
 
             let set = build_graph_color_set(&theme, &cfg);
 
-            // Stays transparent — patching only fires on RGB bg.
+            // Stays transparent, patching only fires on RGB bg.
             assert_eq!(set.background_color, GraphColor::transparent());
         }
     }

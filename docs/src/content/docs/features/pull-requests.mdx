@@ -1,6 +1,6 @@
 ---
 title: Pull Requests
-description: Review and act on PRs from inside gitoui — list, detail, conversation, compose.
+description: Review and act on PRs from inside gitoui, list, detail, conversation, compose.
 ---
 
 import { Tabs, TabItem, Steps, Aside, Badge } from "@astrojs/starlight/components";
@@ -18,7 +18,7 @@ GitHub Auth section.
 | Author   | Login + avatar (when avatars are enabled).      |
 | Status   | Open / Merged / Closed + draft indicator.       |
 
-![PR list — bordered panel, #N / Title / Author / Status columns, label chips, cursor row highlighted](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-list.png)
+![PR list, bordered panel, #N / Title / Author / Status columns, label chips, cursor row highlighted](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-list.png)
 
 | Press        | Action                                              |
 |--------------|-----------------------------------------------------|
@@ -42,7 +42,7 @@ follow the current PR state.
 |------------------|----------------------|
 | `a`              | Approve review.      |
 | `x`              | Request changes.     |
-| `m`              | Merge (opens the merge dialog — squash / merge commit / rebase). |
+| `m`              | Merge (opens the merge dialog, squash / merge commit / rebase). |
 | `o`              | Open in browser.     |
 | `l`              | Labels picker.       |
 | `v`              | Reviewers picker.    |
@@ -65,7 +65,7 @@ Shows the PR description card, then every comment, review, review-comment,
 and timeline event in chronological order. The selected card has a
 **top-border ribbon** with card-local actions:
 
-![PR Conversation tab — description card, comment cards with avatars/reactions, focused card action ribbon](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-conversation.png)
+![PR Conversation tab, description card, comment cards with avatars/reactions, focused card action ribbon](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-conversation.png)
 
 | Press     | Action                                                |
 |-----------|-------------------------------------------------------|
@@ -73,10 +73,10 @@ and timeline event in chronological order. The selected card has a
 | `Shift+R` | Quote-reply to the focused comment.                   |
 | `e`       | Edit your own comment.                                |
 | `d`       | Delete your own comment (confirmation dialog).        |
-| `+`       | React (emoji picker — toggle on/off, your reactions highlighted). |
+| `+`       | React (emoji picker, toggle on/off, your reactions highlighted). |
 | `↵`       | Open the first `#N` reference inside the focused card. |
 
-![PR quote-reply — Shift+R on a comment seeds the editor with a quoted block, type the reply, Ctrl+S to submit](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-quote-reply.gif)
+![PR quote-reply, Shift+R on a comment seeds the editor with a quoted block, type the reply, Ctrl+S to submit](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-quote-reply.gif)
 
 `#N` mentions are styled inline and clickable. The picker is mouse-aware.
 
@@ -85,7 +85,7 @@ and timeline event in chronological order. The selected card has a
 <TabItem label="Files">
 
 Lists every file touched by the PR with **+/− line counts**. `Enter`
-drills into the file's diff — same view as commit-detail diffs, including
+drills into the file's diff, same view as commit-detail diffs, including
 hunk navigation and in-diff search.
 
 </TabItem>
@@ -100,7 +100,7 @@ works as in the main app.
 
 <TabItem label="Checks">
 
-Mirrors the CI run on github.com's `/pull/<n>/checks` page — every check
+Mirrors the CI run on github.com's `/pull/<n>/checks` page, every check
 run grouped under its parent workflow. Workflows are **collapsed by
 default**; the cursor lands on workflow headers first so you can scan
 status at a glance.
@@ -109,7 +109,7 @@ status at a glance.
 |--------------|---------------------------------------------------------------------|
 | `↑↓ / j / k` | Move through workflow headers and (when expanded) their check rows. |
 | `Enter` / click on a header | Expand / collapse the workflow group.                |
-| `Enter` / click on a check row | Open the **"Open on GitHub"** dialog — log streaming isn't local, the dialog confirms and `o` jumps to the run URL in your browser. |
+| `Enter` / click on a check row | Open the **"Open on GitHub"** dialog, log streaming isn't local, the dialog confirms and `o` jumps to the run URL in your browser. |
 
 </TabItem>
 
@@ -119,9 +119,9 @@ status at a glance.
 
 <Steps>
 
-1. `n` from the PR list opens the **compose form** — fields for Title,
+1. `n` from the PR list opens the **compose form**, fields for Title,
    Body, Base branch, Head branch, Labels, Reviewers, Draft.
-2. Type in the Body — markdown supported, with live preview on the right.
+2. Type in the Body, markdown supported, with live preview on the right.
 3. Type `#` to open the **mention popup**: filter by number, `↑↓` to pick,
    `Enter` to insert as `#123`.
 4. Submit with `Ctrl+S` <Badge text="rebindable" variant="tip" /> via
@@ -129,7 +129,7 @@ status at a glance.
 
 </Steps>
 
-The body field also supports word-jump editing — `Ctrl+H` / `Ctrl+W` /
+The body field also supports word-jump editing, `Ctrl+H` / `Ctrl+W` /
 `Ctrl+Backspace` delete word left, `Ctrl+Left` / `Ctrl+Right` jump by word.
 
 <Aside type="note">

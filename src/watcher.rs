@@ -5,7 +5,7 @@
 //!   1. notify-debouncer-mini absorbs OS event bursts in a 1.5 s window
 //!   2. A whitelist filter keeps only events on files we actually care about
 //!      (HEAD, index, refs/*, MERGE_HEAD/CHERRY_PICK_HEAD/REBASE_HEAD,
-//!      packed-refs) — everything else (objects/, logs/, hooks/, .lock,
+//!      packed-refs), everything else (objects/, logs/, hooks/, .lock,
 //!      COMMIT_EDITMSG, info/, …) is ignored
 //!   3. A content fingerprint is computed before each event is sent; if the
 //!      repo state matches the previous snapshot the event is dropped. This
@@ -80,7 +80,7 @@ struct GitFingerprint {
     merge_head: Option<Vec<u8>>,
     cherry_pick_head: Option<Vec<u8>>,
     rebase_head: Option<Vec<u8>>,
-    /// Index file mtime (cheap proxy — reading the binary index would be
+    /// Index file mtime (cheap proxy, reading the binary index would be
     /// wasteful, and any staging change updates the mtime)
     index_mtime: Option<SystemTime>,
 }
@@ -137,11 +137,11 @@ pub fn start(git_dir: &Path, sender: Sender) -> Option<Debouncer<RecommendedWatc
         Duration::from_millis(DEBOUNCE_MS),
         move |res: DebounceEventResult| {
             let Ok(events) = res else { return };
-            // Whitelist filter first — cheap.
+            // Whitelist filter first, cheap.
             if !events.iter().any(|e| is_relevant_event(&e.path)) {
                 return;
             }
-            // Content compare next — eliminates touch / no-op writes.
+            // Content compare next, eliminates touch / no-op writes.
             let now = GitFingerprint::capture(&git_dir_owned);
             let mut last = last_fingerprint.lock().unwrap();
             if *last == now {

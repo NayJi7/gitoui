@@ -51,7 +51,7 @@ fn ss(kb: &KeyBinds, scope: &[&str], action_name: &str, action: &'static str) ->
     }
 }
 
-/// Build a Shortcut with a fixed key string — for symbolic keys
+/// Build a Shortcut with a fixed key string, for symbolic keys
 /// (`Esc`, `↑↓`, `Enter`, etc.) and for terminal-level shortcuts
 /// (`Ctrl+Shift+C` copy/paste) that aren't bound through gitoui.
 fn lit(key: &str, action: &'static str) -> Shortcut {
@@ -64,10 +64,10 @@ fn lit(key: &str, action: &'static str) -> Shortcut {
 #[derive(Debug)]
 pub struct HelpView<'a> {
     before: View<'a>,
-    /// "Committed" section — drives the right pane content + renders
+    /// "Committed" section, drives the right pane content + renders
     /// the leading `▶` marker. Changes on click or arrow keys.
     selected: usize,
-    /// Currently-hovered section — drives the row background highlight.
+    /// Currently-hovered section, drives the row background highlight.
     /// Tracks mouse-move and arrow keys but NOT clicks alone (a click
     /// pulls it in sync with `selected` so the two never disagree
     /// without a follow-up mouse move).
@@ -112,7 +112,7 @@ impl HelpView<'_> {
         }
     }
 
-    /// Hovering only updates `hovered` — the right pane stays on the
+    /// Hovering only updates `hovered`, the right pane stays on the
     /// previously-committed `selected` section until the user clicks.
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
         if let Some(idx) = self.left_area_section_index(col, row) {
@@ -300,7 +300,7 @@ impl HelpView<'_> {
 
             // Hover bg covers the 2-col left gutter (where the `▶`
             // marker sits when selected), the title, and a 2-col right
-            // pad — so the highlight band reads as one continuous chip
+            // pad, so the highlight band reads as one continuous chip
             // around the section name.
             let bg_style = if is_hovered {
                 Style::default()
@@ -394,7 +394,7 @@ impl HelpView<'_> {
             // nest under the section title + any `▍ sub-header` lines,
             // matching the config view's `CONFIG_ITEM_INDENT` style.
             // Keys use the theme's secondary accent (cyan/blue in most
-            // themes — the same token used by config's Cycle values) so
+            // themes, the same token used by config's Cycle values) so
             // they pop against the section header's primary accent
             // without falling into the "warn-yellow" trap of help_key_fg.
             let key_label = format!("  {:<width$}", sh.key, width = key_col_width);
@@ -468,7 +468,7 @@ impl<'a> HelpView<'a> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Section data — sourced directly from each view's key-handling code and
+// Section data, sourced directly from each view's key-handling code and
 // `assets/default-keybind.toml`. Each section maps to one logical view in
 // the app. Sub-views inherit shortcuts from the section above them in the
 // listing order (e.g. Diff inherits Navigation; Branch Detail inherits
@@ -527,7 +527,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Commit List",
-            intro: Some("The main view — `gitoui`'s home screen."),
+            intro: Some("The main view, `gitoui`'s home screen."),
             shortcuts: vec![
                 lit("Search", ""),
                 sg(kb, UserEvent::Search, "Start a search"),
@@ -773,7 +773,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "File History",
-            intro: Some("Opens with `Shift+H` on a file — equivalent of `git log --follow`."),
+            intro: Some("Opens with `Shift+H` on a file, equivalent of `git log --follow`."),
             shortcuts: vec![
                 lit("Esc / Enter", "Close history"),
                 lit("j / k / arrows", "Navigate revisions"),
@@ -885,7 +885,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Compare (2-commit)",
-            intro: Some("Opens after marking two commits with Space — shows the cumulative diff."),
+            intro: Some("Opens after marking two commits with Space, shows the cumulative diff."),
             shortcuts: vec![
                 lit("Esc", "Close compare"),
                 lit("j / k / arrows", "Navigate files / scroll"),

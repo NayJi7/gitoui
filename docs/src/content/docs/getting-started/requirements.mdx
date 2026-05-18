@@ -23,7 +23,7 @@ graph, your terminal needs to speak one of:
 
 | Protocol | <Badge text="recommended" variant="success" /> when… | Terminals (non-exhaustive)              |
 |----------|------------------------------------------------------|-----------------------------------------|
-| **Kitty**     | available — auto-detect default          | **Ghostty (recommended)**, Kitty, WezTerm, Konsole 22.04+, modern gnome-terminal / Ptyxis (VTE ≥ 0.78) |
+| **Kitty**     | available, auto-detect default          | **Ghostty (recommended)**, Kitty, WezTerm, Konsole 22.04+, modern gnome-terminal / Ptyxis (VTE ≥ 0.78) |
 | **iTerm2**    | on macOS                                 | iTerm2, WezTerm                         |
 | **Sixel**     | nothing else works                       | foot (Wayland), mlterm, xterm `-ti vt340`, WezTerm |
 | **Unicode**   | fallback in any other terminal           | Alacritty, Terminal.app, Windows Terminal… (no inline images) |
@@ -43,7 +43,7 @@ If you're building locally instead of using a prebuilt binary:
 
 | Tool         | Version | Notes                                   |
 |--------------|---------|-----------------------------------------|
-| **Rust**     | 1.88+   | `rust-toolchain.toml` not pinned — use stable. |
+| **Rust**     | 1.88+   | `rust-toolchain.toml` not pinned, use stable. |
 | **Cargo**    | ships with Rust | |
 | **`cc`** / `cargo`-compatible linker | platform default | For native deps (`sharp` isn't required, this is Rust only). |
 
@@ -61,12 +61,12 @@ cargo build --release
 The Pull Requests and Issues views need:
 
 - A repo with a **`github.com` remote** (any of `origin`, `upstream`, or a
-  custom name — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> scans `git remote -v` at startup).
+  custom name, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> scans `git remote -v` at startup).
 - A logged-in **GitHub account** via OAuth device-flow (configure under the
-  Configuration page — section "GitHub Auth"). Token is stored at
+  Configuration page, section "GitHub Auth"). Token is stored at
   `~/.config/gitoui/github_token.toml` with `0600` permissions.
 
 <Aside type="note">
 Without auth or without a GitHub remote, the `Shift+R` (PRs) and `Shift+I`
-(Issues) shortcuts are silent no-ops — the rest of <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> works fine.
+(Issues) shortcuts are silent no-ops, the rest of <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> works fine.
 </Aside>

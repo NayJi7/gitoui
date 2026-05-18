@@ -284,7 +284,7 @@ impl Repository {
 
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
         // PR commits fetched on demand (via `refs/pull/<n>/head`) aren't
-        // in the in-memory map — fall back to a one-off `git log -1`
+        // in the in-memory map, fall back to a one-off `git log -1`
         // so the existing CommitDetail / DiffView still work for them.
         let commit = self.commit(commit_hash).cloned().unwrap_or_else(|| {
             load_commit_by_hash(&self.path, commit_hash.as_str()).unwrap_or_default()
@@ -313,7 +313,7 @@ fn check_git_repository(path: &Path) -> Result<()> {
 
 /// Resolve the root of the git work tree (or bare repo) that contains
 /// `path`. Returns `Some(root)` when `path` is *anywhere* inside a git
-/// tree — the root itself OR any sub-directory — and `None` otherwise.
+/// tree, the root itself OR any sub-directory, and `None` otherwise.
 ///
 /// This is the entry point gitoui uses to anchor its whole UI at the
 /// repo root: running `gitoui` from `~/proj/src/sub/` resolves to
@@ -322,7 +322,7 @@ fn check_git_repository(path: &Path) -> Result<()> {
 /// gitoui rebases to the root.
 ///
 /// Combines `--is-bare-repository` and `--show-toplevel` into a single
-/// `git rev-parse` invocation — `git` prints one result per flag on its
+/// `git rev-parse` invocation, `git` prints one result per flag on its
 /// own line, so we get both answers for the cost of one fork+exec.
 pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     let output = Command::new("git")
@@ -335,10 +335,10 @@ pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     // stdout layout (git processes flags left-to-right and prints each
     // result on its own line):
     //   work-tree root:  "false\n<root>\n"     exit 0
-    //   subfolder:       "false\n<root>\n"     exit 0 — same as root,
+    //   subfolder:       "false\n<root>\n"     exit 0, same as root,
     //                                                   `<root>` always points
     //                                                   at the toplevel
-    //   bare repo:       "true\n"              exit 128 — `--show-toplevel`
+    //   bare repo:       "true\n"              exit 128, `--show-toplevel`
     //                                                     fails ("must be run
     //                                                     in a work tree") but
     //                                                     `--is-bare-repository`
@@ -347,7 +347,7 @@ pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
     if lines.next() == Some("true") {
-        // Bare repo — the given path *is* the repo (or `--git-dir`).
+        // Bare repo, the given path *is* the repo (or `--git-dir`).
         // Canonicalise so the caller sees a stable absolute path.
         return std::fs::canonicalize(path).ok();
     }
@@ -363,7 +363,7 @@ pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     std::fs::canonicalize(toplevel).ok()
 }
 
-/// Back-compat shim — `find_repo_root(path).is_some()`. Used in spots
+/// Back-compat shim, `find_repo_root(path).is_some()`. Used in spots
 /// where callers only need a yes/no answer (e.g. early validation).
 pub fn is_git_path(path: &Path) -> bool {
     find_repo_root(path).is_some()
@@ -563,11 +563,11 @@ pub fn load_commit_by_hash(path: &Path, hash: &str) -> Option<Commit> {
 /// Pull a single PR commit into the local repo so `git show` can
 /// render it. Two passes:
 ///
-/// 1. `+refs/pull/<n>/head:refs/pull/<n>/head` — the canonical PR
+/// 1. `+refs/pull/<n>/head:refs/pull/<n>/head`, the canonical PR
 ///    head refspec. Brings the whole PR branch in one shot for live
 ///    PRs and is also faster than per-SHA fetches when the user
 ///    drills into several commits on the same PR.
-/// 2. Direct SHA fetch (`git fetch <url> <sha>`) — fallback for
+/// 2. Direct SHA fetch (`git fetch <url> <sha>`), fallback for
 ///    squash-merged PRs whose branch was deleted: the head ref no
 ///    longer points at the original commit, but GitHub still keeps
 ///    the commit reachable for the PR's diff view and serves it
@@ -586,7 +586,7 @@ pub fn fetch_pull_request_commit(
     sha: &str,
 ) -> std::result::Result<(), String> {
     let url = format!("https://github.com/{}/{}", owner, repo);
-    // Pass 1 — pull/<n>/head refspec. Best-effort: ignore errors and
+    // Pass 1, pull/<n>/head refspec. Best-effort: ignore errors and
     // re-check whether the commit landed.
     let refspec = format!("+refs/pull/{}/head:refs/pull/{}/head", pr_number, pr_number);
     let _ = Command::new("git")
@@ -596,7 +596,7 @@ pub fn fetch_pull_request_commit(
     if load_commit_by_hash(path, sha).is_some() {
         return Ok(());
     }
-    // Pass 2 — direct SHA fetch. `--depth=1` avoids dragging the
+    // Pass 2, direct SHA fetch. `--depth=1` avoids dragging the
     // commit's full ancestry along just to render a single diff.
     let output = Command::new("git")
         .args(["fetch", "--quiet", "--depth=1", &url, sha])
@@ -888,7 +888,7 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
     // file kinds + `--numstat` for line counts) into a single `git log`
     // call. `git diff` honours only the last of `--name-status`/`--numstat`,
     // but `git log --raw --numstat` prints BOTH sections one after the
-    // other in a single fork+exec — halving the cost of opening any commit
+    // other in a single fork+exec, halving the cost of opening any commit
     // in the Detail view (was 2 forks per click).
     //
     // Output layout (--format= empty drops the commit header):
@@ -905,7 +905,7 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
         .arg("--numstat")
         .arg("-M")
         // `git log` hides diffs for merge commits by default. Force a diff
-        // against the first parent — same view the previous `git diff
+        // against the first parent, same view the previous `git diff
         // <hash>^ <hash>` call gave us. `-m` would also work but emits one
         // diff per parent, which we'd then have to dedupe.
         .arg("--first-parent")
@@ -947,7 +947,7 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
             if let Some(to) = rename_to {
                 // Keep an extra entry under `oldname` so a `D`/`R` row that
                 // appeared earlier in the stream isn't shadowed by a stale
-                // status — defensive, but cheap.
+                // status, defensive, but cheap.
                 let _ = to;
             }
         } else {

@@ -27,7 +27,7 @@ pub struct DetailView<'a> {
     refs: Vec<Ref>,
     head_branch_name: Option<String>,
     head_commit_hash: Option<CommitHash>,
-    /// PR number the user is currently exploring — surfaces in the
+    /// PR number the user is currently exploring, surfaces in the
     /// "Commit Details" panel title so they always know the origin.
     pr_origin: Option<u64>,
 
@@ -70,7 +70,7 @@ impl<'a> DetailView<'a> {
 
     /// Pre-select the file whose path matches in the commit's change list.
     /// Used when arriving from Blame / FileHistory so the user lands directly
-    /// on the file they were inspecting — `ensure_selected_visible` (run on
+    /// on the file they were inspecting, `ensure_selected_visible` (run on
     /// the next render) scrolls the file row into view automatically. Matches
     /// against every variant of `FileChange` including the `from`/`to` sides
     /// of a Move so renames in either direction still resolve.
@@ -92,8 +92,8 @@ impl<'a> DetailView<'a> {
 
         // Per-view shortcut: `revert` is scoped to [scope.detail] because
         // `v` is taken globally by `clean_untracked` (uncommitted view).
-        // Going through the scope resolver — instead of a raw-key
-        // intercept — means a user rebinding `[keybind.detail] revert`
+        // Going through the scope resolver, instead of a raw-key
+        // intercept, means a user rebinding `[keybind.detail] revert`
         // works without any extra wiring, and the action panel can
         // surface the actual bound key.
         if let Some("revert") = self.ctx.keybind.resolve_scoped(&["detail"], key) {
@@ -454,7 +454,7 @@ impl<'a> DetailView<'a> {
         let detail_y = detail_area.y as usize;
 
         if row < detail_y {
-            // Click in commit list pane — ignore
+            // Click in commit list pane, ignore
             return;
         }
 
@@ -736,7 +736,7 @@ impl<'a> DetailView<'a> {
         }
         count += 1; // divider
         count += 1; // commit message (subject)
-                    // Body lines come straight after the subject — no separator row
+                    // Body lines come straight after the subject, no separator row
                     // since commit_message_lines() stopped pushing one. Counting an
                     // empty line here used to push hover detection 1 row off.
         if !self.commit.body.is_empty() {

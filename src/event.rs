@@ -69,7 +69,7 @@ pub enum AppEvent {
     NotifySuccess(String),
     NotifyWarn(String),
     NotifyError(String),
-    /// Persistent footer message — bypasses the 2 s auto-clear timer.
+    /// Persistent footer message, bypasses the 2 s auto-clear timer.
     /// Used by the commit-list search-applied state to keep the
     /// "Match X of Y (query)" hint visible the whole time the search
     /// is active. `warn = true` switches to the warn color (zero
@@ -120,7 +120,7 @@ pub enum AppEvent {
         is_staged: bool,
     },
     /// Toggle a single hunk between staged and unstaged. `currently_staged`
-    /// drives which direction the patch is applied — staged hunks reverse the
+    /// drives which direction the patch is applied, staged hunks reverse the
     /// patch (unstage), unstaged hunks forward-apply it (stage).
     ToggleHunkStage {
         file_path: String,
@@ -146,7 +146,7 @@ pub enum AppEvent {
     },
     CloseConflictEditor,
     OpenInteractiveRebase {
-        /// Commit the user is rebasing ONTO — `base..HEAD` commits get
+        /// Commit the user is rebasing ONTO, `base..HEAD` commits get
         /// loaded into the editor.
         base_hash: String,
     },
@@ -154,24 +154,24 @@ pub enum AppEvent {
     /// Open the GitHub Pull Requests view. App resolves auth + remote
     /// and surfaces an error notification if either is missing.
     OpenPullRequests,
-    /// Open the PR view and jump straight to the given PR's detail —
+    /// Open the PR view and jump straight to the given PR's detail
     /// dispatched from cross-view navigation (e.g. clicking a `#N`
     /// reference inside an Issue comment).
     OpenPullRequestDetail {
         number: u64,
     },
-    /// Cross-view nav from a `#N` mention click/Enter — switches
+    /// Cross-view nav from a `#N` mention click/Enter, switches
     /// to the Issues view and opens that issue's detail page.
     OpenIssueDetail {
         number: u64,
     },
-    /// PR view's `#N` resolver / mention popup feed — full issue list
+    /// PR view's `#N` resolver / mention popup feed, full issue list
     /// fetched in the background so PR comments can colour `#N`
     /// references AND the `#` autocomplete popup has titles to show.
     PrMentionIssuesFetched {
         issues: Vec<(u64, String)>,
     },
-    /// Issue view: reaction add succeeded — carries the new
+    /// Issue view: reaction add succeeded, carries the new
     /// reaction's id so the view can record `(kind, id)` against
     /// `(issue_number, target_idx)` and later DELETE on toggle-off.
     IssueReactionApplied {
@@ -180,14 +180,14 @@ pub enum AppEvent {
         kind: crate::github::pr::ReactionKind,
         reaction_id: u64,
     },
-    /// Issue view: reaction removal succeeded — view drops the
+    /// Issue view: reaction removal succeeded, view drops the
     /// recorded `(kind, id)` pair.
     IssueReactionRemoved {
         issue_number: u64,
         target_idx: usize,
         kind: crate::github::pr::ReactionKind,
     },
-    /// PR view: reaction add succeeded — same shape as the Issue
+    /// PR view: reaction add succeeded, same shape as the Issue
     /// counterpart, just routed to the PR view.
     PrReactionApplied {
         pr_number: u64,
@@ -200,7 +200,7 @@ pub enum AppEvent {
         target_idx: usize,
         kind: crate::github::pr::ReactionKind,
     },
-    /// Viewer's pre-existing reactions on a comment/body — fetched
+    /// Viewer's pre-existing reactions on a comment/body, fetched
     /// when the reaction picker opens so the chips can be tagged
     /// with their red "mine" indicator even on a freshly-loaded
     /// session.
@@ -227,7 +227,7 @@ pub enum AppEvent {
         result: Result<crate::github::issue::IssueDetail, String>,
     },
     /// Result of a background write on an issue (comment / close /
-    /// labels / etc.) — sent by the worker thread that ran the
+    /// labels / etc.), sent by the worker thread that ran the
     /// PATCH/POST/DELETE.
     IssueActionDone {
         number: u64,
@@ -265,19 +265,19 @@ pub enum AppEvent {
         all_users: Vec<String>,
         currently_assigned: Vec<String>,
     },
-    /// Milestone picker — single-select.
+    /// Milestone picker, single-select.
     OpenIssueMilestonePicker {
         issue_number: u64,
         issue_title: String,
         all_milestones: Vec<crate::github::issue::Milestone>,
         currently_set: Option<u64>,
     },
-    /// Issue created — view jumps straight into the new issue's detail.
+    /// Issue created, view jumps straight into the new issue's detail.
     IssueCreated {
         number: u64,
     },
     /// Compose-issue picker dialogs return their selections via these
-    /// events — the view captures them into ComposeState rather than
+    /// events, the view captures them into ComposeState rather than
     /// firing a SetIssueX write (no issue exists yet).
     ComposeIssueLabelsPicked {
         labels: Vec<String>,
@@ -312,14 +312,14 @@ pub enum AppEvent {
         issue_number: u64,
         comment_id: u64,
     },
-    /// Background fetch of a PR's full detail completed — pushed by the
+    /// Background fetch of a PR's full detail completed, pushed by the
     /// worker thread the PR view spawned. The view updates its cache and
     /// re-renders.
     PullRequestDetailFetched {
         number: u64,
         result: Result<crate::github::pr::PullRequestDetail, String>,
     },
-    /// Result of a background write action on a PR — sent by the worker
+    /// Result of a background write action on a PR, sent by the worker
     /// thread that ran the POST/PATCH/DELETE. The view shows a toast,
     /// invalidates its cache for `number`, and triggers a re-fetch.
     PullRequestActionDone {
@@ -327,7 +327,7 @@ pub enum AppEvent {
         action: String,
         result: Result<(), String>,
     },
-    /// Repo labels finished fetching for the picker — payload carries
+    /// Repo labels finished fetching for the picker, payload carries
     /// the full label set (with their hex colours so the dialog can
     /// paint GitHub-style chips), plus which names are currently
     /// attached to the PR. The handler opens the multi-select dialog.
@@ -337,7 +337,7 @@ pub enum AppEvent {
         all_labels: Vec<crate::github::pr::Label>,
         currently_on_pr: Vec<String>,
     },
-    /// Same shape as `OpenPrLabelsPicker` but for reviewers — uses the
+    /// Same shape as `OpenPrLabelsPicker` but for reviewers, uses the
     /// `/assignees` endpoint as the user pool.
     OpenPrReviewersPicker {
         pr_number: u64,
@@ -359,7 +359,7 @@ pub enum AppEvent {
     /// instead of dropping to the commit graph.
     ///
     /// `after_fetch` flags the second-pass re-entry done by the fetch
-    /// thread on success — if the commit is STILL missing locally at
+    /// thread on success, if the commit is STILL missing locally at
     /// that point (e.g. PR was squash-merged + branch deleted, the
     /// `refs/pull/<n>/head` ref no longer points at the original
     /// commit), the handler errors out instead of re-spawning another
@@ -378,20 +378,20 @@ pub enum AppEvent {
         file_path: String,
         after_fetch: bool,
     },
-    /// A newly-created PR landed on GitHub — the PR view clears its
+    /// A newly-created PR landed on GitHub, the PR view clears its
     /// compose draft, reloads the list, and opens the freshly
     /// created PR in Detail mode.
     PrCreated {
         number: u64,
     },
-    /// Compose form's labels-picker fetch finished — app opens the
+    /// Compose form's labels-picker fetch finished, app opens the
     /// multi-select dialog with this payload, and on confirm
     /// dispatches `ComposeLabelsPicked` back to the view.
     OpenComposeLabelsPicker {
         all_labels: Vec<crate::github::pr::Label>,
         currently_selected: Vec<String>,
     },
-    /// Labels the user chose in the compose-form picker — pushed
+    /// Labels the user chose in the compose-form picker, pushed
     /// back into the active `ComposeState`.
     ComposeLabelsPicked {
         labels: Vec<crate::github::pr::Label>,
@@ -402,7 +402,7 @@ pub enum AppEvent {
     SwitchWorktree {
         path: String,
     },
-    /// Sent (debounced) when the .git directory changes — triggers a refresh
+    /// Sent (debounced) when the .git directory changes, triggers a refresh
     /// of the current view if the user isn't in an input/dialog state.
     FilesystemChanged,
 }
@@ -439,19 +439,19 @@ pub enum DialogKind {
     Reset {
         target: String,
     },
-    /// Confirm squashing a commit into its parent. No options — just a
+    /// Confirm squashing a commit into its parent. No options, just a
     /// confirmation prompt before we run the rebase under the hood.
     Squash {
         target: String,
     },
-    /// Merge a pull request — radio for merge method + optional title
+    /// Merge a pull request, radio for merge method + optional title
     /// and message. Confirm runs `PUT /pulls/{n}/merge`.
     MergePullRequest {
         number: u64,
         pr_title: String,
         pr_body: String,
     },
-    /// Confirm before deleting a PR comment — preview shows the body
+    /// Confirm before deleting a PR comment, preview shows the body
     /// and author so the user sees which comment is about to go.
     ConfirmDeleteComment {
         pr_number: u64,
@@ -500,7 +500,7 @@ pub enum DialogKind {
         for_compose: bool,
     },
     /// Multi-select picker for the PR's reviewers. Same shape as
-    /// labels — `selected` starts at currently-requested reviewers.
+    /// labels, `selected` starts at currently-requested reviewers.
     PullRequestReviewers {
         pr_number: u64,
         pr_title: String,
@@ -508,7 +508,7 @@ pub enum DialogKind {
         selected: Vec<bool>,
         initial: Vec<bool>,
     },
-    /// Issue labels multi-select. Mirror of `PullRequestLabels` —
+    /// Issue labels multi-select. Mirror of `PullRequestLabels`
     /// kept distinct so the dialog confirm dispatches to the issue
     /// view rather than the PR view.
     IssueLabels {
@@ -516,7 +516,7 @@ pub enum DialogKind {
         issue_title: String,
         all_labels: Vec<crate::github::pr::Label>,
         selected: Vec<bool>,
-        /// When `true`, this is the Compose-new-issue picker — the
+        /// When `true`, this is the Compose-new-issue picker, the
         /// dialog stays in-memory rather than firing the SetIssueLabels
         /// write (the compose state collects the picked labels for the
         /// eventual POST /issues).
@@ -540,13 +540,13 @@ pub enum DialogKind {
         selected: Option<u64>,
         for_compose: bool,
     },
-    /// Confirmation dialog when closing an issue — lets the user pick
+    /// Confirmation dialog when closing an issue, lets the user pick
     /// "Completed" vs "Not planned" before firing the write.
     ConfirmCloseIssue {
         issue_number: u64,
         issue_title: String,
     },
-    /// Confirmation dialog when reopening a closed issue — single
+    /// Confirmation dialog when reopening a closed issue, single
     /// yes/no, no state_reason to pick (GitHub clears it on reopen).
     ConfirmReopenIssue {
         issue_number: u64,
@@ -629,12 +629,12 @@ pub enum DialogKind {
     },
     // Add new worktree
     AddWorktree,
-    // Checkout blocked by local changes — pick a resolution path.
+    // Checkout blocked by local changes, pick a resolution path.
     CheckoutHasLocalChanges {
         target: String,
         is_branch: bool,
     },
-    /// Pull-request commit that gitoui can't read locally — typically
+    /// Pull-request commit that gitoui can't read locally, typically
     /// a squash-merged PR whose branch was deleted. Both git fetch
     /// passes (`refs/pull/<n>/head` + direct SHA) failed to bring the
     /// commit in. Offers an "open on GitHub" escape so the user can
@@ -691,7 +691,7 @@ pub enum GitAction {
         ignore_date: bool,
         interactive: bool,
     },
-    /// Squash with parent — non-interactive, no options.
+    /// Squash with parent, non-interactive, no options.
     SquashWithParent,
     /// Merge a PR via the GitHub API. `method` is "merge" / "squash" /
     /// "rebase" (matches GitHub's `merge_method` body field).
@@ -809,7 +809,7 @@ pub struct Sender {
 
 impl Sender {
     // `mpsc::channel` is unbounded, so the only failure mode is a closed
-    // channel — which only happens after the receiver has been dropped, i.e.
+    // channel, which only happens after the receiver has been dropped, i.e.
     // during final shutdown when nothing will consume the event anyway.
     // Silently dropping is correct in that race; panicking on the spawned
     // poller thread (or any view-side sender) just pollutes the terminal
@@ -892,7 +892,7 @@ impl EventController {
                             // The kitty keyboard disambiguation flag we
                             // push at startup makes terminals emit
                             // Press / Repeat / Release events for every
-                            // key. We dispatch on Press / Repeat only —
+                            // key. We dispatch on Press / Repeat only
                             // Release events would double-fire actions
                             // (e.g. `p` opens config on press, then
                             // re-fires UserEvent::Config on release,
@@ -910,7 +910,7 @@ impl EventController {
                             // (NUM_LOCK, CAPS_LOCK) to every KeyEvent.
                             // Our parsed bindings are built via
                             // `KeyEvent::new`, which sets `state: NONE`
-                            // — so without this strip a user with
+                            //, so without this strip a user with
                             // NumLock or CapsLock on never matched
                             // their own bindings. The lock state isn't
                             // a dispatch input anywhere in the app;
@@ -950,7 +950,7 @@ impl EventController {
         // Ask the terminal to disambiguate escape codes (Kitty keyboard
         // protocol). Without it, terminals that fall back to xterm's
         // legacy meta encoding ship `Alt+letter` as `Esc` + `letter`
-        // bytes — crossterm can usually parse the pair as a single
+        // bytes, crossterm can usually parse the pair as a single
         // KeyEvent but only when both bytes land inside its short
         // read-window. Stragglers leak through as a stray `Esc` that
         // closes the current view, which is what made Alt-* bindings
@@ -1070,15 +1070,15 @@ pub enum UserEvent {
     Merge,
     Rebase,
     Reset,
-    /// Squash the selected commit with its parent — runs an interactive
+    /// Squash the selected commit with its parent, runs an interactive
     /// rebase under the hood with a `[pick parent, fixup target]` plan.
     /// Faster than opening the rebase editor for the common "combine the
     /// last few wip/fix commits" case.
     Squash,
-    /// Open the GitHub Pull Requests view — gated behind an authenticated
+    /// Open the GitHub Pull Requests view, gated behind an authenticated
     /// GitHub session.
     PullRequests,
-    /// Open the GitHub Issues view — gated behind an authenticated
+    /// Open the GitHub Issues view, gated behind an authenticated
     /// GitHub session. Default keybind: Shift+I.
     Issues,
     // Phase 2 - Uncommitted actions
@@ -1343,7 +1343,7 @@ mod tests {
 
     // Regression: dropping the receiver before the spawned event-poller thread
     // (or any view-side `Sender::send` call) used to panic with `SendError`.
-    // See src/event.rs Sender::send doc — silent drop is correct on shutdown.
+    // See src/event.rs Sender::send doc, silent drop is correct on shutdown.
     #[test]
     fn sender_send_after_receiver_drop_does_not_panic() {
         let (tx, rx) = mpsc::channel();

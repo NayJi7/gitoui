@@ -1,15 +1,15 @@
 //! Data layer for the interactive-rebase editor.
 //!
 //! Public API:
-//! - [`RebaseAction`] — Pick / Reword / Edit / Squash / Fixup / Drop
-//! - [`RebaseItem`] — one row in the rebase todo (action + commit + metadata)
-//! - [`load_rebase_items`] — `git log --reverse base..HEAD` parser
-//! - [`serialise_todo`] — render a todo file in git's syntax
-//! - [`apply_rebase`] — orchestrate `git rebase -i base` with our prepared
+//! - [`RebaseAction`], Pick / Reword / Edit / Squash / Fixup / Drop
+//! - [`RebaseItem`], one row in the rebase todo (action + commit + metadata)
+//! - [`load_rebase_items`], `git log --reverse base..HEAD` parser
+//! - [`serialise_todo`], render a todo file in git's syntax
+//! - [`apply_rebase`], orchestrate `git rebase -i base` with our prepared
 //!   todo via `GIT_SEQUENCE_EDITOR` + handle reword messages via `GIT_EDITOR`
 //!
 //! Rebase order convention: `load_rebase_items` returns commits in
-//! chronological order (oldest first) — that's the order git's rebase-todo
+//! chronological order (oldest first), that's the order git's rebase-todo
 //! uses. The view shows them in the same order.
 
 use std::path::Path;
@@ -56,7 +56,7 @@ impl RebaseAction {
         }
     }
 
-    /// Human-readable explanation of what this action will do — shown under
+    /// Human-readable explanation of what this action will do, shown under
     /// the commit row in the Inline layout and in the Result preview.
     pub fn description(&self) -> &'static str {
         match self {
@@ -110,7 +110,7 @@ impl RebaseAction {
 
     /// Map a scoped action name (as resolved from `[scope.rebase]`) to
     /// the corresponding enum variant. Stricter than `from_key` because
-    /// it's only used in the keybind dispatch path — typos in the user's
+    /// it's only used in the keybind dispatch path, typos in the user's
     /// TOML can fail at config-load time later if we plumb validation
     /// through, but for now an unknown name silently returns None and
     /// the dispatcher falls through.
@@ -139,7 +139,7 @@ pub struct RebaseItem {
     pub subject: String,
     /// Author display name (`%an`).
     pub author: String,
-    /// Relative date (`%cr`) — "2 days ago".
+    /// Relative date (`%cr`), "2 days ago".
     pub date: String,
     /// New message to use when `action == Reword`. `None` means "use the
     /// commit's existing message"; the view's inline editor populates this
@@ -150,12 +150,12 @@ pub struct RebaseItem {
 /// Run `git log --reverse <base>..HEAD` and parse the output into items,
 /// each defaulting to `RebaseAction::Pick`.
 ///
-/// `base_hash` is the commit that the user is rebasing onto — its children
+/// `base_hash` is the commit that the user is rebasing onto, its children
 /// (`base..HEAD`) are the ones that will be replayed. The list is returned
 /// in chronological order (oldest first), which is the order git's
 /// rebase-todo uses.
 pub fn load_rebase_items(repo: &Path, base_hash: &str) -> Result<Vec<RebaseItem>, String> {
-    // Field separator: \x1f (Unit Separator) — same convention as the
+    // Field separator: \x1f (Unit Separator), same convention as the
     // commit-list loader.
     let format = "%H\x1f%s\x1f%an\x1f%cr";
     let range = format!("{}..HEAD", base_hash);
@@ -205,7 +205,7 @@ pub fn serialise_todo(items: &[RebaseItem]) -> String {
     let mut out = String::new();
     for it in items {
         if it.action == RebaseAction::Drop {
-            // Skip — equivalent to "drop <hash>" but doesn't leave a
+            // Skip, equivalent to "drop <hash>" but doesn't leave a
             // confusing dropped-line message in the rebase output.
             continue;
         }
@@ -224,13 +224,13 @@ pub fn serialise_todo(items: &[RebaseItem]) -> String {
 pub enum RebaseOutcome {
     /// Rebase finished without leaving the repo in a conflicted state.
     Clean,
-    /// Rebase stopped — either because git hit a conflict, or because one
+    /// Rebase stopped, either because git hit a conflict, or because one
     /// of the steps was `Edit`/`Reword` and is waiting on the user. The
     /// working tree is in a `rebase in progress` state; the user can
     /// resolve / amend, then `git rebase --continue` (or use our editors).
     Paused(String),
     /// `.git/rebase-merge` or `.git/rebase-apply` already exists from a
-    /// previous unfinished rebase — we refused to start a new one to
+    /// previous unfinished rebase, we refused to start a new one to
     /// avoid clobbering state. Caller should surface a clear "abort the
     /// previous rebase first" message.
     AlreadyInProgress,
@@ -238,13 +238,13 @@ pub enum RebaseOutcome {
 
 /// True when a rebase-merge or rebase-apply directory exists. We surface
 /// this state separately from a rebase we just ran because the user can't
-/// fix it with `--continue` — they need to explicitly abort first.
+/// fix it with `--continue`, they need to explicitly abort first.
 pub fn rebase_in_progress(repo: &Path) -> bool {
     let git_dir = repo.join(".git");
     git_dir.join("rebase-merge").is_dir() || git_dir.join("rebase-apply").is_dir()
 }
 
-/// Cheap stat-and-read for `.git/rebase-merge/stopped-sha` — returns the
+/// Cheap stat-and-read for `.git/rebase-merge/stopped-sha`, returns the
 /// full SHA git is paused on, or `None` if no rebase is paused (or the
 /// file just doesn't exist, e.g. on `git rebase --skip`'s narrow window).
 /// Used by the commit-list renderer to badge the paused row directly,
@@ -273,7 +273,7 @@ fn rev_parse(repo: &Path, rev: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Squash `target` into its parent — non-interactive shortcut that runs
+/// Squash `target` into its parent, non-interactive shortcut that runs
 /// the same rebase machinery as the interactive editor, but with a
 /// pre-built `[pick parent, fixup target, pick …rest]` plan. Faster
 /// than opening the editor when the user just wants to combine adjacent
@@ -283,13 +283,13 @@ fn rev_parse(repo: &Path, rev: &str) -> Result<String, String> {
 /// - target is the initial commit (no parent),
 /// - target's parent IS the initial commit (rebase --root needed; not
 ///   wired up here yet),
-/// - target is a merge commit (multiple parents — ambiguous semantics),
+/// - target is a merge commit (multiple parents, ambiguous semantics),
 /// - another rebase is already in progress.
 pub fn squash_with_parent(repo: &Path, target_hash: &str) -> Result<RebaseOutcome, String> {
     if rebase_in_progress(repo) {
         return Ok(RebaseOutcome::AlreadyInProgress);
     }
-    // Reject merge commits — a fixup on a merge produces surprising
+    // Reject merge commits, a fixup on a merge produces surprising
     // history; better to make the user use the interactive editor.
     let parents = Command::new("git")
         .current_dir(repo)
@@ -304,16 +304,16 @@ pub fn squash_with_parent(repo: &Path, target_hash: &str) -> Result<RebaseOutcom
         .count()
         .saturating_sub(1);
     if parent_count == 0 {
-        return Err("Cannot squash the initial commit — it has no parent.".into());
+        return Err("Cannot squash the initial commit, it has no parent.".into());
     }
     if parent_count > 1 {
-        return Err("Cannot squash a merge commit — use the interactive rebase instead.".into());
+        return Err("Cannot squash a merge commit, use the interactive rebase instead.".into());
     }
 
     let grandparent = match rev_parse(repo, &format!("{}^^", target_hash)) {
         Ok(h) => h,
         Err(_) => {
-            return Err("Cannot squash into the root commit yet — \
+            return Err("Cannot squash into the root commit yet, \
                  use the interactive rebase editor for this case."
                 .into());
         }
@@ -330,14 +330,14 @@ pub fn squash_with_parent(repo: &Path, target_hash: &str) -> Result<RebaseOutcom
     }
     if !found {
         return Err(format!(
-            "Target {} not found in rebase range — refusing to squash.",
+            "Target {} not found in rebase range, refusing to squash.",
             target_hash.chars().take(7).collect::<String>()
         ));
     }
     apply_rebase(repo, &grandparent, &items)
 }
 
-/// `git rebase --abort` — caller verifies state first.
+/// `git rebase --abort`, caller verifies state first.
 pub fn abort_rebase(repo: &Path) -> Result<(), String> {
     let out = Command::new("git")
         .current_dir(repo)
@@ -363,7 +363,7 @@ pub struct ResumeStep {
 }
 
 /// Snapshot of `.git/rebase-merge/*` for the resume view. `None` for any
-/// field means the file was missing — we still show what we can.
+/// field means the file was missing, we still show what we can.
 #[derive(Debug, Clone)]
 pub struct ResumeState {
     /// Lines already executed (from `done`).
@@ -424,7 +424,7 @@ pub fn read_resume_state(repo: &Path) -> Option<ResumeState> {
         .ok()
         .map(|s| s.trim().to_string());
 
-    // Try to extract a meaningful headline from `git status --short` —
+    // Try to extract a meaningful headline from `git status --short`
     // the rebase-stopped state always shows unmerged paths or staged
     // changes that the user needs to address.
     let headline = Command::new("git")
@@ -467,7 +467,7 @@ pub fn continue_rebase(repo: &Path) -> Result<RebaseOutcome, String> {
     }
 }
 
-/// `git rebase --skip` — drops the current commit and resumes the rebase.
+/// `git rebase --skip`, drops the current commit and resumes the rebase.
 pub fn skip_rebase(repo: &Path) -> Result<RebaseOutcome, String> {
     let out = Command::new("git")
         .current_dir(repo)
@@ -502,7 +502,7 @@ pub fn apply_rebase(
     base_hash: &str,
     items: &[RebaseItem],
 ) -> Result<RebaseOutcome, String> {
-    // Refuse to start if a previous rebase is still in progress — git would
+    // Refuse to start if a previous rebase is still in progress, git would
     // exit 128 with a wall of text and we'd surface it as a confusing
     // "Rebase paused" notification. Return a distinct variant so the view
     // can prompt the user to abort first.
@@ -540,7 +540,7 @@ pub fn apply_rebase(
             }
             RebaseAction::Squash => {
                 prompt_idx += 1;
-                // No file written — git's default combined message is used.
+                // No file written, git's default combined message is used.
             }
             _ => {}
         }
@@ -548,7 +548,7 @@ pub fn apply_rebase(
     std::fs::write(scratch.join("prompt_counter"), "1")
         .map_err(|e| format!("write counter: {}", e))?;
 
-    // 3. Editor script — handles both GIT_SEQUENCE_EDITOR and GIT_EDITOR
+    // 3. Editor script, handles both GIT_SEQUENCE_EDITOR and GIT_EDITOR
     //    invocations by inspecting the filename it's asked to edit.
     let editor_path = scratch.join("editor.sh");
     let editor_src = format!(
@@ -596,14 +596,14 @@ exit 0
         .output()
         .map_err(|e| format!("git rebase failed to spawn: {}", e))?;
 
-    // Cleanup our scratch dir — the rebase machinery has its own state
+    // Cleanup our scratch dir, the rebase machinery has its own state
     // in .git/rebase-merge if it's still running.
     let _ = std::fs::remove_dir_all(&scratch);
 
     if out.status.success() {
         Ok(RebaseOutcome::Clean)
     } else {
-        // A non-zero exit means git stopped — could be a conflict, an
+        // A non-zero exit means git stopped, could be a conflict, an
         // edit step, or a real error. Either way, surface stderr.
         let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
         Ok(RebaseOutcome::Paused(msg))

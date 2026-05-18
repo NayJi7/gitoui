@@ -1,11 +1,11 @@
 //! GitHub Pull Request data layer.
 //!
 //! Endpoints used (all REST v3):
-//! - `GET /repos/{owner}/{repo}/pulls?state=open` — list summaries
-//! - `GET /repos/{owner}/{repo}/pulls/{number}` — full detail (description, head/base)
-//! - `GET /repos/{owner}/{repo}/pulls/{number}/files` — file changes
-//! - `GET /repos/{owner}/{repo}/pulls/{number}/reviews` — review summary
-//! - `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` — CI status
+//! - `GET /repos/{owner}/{repo}/pulls?state=open`, list summaries
+//! - `GET /repos/{owner}/{repo}/pulls/{number}`, full detail (description, head/base)
+//! - `GET /repos/{owner}/{repo}/pulls/{number}/files`, file changes
+//! - `GET /repos/{owner}/{repo}/pulls/{number}/reviews`, review summary
+//! - `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`, CI status
 //!
 //! All fetches block; callers should run them off the UI tick if they
 //! care about responsiveness on slow networks.
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{http_client, RepoCoords};
 
-/// Compact PR summary — populates the list panel.
+/// Compact PR summary, populates the list panel.
 #[derive(Debug, Clone)]
 pub struct PullRequest {
     pub number: u64,
@@ -26,7 +26,7 @@ pub struct PullRequest {
     pub head_label: String,
     /// Base branch ref name (usually `main` or `master`).
     pub base_ref: String,
-    /// Head commit SHA — used to look up CI status lazily.
+    /// Head commit SHA, used to look up CI status lazily.
     pub head_sha: String,
     /// Labels attached to the PR, in the order GitHub returned them.
     /// Surfaced in the list as short coloured chips next to the title.
@@ -40,13 +40,13 @@ pub enum PullState {
     Merged,
 }
 
-/// Full PR data — populates the detail view. Fetched in one parallel
+/// Full PR data, populates the detail view. Fetched in one parallel
 /// roundtrip when the user opens a PR; everything for the 4 tabs is
 /// rolled in so subsequent tab switches are instant.
 #[derive(Debug, Clone)]
 pub struct PullRequestDetail {
     pub number: u64,
-    /// GitHub's GraphQL node ID — needed for the `convertPullRequest
+    /// GitHub's GraphQL node ID, needed for the `convertPullRequest
     /// ToDraft` / `markPullRequestReadyForReview` mutations, which
     /// the REST API doesn't expose.
     pub node_id: String,
@@ -56,7 +56,7 @@ pub struct PullRequestDetail {
     pub draft: bool,
     pub head_label: String,
     pub base_ref: String,
-    /// Head commit SHA — anchors the on-demand `git show` for files
+    /// Head commit SHA, anchors the on-demand `git show` for files
     /// and commits when drilling into the existing diff / detail views.
     pub head_sha: String,
     pub body: String,
@@ -70,19 +70,19 @@ pub struct PullRequestDetail {
     pub files: Vec<PullFile>,
     /// Labels currently attached to the PR.
     pub labels: Vec<Label>,
-    /// Aggregate merge readiness — drives the badge shown alongside
+    /// Aggregate merge readiness, drives the badge shown alongside
     /// the PR title (Ready to merge / Conflicts / Blocked / etc).
     pub mergeability: Mergeability,
     /// Relative timestamp of when the PR was opened, e.g. "13h ago".
     pub opened_when: String,
     // ── Per-tab payloads (lazy-loaded together with the summary above).
-    /// Commits on the PR, oldest first — matches what GitHub's Commits
+    /// Commits on the PR, oldest first, matches what GitHub's Commits
     /// tab shows.
     pub commit_list: Vec<PullCommit>,
-    /// Chronological mix of issue comments + review bodies — populates
+    /// Chronological mix of issue comments + review bodies, populates
     /// the Conversation tab.
     pub conversation: Vec<ConversationEntry>,
-    /// Detailed check runs — populates the Checks tab. The `ci`
+    /// Detailed check runs, populates the Checks tab. The `ci`
     /// `CiSummary` above keeps roll-up counts for headline rendering.
     pub check_runs: Vec<CheckRunDetail>,
 }
@@ -104,7 +104,7 @@ pub struct PullCommit {
 #[derive(Debug, Clone)]
 pub struct ConversationEntry {
     /// Stable comment id from GitHub. `None` for entries that don't have
-    /// an id (e.g. reviews — they have their own id but we don't use it).
+    /// an id (e.g. reviews, they have their own id but we don't use it).
     pub id: Option<u64>,
     /// `Some(parent_id)` for review-comment replies (threaded under the
     /// parent in the Conversation tab). `None` for top-level entries.
@@ -115,12 +115,12 @@ pub struct ConversationEntry {
     pub kind: ConversationKind,
     /// Aggregate reaction counts attached to this comment. Comes from
     /// the `reactions` summary object GitHub embeds inline on each
-    /// comment payload — no extra request needed.
+    /// comment payload, no extra request needed.
     pub reactions: ReactionCounts,
 }
 
 /// Per-comment reaction tally. GitHub's reactions API supports
-/// exactly 8 emoji — fixed for the foreseeable future — so we model
+/// exactly 8 emoji, fixed for the foreseeable future, so we model
 /// them as named fields rather than a hashmap.
 #[derive(Debug, Clone, Default)]
 pub struct ReactionCounts {
@@ -135,7 +135,7 @@ pub struct ReactionCounts {
 }
 
 impl ReactionCounts {
-    /// Total across all reaction types — used to decide whether to
+    /// Total across all reaction types, used to decide whether to
     /// render the chip row at all.
     pub fn total(&self) -> u64 {
         self.plus_one
@@ -151,7 +151,7 @@ impl ReactionCounts {
     /// Walk the eight types in canonical GitHub order, yielding
     /// `(kind, count)` so callers can `filter(|(_, n)| *n > 0)`.
     pub fn iter(&self) -> impl Iterator<Item = (ReactionKind, u64)> + '_ {
-        // Same trailing-Heart order as `ReactionKind::all()` — keeps
+        // Same trailing-Heart order as `ReactionKind::all()`, keeps
         // the chip row in a Paragraph layout that survives `❤️`'s
         // unicode-width=1 vs terminal-width=2 mismatch by never
         // letting another emoji sit after it on the same line.
@@ -212,7 +212,7 @@ impl ReactionKind {
     }
 
     pub fn all() -> &'static [ReactionKind] {
-        // Heart sits LAST in the iteration order — its U+FE0F
+        // Heart sits LAST in the iteration order, its U+FE0F
         // variation selector makes `unicode-width` report 1 col
         // while terminals render 2, which silently clips the next
         // emoji on the row (`🚀` vanishing was the symptom). Putting
@@ -285,7 +285,7 @@ pub enum Mergeability {
     Merged,
     /// Closed without merging.
     Closed,
-    /// Conflicts with the base branch — needs manual resolution.
+    /// Conflicts with the base branch, needs manual resolution.
     Conflicts,
     /// CI checks failing.
     ChecksFailing,
@@ -316,7 +316,7 @@ pub struct ReviewsSummary {
     pub commented: usize,
 }
 
-/// Aggregated CI status — totals across all check-runs on the head SHA.
+/// Aggregated CI status, totals across all check-runs on the head SHA.
 #[derive(Debug, Clone, Default)]
 pub struct CiSummary {
     pub total: usize,
@@ -368,7 +368,7 @@ pub enum FileStatus {
     Other,
 }
 
-// ---------- Raw response shapes — internal, deserialised then mapped. ----------
+// ---------- Raw response shapes, internal, deserialised then mapped. ----------
 
 #[derive(Deserialize)]
 struct ApiUser {
@@ -407,7 +407,7 @@ struct ApiPullSummary {
 #[derive(Deserialize)]
 struct ApiPullDetail {
     number: u64,
-    /// GraphQL node ID — required for draft toggle mutations (REST
+    /// GraphQL node ID, required for draft toggle mutations (REST
     /// can't flip the draft flag).
     #[serde(default)]
     node_id: String,
@@ -441,7 +441,7 @@ struct ApiPullDetail {
     #[serde(default)]
     mergeable: Option<bool>,
     /// `clean` / `dirty` / `unstable` / `blocked` / `behind` / `draft`
-    /// / `unknown` — see GitHub docs. We map this to our richer
+    /// / `unknown`, see GitHub docs. We map this to our richer
     /// `Mergeability` enum below.
     #[serde(default)]
     mergeable_state: String,
@@ -498,7 +498,7 @@ struct ApiCommitItem {
     #[serde(default)]
     sha: String,
     commit: ApiCommitInner,
-    /// Top-level `author` is the GitHub *user* (login) — distinct
+    /// Top-level `author` is the GitHub *user* (login), distinct
     /// from `commit.author` which is the git author (name + email).
     /// May be null when the commit's email isn't linked to a GitHub
     /// account.
@@ -543,7 +543,7 @@ struct ApiIssueComment {
 struct ApiReviewComment {
     #[serde(default)]
     id: u64,
-    /// Set on replies — points at the comment this one is replying to.
+    /// Set on replies, points at the comment this one is replying to.
     #[serde(default, rename = "in_reply_to_id")]
     in_reply_to_id: Option<u64>,
     user: Option<ApiUser>,
@@ -575,7 +575,7 @@ struct ApiReviewWithBody {
 
 /// Inline `reactions` summary GitHub embeds on every comment-bearing
 /// resource. Field names follow GH's JSON keys (note the `+1` / `-1`
-/// renames — Rust can't name a field that).
+/// renames, Rust can't name a field that).
 #[derive(Deserialize, Default)]
 struct ApiReactions {
     #[serde(default, rename = "+1")]
@@ -651,7 +651,7 @@ struct ApiWorkflowRun {
 // ---------- Public API ----------
 
 /// Fetch the open PRs on the given repo, sorted by number descending
-/// (newest first — matches GitHub's web UI default).
+/// (newest first, matches GitHub's web UI default).
 pub fn list_pull_requests(token: &str, coords: &RepoCoords) -> Result<Vec<PullRequest>, String> {
     let client = http_client()?;
     // Fetch every state so the view can filter client-side between
@@ -699,7 +699,7 @@ pub fn fetch_pull_request_detail(
         coords.owner, coords.repo, number
     );
 
-    // Primary PR fetch — we need its head SHA for the CI call, but we
+    // Primary PR fetch, we need its head SHA for the CI call, but we
     // can start reviews + files in parallel since they don't depend on
     // that SHA.
     let pr_resp = client
@@ -715,7 +715,7 @@ pub fn fetch_pull_request_detail(
     let pr: ApiPullDetail =
         serde_json::from_str(&pr_body).map_err(|e| format!("PR JSON: {}", e))?;
 
-    // Spawn the 6 secondary fetches concurrently — total latency ≈
+    // Spawn the 6 secondary fetches concurrently, total latency ≈
     // max(call) rather than sum(call). Each helper degrades to an
     // empty value on error so a single failing endpoint never breaks
     // the whole detail view.
@@ -801,7 +801,7 @@ pub fn fetch_pull_request_detail(
     for r in review_entries {
         let body = r.body.unwrap_or_default();
         // Reviews with no body and state "COMMENTED" are usually
-        // "Reviewed N files" markers — filter to reduce noise.
+        // "Reviewed N files" markers, filter to reduce noise.
         if body.is_empty() && r.state == "COMMENTED" {
             continue;
         }
@@ -821,7 +821,7 @@ pub fn fetch_pull_request_detail(
                 when: short_relative(&r.submitted_at),
                 body,
                 kind: ConversationKind::Review { state },
-                // Review summary objects don't carry reactions —
+                // Review summary objects don't carry reactions
                 // GitHub only surfaces them on the individual
                 // comments inside the review.
                 reactions: ReactionCounts::default(),
@@ -899,7 +899,7 @@ pub fn fetch_pull_request_detail(
 }
 
 /// Combine GitHub's signals into a single readiness flag for the badge.
-/// Worst state wins when they conflict — e.g. a PR that's mergeable but
+/// Worst state wins when they conflict, e.g. a PR that's mergeable but
 /// with failing CI surfaces as `ChecksFailing`, not `Ready`.
 fn derive_mergeability(
     state: PullState,
@@ -927,7 +927,7 @@ fn derive_mergeability(
         "behind" => return Mergeability::Behind,
         "draft" => return Mergeability::Draft,
         "clean" => {
-            // Clean per GitHub — double-check our local roll-ups too,
+            // Clean per GitHub, double-check our local roll-ups too,
             // since GitHub sometimes marks clean while a check is
             // still pending.
             if ci.failure > 0 {
@@ -1186,7 +1186,7 @@ fn fetch_check_runs_detail(
 /// `run_id → workflow_name` for those that count as "user-visible" CI
 /// runs. The `event=dynamic` type covers GitHub's internal auto-
 /// pipelines (notably Copilot's PR reviewer), which GitHub itself hides
-/// from the PR detail's "Checks N" badge — we mirror that filter here
+/// from the PR detail's "Checks N" badge, we mirror that filter here
 /// so our counts agree with the web UI. The names also power the
 /// accordion grouping in the Checks tab (e.g. "Build", "CodeQL").
 fn fetch_visible_workflows(
@@ -1363,7 +1363,7 @@ struct ReplyBody<'a> {
     in_reply_to: u64,
     // Optional, but GitHub recommends including the commit_id+path the
     // parent is anchored on. We let the API fall back when these are
-    // omitted — replies to existing threads inherit the parent's anchor.
+    // omitted, replies to existing threads inherit the parent's anchor.
     #[serde(skip_serializing_if = "Option::is_none")]
     commit_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1386,7 +1386,7 @@ pub fn post_issue_comment(
 
 /// Reply to an existing review comment thread (file-level inline thread).
 /// `parent_id` is the comment we're replying to (GitHub flattens the
-/// thread so this can be any comment in the chain — the API normalises
+/// thread so this can be any comment in the chain, the API normalises
 /// `in_reply_to` to the thread root anyway).
 pub fn post_review_comment_reply(
     token: &str,
@@ -1542,7 +1542,7 @@ struct MergeBody<'a> {
     commit_message: Option<&'a str>,
 }
 
-/// Merge a PR. `commit_title` / `commit_message` are optional — GitHub
+/// Merge a PR. `commit_title` / `commit_message` are optional, GitHub
 /// uses sensible defaults if omitted (PR title / description).
 pub fn merge_pull_request(
     token: &str,
@@ -1676,7 +1676,7 @@ fn list_my_reactions_at(
     let entries: Vec<ApiReactionEntry> =
         serde_json::from_str(&body).map_err(|e| format!("/reactions JSON: {}", e))?;
     // GitHub logins are case-insensitive in matching even though
-    // the API echoes the canonical case — compare lowercase to
+    // the API echoes the canonical case, compare lowercase to
     // avoid false negatives when `me_login` differs in casing
     // from the reaction owner's login on the API response.
     let me_low = me_login.to_lowercase();
@@ -1693,7 +1693,7 @@ fn list_my_reactions_at(
 }
 
 /// Reactions placed on the issue / PR body by the authenticated
-/// viewer — returns `(kind, reaction_id)` pairs so a re-click can
+/// viewer, returns `(kind, reaction_id)` pairs so a re-click can
 /// `DELETE` them.
 pub fn list_my_issue_reactions(
     token: &str,
@@ -1734,7 +1734,7 @@ pub fn list_my_review_comment_reactions(
     list_my_reactions_at(token, &url, me_login)
 }
 
-/// `DELETE /repos/:owner/:repo/issues/:n/reactions/:rid` — removes
+/// `DELETE /repos/:owner/:repo/issues/:n/reactions/:rid`, removes
 /// the viewer's reaction from an issue or PR body.
 pub fn delete_issue_reaction(
     token: &str,
@@ -1750,7 +1750,7 @@ pub fn delete_issue_reaction(
 }
 
 /// `DELETE /repos/:owner/:repo/issues/comments/:cid/reactions/:rid`
-/// — removes a reaction from an issue or PR top-level comment.
+///, removes a reaction from an issue or PR top-level comment.
 pub fn delete_issue_comment_reaction(
     token: &str,
     coords: &RepoCoords,
@@ -1765,7 +1765,7 @@ pub fn delete_issue_comment_reaction(
 }
 
 /// `DELETE /repos/:owner/:repo/pulls/comments/:cid/reactions/:rid`
-/// — review-comment variant of the above (file/line inline threads).
+///, review-comment variant of the above (file/line inline threads).
 pub fn delete_review_comment_reaction(
     token: &str,
     coords: &RepoCoords,
@@ -1797,7 +1797,7 @@ fn delete_request(token: &str, url: &str) -> Result<(), String> {
 }
 
 /// Fetch one commit's full data (message body, author, files +
-/// patches). Used by the Commits-tab drill-down — gives us per-file
+/// patches). Used by the Commits-tab drill-down, gives us per-file
 /// diffs without going through the PR-files endpoint.
 pub fn fetch_commit_detail(
     token: &str,
@@ -1930,12 +1930,12 @@ struct CreatePrBody<'a> {
 }
 
 /// `POST /repos/{owner}/{repo}/pulls`. Returns the new PR's number
-/// on success — the caller can then open its detail view.
+/// on success, the caller can then open its detail view.
 /// Try to load the body of the first pull-request template found
 /// in this repo's checkout. GitHub looks for these paths in order,
 /// case-insensitive; we mirror the canonical case-sensitive ones
 /// since they cover ~all real-world repos. Returns `None` when no
-/// template is configured — the compose form then starts with an
+/// template is configured, the compose form then starts with an
 /// empty body.
 pub fn load_pr_template(repo_path: &std::path::Path) -> Option<String> {
     let candidates = [
@@ -2019,7 +2019,7 @@ pub fn set_pull_request_state(
 }
 
 /// Toggle a PR's draft flag. GitHub's REST API does not expose this
-/// — only the GraphQL `convertPullRequestToDraft` / `markPullRequest
+///, only the GraphQL `convertPullRequestToDraft` / `markPullRequest
 /// ReadyForReview` mutations work, so we POST to `/graphql` directly.
 pub fn set_pull_request_draft(token: &str, node_id: &str, draft: bool) -> Result<(), String> {
     let mutation = if draft {
@@ -2027,7 +2027,7 @@ pub fn set_pull_request_draft(token: &str, node_id: &str, draft: bool) -> Result
     } else {
         "markPullRequestReadyForReview"
     };
-    // GraphQL escaping — node ids are opaque base64-ish strings, no
+    // GraphQL escaping, node ids are opaque base64-ish strings, no
     // double quotes or backslashes, so plain interpolation is safe.
     let query = format!(
         r#"mutation {{ {mutation}(input: {{ pullRequestId: "{node_id}" }}) {{ pullRequest {{ id }} }} }}"#,
@@ -2054,7 +2054,7 @@ pub fn set_pull_request_draft(token: &str, node_id: &str, draft: bool) -> Result
         let body = resp.text().unwrap_or_default();
         return Err(humanize_github_error(status, &body));
     }
-    // GraphQL returns 200 even on logical errors — they show up in
+    // GraphQL returns 200 even on logical errors, they show up in
     // a top-level `errors` array. Parse and surface the first one.
     let body = resp.text().map_err(|e| format!("GraphQL read: {}", e))?;
     let parsed: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
@@ -2071,7 +2071,7 @@ pub fn set_pull_request_draft(token: &str, node_id: &str, draft: bool) -> Result
 }
 
 /// Fetch all labels available on a repo (the picker source). Paginated
-/// at 100 per page — for any sane repo size, one page is enough.
+/// at 100 per page, for any sane repo size, one page is enough.
 pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, String> {
     let client = http_client()?;
     let url = format!(
@@ -2150,7 +2150,7 @@ struct ReviewersBody<'a> {
 }
 
 /// Request one or more reviewers on a PR. Users already requested or
-/// who are the PR author cause a 422 — caller should filter beforehand.
+/// who are the PR author cause a 422, caller should filter beforehand.
 pub fn request_pull_request_reviewers(
     token: &str,
     coords: &RepoCoords,
@@ -2216,7 +2216,7 @@ fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
         .unwrap_or("")
         .to_string();
     // `errors` may be an array of bare strings *or* of `{message, code}`
-    // objects depending on the endpoint — handle both.
+    // objects depending on the endpoint, handle both.
     let first_error = parsed
         .get("errors")
         .and_then(|v| v.as_array())
@@ -2245,13 +2245,13 @@ fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
     if scan.contains("pull request is not mergeable")
         || scan.contains("pull request is in unstable state")
     {
-        return "PR is not mergeable — resolve conflicts or wait for checks".into();
+        return "PR is not mergeable, resolve conflicts or wait for checks".into();
     }
     if scan.contains("head branch was modified") {
-        return "Head branch changed since you started — refresh and retry".into();
+        return "Head branch changed since you started, refresh and retry".into();
     }
     if scan.contains("base branch was modified") {
-        return "Base branch changed since you started — refresh and retry".into();
+        return "Base branch changed since you started, refresh and retry".into();
     }
     if scan.contains("required status check") {
         return "Required status checks haven't passed yet".into();
@@ -2264,16 +2264,16 @@ fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
     }
     // Auth / rate / generic categories.
     if scan.contains("bad credentials") {
-        return "GitHub token rejected — sign in again".into();
+        return "GitHub token rejected, sign in again".into();
     }
     if scan.contains("api rate limit exceeded") || scan.contains("secondary rate limit") {
-        return "GitHub rate limit reached — try again later".into();
+        return "GitHub rate limit reached, try again later".into();
     }
     if scan.contains("must have admin rights")
         || scan.contains("must have push access")
         || scan.contains("resource not accessible by")
     {
-        return "Permission denied — your token lacks the required scope".into();
+        return "Permission denied, your token lacks the required scope".into();
     }
     // Content validation.
     if scan.contains("body can't be blank") || scan.contains("body is too short") {
@@ -2294,7 +2294,7 @@ fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
     match status.as_u16() {
         401 => format!("Authentication failed: {}", detail),
         403 => format!("Permission denied: {}", detail),
-        404 => "Not found — resource may have been deleted".into(),
+        404 => "Not found, resource may have been deleted".into(),
         409 => format!("Conflict: {}", detail),
         422 => format!("Invalid request: {}", detail),
         500..=599 => {

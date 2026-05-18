@@ -186,7 +186,7 @@ impl<'a> ListView<'a> {
                 // `e` from the commit list resumes a paused rebase
                 // (the chip `⏸ rebase paused (e:resume)` advertises
                 // this). Outside the rebase-in-progress case the event
-                // has no meaning here — falls through to the `_` arm
+                // has no meaning here, falls through to the `_` arm
                 // for a silent no-op. Empty `base_hash` routes through
                 // the resume short-circuit in `open_dialog` /
                 // `OpenInteractiveRebase`.
@@ -207,7 +207,7 @@ impl<'a> ListView<'a> {
         if let SearchState::Applied { .. } = self.as_list_state().search_state() {
             match event {
                 // Cycling through matches uses Left / Right arrows
-                // (or h / l in the global keymap) — replaces the old
+                // (or h / l in the global keymap), replaces the old
                 // n / Shift+N vim-style bindings, which now leave the
                 // commit-list search alone and stay free for future
                 // global use.
@@ -244,7 +244,7 @@ impl<'a> ListView<'a> {
                 // we can't add a separate UserEvent::RegexToggle bound to `x`
                 // without colliding with the existing `x → Discard` binding
                 // used by the Uncommitted view. Instead we intercept Discard
-                // only inside the SearchState::Applied block — outside this
+                // only inside the SearchState::Applied block, outside this
                 // block the list view ignores Discard, preserving the
                 // Uncommitted view's discard semantics.
                 UserEvent::Discard => {
@@ -356,7 +356,7 @@ impl<'a> ListView<'a> {
 
     fn update_matched_message(&self) {
         if let Some((msg, matched)) = self.as_list_state().matched_query_string() {
-            // Sticky variant — stays visible the entire time search is
+            // Sticky variant, stays visible the entire time search is
             // applied, not just for the 2 s notification window.
             self.tx.send(AppEvent::SetSearchStatus {
                 msg,
@@ -397,12 +397,25 @@ impl<'a> ListView<'a> {
         self.tx.send(AppEvent::CopyToClipboard { name, value });
     }
 
+    /// Replace the view's `Rc<AppContext>` clone with a fresh one.
+    /// Necessary after `App::close_config` calls `Rc::make_mut` on the
+    /// app's ctx: that COWs the inner data because the view also holds
+    /// a clone, leaving the view pointing at the pre-change ctx. Every
+    /// in-place setting that relies on the view re-reading ctx fields
+    /// (date_format, github_avatars / avatar_manager, conflict_view,
+    /// rebase_view, diff_mode, …) goes through here. The widget
+    /// (CommitList) is built per frame from `self.ctx.clone()` so the
+    /// next render picks up the new ctx automatically.
+    pub fn replace_ctx(&mut self, ctx: Rc<AppContext>) {
+        self.ctx = ctx;
+    }
+
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
         // Re-derive the palette from the freshly-set theme rather than
         // reading `ctx.graph_color_set`. The shared `AppContext` is
         // held via `Rc`: when `apply_live_config_theme` mutates
         // `app.ctx` via `Rc::make_mut`, the runtime forks the inner
-        // value because the view also holds an `Rc` clone — so the
+        // value because the view also holds an `Rc` clone, so the
         // view's local `ctx.graph_color_set` keeps pointing at the
         // PREVIOUS palette and the rebake uses stale bg + branch
         // colours. Computing from the new `color_theme` here sidesteps
@@ -444,7 +457,7 @@ impl<'a> ListView<'a> {
     /// Resolve a `Option<GraphWidthType>` (config-level setting, with
     /// `Auto` deciding from terminal width vs the graph's max column)
     /// to a concrete `CellWidthType` using the same logic as startup.
-    /// Returns `None` if the terminal size query fails — caller should
+    /// Returns `None` if the terminal size query fails, caller should
     /// then skip the update gracefully.
     pub fn resolve_cell_width(
         &self,
@@ -499,7 +512,7 @@ impl<'a> ListView<'a> {
     /// Uncommitted Changes / stash rows are silently rejected since they have
     /// no real ancestry to diff against.
     fn handle_mark_compare(&mut self) {
-        // Reject uncommitted up front — toggle_compare_mark already does this
+        // Reject uncommitted up front, toggle_compare_mark already does this
         // for case (1), but we also need to short-circuit case (3) where the
         // cursor lands on uncommitted while a mark is active.
         if self.as_list_state().is_uncommitted_selected() {
@@ -629,7 +642,7 @@ impl<'a> ListView<'a> {
             || list_state.hovered_tag != prev_tag;
 
         // Mouse-hover changed the selected commit while search is
-        // applied — refresh the sticky "Match X of Y" footer so it
+        // applied, refresh the sticky "Match X of Y" footer so it
         // tracks the cursor instead of trailing the last cycle.
         if prev_selected != new_selected {
             self.maybe_sync_search_status();

@@ -19,11 +19,11 @@
 <p align="center"><em>Say <strong>oui</strong> to the smoothest git terminal youser experience.</em></p>
 
 <p align="center">
-  <!-- ▶ demo GIF — full app walkthrough -->
+  <!-- ▶ demo GIF, full app walkthrough -->
   <img src="https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/demo.gif" alt="gitoui demo" width="900">
 </p>
 
-**gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie) — a beautifully-rendered `git log --graph` viewer — and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.
+**gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie), a beautifully-rendered `git log --graph` viewer, and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.
 
 ## What's inside
 
@@ -33,7 +33,7 @@ The commit graph stays serie's: pre-rendered SVGs sent inline through your termi
 - `b` to blame, `Shift+H` to follow file history across renames.
 - Mark two commits with `Space` for a cumulative diff between them.
 - Visual interactive rebase: grab + drop rows, reword in place, pause + resume modes.
-- 3-way conflict editor — pick OURS / THEIRS / BOTH per hunk, no need to drop to vimdiff.
+- 3-way conflict editor, pick OURS / THEIRS / BOTH per hunk, no need to drop to vimdiff.
 - Full GitHub workflow: PR + Issue threads, reviews, reactions, labels, assignees, mention autocomplete, comment CRUD.
 - Inline GitHub avatars rendered through the same image protocols as the graph.
 - Two-layer keybinds: global `[keybind]` UserEvents plus per-view `[keybind.scope.<path>]` overrides.
@@ -68,7 +68,7 @@ Press `?` for the keymap, `q` to quit. Full docs at [nayji7.github.io/gitoui](ht
 
 ## Contributing
 
-Open source, open arms — PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup and workflow.
+Open source, open arms, PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup and workflow.
 
 ## License
 

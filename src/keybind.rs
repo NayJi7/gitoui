@@ -11,7 +11,7 @@ const DEFAULT_KEY_BIND: &str = include_str!("../assets/default-keybind.toml");
 /// Per-scope key map. Stores `KeyEvent → action_name` where the action
 /// name is whatever string the view defined for that scope (e.g.
 /// "approve", "merge", "edit_own"). Views resolve back to a typed enum
-/// via their own `from_action_name` helper — that keeps action sets
+/// via their own `from_action_name` helper, that keeps action sets
 /// per-view (so two scopes can both define `reload` without collision)
 /// AND lets a typo in the TOML fail at config-load time instead of
 /// silently no-op'ing at runtime.
@@ -33,7 +33,7 @@ impl DerefMut for ScopeBindings {
 
 /// Full keybind set: the existing global map plus per-scope overrides.
 /// Scope paths are dotted strings like "pr", "pr.list", "rebase.resume"
-/// — the resolver walks parent scopes when a leaf doesn't bind the
+///, the resolver walks parent scopes when a leaf doesn't bind the
 /// key. Deref'ing yields the global `KeyBind` so existing call sites
 /// (`ctx.keybind.get(&key)`, `ctx.keybind.keys_for_event(...)`, etc.)
 /// keep working unchanged after AppContext switches the field type.
@@ -64,13 +64,13 @@ impl KeyBinds {
     /// Build the default bindings from the embedded TOML, then layer
     /// any user-provided overrides on top.
     ///
-    /// Merge semantics are REPLACING per event/action — the same rule
+    /// Merge semantics are REPLACING per event/action, the same rule
     /// for both the global section and every scope. When the user
     /// specifies any keys for `event` (global) or `action` (scoped),
     /// every default key that pointed to that event/action is dropped
     /// FIRST, then the user's keys are inserted. So:
     ///
-    /// * `navigate_up = ["x"]` rebinds NavigateUp to `x` ONLY — the
+    /// * `navigate_up = ["x"]` rebinds NavigateUp to `x` ONLY, the
     ///   default `k` and `Up` are gone. To keep them too, write
     ///   `navigate_up = ["k", "up", "x"]` explicitly.
     /// * `approve = ["ctrl-a"]` rebinds approve in `[scope.pr]` to
@@ -104,7 +104,7 @@ impl KeyBinds {
     /// Look up a key in `scope` and its ancestor scopes, returning the
     /// deepest match. Walk order for `["pr", "list"]` is `pr.list` →
     /// `pr` → no-match. The global UserEvent map is NOT consulted here
-    /// — views that hit `None` fall through to their existing global
+    ///, views that hit `None` fall through to their existing global
     /// `UserEvent` dispatch.
     pub fn resolve_scoped(&self, scope: &[&str], key: KeyEvent) -> Option<&str> {
         for depth in (0..=scope.len()).rev() {
@@ -124,7 +124,7 @@ impl KeyBinds {
     /// Footer/help-friendly single-key string for a scoped action.
     /// Picks the shortest non-empty binding so footers stay compact;
     /// ties go to the lexicographically-first name (`a` before `Ctrl+A`).
-    /// Returns an empty string when the action is unbound — callers
+    /// Returns an empty string when the action is unbound, callers
     /// can either drop the hint or render the bare action name.
     pub fn primary_scoped_key(&self, scope: &[&str], action: &str) -> String {
         let mut keys = self.keys_for_scoped_action(scope, action);
@@ -228,7 +228,7 @@ impl<'de> Deserialize<'de> for KeyBinds {
         //   • top-level `event_name = { ... nested ... }` → scope sub-tree
         // Scope sub-trees can themselves nest one level deeper (e.g.
         // `[pr.conversation]` inside `[pr]`), which TOML flattens into
-        // a separate `pr.conversation` table at this level — so a
+        // a separate `pr.conversation` table at this level, so a
         // single walk over the keys is enough.
         let table = toml::value::Table::deserialize(deserializer)?;
         let mut bundle = KeyBinds::default();
@@ -241,7 +241,7 @@ impl<'de> Deserialize<'de> for KeyBinds {
         // being both a value (`issues = ["shift-i"]`) and a sub-table
         // (`[issues]`) at the same level. Putting all scopes under
         // `[scope]` shields scope names from ever colliding with a
-        // global event name — current or future.
+        // global event name, current or future.
         let mut scopes_input: FxHashMap<String, toml::value::Table> = FxHashMap::default();
         let mut globals_input: FxHashMap<String, Vec<String>> = FxHashMap::default();
         for (k, v) in table {
@@ -283,7 +283,7 @@ impl<'de> Deserialize<'de> for KeyBinds {
 
         // Build each scope. Per-scope conflict detection (two events
         // bound to the same key WITHIN one scope → error). No cross-
-        // scope conflict — that's the whole point of the design.
+        // scope conflict, that's the whole point of the design.
         for (path, scope_table) in scopes_input {
             let mut sb = ScopeBindings::default();
             for (action_name, keys_value) in scope_table {
@@ -298,7 +298,7 @@ impl<'de> Deserialize<'de> for KeyBinds {
                     })?;
                     if let Some(prev) = sb.insert(key_event, action_name.clone()) {
                         return Err(serde::de::Error::custom(format!(
-                            "keybind.{path}: key {} is bound to both `{}` and `{}` — pick one",
+                            "keybind.{path}: key {} is bound to both `{}` and `{}`, pick one",
                             key_event_to_string(key_event),
                             action_name,
                             prev,
@@ -359,10 +359,10 @@ impl<'de> Deserialize<'de> for KeyBind {
                 if let Some(conflict_user_event) = key_map.insert(key_event, user_event) {
                     // Render both events + the conflicting key as
                     // user-facing strings instead of `KeyEvent { ... }`
-                    // Debug noise — the diagnostic prints this
+                    // Debug noise, the diagnostic prints this
                     // message verbatim under the brand splash.
                     let msg = format!(
-                        "key {:?} is bound to both `{:?}` and `{:?}` — only one event per key",
+                        "key {:?} is bound to both `{:?}` and `{:?}`, only one event per key",
                         key_event_to_string(key_event),
                         user_event,
                         conflict_user_event,
@@ -379,7 +379,7 @@ impl<'de> Deserialize<'de> for KeyBind {
 fn parse_key_event(raw: &str) -> Result<KeyEvent, String> {
     let raw_lower = raw.to_ascii_lowercase().replace(' ', "");
     let (remaining, modifiers) = extract_modifiers(&raw_lower);
-    // Cap at one user-supplied modifier — the app deliberately speaks
+    // Cap at one user-supplied modifier, the app deliberately speaks
     // 2-key combos only (ctrl-a, alt-x, shift-r). Chains like
     // `ctrl-shift-a` aren't allowed in user configs, both to keep the
     // display strings short (footers show `Ctrl+a`, not `Ctrl+Shift+A`)
@@ -387,10 +387,10 @@ fn parse_key_event(raw: &str) -> Result<KeyEvent, String> {
     // reliably anyway.
     if modifiers.bits().count_ones() > 1 {
         // The caller (`Deserialize`) already prefixes the raw string,
-        // so we only emit the explanation here — avoids the awkward
+        // so we only emit the explanation here, avoids the awkward
         // `"ctrl-shift-a": "ctrl-shift-a": only one modifier…` echo.
         return Err(
-            "only one modifier prefix is allowed — use ctrl-X, alt-X or shift-X, \
+            "only one modifier prefix is allowed, use ctrl-X, alt-X or shift-X, \
              not chained combos"
                 .to_string(),
         );
@@ -648,7 +648,7 @@ mod tests {
 
         // Chained modifiers can still be CONSTRUCTED via the
         // crossterm-side runtime (BackTab adds SHIFT internally on top
-        // of a Ctrl modifier, for instance) — the formatter must
+        // of a Ctrl modifier, for instance), the formatter must
         // therefore still render them sanely, even though the TOML
         // parser refuses to accept them as user input.
         let key_event = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL | KeyModifiers::SHIFT);
@@ -745,7 +745,7 @@ mod tests {
         let c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty());
         let z = KeyEvent::new(KeyCode::Char('z'), KeyModifiers::empty());
 
-        // `a` exists in `pr` only — looking up via `pr.conversation`
+        // `a` exists in `pr` only, looking up via `pr.conversation`
         // must walk up to `pr` and find it.
         assert_eq!(
             kb.resolve_scoped(&["pr", "conversation"], a),
@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     fn keybinds_cross_scope_same_key_is_ok() {
-        // `a` bound globally AND scoped should NOT error — that's
+        // `a` bound globally AND scoped should NOT error, that's
         // the whole point of scoping.
         let toml = r#"
             stage = ["a"]
@@ -816,7 +816,7 @@ mod tests {
     fn user_override_replaces_action_keys_in_scope() {
         // User remaps `approve` from `a` to `ctrl-a`. Because scope
         // overrides are REPLACING (not additive), the default `a →
-        // approve` is dropped — only `Ctrl+A` triggers approve now.
+        // approve` is dropped, only `Ctrl+A` triggers approve now.
         let user_toml = r#"
             [scope.pr]
             approve = ["ctrl-a"]
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn user_override_keeps_multiple_user_keys() {
-        // User explicitly lists 2 keys — both work, the default is gone.
+        // User explicitly lists 2 keys, both work, the default is gone.
         let user_toml = r#"
             [scope.pr]
             approve = ["ctrl-a", "shift-a"]

@@ -258,7 +258,7 @@ impl AvatarManager {
     // The email/commit-hash path roundtrips through GitHub's commit
     // endpoint to resolve an avatar URL. For PRs and Issues we
     // already know the GitHub login, so we can short-circuit to
-    // `https://github.com/{login}.png` — a single redirect to the
+    // `https://github.com/{login}.png`, a single redirect to the
     // canonical avatar CDN, no auth needed, no rate limit relevant.
     //
     // All three helpers (`prefetch_login`, `ensure_uploaded_login`,
@@ -269,7 +269,7 @@ impl AvatarManager {
     // hash collision is impossible) while reusing every bit of the
     // existing prepared-image / upload machinery.
 
-    /// Cache key under which a login lives — guaranteed disjoint
+    /// Cache key under which a login lives, guaranteed disjoint
     /// from any real email since `@login/` cannot appear in a
     /// well-formed email local-part.
     fn login_storage_key(login: &str) -> String {
@@ -389,13 +389,13 @@ impl AvatarManager {
         }
         let email_key = email.trim().to_lowercase();
 
-        // Single lock for all state checks — avoids double-locking
+        // Single lock for all state checks, avoids double-locking
         {
             let mut state = self.fetch_state.lock().unwrap();
             if state.missing.contains(&email_key) {
                 return;
             }
-            // Don't add to in_flight if we're already at the concurrency limit —
+            // Don't add to in_flight if we're already at the concurrency limit
             // the next prefetch call on the following frame will retry.
             if self.active_fetches.load(Ordering::Relaxed) >= MAX_CONCURRENT_FETCHES {
                 return;
@@ -408,7 +408,7 @@ impl AvatarManager {
         let path = self.email_to_path(email);
         if let Ok(metadata) = path.metadata() {
             if metadata.len() > 0 {
-                // Already on disk — remove from in_flight without fetch
+                // Already on disk, remove from in_flight without fetch
                 self.fetch_state
                     .lock()
                     .unwrap()
@@ -545,7 +545,7 @@ fn fallback_avatar_png(seed: &str) -> Vec<u8> {
         255,
     ];
     let mut avatar = image::RgbaImage::new(128, 128);
-    let radius_sq = 64.0f32 * 64.0f32; // squared — no sqrt needed
+    let radius_sq = 64.0f32 * 64.0f32; // squared, no sqrt needed
     let center = 63.5f32;
     for (x, y, pixel) in avatar.enumerate_pixels_mut() {
         let dx = x as f32 - center;
@@ -631,7 +631,7 @@ fn rounded_avatar_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let y = (height - side) / 2;
     let mut avatar = image
         .crop_imm(x, y, side, side)
-        .resize_exact(128, 128, FilterType::Triangle) // bilinear — much faster than Lanczos3
+        .resize_exact(128, 128, FilterType::Triangle) // bilinear, much faster than Lanczos3
         .to_rgba8();
     let radius_sq = 64.0f32 * 64.0f32; // compare squared to avoid sqrt
     let center = 63.5f32;
@@ -663,7 +663,7 @@ fn rounded_avatar_on_background(source: &image::DynamicImage, bg: [u8; 4]) -> Op
     let y = (height - side) / 2;
     let mut image = source
         .crop_imm(x, y, side, side)
-        .resize_exact(128, 128, FilterType::Triangle) // bilinear — much faster than Lanczos3
+        .resize_exact(128, 128, FilterType::Triangle) // bilinear, much faster than Lanczos3
         .to_rgba8();
     let radius_sq = 64.0f32 * 64.0f32; // compare squared to avoid sqrt
     let center = 63.5f32;

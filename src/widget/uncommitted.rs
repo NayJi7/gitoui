@@ -380,7 +380,7 @@ impl<'a> UncommittedWidget<'a> {
             } else {
                 "conflicts"
             };
-            let banner_text = format!(" ⚠  {} {} — press to resolve", conflict_count, noun);
+            let banner_text = format!(" ⚠  {} {}, press to resolve", conflict_count, noun);
             let banner_line = Line::from(Span::styled(
                 banner_text,
                 Style::default()

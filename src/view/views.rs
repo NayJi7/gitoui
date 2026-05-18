@@ -610,7 +610,7 @@ impl<'a> View<'a> {
         match self {
             View::Config(view) => view.is_editing_text(),
             View::Dialog(view) => view.is_input_focused(),
-            // DiffView's own search has its own input mode — must be flagged here
+            // DiffView's own search has its own input mode, must be flagged here
             // so that keys with no UserEvent mapping (Backspace, Delete) still flow
             // to the view instead of being dropped by the app key router.
             View::Diff(view) => view.is_search_input_active(),

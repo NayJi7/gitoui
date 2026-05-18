@@ -1,7 +1,7 @@
 use resvg::{tiny_skia, usvg};
 
 static LOGO_SVG: &[u8] = include_bytes!("../assets/brand/logo-nobg.svg");
-// Two wordmark variants — the `oui` letters are off-white in the default
+// Two wordmark variants, the `oui` letters are off-white in the default
 // variant (designed for dark UIs) and near-black in the `-color` variant
 // (designed for light UIs). The runtime swap happens in
 // `render_wordmark_png` based on the theme bg's perceived luminance.
@@ -12,22 +12,22 @@ static WORDMARK_COLOR_SVG: &[u8] = include_bytes!("../assets/brand/wordmark-nobg
 // SVG viewBox: 0 0 809 1008.  The y=601 on cells 12/15/16 is the 1-px fix that
 // eliminates the seam visible at fade-out in the animated version.
 const CELLS: [(&str, &str); 16] = [
-    ("M604 0H804V199H604V0Z", "#F05133"), //  1 R1C4 — spiral start (top-right)
+    ("M604 0H804V199H604V0Z", "#F05133"), //  1 R1C4, spiral start (top-right)
     ("M404 0H604V199H404V0Z", "#F05133"), //  2 R1C3
     ("M205 0H405V199H205V0Z", "#F05133"), //  3 R1C2
-    ("M5 0H205V199H5V0Z", "#F05133"),     //  4 R1C1 — top-left
+    ("M5 0H205V199H5V0Z", "#F05133"),     //  4 R1C1, top-left
     ("M4 199H204V404H4V199Z", "#F05133"), //  5 R2C1
     ("M4 404H204V603H4V404Z", "#F05133"), //  6 R3C1
     ("M4 603H204V799H4V603Z", "#F05133"), //  7 R4C1
-    ("M5 799H204V998H5V799Z", "#F05133"), //  8 R5C1 — bottom-left
+    ("M5 799H204V998H5V799Z", "#F05133"), //  8 R5C1, bottom-left
     ("M204 799H404V998H204V799Z", "#F05133"), //  9 R5C2
     ("M404 799H604V998H404V799Z", "#F05133"), // 10 R5C3
-    ("M604 799H805V998H604V799Z", "#F05133"), // 11 R5C4 — bottom-right
+    ("M604 799H805V998H604V799Z", "#F05133"), // 11 R5C4, bottom-right
     ("M604 601H805V799H604V601Z", "#F05133"), // 12 R4C4 (y=601 seam fix)
     ("M604 403H804V601H604V403Z", "#F05133"), // 13 R3C4
-    ("M404 403H604V601H404V403Z", "#F05133"), // 14 R3C3 — tongue
-    ("M404 601H604V799H404V601Z", "#8B2A12"), // 15 R4C3 — shadow
-    ("M204 601H404V799H204V601Z", "#8B2A12"), // 16 R4C2 — shadow
+    ("M404 403H604V601H404V403Z", "#F05133"), // 14 R3C3, tongue
+    ("M404 601H604V799H404V601Z", "#8B2A12"), // 15 R4C3, shadow
+    ("M204 601H404V799H204V601Z", "#8B2A12"), // 16 R4C2, shadow
 ];
 
 /// Width in terminal columns of the spinner image.
@@ -84,7 +84,7 @@ pub const LOGO_CELL_WIDTH: usize = 2;
 
 /// "gitoui" wordmark: 1044×500 (≈2.09:1 landscape). At 4 cols × 1 row (2:1 display ratio),
 /// the scale is width-limited (SVG slightly wider than canvas), so the text fills the full
-/// row width and is ~96% of row height — about 0.7 display-px shorter than the G logo.
+/// row width and is ~96% of row height, about 0.7 display-px shorter than the G logo.
 pub const WORDMARK_CELL_WIDTH: usize = 4;
 
 /// Gap between the two images, in terminal columns.
@@ -109,7 +109,7 @@ fn render_svg_to_png_bg(
 /// shows up as a dark cloud around the logo on light themes (Catppuccin
 /// Latte, Solarized Light, …). At the 8×16-pixel cell density we
 /// rasterize to, the shadow adds nothing legible anyway. The matching
-/// `<filter>` definitions stay in `<defs>` — unused, free to ignore.
+/// `<filter>` definitions stay in `<defs>`, unused, free to ignore.
 fn strip_filter_attr(svg: &[u8]) -> Vec<u8> {
     let s = match std::str::from_utf8(svg) {
         Ok(v) => v,
@@ -152,7 +152,7 @@ fn render_svg_to_png_aligned(
     let mut pixmap = tiny_skia::Pixmap::new(px_w, px_h)?;
     // Bake an opaque background into the pixmap when one is provided.
     // The Kitty image protocol composites a transparent PNG over the
-    // terminal's window bg, NOT the cell SGR bg — so leaving the PNG
+    // terminal's window bg, NOT the cell SGR bg, so leaving the PNG
     // transparent makes the logo render over the terminal's default
     // (usually dark) bg even when the active theme is light. Pre-
     // filling the pixmap with `theme.bg` produces an opaque PNG that
@@ -166,7 +166,7 @@ fn render_svg_to_png_aligned(
 
 /// Render the G logomark.
 /// PNG is square (px × px) to match the 2-col × 1-row cell aspect ratio.
-/// The SVG is portrait (0.8:1), so it's height-limited in the square canvas — that
+/// The SVG is portrait (0.8:1), so it's height-limited in the square canvas, that
 /// leaves ~1.58 display-px of horizontal slack. We right-align the rendered G so the
 /// slack sits on the LEFT of the image, putting the G flush against the wordmark.
 pub fn render_logo_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
@@ -186,7 +186,7 @@ pub fn render_wordmark_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
                          // the active theme bg. `WORDMARK_SVG` has off-white `oui` for dark
                          // themes; `WORDMARK_COLOR_SVG` has near-black `oui` for light
                          // themes. Detection reuses `themes::is_dark_color`, the same
-                         // routine that auto-picks the syntect theme — so custom user
+                         // routine that auto-picks the syntect theme, so custom user
                          // themes work out of the box.
     let svg: &[u8] = match bg {
         Some((r, g, b)) if !crate::themes::is_dark_color(ratatui::style::Color::Rgb(r, g, b)) => {

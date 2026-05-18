@@ -1,6 +1,6 @@
 ---
 title: FAQ
-description: Common questions about gitoui — pronunciation, terminal compatibility, daily use.
+description: Common questions about gitoui, pronunciation, terminal compatibility, daily use.
 ---
 
 <div class="faq-list">
@@ -12,7 +12,7 @@ description: Common questions about gitoui — pronunciation, terminal compatibi
 
 </summary>
 
-The honest answer: the obvious name — [`gitui`](https://github.com/extrawurst/gitui) — was already taken. And since I'm French, and we obviously love baguettes, I went with the next best thing: stitch a `oui` to the end of `git`. Voilà, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>. A small bilingual joke that doubles as a tagline — the project says **yes** to a fuller TUI workflow.
+The honest answer: the obvious name, [`gitui`](https://github.com/extrawurst/gitui), was already taken. And since I'm French, and we obviously love baguettes, I went with the next best thing: stitch a `oui` to the end of `git`. Voilà, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>. A small bilingual joke that doubles as a tagline, the project says **yes** to a fuller TUI workflow.
 
 </details>
 
@@ -23,7 +23,7 @@ The honest answer: the obvious name — [`gitui`](https://github.com/extrawurst/
 
 </summary>
 
-[`/ʒi.tu.i/`](https://en.wikipedia.org/wiki/Help:IPA/French) — like the French word *<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>* would be if you stitched "git" and "oui" together. The "oui" half is the French word for "yes" — the project says yes to a fuller TUI workflow.
+[`/ʒi.tu.i/`](https://en.wikipedia.org/wiki/Help:IPA/French), like the French word *<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span>* would be if you stitched "git" and "oui" together. The "oui" half is the French word for "yes", the project says yes to a fuller TUI workflow.
 
 If IPA doesn't help: roughly **zhee-too-ee**.
 
@@ -36,7 +36,7 @@ If IPA doesn't help: roughly **zhee-too-ee**.
 
 </summary>
 
-Different focus. lazygit and gitui are full git operations toolkits — every command surface is interactive. <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> starts from "I want to read history and review changes" and adds the operations that fit naturally on top of that: stage, commit, rebase, resolve conflicts, review PRs.
+Different focus. lazygit and gitui are full git operations toolkits, every command surface is interactive. <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> starts from "I want to read history and review changes" and adds the operations that fit naturally on top of that: stage, commit, rebase, resolve conflicts, review PRs.
 
 Use <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> if your daily flow is **read-heavy** with frequent reviews + some editing. Use lazygit/gitui if you want to drive every git command through the TUI.
 
@@ -49,9 +49,9 @@ Use <span class="gitoui-wordmark"><span class="git-part">git</span><span class="
 
 </summary>
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> pushes the Kitty keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES` flag at startup — that makes `Alt+letter` arrive as a single KeyEvent on supporting terminals (Kitty, Ghostty, WezTerm, foot, Konsole 22.04+, …). Older terminals treat Alt as a meta-prefix and send `Esc` followed by the letter; usually crossterm combines them, but if the bytes drift apart you end up firing `Cancel` (Esc) before the letter arrives.
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> pushes the Kitty keyboard protocol's `DISAMBIGUATE_ESCAPE_CODES` flag at startup, that makes `Alt+letter` arrive as a single KeyEvent on supporting terminals (Kitty, Ghostty, WezTerm, foot, Konsole 22.04+, …). Older terminals treat Alt as a meta-prefix and send `Esc` followed by the letter; usually crossterm combines them, but if the bytes drift apart you end up firing `Cancel` (Esc) before the letter arrives.
 
-If your terminal doesn't speak the protocol, switch to `Ctrl+...` for your custom bindings — see [Custom keybindings](/keybindings/custom/).
+If your terminal doesn't speak the protocol, switch to `Ctrl+...` for your custom bindings, see [Custom keybindings](/keybindings/custom/).
 
 </details>
 
@@ -64,9 +64,9 @@ If your terminal doesn't speak the protocol, switch to `Ctrl+...` for your custo
 
 Help is computed from your live config at render time. If the displayed key is wrong:
 
-1. Check your config validated — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> prints a styled diagnostic at startup if there's an error.
+1. Check your config validated, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> prints a styled diagnostic at startup if there's an error.
 2. Make sure you're on the right config file (`GITOUI_CONFIG_FILE` env variable might be overriding the default location).
-3. Some glyphs in the Help page are intentionally symbolic — `Esc`, `↑↓`, `Enter`, `Tab`, `Space`, `#`. These don't follow rebinds (only the action's *behaviour* moves, not the label).
+3. Some glyphs in the Help page are intentionally symbolic, `Esc`, `↑↓`, `Enter`, `Tab`, `Space`, `#`. These don't follow rebinds (only the action's *behaviour* moves, not the label).
 
 </details>
 
@@ -106,7 +106,7 @@ Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder and cac
 
 </summary>
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> pops the Kitty keyboard protocol on exit, but **inline image placements** (Kitty / iTerm2) sometimes linger if you exit via a crash or `SIGKILL`. Press `Ctrl+L` in your shell to clear the screen — that flushes the stale placements.
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> pops the Kitty keyboard protocol on exit, but **inline image placements** (Kitty / iTerm2) sometimes linger if you exit via a crash or `SIGKILL`. Press `Ctrl+L` in your shell to clear the screen, that flushes the stale placements.
 
 </details>
 
@@ -119,8 +119,8 @@ Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder and cac
 
 The only network calls are:
 
-- **GitHub avatars** — fetched from `avatars.githubusercontent.com` and cached locally. Disable with `core.option.github_avatars = false`.
-- **GitHub API** — only when you actively browse PRs / Issues. Uses your OAuth token; respects the GitHub rate limit (5000 req/h per user).
+- **GitHub avatars**, fetched from `avatars.githubusercontent.com` and cached locally. Disable with `core.option.github_avatars = false`.
+- **GitHub API**, only when you actively browse PRs / Issues. Uses your OAuth token; respects the GitHub rate limit (5000 req/h per user).
 
 No telemetry, no crash reporting, no auto-update phone-home.
 
@@ -133,7 +133,7 @@ No telemetry, no crash reporting, no auto-update phone-home.
 
 </summary>
 
-It's daily-driven on the <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> repo itself and on a few sandboxes. Pre-v1.0 means the config schema and some keybinds may still shift — your `.toml` config might need touches when you upgrade. The on-disk git operations are all plain `git` CLI calls, no libgit2, so worst-case <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> never corrupts state; it just produces an error you'd see from `git` directly.
+It's daily-driven on the <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> repo itself and on a few sandboxes. Pre-v1.0 means the config schema and some keybinds may still shift, your `.toml` config might need touches when you upgrade. The on-disk git operations are all plain `git` CLI calls, no libgit2, so worst-case <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> never corrupts state; it just produces an error you'd see from `git` directly.
 
 </details>
 

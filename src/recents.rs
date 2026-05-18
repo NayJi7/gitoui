@@ -3,7 +3,7 @@
 //! under the user's config dir; the most recent sits at index 0.
 //!
 //! File location: `$XDG_CONFIG_HOME/gitoui/recents.json` (defaults to
-//! `~/.config/gitoui/recents.json`). The file is written best-effort —
+//! `~/.config/gitoui/recents.json`). The file is written best-effort
 //! failures are logged to stderr and never propagate, because losing a
 //! recents entry shouldn't disrupt the user's session.
 
@@ -73,7 +73,7 @@ fn save_at(path: &Path, entries: &[PathBuf]) {
 
 /// Move `path` to the front of `current`, dedup, cap at `MAX_RECENTS`, and
 /// return the updated list. The file write is off-loaded to a background
-/// thread — the returned `Vec` is immediately authoritative and the on-disk
+/// thread, the returned `Vec` is immediately authoritative and the on-disk
 /// copy catches up within milliseconds.
 ///
 /// Callers pass their in-memory list so we avoid a redundant `load()` call.
@@ -87,8 +87,8 @@ pub fn push(path: &Path, current: &[PathBuf]) -> Vec<PathBuf> {
     recents.truncate(MAX_RECENTS);
     let to_save = recents.clone();
     // Capture the destination path eagerly so a background save that
-    // wakes up after the env (XDG_CONFIG_HOME) has shifted — common in
-    // the parallel test suite — still writes to the file the caller
+    // wakes up after the env (XDG_CONFIG_HOME) has shifted, common in
+    // the parallel test suite, still writes to the file the caller
     // expects.
     let dest = recents_file();
     std::thread::spawn(move || {
@@ -101,7 +101,7 @@ pub fn push(path: &Path, current: &[PathBuf]) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    //! Baseline for the recents store — pinned ahead of the upcoming
+    //! Baseline for the recents store, pinned ahead of the upcoming
     //! "async write + in-memory cache" optimisation. Each test installs a
     //! private XDG_CONFIG_HOME pointing at a tempdir so the suite can run
     //! in parallel without stomping on the real user file.

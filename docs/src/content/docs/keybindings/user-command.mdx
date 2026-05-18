@@ -5,7 +5,7 @@ description: Bind your own shell commands to in-app shortcuts.
 
 import { Aside } from "@astrojs/starlight/components";
 
-Custom shell commands wired to a keybind — for project-specific actions
+Custom shell commands wired to a keybind, for project-specific actions
 (run a test suite, open the current commit in `tig` / `lazygit`, ping a
 deploy script, …). The command and the key are configured separately:
 the command lives under `[core.user_command]`, the key under `[keybind]`.
@@ -26,18 +26,18 @@ tab_width = 4
 |------------|---------------------------------------|----------------------------------------------------------------------------------------|
 | `name`     | string                                | Label shown in the user-command output view.                                           |
 | `commands` | array of strings                      | Program + arguments. First element is the binary, rest are args.                       |
-| `type`     | `inline` (default) / `silent` / `suspend` | How the command runs — see below.                                                 |
+| `type`     | `inline` (default) / `silent` / `suspend` | How the command runs, see below.                                                 |
 | `refresh`  | bool (default `false`)                | After execution, refresh the commit list. **Incompatible with `inline`** (validated at config-load). |
 | `tab_width`| int (sibling of `commands_N`)         | Display width for `\t` characters in command output. Applies to all commands.          |
 
 ### Execution types
 
-- **`inline`** — output renders inside a gitoui pane. Gitoui stays alive,
+- **`inline`**, output renders inside a gitoui pane. Gitoui stays alive,
   you can scroll the output. Best for `git diff`, `git log`,
   static-output inspection.
-- **`silent`** — output discarded. Best for fire-and-forget commands
+- **`silent`**, output discarded. Best for fire-and-forget commands
   (`notify-send`, background `&`, …).
-- **`suspend`** — gitoui drops alt-screen + raw mode, the command takes
+- **`suspend`**, gitoui drops alt-screen + raw mode, the command takes
   over the terminal, gitoui resumes on exit. Best for interactive
   editors (`vim`, `nano`) and full-screen TUIs (`tig`, `lazygit`).
 
@@ -60,14 +60,14 @@ opens the user-command view → runs `commands_N`.
 <Aside type="tip" title="Pick stable keys">
 **F-keys** (`f1` … `f12`), **ctrl+letter** or **alt+letter** behave the
 same across terminals and keyboard layouts. **Shift+digit** (e.g.
-`shift-1`) is fragile — QWERTY US sends `!` instead of `shift+1`, while
+`shift-1`) is fragile, QWERTY US sends `!` instead of `shift+1`, while
 AZERTY FR sends `shift+1` literally. Stick to F-keys / ctrl-/ alt- for
 predictable bindings.
 </Aside>
 
 <Aside type="caution" title="Overrides drop the default">
 Binding `user_command_1 = ["t"]` in `[keybind]` **replaces** the default
-`add_tag = ["t"]` — `t` no longer adds a tag. Mirror it to keep both:
+`add_tag = ["t"]`, `t` no longer adds a tag. Mirror it to keep both:
 `add_tag = ["t", "ctrl-t"]` (or pick a free key in the first place).
 </Aside>
 
@@ -89,7 +89,7 @@ with values from the focused commit / view:
 | `{{area_height}}`           | Height (cells) of the output pane.                                    |
 
 `{{area_width}}` / `{{area_height}}` are handy for tools that take a
-`--width` / `--columns` flag — pass the pane size so output wraps
+`--width` / `--columns` flag, pass the pane size so output wraps
 correctly inside gitoui rather than against your terminal width.
 
 ## Full worked example
@@ -111,7 +111,7 @@ user_command_3 = ["f7"]
 
 ## Limits
 
-- Commands run with the same env as the gitoui process — no isolation,
+- Commands run with the same env as the gitoui process, no isolation,
   no sandbox.
 - Output renders verbatim; ANSI escape codes (colors, cursor moves)
   pass through.

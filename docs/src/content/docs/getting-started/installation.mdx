@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Three ways to install gitoui — curl-pipe-sh, cargo install, or build from source.
+description: Three ways to install gitoui, curl-pipe-sh, cargo install, or build from source.
 ---
 
 import { Tabs, TabItem, Aside, Steps } from "@astrojs/starlight/components";
@@ -8,7 +8,7 @@ import { Tabs, TabItem, Aside, Steps } from "@astrojs/starlight/components";
 <Tabs>
 <TabItem label="curl | sh">
 
-The fastest install on Linux and macOS — downloads the latest prebuilt
+The fastest install on Linux and macOS, downloads the latest prebuilt
 binary from GitHub Releases and drops it into `~/.local/bin`.
 
 ```sh
@@ -62,7 +62,7 @@ install -m 0755 target/release/gitoui ~/.local/bin/
 ```
 
 The release binary is ~16 MB. A debug build is ~250 MB and slower at
-startup — only use it for development.
+startup, only use it for development.
 
 </TabItem>
 </Tabs>
@@ -95,22 +95,22 @@ startup — only use it for development.
 
 </Steps>
 
-![First-launch splash — G logomark, gitoui wordmark, and the commit graph](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/splash-firstlaunch.png)
+![First-launch splash, G logomark, gitoui wordmark, and the commit graph](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/splash-firstlaunch.png)
 
 ## Updating
 
 <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> checks crates.io for a newer release once a day at startup. When one is
 available, you'll see a prompt:
 
-- **`y`** — runs the update right away (`cargo install --force` if you installed
+- **`y`**, runs the update right away (`cargo install --force` if you installed
   via cargo, otherwise re-runs `install.sh`) and re-launches the new binary.
-- **`n`** — skips this time. The prompt comes back tomorrow.
-- **`N`** — disables the automatic check entirely. Writes
+- **`n`**, skips this time. The prompt comes back tomorrow.
+- **`N`**, disables the automatic check entirely. Writes
   `[core.option] check_updates = false` to your config file so future launches
   stay silent. **To revert**, just remove that line from
   `~/.config/gitoui/config.toml` and the check kicks back in on the next launch.
 
-The script and `cargo install` are both idempotent — you can also trigger an
+The script and `cargo install` are both idempotent, you can also trigger an
 update manually at any time:
 
 ```sh

@@ -12,24 +12,24 @@ cd ~/my/repo
 gitoui
 ```
 
-You land on the **commit list** — your home screen. The commit graph is on the
+You land on the **commit list**, your home screen. The commit graph is on the
 left, then commit message, author, hash, and date. Use arrows or `j`/`k` to
-move. Each shortcut shown below is reconfigurable — see the
+move. Each shortcut shown below is reconfigurable, see the
 [Keybindings page](/keybindings/).
 
-![gitoui commit list home — graph column on the left, branches diverging, cursor row highlighted](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/home-commit-graph.png)
+![gitoui commit list home, graph column on the left, branches diverging, cursor row highlighted](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/home-commit-graph.png)
 
 ## The five canonical moves
 
-These five shortcuts cover 95% of navigation — learn them first.
+These five shortcuts cover 95% of navigation, learn them first.
 
 | Press           | Goes to                                                |
 |-----------------|--------------------------------------------------------|
 | `Enter`         | Commit detail (or **Uncommitted** on the top row).     |
 | `Tab`           | Refs panel (branches, tags, stashes, remotes).         |
-| `f`             | Search — fuzzy by default, toggle case (`s`) / fuzzy (`z`) / regex (`x`) inline. |
-| `?` or `F1`     | Help — the live reference of every shortcut, computed from your config. |
-| `p`             | Configuration — themes, modes, GitHub auth, live cycling with ← / →. |
+| `f`             | Search, fuzzy by default, toggle case (`s`) / fuzzy (`z`) / regex (`x`) inline. |
+| `?` or `F1`     | Help, the live reference of every shortcut, computed from your config. |
+| `p`             | Configuration, themes, modes, GitHub auth, live cycling with ← / →. |
 
 Hit `Esc` (or `q` in the list view) to back out of any view.
 
@@ -65,7 +65,7 @@ From the commit list, `Enter` on the top row (Uncommitted Changes) opens the
 ### 2-commit comparison
 
 `Space` on a commit marks it. Move to a second commit and press `Space`
-again — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> opens the cumulative diff between the two endpoints.
+again, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> opens the cumulative diff between the two endpoints.
 `Esc` clears the mark.
 
 ### Interactive rebase
@@ -76,17 +76,17 @@ to set actions, `Space` to grab and reorder rows with arrows, `Enter` to
 apply. If the rebase pauses (conflict, edit), <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> detects it on the next
 open and shows a resume banner with `c` continue / `s` skip / `a` abort.
 
-![Interactive rebase pass — plan editor, grab row, reorder, reword inline, apply](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/rebase-plan-editor.gif)
+![Interactive rebase pass, plan editor, grab row, reorder, reword inline, apply](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/rebase-plan-editor.gif)
 
 ### Open a Pull Request
 
-`Shift+R` (anywhere) opens the **PR list**. `Enter` drills into a PR — the
+`Shift+R` (anywhere) opens the **PR list**. `Enter` drills into a PR, the
 Conversation / Files / Commits / References tabs work like GitHub's web UI.
 `a` approve, `m` merge, `c` new comment, `+` react, `Shift+R` quote-reply.
 
 Same flow for **Issues** with `Shift+I`.
 
-![PR detail — Conversation tab, author avatar, label chips, focused comment card with action ribbon](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-conversation.png)
+![PR detail, Conversation tab, author avatar, label chips, focused comment card with action ribbon](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-conversation.png)
 
 <Aside type="tip">
 The Help page is the live reference: every shortcut shown there matches your
@@ -97,7 +97,7 @@ current config, so any rebind is reflected automatically.
 
 <FileTree>
 - ~/.config/gitoui/
-  - config.toml main config — schema [reference](/configurations/config-file-format/)
+  - config.toml main config, schema [reference](/configurations/config-file-format/)
   - themes/
     - **MySuperTheme.toml** [custom themes](/configurations/themes/)
   - github_token.toml OAuth token (mode `0600`, user-only)

@@ -1,4 +1,4 @@
-//! GitHub Issues view — slices I1 → I4. List + detail (Conversation,
+//! GitHub Issues view, slices I1 → I4. List + detail (Conversation,
 //! Timeline, Linked tabs) + Compose-new-issue, with full CRUD on
 //! comments, reactions, labels/assignees/milestone, and close/reopen.
 //!
@@ -66,7 +66,7 @@ pub struct IssuesView<'a> {
     /// chronological list with no selected-item concept, so the scroll
     /// is driven directly by NavigateUp/Down + wheel + PageUp/Down.
     timeline_scroll: u16,
-    /// Open editor in either New or Edit mode — routes raw keys.
+    /// Open editor in either New or Edit mode, routes raw keys.
     comment_editor: Option<CommentEditor>,
     comment_editor_cursor_pos: Option<(u16, u16)>,
     editor_body_area: Option<Rect>,
@@ -85,12 +85,12 @@ pub struct IssuesView<'a> {
     /// tab. Captured during the post-render restyle pass; consumed
     /// by `handle_click` to navigate to the referenced item.
     conversation_ref_links: Vec<RefLink>,
-    /// Reference the mouse is currently hovering — drives the
+    /// Reference the mouse is currently hovering, drives the
     /// hover-bg highlight at next render. Identified by `(number,
     /// is_pr)` so repeated occurrences of the same ref in a single
     /// comment all light up together.
     conversation_hovered_ref: Option<(u64, bool)>,
-    /// References tab state — `hovered` is the selected row,
+    /// References tab state, `hovered` is the selected row,
     /// `count` is the total rows (used to clamp nav), `row_rects`
     /// hold the per-row hit-test rects captured at render time.
     references_hovered: usize,
@@ -101,12 +101,12 @@ pub struct IssuesView<'a> {
     /// Reaction picker overlay; takes key+mouse focus when present.
     reaction_picker: Option<ReactionPicker>,
     /// Floating `#` autocomplete popup. Active while the user is
-    /// typing a `#NNN` mention inside the comment editor — proposes
+    /// typing a `#NNN` mention inside the comment editor, proposes
     /// issues + PRs matching the prefix, picked into the buffer on
     /// Enter. Drives its own keypress dispatch while `Some`.
     mention_popup: Option<MentionPopup>,
     /// PR list cached for `#` autocomplete. Fetched lazily on the
-    /// first time the popup needs to open — issues we already have
+    /// first time the popup needs to open, issues we already have
     /// in `self.items`. Empty until the background fetch lands.
     mention_pr_cache: Vec<PullRequest>,
     /// `true` while the background PR fetch for `#` autocomplete is
@@ -117,7 +117,7 @@ pub struct IssuesView<'a> {
     /// open issue.
     mention_user_cache: Vec<String>,
     /// In-session log of the viewer's reactions on each conversation
-    /// entry — keyed by `(issue_number, target_idx)`. Stores both
+    /// entry, keyed by `(issue_number, target_idx)`. Stores both
     /// the kind (so the picker can highlight it red) and the
     /// returned reaction id (so a re-click can DELETE it).
     viewer_reactions: FxHashMap<(u64, usize), Vec<(crate::github::pr::ReactionKind, u64)>>,
@@ -144,7 +144,7 @@ enum Mode {
 enum Tab {
     Conversation,
     Timeline,
-    /// Bidirectional `#N` references — forward refs (this issue
+    /// Bidirectional `#N` references, forward refs (this issue
     /// mentions #N in its body or comments) AND backward refs
     /// (other items mention this issue via cross-reference events).
     /// Renamed from "Linked" because it's broader than GitHub's
@@ -200,7 +200,7 @@ impl IssueListFilter {
     }
 }
 
-/// Lean comment editor — only the two flows issues support: new
+/// Lean comment editor, only the two flows issues support: new
 /// top-level comment and edit-own. Reuses the buffer/cursor model
 /// from the PR view's editor.
 #[derive(Debug, Clone)]
@@ -238,7 +238,7 @@ struct ReactionPicker {
     row_rects: Vec<Rect>,
 }
 
-/// One row of the References tab — combines forward refs (this
+/// One row of the References tab, combines forward refs (this
 /// issue mentions #N) and backward refs (#N mentioned this issue
 /// via timeline cross-references).
 #[derive(Debug, Clone)]
@@ -296,7 +296,7 @@ pub(crate) enum MentionKind {
     User,
 }
 
-/// Which text surface the popup is anchored to — read/write paths
+/// Which text surface the popup is anchored to, read/write paths
 /// branch on this so the same popup machinery works for the comment
 /// editor (Detail mode) and the compose Title / Body fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,12 +314,12 @@ pub(crate) enum MentionTarget {
 #[derive(Debug, Clone)]
 pub(crate) struct MentionPopup {
     pub target: MentionTarget,
-    /// Which character opened the popup — `'#'` for issue/PR refs,
+    /// Which character opened the popup, `'#'` for issue/PR refs,
     /// `'@'` for user mentions. Drives both the trigger detection
     /// in `update_mention_query_from_editor` and the insert format
     /// in `pick_mention`.
     pub trigger: char,
-    /// Byte offset of the trigger char inside the target buffer —
+    /// Byte offset of the trigger char inside the target buffer
     /// drives the replacement range on pick.
     pub anchor: usize,
     /// Chars typed after the trigger (the filter query).
@@ -328,10 +328,10 @@ pub(crate) struct MentionPopup {
     /// Recomputed every time `query` changes.
     pub filtered: Vec<MentionItem>,
     pub hovered: usize,
-    /// Row offset inside `filtered` of the topmost rendered item —
+    /// Row offset inside `filtered` of the topmost rendered item
     /// drives the scroll window so `hovered` stays in view.
     pub scroll: usize,
-    /// Body height captured at the last render — used by the nav
+    /// Body height captured at the last render, used by the nav
     /// helpers to decide when to scroll the viewport.
     pub last_visible: u16,
     pub overlay_rect: Option<Rect>,
@@ -347,7 +347,7 @@ struct ComposeState {
     body_scroll: u16,
     body_last_height: u16,
     labels: Vec<String>,
-    /// Available labels with colours — fetched on compose open to
+    /// Available labels with colours, fetched on compose open to
     /// keep the picker render instant.
     available_labels: Vec<crate::github::pr::Label>,
     assignees: Vec<String>,
@@ -681,11 +681,11 @@ impl<'a> IssuesView<'a> {
     // ─── Event dispatch ──────────────────────────────────────────
 
     pub fn handle_event(&mut self, evt: UserEventWithCount, key: KeyEvent) {
-        // `reload` is an Issues-wide action — works in list AND detail.
+        // `reload` is an Issues-wide action, works in list AND detail.
         // Resolved through [scope.issues]; the inner handlers do their
         // own scoped lookup afterwards for mode-specific actions.
         // Reaction picker / mention popup take over before us though
-        // — checked just below.
+        //, checked just below.
         if self.mention_popup.is_none()
             && self.reaction_picker.is_none()
             && self.comment_editor.is_none()
@@ -697,11 +697,11 @@ impl<'a> IssuesView<'a> {
             }
         }
 
-        // Mention popup intercepts keys before the editor — its own
+        // Mention popup intercepts keys before the editor, its own
         // handler passes char/backspace through to update the query.
         if self.mention_popup.is_some() {
             // Mouse wheel scrolls the popup viewport without moving
-            // the selector — separate from ↑↓ which moves the
+            // the selector, separate from ↑↓ which moves the
             // selector and only scrolls when it leaves the window.
             match evt.event {
                 UserEvent::ScrollUp => {
@@ -738,7 +738,7 @@ impl<'a> IssuesView<'a> {
             self.handle_event_comment_editor(key);
             return;
         }
-        // Compose body scroll — mouse wheel pans the body viewport
+        // Compose body scroll, mouse wheel pans the body viewport
         // when focus is on the Body field. Keeps the cursor in
         // place (we just shift body_scroll); a subsequent ↑/↓ keys
         // moves the cursor as usual and re-anchors the viewport.
@@ -755,7 +755,7 @@ impl<'a> IssuesView<'a> {
                 _ => {}
             }
         }
-        // Semantic event dispatch — gives us count-aware nav (e.g.
+        // Semantic event dispatch, gives us count-aware nav (e.g.
         // typing `5j` to move 5 rows down), mouse wheel, and a single
         // path that all bindings flow through.
         let n = evt.count.max(1) as i32;
@@ -796,7 +796,7 @@ impl<'a> IssuesView<'a> {
                 self.open_hovered();
                 return;
             }
-            // ←/→ still cycle the filter — the binding stays
+            // ←/→ still cycle the filter, the binding stays
             // active, just not advertised in the footer (the user
             // wanted a cleaner hint with only the canonical
             // shortcuts).
@@ -887,7 +887,7 @@ impl<'a> IssuesView<'a> {
                 }
                 return;
             }
-            // Ctrl+U / Ctrl+D globally — scroll the active tab half a
+            // Ctrl+U / Ctrl+D globally, scroll the active tab half a
             // viewport (~5 lines). Previously these were hardcoded char
             // matches; routing through UserEvent lets a user rebind
             // `half_page_*` globally and have it apply here too.
@@ -914,7 +914,7 @@ impl<'a> IssuesView<'a> {
                 return;
             }
             // ←/→ cycle Conversation / Timeline / Linked tabs (not
-            // advertised in the footer to stay clean — same pattern
+            // advertised in the footer to stay clean, same pattern
             // as the list filters). We deliberately gate this on
             // the raw key being an arrow so the `l` and `h` letter
             // bindings still reach `handle_event_detail` for the
@@ -981,14 +981,14 @@ impl<'a> IssuesView<'a> {
         }
 
         // Navigation (j/k/g/G/Up/Down/Home/End) is already handled by
-        // the outer UserEvent dispatch — drop the per-key duplicates so
+        // the outer UserEvent dispatch, drop the per-key duplicates so
         // users who rebind navigate_up etc. in the global section see
         // their custom keys take effect here too.
         match key.code {
             KeyCode::Esc => {
                 self.tx.send(AppEvent::CloseIssues);
             }
-            // Tab no longer cycles filter — ←/→ owns that (via the
+            // Tab no longer cycles filter, ←/→ owns that (via the
             // UserEvent dispatch in `handle_event` above). Tab can
             // be reused for ref-list or whatever the global binding
             // says, falling through here unhandled.
@@ -1000,7 +1000,7 @@ impl<'a> IssuesView<'a> {
     fn handle_event_detail(&mut self, key: KeyEvent) {
         let comment_count = self.conversation_comment_count.max(1);
 
-        // Scoped detail actions — walks [scope.issues.detail] then
+        // Scoped detail actions, walks [scope.issues.detail] then
         // [scope.issues] for inherited actions (labels/assignees/etc).
         // `reload` was already claimed by the outer dispatcher.
         if let Some(action) = self.ctx.keybind.resolve_scoped(&["issues", "detail"], key) {
@@ -1076,7 +1076,7 @@ impl<'a> IssuesView<'a> {
             // Enter on the Conversation tab follows the FIRST `#N`
             // reference inside the currently-selected comment card.
             // Click on a specific ref also works for picking among
-            // multiple — this shortcut is the keyboard-driven
+            // multiple, this shortcut is the keyboard-driven
             // fallback that GitHub web doesn't have.
             KeyCode::Enter if matches!(self.active_tab, Tab::Conversation) => {
                 self.follow_first_ref_in_selected_card();
@@ -1151,7 +1151,7 @@ impl<'a> IssuesView<'a> {
         let editing_text = matches!(field, ComposeField::Title | ComposeField::Body);
         let editing_body = matches!(field, ComposeField::Body);
 
-        // Scoped compose action — `submit` (Ctrl+S by default).
+        // Scoped compose action, `submit` (Ctrl+S by default).
         if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
             self.submit_compose();
             return;
@@ -1181,7 +1181,7 @@ impl<'a> IssuesView<'a> {
 
         if !editing_text {
             // Labels / Assignees / Milestone: Enter on the focused
-            // row opens its picker — the only entry point, so the
+            // row opens its picker, the only entry point, so the
             // form stays predictable.
             if matches!(key.code, KeyCode::Enter) {
                 self.compose_activate_field();
@@ -1220,7 +1220,7 @@ impl<'a> IssuesView<'a> {
         // into view. Mouse-wheel scroll bypasses this path (it goes
         // through the dedicated `ScrollUp/Down` intercept earlier),
         // so wheel-scrolling no longer gets reverted on the next
-        // render — that was the source of the "scroll doesn't stick"
+        // render, that was the source of the "scroll doesn't stick"
         // and "hover scrolls to bottom" bugs.
         if editing_body {
             self.compose_body_anchor_to_cursor();
@@ -1229,7 +1229,7 @@ impl<'a> IssuesView<'a> {
 
     /// Re-anchor `body_scroll` so the body cursor stays inside the
     /// last-rendered viewport. Called from cursor-mutating actions
-    /// (typing, arrow keys, click, vertical nav) — NOT from the
+    /// (typing, arrow keys, click, vertical nav), NOT from the
     /// render path. Mouse-wheel scrolling never calls this, which is
     /// why the user's wheel scroll stays where they put it.
     fn compose_body_anchor_to_cursor(&mut self) {
@@ -1265,9 +1265,9 @@ impl<'a> IssuesView<'a> {
 
     fn compose_field_insert_char(&mut self, ch: char) {
         // Detect a `#` typed inside the Body field BEFORE we mutate
-        // anything else — we want the anchor offset to point at the
+        // anything else, we want the anchor offset to point at the
         // `#` / `@` we're about to write. Both Body and Title open
-        // the popup — GitHub web supports mentions in both fields,
+        // the popup, GitHub web supports mentions in both fields,
         // so we match that.
         let popup_intent: Option<(usize, MentionTarget)> = {
             let Some(c) = self.compose.as_ref() else {
@@ -1560,7 +1560,7 @@ impl<'a> IssuesView<'a> {
             }
         }
         if current_line < logical_line {
-            // Click below the last line — drop cursor at end.
+            // Click below the last line, drop cursor at end.
             c.body_cursor = buf.len();
             c.field = ComposeField::Body;
             return;
@@ -1608,7 +1608,7 @@ impl<'a> IssuesView<'a> {
     // ─── Comment editor key dispatch ─────────────────────────────
 
     fn handle_event_comment_editor(&mut self, key: KeyEvent) {
-        // `submit` is shared with the compose forms — rebindable via
+        // `submit` is shared with the compose forms, rebindable via
         // [scope.compose]. Ctrl+Enter still fires here too because most
         // terminals don't propagate the modifier with Enter, so it's
         // worth keeping as a hardcoded second path.
@@ -1632,7 +1632,7 @@ impl<'a> IssuesView<'a> {
                 self.editor_insert_char('\n');
                 true
             }
-            // Tab inserts 4 spaces — binding it to "send" is hostile
+            // Tab inserts 4 spaces, binding it to "send" is hostile
             // when the user is typing code / lists.
             KeyCode::Tab => {
                 for _ in 0..4 {
@@ -1719,7 +1719,7 @@ impl<'a> IssuesView<'a> {
             KeyCode::Char(ch) if !ctrl => {
                 self.editor_insert_char(ch);
                 // Typing a `#` or `@` opens the autocomplete anchored
-                // at the char we just inserted — `cursor` points to
+                // at the char we just inserted, `cursor` points to
                 // just past it, so anchor = cursor - 1.
                 if ch == '#' || ch == '@' {
                     if let Some(ed) = self.comment_editor.as_ref() {
@@ -2043,7 +2043,7 @@ impl<'a> IssuesView<'a> {
         out
     }
 
-    /// Build the `@` mention universe — assignables fetched for the
+    /// Build the `@` mention universe, assignables fetched for the
     /// assignees picker plus the participants of the currently-open
     /// conversation (Detail), OR the assignables fetched for compose
     /// (Compose). De-dup by login, sort alpha.
@@ -2080,7 +2080,7 @@ impl<'a> IssuesView<'a> {
                 }
             }
         }
-        // Compose mode has no open issue — fall back to the
+        // Compose mode has no open issue, fall back to the
         // assignables that the compose form already fetched for its
         // own picker, plus the authors visible in the issue list.
         if let Some(c) = self.compose.as_ref() {
@@ -2150,7 +2150,7 @@ impl<'a> IssuesView<'a> {
 
     /// Mouse-wheel scroll inside the mention popup. Moves the
     /// viewport (`scroll`) without touching the selector
-    /// (`hovered`) — gives the user a real "list slides under
+    /// (`hovered`), gives the user a real "list slides under
     /// the cursor" feel, separate from ↑↓ keyboard nav.
     fn mention_popup_scroll(&mut self, delta: i32) {
         let Some(p) = self.mention_popup.as_mut() else {
@@ -2182,7 +2182,7 @@ impl<'a> IssuesView<'a> {
             (p.target, p.anchor, p.query.chars().count(), replacement)
         };
         self.mention_popup = None;
-        // Clamp the splice range — an inconsistent (anchor, buf)
+        // Clamp the splice range, an inconsistent (anchor, buf)
         // snapshot would otherwise panic `replace_range` with
         // "begin > end" mid-edit.
         match target {
@@ -2394,7 +2394,7 @@ impl<'a> IssuesView<'a> {
         self.follow_reference(link.number, link.is_pr);
     }
 
-    /// Navigate to a `#N` reference — issues swap the open issue
+    /// Navigate to a `#N` reference, issues swap the open issue
     /// in-place (cheap), PRs dispatch a cross-view event that
     /// re-anchors the App on the PR view.
     fn follow_reference(&mut self, number: u64, is_pr: bool) {
@@ -2636,7 +2636,7 @@ impl<'a> IssuesView<'a> {
     /// Quote-reply: opens a fresh top-level comment pre-filled with
     /// the selected comment's body wrapped in a markdown blockquote,
     /// followed by an empty line where the user types their reply.
-    /// GitHub web does the same thing — issue comments don't thread
+    /// GitHub web does the same thing, issue comments don't thread
     /// natively so a quoted top-level comment is the closest match.
     fn start_quote_reply(&mut self) {
         // Warm up the PR cache for the `#` autocomplete so the popup
@@ -2705,7 +2705,7 @@ impl<'a> IssuesView<'a> {
             return;
         };
         // Cannot edit the issue description card (index 0) via this
-        // shortcut — issue body edit is rare; defer to future slice.
+        // shortcut, issue body edit is rare; defer to future slice.
         if self.conversation_selected == 0 {
             return;
         }
@@ -2761,7 +2761,7 @@ impl<'a> IssuesView<'a> {
         let author = entry.author.clone();
         let body_preview = entry.body.clone();
         // Open the same kind of preview-style confirmation the PR view
-        // uses — the user reads the body + author before committing
+        // uses, the user reads the body + author before committing
         // to a destructive action.
         self.tx.send(AppEvent::OpenDialog(
             crate::event::DialogKind::ConfirmDeleteIssueComment {
@@ -2817,7 +2817,7 @@ impl<'a> IssuesView<'a> {
         let Some(detail) = self.detail_cache.get(&number) else {
             return;
         };
-        // No-op when the issue is already closed — the keybinding
+        // No-op when the issue is already closed, the keybinding
         // shouldn't even surface in that case (see `footer_hint`)
         // but guard here too so a stale shortcut doesn't fire.
         if matches!(detail.state, IssueState::Closed) {
@@ -2839,7 +2839,7 @@ impl<'a> IssuesView<'a> {
         let Some(detail) = self.detail_cache.get(&number) else {
             return;
         };
-        // Symmetric guard to `start_close` — never POST a reopen on
+        // Symmetric guard to `start_close`, never POST a reopen on
         // an already-open issue.
         if matches!(detail.state, IssueState::Open) {
             return;
@@ -2952,7 +2952,7 @@ impl<'a> IssuesView<'a> {
 
     // ─── Compose ─────────────────────────────────────────────────
 
-    /// "Reference in new issue" — opens Compose pre-filled with a
+    /// "Reference in new issue", opens Compose pre-filled with a
     /// back-reference to the currently-selected entry (issue body or
     /// comment). The new issue body is a markdown blockquote of the
     /// source plus a `Re: #N` line so the auto-detected cross-ref
@@ -3024,7 +3024,7 @@ impl<'a> IssuesView<'a> {
     fn start_compose(&mut self) {
         let token = self.token.clone();
         let coords = self.coords.clone();
-        // Pre-fetch labels/assignees/milestones synchronously — small
+        // Pre-fetch labels/assignees/milestones synchronously, small
         // payloads, keeps the picker open instant. Surface failures
         // as warnings rather than blocking the compose flow.
         let labels = crate::github::issue::list_repo_labels(&token, &coords).unwrap_or_default();
@@ -3165,7 +3165,7 @@ impl<'a> IssuesView<'a> {
             }
             return;
         }
-        // Comment editor takes priority — click inside it positions
+        // Comment editor takes priority, click inside it positions
         // the cursor; click outside dismisses nothing (so the user
         // can still scan the conversation without losing their draft).
         if self.comment_editor.is_some() && rect_contains(self.editor_body_area, col, row) {
@@ -3190,7 +3190,7 @@ impl<'a> IssuesView<'a> {
             }
             return;
         }
-        // Inline `#N` reference click — only relevant in the
+        // Inline `#N` reference click, only relevant in the
         // Conversation tab. Resolve the screen (col, row) back to a
         // logical (line, col) inside the Paragraph buffer and check
         // if any captured link covers that position.
@@ -3216,7 +3216,7 @@ impl<'a> IssuesView<'a> {
                 }
             }
         }
-        // References tab row click — first click selects, second
+        // References tab row click, first click selects, second
         // (or click on already-selected) follows. Matches the way
         // double-clicks would behave on a list widget while still
         // working over a single click for power users.
@@ -3269,7 +3269,7 @@ impl<'a> IssuesView<'a> {
                         ComposeField::Assignees => self.open_compose_assignees_picker(),
                         ComposeField::Milestone => self.open_compose_milestone_picker(),
                         // Click inside the Body block snaps the
-                        // cursor to the clicked character — same
+                        // cursor to the clicked character, same
                         // UX as the comment editor.
                         ComposeField::Body => {
                             self.compose_body_move_cursor_to_click(col, row);
@@ -3366,7 +3366,7 @@ impl<'a> IssuesView<'a> {
         }
         // Detail mode + Conversation tab: hovering a comment card
         // bumps the selection to that card, matching PR's UX.
-        // Hovering deliberately does NOT auto-scroll — the user
+        // Hovering deliberately does NOT auto-scroll, the user
         // expects mouse hover to leave the viewport alone.
         if matches!(self.mode, Mode::Detail) && matches!(self.active_tab, Tab::Conversation) {
             if let Some(area) = self.tab_content_area {
@@ -3375,7 +3375,7 @@ impl<'a> IssuesView<'a> {
                     for &(idx, first, last) in &self.conversation_comment_spans {
                         if logical >= first && logical <= last {
                             self.conversation_selected = idx;
-                            // No scroll_to_selected — hover never
+                            // No scroll_to_selected, hover never
                             // moves the viewport.
                             break;
                         }
@@ -3423,7 +3423,7 @@ impl<'a> IssuesView<'a> {
     }
 
     /// Programmatic entry point used by cross-view navigation
-    /// (`OpenIssueDetail`) — opens the issue detail without
+    /// (`OpenIssueDetail`), opens the issue detail without
     /// requiring a prior list selection. The issue may not exist
     /// in `self.items` yet; the fetch will surface a 404 if so.
     pub fn open_by_number(&mut self, number: u64) {
@@ -3442,7 +3442,7 @@ impl<'a> IssuesView<'a> {
         // populate the tab counts before the user has to switch tabs,
         // and the PR cache primes the `#N` reference resolver so
         // refs in the body card (e.g. `#1`) render as proper links on
-        // the very first frame — without this, the resolver runs
+        // the very first frame, without this, the resolver runs
         // against an empty `mention_pr_cache` and the ref text shows
         // as plain `#N` until some later action triggers the fetch.
         if !self.detail_cache.contains_key(&number) && self.loading_for != Some(number) {
@@ -3501,13 +3501,13 @@ impl<'a> IssuesView<'a> {
         self.comment_editor_cursor_pos = None;
         self.list_area = None;
         self.tab_content_area = None;
-        // Per-frame avatar accumulator — flushed once at the end
+        // Per-frame avatar accumulator, flushed once at the end
         // via the diff helper so cross-section transitions clear
         // stale placements correctly.
         self.pending_avatar_paints.clear();
 
         // Compose keeps the same top header as the list/detail
-        // views (⊙ Issues OWNER/REPO …) — only the body area below
+        // views (⊙ Issues OWNER/REPO …), only the body area below
         // the header switches to the compose form. Parity with the
         // PR view's chrome.
         if matches!(self.mode, Mode::Compose) {
@@ -3517,7 +3517,7 @@ impl<'a> IssuesView<'a> {
                 .split(area);
             self.render_top_header(f, chunks[0]);
             self.render_compose(f, chunks[1]);
-            // `#` mention popup also fires from compose Body — paint
+            // `#` mention popup also fires from compose Body, paint
             // it on top so the picker is visible during issue creation.
             if self.mention_popup.is_some() {
                 self.render_mention_popup(f, area);
@@ -3529,7 +3529,7 @@ impl<'a> IssuesView<'a> {
 
         // Same vertical structure as the PR view: 2-row top header
         // (title + divider), optional 3-row error banner, then the
-        // body — which is either the bordered list panel or the
+        // body, which is either the bordered list panel or the
         // detail layout.
         let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
             3
@@ -3557,7 +3557,7 @@ impl<'a> IssuesView<'a> {
         if self.reaction_picker.is_some() {
             self.render_reaction_picker_overlay(f, chunks[2]);
         }
-        // `#` mention popup — drawn last so it floats above the
+        // `#` mention popup, drawn last so it floats above the
         // editor + reaction picker (the latter shouldn't coexist
         // but z-order is correct anyway).
         if self.mention_popup.is_some() {
@@ -3575,7 +3575,7 @@ impl<'a> IssuesView<'a> {
     fn flush_pending_avatars(&mut self, f: &mut Frame) {
         let pending = std::mem::take(&mut self.pending_avatar_paints);
         let prev = std::mem::take(&mut self.prev_painted_avatars);
-        // Build the list of "occluding" rects — overlays drawn this
+        // Build the list of "occluding" rects, overlays drawn this
         // frame whose visual region must not show any avatar from
         // the cards beneath. Avatars sitting inside any of them get
         // dropped from `pending`; the diff then sees them as "no
@@ -3606,13 +3606,13 @@ impl<'a> IssuesView<'a> {
 
     /// Position the terminal cursor on the active text input surface
     /// (comment editor or compose Title/Body). Honours the user's
-    /// `cursor_type` config — native cursor by default, virtual glyph
+    /// `cursor_type` config, native cursor by default, virtual glyph
     /// painted into the buffer when so configured.
     fn place_terminal_cursor(&self, f: &mut Frame) {
         let Some((cx, cy)) = self.comment_editor_cursor_pos else {
             return;
         };
-        // Suppress the terminal cursor when the mention popup is up —
+        // Suppress the terminal cursor when the mention popup is up
         // a blinking cursor sitting on top of the popup body reads as
         // a glitch. The popup intercepts every keystroke anyway, so
         // the editor cursor isn't actionable while it's open.
@@ -3638,7 +3638,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    /// Top header — single line "⊙ Issues OWNER/REPO  N open" plus a
+    /// Top header, single line "⊙ Issues OWNER/REPO  N open" plus a
     /// thin divider beneath. Mirrors `PullRequestsView::render_header`
     /// so the two pages share an identical entry surface.
     fn render_top_header(&self, f: &mut Frame, area: Rect) {
@@ -3675,7 +3675,7 @@ impl<'a> IssuesView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ),
         ];
-        // Right-aligned ` GitHub` mark — same gate as the PR header.
+        // Right-aligned ` GitHub` mark, same gate as the PR header.
         if self.ctx.ui_config.common.nerd_font {
             const GH_TAG: &str = "\u{f09b} GitHub";
             const RIGHT_PAD: usize = 2;
@@ -3725,7 +3725,7 @@ impl<'a> IssuesView<'a> {
     }
 
     /// Build the filter-tabs title row that sits on the top border of
-    /// the Issues list panel — strict mirror of PR's
+    /// the Issues list panel, strict mirror of PR's
     /// `build_filter_title`. Returns styled spans + per-tab screen
     /// rects for click hit-testing.
     fn build_filter_title(&self, area: Rect) -> (Vec<Span<'static>>, Vec<(IssueListFilter, Rect)>) {
@@ -3774,7 +3774,7 @@ impl<'a> IssuesView<'a> {
     }
 
     fn render_list(&mut self, f: &mut Frame, area: Rect) {
-        // Filter tabs as the block title — identical to the PR list.
+        // Filter tabs as the block title, identical to the PR list.
         let (title_spans, tab_rects) = self.build_filter_title(area);
         self.filter_tab_rects = tab_rects;
 
@@ -3817,7 +3817,7 @@ impl<'a> IssuesView<'a> {
             return;
         }
 
-        // Keyboard scroll anchoring — same logic as PR list.
+        // Keyboard scroll anchoring, same logic as PR list.
         let visible = body_area.height as usize;
         if visible > 0 && self.hovered >= self.list_scroll_offset + visible {
             self.list_scroll_offset = self.hovered + 1 - visible;
@@ -3864,7 +3864,7 @@ impl<'a> IssuesView<'a> {
         let mut state = ListState::default();
         state.select(Some(self.hovered));
         *state.offset_mut() = self.list_scroll_offset;
-        // No widget-level highlight — `format_issue_row` paints the
+        // No widget-level highlight, `format_issue_row` paints the
         // selection bg per-span so label chips keep their colours.
         let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD));
         f.render_stateful_widget(list, body_area, &mut state);
@@ -3930,7 +3930,7 @@ impl<'a> IssuesView<'a> {
         if has_labels {
             self.render_issue_labels_row(f, labels_area, cached.as_ref());
         }
-        // Divider — single `─` row spanning the width.
+        // Divider, single `─` row spanning the width.
         {
             let theme = &self.ctx.color_theme;
             f.render_widget(
@@ -3999,7 +3999,7 @@ impl<'a> IssuesView<'a> {
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw("  "));
-            // Conservative title budget — we don't know exact meta
+            // Conservative title budget, we don't know exact meta
             // width here without measuring, so estimate generously.
             // `avatar_pad_each` is 3 cells per author/assignee when
             // avatars are enabled, 0 otherwise; matches the actual
@@ -4048,7 +4048,7 @@ impl<'a> IssuesView<'a> {
                 Style::default().fg(theme.list_name_fg),
             ));
             spans.push(Span::styled(" · ".to_string(), dim));
-            // Date matches the commit-list date colour — keeps the
+            // Date matches the commit-list date colour, keeps the
             // visual language consistent across views.
             spans.push(Span::styled(
                 d.opened_when.clone(),
@@ -4116,14 +4116,14 @@ impl<'a> IssuesView<'a> {
     fn render_tab_bar(&mut self, f: &mut Frame, area: Rect, number: u64) {
         let theme = &self.ctx.color_theme;
         // Per-tab counts only render once the issue detail (and the
-        // tab's own data) has loaded — empty counters would lie
+        // tab's own data) has loaded, empty counters would lie
         // about the state of an in-flight tab.
         let detail = self.detail_cache.get(&number).cloned();
         let convo_count = detail.as_ref().map(|d| d.conversation.len() + 1);
         let timeline_count = self.timeline_cache.get(&number).map(|v| v.len());
         // References = forward (local #N scan) + backward (timeline
         // cross-references), so the count has to come from the
-        // combined collector — not just the API-cached LinkedPr
+        // combined collector, not just the API-cached LinkedPr
         // list, which only covers what GitHub search managed to
         // index. Only show the number once the issue detail itself
         // has loaded (otherwise scanning the empty body is just 0).
@@ -4144,7 +4144,7 @@ impl<'a> IssuesView<'a> {
                 Tab::Timeline => timeline_count,
                 Tab::References => references_count,
             };
-            // Label width matches the visible glyphs exactly — no
+            // Label width matches the visible glyphs exactly, no
             // padding spaces around it, so the UNDERLINED modifier
             // stays glued to the word.
             let label = match count {
@@ -4269,7 +4269,7 @@ impl<'a> IssuesView<'a> {
         if detail.conversation.is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "  No comments yet — press 'c' to add one.",
+                "  No comments yet, press 'c' to add one.",
                 Style::default().fg(theme.detail_label_fg),
             )));
             self.conversation_comment_count = 1;
@@ -4351,7 +4351,7 @@ impl<'a> IssuesView<'a> {
         }
         // Post-process every line to recolour `#N` references that
         // resolve to a known issue or PR in our local caches and
-        // also capture the click hit-boxes — GitHub web renders
+        // also capture the click hit-boxes, GitHub web renders
         // these as underlined hyperlinks.
         let issue_titles: rustc_hash::FxHashMap<u64, String> = self
             .items
@@ -4451,7 +4451,7 @@ impl<'a> IssuesView<'a> {
             return;
         }
         let mut lines: Vec<Line<'static>> = Vec::new();
-        // `(login, col, row)` triples — the timeline lays out events
+        // `(login, col, row)` triples, the timeline lays out events
         // top-down, one per row, so row == index into `events`.
         let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut paints: Vec<(String, u16, u16)> = Vec::new();
@@ -4552,7 +4552,7 @@ impl<'a> IssuesView<'a> {
         // Backward refs: timeline cross-referenced events whose
         // source is an issue/PR mentioning the current one. The
         // `pull_request` flag inside the source payload distinguishes
-        // PRs from issues — but the github::issue layer flattens
+        // PRs from issues, but the github::issue layer flattens
         // this away. As a heuristic, look up the number in our
         // caches (PR cache wins).
         if let Some(events) = self.timeline_cache.get(&number) {
@@ -4614,7 +4614,7 @@ impl<'a> IssuesView<'a> {
             {
                 "  Loading references…"
             } else {
-                "  No references — write `#N` in a comment to link an issue or PR."
+                "  No references, write `#N` in a comment to link an issue or PR."
             };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
@@ -4861,12 +4861,12 @@ impl<'a> IssuesView<'a> {
         let theme = &self.ctx.color_theme;
         let kinds = crate::github::pr::ReactionKind::all();
         // Pick the worst-case visible width across all eight emoji
-        // so every cell is laid out to the same column budget —
+        // so every cell is laid out to the same column budget
         // some glyphs (notably 🚀) measure as 1 cell in some
         // terminals and 2 in others, which breaks alignment when
         // we hard-code a single width.
         // Render the whole row in ONE Paragraph instead of one
-        // widget per cell — ratatui's double-width "continuation"
+        // widget per cell, ratatui's double-width "continuation"
         // markers carry across spans within a single Paragraph, so
         // glyphs no longer overwrite each other. Cell hit-test rects
         // are computed math-side from cell_w.
@@ -4895,7 +4895,7 @@ impl<'a> IssuesView<'a> {
         picker.row_rects.clear();
         let mut x_cursor = inner.x;
         // Manual buffer-level rendering so we can force the "skip
-        // continuation" flag on every emoji cell — unicode-width
+        // continuation" flag on every emoji cell, unicode-width
         // measures ❤️ as 1 col but terminals draw it as 2, and
         // without manual skip the next cell's space overwrites the
         // emoji's 2nd visual half (which was making 🚀 vanish).
@@ -4905,7 +4905,7 @@ impl<'a> IssuesView<'a> {
             let is_mine = mine.contains(kind);
             let cell_rect = Rect::new(x_cursor, inner.y, cell_w, 1);
             picker.row_rects.push(cell_rect);
-            // A "mine" emoji always stays red — when also hovered
+            // A "mine" emoji always stays red, when also hovered
             // we use a deeper red so the cursor position still reads
             // distinctly without losing the "you reacted with this"
             // signal.
@@ -4957,7 +4957,7 @@ impl<'a> IssuesView<'a> {
     /// borders. Shows up to 8 issues / PRs matching the query.
     fn render_mention_popup(&mut self, f: &mut Frame, area: Rect) {
         // Anchor the popup against the actively-edited surface so
-        // it pops next to the cursor — not into a top-left corner.
+        // it pops next to the cursor, not into a top-left corner.
         let target = self.mention_popup.as_ref().map(|p| p.target);
         let editor_rect = match target {
             Some(MentionTarget::ComposeTitle) => self
@@ -4980,7 +4980,7 @@ impl<'a> IssuesView<'a> {
         }
     }
 
-    /// Full-screen "Create new Issue" form — mirrors the PR
+    /// Full-screen "Create new Issue" form, mirrors the PR
     /// `render_compose_mode` layout exactly so the two pages share
     /// the same visual rhythm (sub-header / divider / single-pane
     /// Compose block, with each field aligned via `Label: value`).
@@ -4988,7 +4988,7 @@ impl<'a> IssuesView<'a> {
         let theme = &self.ctx.color_theme;
         self.compose_field_rects.clear();
 
-        // Slim sub-header (1 row) + divider (1) + compose body — same
+        // Slim sub-header (1 row) + divider (1) + compose body, same
         // structure as PR compose. The `NEW · Create new Issue` line
         // hints that this is a write surface even with the standard
         // top header still visible above.
@@ -5027,7 +5027,7 @@ impl<'a> IssuesView<'a> {
             divider_area,
         );
 
-        // ── Compose block (full width — no preview pane since there's
+        // ── Compose block (full width, no preview pane since there's
         //    no head/base diff to show like the PR view). Same Block
         //    chrome as PR's compose form for visual parity.
         let block = Block::default()
@@ -5093,11 +5093,11 @@ impl<'a> IssuesView<'a> {
 
         let mut y = inner.y;
 
-        // ── Title row — text input with focus-only underline.
+        // ── Title row, text input with focus-only underline.
         let title_focused = matches!(state.field, ComposeField::Title);
         let title_value: Vec<Span<'static>> = if state.title.is_empty() {
             vec![Span::styled(
-                "(type a title — required)".to_string(),
+                "(type a title, required)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )]
         } else {
@@ -5122,7 +5122,7 @@ impl<'a> IssuesView<'a> {
         let (title_rect, title_value_x) = render_row(f, y, title_focused, "Title:", title_value);
         self.compose_field_rects
             .push((ComposeField::Title, title_rect));
-        // Underline under the typed text when focused — same trick
+        // Underline under the typed text when focused, same trick
         // PR uses for its title input.
         if title_focused {
             let underline_y = (title_rect.y + 1).min(inner.y + inner.height - 1);
@@ -5137,11 +5137,11 @@ impl<'a> IssuesView<'a> {
         }
         y += 2;
 
-        // ── Labels row — chips inline.
+        // ── Labels row, chips inline.
         let labels_focused = matches!(state.field, ComposeField::Labels);
         let labels_value: Vec<Span<'static>> = if state.labels.is_empty() {
             vec![Span::styled(
-                "(none — Enter to pick)".to_string(),
+                "(none, Enter to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )]
         } else {
@@ -5169,14 +5169,14 @@ impl<'a> IssuesView<'a> {
             .push((ComposeField::Labels, labels_rect));
         y += 2;
 
-        // ── Assignees row — comma-joined logins, with avatars when
+        // ── Assignees row, comma-joined logins, with avatars when
         //    enabled. Avatar painted as a post-pass overlay.
         let assignees_focused = matches!(state.field, ComposeField::Assignees);
         let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut assignee_paints: Vec<(String, u16)> = Vec::new();
         let assignees_value: Vec<Span<'static>> = if state.assignees.is_empty() {
             vec![Span::styled(
-                "(none — Enter to pick)".to_string(),
+                "(none, Enter to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )]
         } else {
@@ -5210,7 +5210,7 @@ impl<'a> IssuesView<'a> {
             render_row(f, y, assignees_focused, "Assignees:", assignees_value);
         self.compose_field_rects
             .push((ComposeField::Assignees, assignees_rect));
-        // Avatars overlay — diff-tracked via the view-wide
+        // Avatars overlay, diff-tracked via the view-wide
         // accumulator (flushed at the end of `render()`).
         let theme_bg = theme.bg;
         for (login, x) in assignee_paints {
@@ -5226,7 +5226,7 @@ impl<'a> IssuesView<'a> {
         }
         y += 2;
 
-        // ── Milestone row — single selected value or "(none)".
+        // ── Milestone row, single selected value or "(none)".
         let milestone_focused = matches!(state.field, ComposeField::Milestone);
         let milestone_value: Vec<Span<'static>> = match state.milestone {
             Some(n) => match state.available_milestones.iter().find(|m| m.number == n) {
@@ -5237,7 +5237,7 @@ impl<'a> IssuesView<'a> {
                 )],
             },
             None => vec![Span::styled(
-                "(none — Enter to pick)".to_string(),
+                "(none, Enter to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )],
         };
@@ -5292,7 +5292,7 @@ impl<'a> IssuesView<'a> {
             state.body.matches('\n').count() as u16 + 1
         };
         // Render-time scroll handling: ONLY clamp against the
-        // current max — do NOT re-anchor on the cursor here. The
+        // current max, do NOT re-anchor on the cursor here. The
         // anchor lives in `compose_body_anchor_to_cursor` and is
         // called by cursor-mutating actions only. Re-anchoring at
         // render time would snap `body_scroll` back to the cursor
@@ -5320,7 +5320,7 @@ impl<'a> IssuesView<'a> {
             self.mention_pr_cache.iter().map(|p| p.number).collect();
         let body_text: Vec<Line<'static>> = if body_str.is_empty() {
             vec![Line::from(Span::styled(
-                "(type a description — supports markdown)".to_string(),
+                "(type a description, supports markdown)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             ))]
         } else {
@@ -5358,7 +5358,7 @@ impl<'a> IssuesView<'a> {
             ComposeField::Body
                 if body_focused
                 // Only place the terminal cursor when its logical
-                // row is INSIDE the visible scroll window — without
+                // row is INSIDE the visible scroll window, without
                 // this guard `saturating_sub(scroll)` makes the
                 // cursor visually jump to row 0 of the body whenever
                 // we scroll past it, which the user perceives as
@@ -5404,7 +5404,7 @@ impl<'a> IssuesView<'a> {
 
 /// Scan a free-form text blob for `#N` references and return the
 /// list of resolved numbers (deduplicated, order-preserved). Same
-/// left/right boundary rules as the comment styling — `foo#42` and
+/// left/right boundary rules as the comment styling, `foo#42` and
 /// `#42abc` are NOT matched, only clean references.
 /// Walk `count` chars forward from `start` byte offset inside `s`,
 /// returning the byte offset just past the last walked char. Used
@@ -5558,7 +5558,7 @@ where
                         // Build (rendered_text, fg_color, optional_link).
                         // For `#N`, the displayed text is enriched
                         // to `KIND#N (title…)` when the resolver
-                        // returns a title — source text in the
+                        // returns a title, source text in the
                         // buffer stays `#N`, so click/edit math
                         // remain unchanged.
                         let (rendered, fg, link) = if is_hash {
@@ -5585,7 +5585,7 @@ where
                             };
                             (rendered, color, Some((n, is_pr)))
                         } else {
-                            // `@login` — render as-is, no link.
+                            // `@login`, render as-is, no link.
                             let rendered = text[i..j].to_string();
                             (rendered, user_mention_color.expect("checked above"), None)
                         };
@@ -5644,12 +5644,12 @@ where
 /// Build a styled line for the comment / compose editor where any
 /// `#N` substring is highlighted in `mention_fg` + UNDERLINED, while
 /// the rest of the text uses `base`. Lighter version of
-/// `restyle_hash_refs_in_span_collect` — no link tracking, no
+/// `restyle_hash_refs_in_span_collect`, no link tracking, no
 /// resolver: it colours every well-formed `#N` because the editor
 /// can't know yet if the reference will resolve.
 pub(crate) fn filter_mention_items_pub(query: &str, all: &[MentionItem]) -> Vec<MentionItem> {
     const MAX_ITEMS: usize = 10;
-    // `@` universe (all entries are User) — return the head of the
+    // `@` universe (all entries are User), return the head of the
     // (already-sorted) list when the query is empty, otherwise a
     // simple prefix/substring score on the login.
     if all.iter().all(|m| matches!(m.kind, MentionKind::User)) {
@@ -5772,7 +5772,7 @@ pub(crate) fn paint_mention_popup(
         .filtered
         .iter()
         .map(|m| match m.kind {
-            // User rows omit the secondary title — only the
+            // User rows omit the secondary title, only the
             // `@login` token is shown, sized via `widest_primary`.
             MentionKind::User => 0,
             _ => m.title.chars().count() as u16,
@@ -5813,7 +5813,7 @@ pub(crate) fn paint_mention_popup(
     // with their continuation cell at `x`. `Clear` on the popup's
     // own rect wipes the continuation marker but leaves the
     // anchor, so the terminal still draws 2 visual cells for the
-    // emoji — its 2nd cell bleeds into the popup's left border.
+    // emoji, its 2nd cell bleeds into the popup's left border.
     // Extending the clear by 1 col wipes the anchor too.
     if x > 0 {
         let pre_rect = Rect::new(x - 1, y, 1, height);
@@ -5989,7 +5989,7 @@ pub(crate) fn editor_line_with_mentions(
     Line::from(spans)
 }
 
-/// Column budgets for an aligned Issue list row — mirrors PR's
+/// Column budgets for an aligned Issue list row, mirrors PR's
 /// `PrListColumns`. Each cell is pre-padded to its column width so
 /// rows align tabularly regardless of value length.
 struct IssueListColumns {
@@ -6009,7 +6009,7 @@ impl IssueListColumns {
 
     fn compute(items: &[Issue], available_width: usize) -> Self {
         // State column: " Open " (6) / " Closed " (8) / " Closed (np) " (~14)
-        // We use compact "OPEN" / "CLOSED" / "CLOSED·" — minimal width 6.
+        // We use compact "OPEN" / "CLOSED" / "CLOSED·", minimal width 6.
         let state = items
             .iter()
             .map(|i| match (i.state, i.state_reason) {
@@ -6043,7 +6043,7 @@ impl IssueListColumns {
             .unwrap_or(0);
         let labels = max_chips * ISSUE_LABEL_CHIP_WIDTH;
         let labels_gap = if labels > 0 { 1 } else { 0 };
-        // 💬 N column — "💬" is 2 visual cells in most terminals; allow
+        // 💬 N column, "💬" is 2 visual cells in most terminals; allow
         // 2 (icon) + 1 (space) + up to 4 digits = 7.
         const COMMENTS_COL: usize = 7;
         let fixed = Self::MARKER
@@ -6070,7 +6070,7 @@ impl IssueListColumns {
 }
 
 /// Build one aligned row for the Issue list. Returns `(line,
-/// avatar_col)` — `avatar_col` is `Some(col)` only when avatars are
+/// avatar_col)`, `avatar_col` is `Some(col)` only when avatars are
 /// enabled (3-cell pad reserved before author). Mirrors PR's
 /// `format_pr_row` including the per-span row selection bg.
 fn format_issue_row(
@@ -6152,7 +6152,7 @@ fn format_issue_row(
         Style::default().fg(theme.detail_label_fg),
     ));
 
-    // Selection bg painted per-span — leave chips alone so their
+    // Selection bg painted per-span, leave chips alone so their
     // colours stay intact. Trailing fill stretches the highlight to
     // the row's right edge.
     if is_selected {
@@ -6206,7 +6206,7 @@ fn state_chip(
     )
 }
 
-/// Returns `(line, actor_col)` — `Some(col)` when the 3-cell pad
+/// Returns `(line, actor_col)`, `Some(col)` when the 3-cell pad
 /// was reserved (avatars enabled), `None` otherwise so the row
 /// stays tight.
 fn timeline_event_line(

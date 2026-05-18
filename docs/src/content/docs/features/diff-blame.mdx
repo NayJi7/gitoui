@@ -5,7 +5,7 @@ description: The diff viewer, side-by-side / unified modes, in-diff search, blam
 
 import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
 
-Three closely-related views — drill into history with the same shortcut chain
+Three closely-related views, drill into history with the same shortcut chain
 once you've focused a file.
 
 <Tabs>
@@ -14,8 +14,8 @@ once you've focused a file.
 `Enter` on a file row inside a commit drilldown (or the Uncommitted view)
 opens the **Diff** view. Layout is split between:
 
-- **Left** — file path + hunk navigation.
-- **Right** — the diff itself, syntax-highlighted by syntect (the theme
+- **Left**, file path + hunk navigation.
+- **Right**, the diff itself, syntax-highlighted by syntect (the theme
   follows `core.option.syntax_theme`).
 
 ### Modes
@@ -23,7 +23,7 @@ opens the **Diff** view. Layout is split between:
 `core.option.diff_mode = "enhanced"` (default) renders side-by-side. Set to
 `"unified"` for the traditional `git diff` layout.
 
-![Side-by-side diff — OLD left (red deletions) / NEW right (green additions), syntax-highlighted via syntect](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/diff-side-by-side.png)
+![Side-by-side diff, OLD left (red deletions) / NEW right (green additions), syntax-highlighted via syntect](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/diff-side-by-side.png)
 
 ### Navigation
 
@@ -42,10 +42,10 @@ matches. The current match is highlighted in `list_match_bg`.
 
 ### Inspect chips
 
-- `b` — open **Blame** on the focused file at this commit.
-- `Shift+H` — open **File History** (`git log --follow`).
-- `c` — copy the file path.
-- `Shift+C` — copy the commit hash.
+- `b`, open **Blame** on the focused file at this commit.
+- `Shift+H`, open **File History** (`git log --follow`).
+- `c`, copy the file path.
+- `Shift+C`, copy the commit hash.
 
 </TabItem>
 
@@ -60,7 +60,7 @@ matches. The current match is highlighted in `list_match_bg`.
 Lines are grouped into **blame blocks** (consecutive lines sharing one
 commit). The viewport highlights the block under the cursor.
 
-![Blame view — left gutter with hash + author + date, focused blame block highlighted, syntax-highlighted source](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/blame-view.png)
+![Blame view, left gutter with hash + author + date, focused blame block highlighted, syntax-highlighted source](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/blame-view.png)
 
 | Press         | Action                                       |
 |---------------|----------------------------------------------|

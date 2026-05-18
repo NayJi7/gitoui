@@ -1,6 +1,6 @@
 ---
 title: Commit graph
-description: The home screen — pre-rendered git log graph with inline image protocol.
+description: The home screen, pre-rendered git log graph with inline image protocol.
 ---
 
 import { Aside, Steps } from "@astrojs/starlight/components";
@@ -13,16 +13,16 @@ Sixel). It auto-detects the protocol at startup; force one with `--protocol`.
 
 Each row carries:
 
-- **Graph cell** — branches, merges, the commit dot (orange for HEAD).
+- **Graph cell**, branches, merges, the commit dot (orange for HEAD).
 - **Commit message** with inline ref glyphs (branch / remote / tag / stash).
-- **Author name** — coloured per the theme. Avatar painted inline when cached.
+- **Author name**, coloured per the theme. Avatar painted inline when cached.
 - **Short hash**.
-- **Date** — format set by `core.option.date_time_format`.
+- **Date**, format set by `core.option.date_time_format`.
 
 The top row is a synthetic **Uncommitted Changes** entry. Drilling into it
 opens the [Uncommitted view](/features/uncommitted/) for staging + commit.
 
-![Commit graph — busy history with branches, merge, tag, stash, HEAD in orange, Uncommitted row on top](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/home-commit-graph.png)
+![Commit graph, busy history with branches, merge, tag, stash, HEAD in orange, Uncommitted row on top](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/home-commit-graph.png)
 
 ## Search
 
@@ -41,15 +41,15 @@ case-insensitive off. Inline toggles while the search is active:
 The search bar's toggle state persists per-session via `[core.search]` in
 the config.
 
-![Search flow — `f` to open, live highlight, toggle case + fuzzy, `n`/`N` to jump between matches](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/search-flow.gif)
+![Search flow, `f` to open, live highlight, toggle case + fuzzy, `n`/`N` to jump between matches](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/search-flow.gif)
 
 ## 2-commit comparison
 
 <Steps>
 
-1. Press `Space` on commit **A** — a brand-coloured chip marks it.
+1. Press `Space` on commit **A**, a brand-coloured chip marks it.
 2. Move the cursor to commit **B** (any direction, any distance).
-3. Press `Space` again — <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> opens the **Compare** view
+3. Press `Space` again, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> opens the **Compare** view
    with the cumulative diff between the two endpoints (`git diff
    <a>..<b>`).
 
@@ -57,13 +57,13 @@ the config.
 
 `Ctrl+click` is the mouse equivalent. `Esc` clears the mark at any point.
 
-![2-commit compare — Space on A, scroll, Space on B, Compare view opens with the cumulative diff](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/compare-2-commits.gif)
+![2-commit compare, Space on A, scroll, Space on B, Compare view opens with the cumulative diff](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/compare-2-commits.gif)
 
 ## Lazy load
 
 The initial run loads `core.option.initial_load_count` commits (1000 by
 default). `]` (`load_more`) appends another `core.option.load_more_count`
-to the list — repeat as many times as you need to walk back in history.
+to the list, repeat as many times as you need to walk back in history.
 
 `-n N` on the CLI overrides the initial count for one run.
 
@@ -77,14 +77,14 @@ graph re-renders when needed without you having to press `r`.
 
 ## Inline badges on the affected commit row
 
-Some transient repo states surface directly on the row they apply to —
+Some transient repo states surface directly on the row they apply to
 no need to hunt through a sidebar:
 
-- `⚠ N conflicts` (red) — on the Uncommitted row, when there are
+- `⚠ N conflicts` (red), on the Uncommitted row, when there are
   unmerged paths from a merge / cherry-pick / rebase conflict.
-- `↻ REBASING` (yellow) — on the Uncommitted row, whenever a rebase
+- `↻ REBASING` (yellow), on the Uncommitted row, whenever a rebase
   is in progress on the branch.
-- `⏸ rebase paused` (yellow) — on the **exact commit git is paused
+- `⏸ rebase paused` (yellow), on the **exact commit git is paused
   on** (read from `.git/rebase-merge/stopped-sha`). Press `e` from the
   commit list to jump to the
   [resume banner](/features/interactive-rebase/#resume-mode) and `c`
