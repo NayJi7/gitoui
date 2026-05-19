@@ -61,11 +61,31 @@ the config.
 
 ## Lazy load
 
-The initial run loads `core.option.initial_load_count` commits (1000 by
+The initial run loads `core.option.initial_load_count` commits (500 by
 default). `]` (`load_more`) appends another `core.option.load_more_count`
 to the list, repeat as many times as you need to walk back in history.
 
 `-n N` on the CLI overrides the initial count for one run.
+
+## Huge repos: wide graph + horizontal scroll
+
+On repos with many parallel branches (rust-lang/rust, linux kernel, …)
+the native graph can be hundreds of lanes wide. gitoui handles this by
+**capping the graph column at ~40 %** of the panel width and exposing a
+horizontal scroll over the visible lane window:
+
+- `←` / `→` slide the viewport over the lanes.
+- All visible rows scroll together (Kitty source-rect crop, so every
+  commit's graph image stays aligned).
+- iTerm2 / Sixel terminals don't support source-rect crop: lanes past
+  the cap stay clipped at column 0 and the message column reclaims the
+  remaining width.
+
+If you don't need the graph at all, set
+`[ui.list] graph_enabled = false` (or toggle "Graph Enabled" in the
+`p` config view). That removes the SVG/PNG pipeline entirely — no
+per-commit image generation, no terminal-image upload — and scrolling
+becomes near-instant even on 300 000-commit histories.
 
 ## Auto-refresh
 

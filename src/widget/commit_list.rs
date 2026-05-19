@@ -36,7 +36,7 @@ use crate::{
     config::UserListColumnType,
     git::{Commit, CommitHash, Head, Ref},
     graph::GraphImageManager,
-    protocol::PreparedImage,
+    protocol::{kitty_encode_cropped, ImageProtocol, PreparedImage},
 };
 
 static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().respect_case());
@@ -333,9 +333,20 @@ pub struct CommitListState<'a> {
     pub hovered_tag: Option<String>,
     pub hovered_row: Option<usize>,
 
-    // Tracks the (offset, height, area) of the last graph render so we can skip
-    // re-rendering graph image cells when visible commits haven't changed.
-    graph_render_state: Option<(usize, usize, Rect)>,
+    // Tracks the (offset, height, area, graph_scroll_x) of the last graph
+    // render so we can skip re-rendering graph image cells when nothing
+    // visible has changed.
+    graph_render_state: Option<(usize, usize, Rect, u16)>,
+    // Horizontal scroll offset (in graph cells) for the lane viewport.
+    // Only matters when the native graph is wider than the column cap
+    // (40 % of panel) — the visible portion of the lanes slides via
+    // Kitty's source-rect crop. Clamped to `0..=graph.max_pos_x` and
+    // reset to 0 on filter change / data reload.
+    graph_scroll_x: u16,
+    // Width of the graph column the last frame allocated (in cells, minus
+    // the 1-cell pad). Used to clamp `graph_scroll_x` from the input
+    // handler so the user can't scroll past the last visible lane.
+    last_graph_area_cells: u16,
     // Stable hash of (offset, height, area, visible_emails+prepared flags), does NOT
     // include `selected`, so hover-driven selection changes don't trigger a full re-render.
     avatar_stable_key: Option<u64>,
@@ -395,6 +406,8 @@ impl<'a> CommitListState<'a> {
             hovered_tag: None,
             hovered_row: None,
             graph_render_state: None,
+            graph_scroll_x: 0,
+            last_graph_area_cells: 0,
             avatar_stable_key: None,
             avatar_prev_selected: None,
             avatars_fully_prepared: false,
@@ -403,6 +416,51 @@ impl<'a> CommitListState<'a> {
 
     pub fn graph_area_cell_width(&self) -> u16 {
         self.graph_cell_width + 1 // right pad
+    }
+
+    /// Native lane count of the graph (in cells). Used to clamp
+    /// horizontal scroll so the user can't slide past the last lane.
+    pub fn graph_native_cell_width(&self) -> u16 {
+        self.graph_cell_width
+    }
+
+    pub fn graph_scroll_x(&self) -> u16 {
+        self.graph_scroll_x
+    }
+
+    /// Slide the horizontal viewport over the graph lanes. Caller must
+    /// clamp to a valid range before calling (see
+    /// `widget::commit_list::CommitList::scroll_graph_horizontal`).
+    /// Setting always invalidates the render cache so the next frame
+    /// re-emits the placement commands with the new crop offset.
+    pub fn set_graph_scroll_x(&mut self, x: u16) {
+        if self.graph_scroll_x == x {
+            return;
+        }
+        self.graph_scroll_x = x;
+        self.graph_render_state = None;
+    }
+
+    /// Maximum valid `graph_scroll_x` so the rightmost lane stays at least
+    /// partially visible. Returns 0 when the native graph already fits the
+    /// allocated column (no overflow → scroll is a no-op).
+    pub fn max_graph_scroll_x(&self) -> u16 {
+        self.graph_cell_width
+            .saturating_sub(self.last_graph_area_cells)
+    }
+
+    /// Slide the horizontal viewport left by `cells`, clamped to 0.
+    pub fn scroll_graph_left(&mut self, cells: u16) {
+        let new = self.graph_scroll_x.saturating_sub(cells);
+        self.set_graph_scroll_x(new);
+    }
+
+    /// Slide the horizontal viewport right by `cells`, clamped to
+    /// `max_graph_scroll_x()` so the rightmost lane stays visible.
+    pub fn scroll_graph_right(&mut self, cells: u16) {
+        let max = self.max_graph_scroll_x();
+        let new = self.graph_scroll_x.saturating_add(cells).min(max);
+        self.set_graph_scroll_x(new);
     }
 
     pub fn update_height(&mut self, height: usize) {
@@ -1377,16 +1435,32 @@ impl<'a> StatefulWidget for CommitList<'a> {
             }
         }
 
+        // Filter out the Graph column entirely when the user has disabled
+        // it — its width is freed back to the Message column and no image
+        // pipeline runs (cf. `prepare_graph_uploads` in `view/list.rs`).
+        let columns: Vec<UserListColumnType> = if self.ctx.ui_config.list.graph_enabled {
+            self.ctx.ui_config.list.columns.clone()
+        } else {
+            self.ctx
+                .ui_config
+                .list
+                .columns
+                .iter()
+                .filter(|c| !matches!(c, UserListColumnType::Graph))
+                .cloned()
+                .collect()
+        };
+
         let widths = self.content_column_widths(rows_area.width, state, avatars_enabled);
         let constraints = calc_cell_widths(
             rows_area.width,
             self.ctx.ui_config.list.commit_message_min_width,
             widths,
-            &self.ctx.ui_config.list.columns,
+            &columns,
         );
         let chunks = Layout::horizontal(constraints).split(rows_area);
 
-        for (i, col) in self.ctx.ui_config.list.columns.iter().enumerate() {
+        for (i, col) in columns.iter().enumerate() {
             match col {
                 UserListColumnType::Graph => {
                     self.render_graph(buf, chunks[i], state);
@@ -1449,8 +1523,17 @@ impl CommitList<'_> {
             })
             .collect();
 
+        // Cap graph column at ~40 % of the panel so a wide multi-branch
+        // history (rust-lang/rust, linux kernel, …) doesn't squeeze the
+        // commit-message column to nothing. The graph image still bakes
+        // every branch lane; what overflows the cap gets truncated at
+        // render time (cf. `take(max_graph_width)` in `render_graph`).
+        // Phase 2 will add `<` / `>` to scroll the hidden lanes back
+        // into view. Floor at 8 cells so the graph always shows
+        // something useful even on tiny terminals.
+        let graph_cap = (area_width * 40 / 100).max(8);
         CommitListColumnWidths {
-            graph: state.graph_area_cell_width().min(area_width),
+            graph: state.graph_area_cell_width().min(area_width).min(graph_cap),
             author: author_column_width(area_width, avatar_width, &names),
             hash: 9,
             date: date_column_width(&dates),
@@ -1468,16 +1551,28 @@ impl CommitList<'_> {
         state: &CommitListState,
         avatars_enabled: bool,
     ) {
+        let columns: Vec<UserListColumnType> = if self.ctx.ui_config.list.graph_enabled {
+            self.ctx.ui_config.list.columns.clone()
+        } else {
+            self.ctx
+                .ui_config
+                .list
+                .columns
+                .iter()
+                .filter(|c| !matches!(c, UserListColumnType::Graph))
+                .cloned()
+                .collect()
+        };
         let widths = self.content_column_widths(area.width, state, avatars_enabled);
         let constraints = calc_cell_widths(
             area.width,
             self.ctx.ui_config.list.commit_message_min_width,
             widths,
-            &self.ctx.ui_config.list.columns,
+            &columns,
         );
         let chunks = Layout::horizontal(constraints).split(area);
 
-        for (i, col_type) in self.ctx.ui_config.list.columns.iter().enumerate() {
+        for (i, col_type) in columns.iter().enumerate() {
             let text = column_header_text(col_type, avatars_enabled);
 
             if !text.is_empty() {
@@ -1497,7 +1592,18 @@ impl CommitList<'_> {
             return;
         }
 
-        let key = (state.offset, state.height, area);
+        // Snapshot column width so input handlers can clamp scroll without
+        // racing the renderer. Clamp scroll if the panel just shrank.
+        let max_graph_width_u16 = area.width.saturating_sub(1);
+        if state.last_graph_area_cells != max_graph_width_u16 {
+            state.last_graph_area_cells = max_graph_width_u16;
+        }
+        let max_scroll = state.max_graph_scroll_x();
+        if state.graph_scroll_x > max_scroll {
+            state.set_graph_scroll_x(max_scroll);
+        }
+
+        let key = (state.offset, state.height, area, state.graph_scroll_x);
         if state.graph_render_state == Some(key) {
             // Visible commits and graph area unchanged: write skip cells so ratatui never
             // emits escape sequences for graph positions. Terminal retains the previous render.
@@ -1529,15 +1635,100 @@ impl CommitList<'_> {
         }
 
         // Render real graph image cells
+        let mut unsupported_overflow_rows: Vec<u16> = Vec::new();
         {
             let state_ref: &CommitListState = state;
             let max_graph_width = area.width.saturating_sub(1) as usize;
+            let bg_style = ratatui::style::Style::default().bg(self.ctx.color_theme.bg);
+            let scroll_x = state_ref.graph_scroll_x() as usize;
+            let supports_kitty_crop = matches!(self.ctx.image_protocol, ImageProtocol::Kitty);
+            let px_per_cell = state_ref.graph_image_manager.pixel_width_per_cell();
+
             self.rendering_commit_info_iter(state_ref)
                 .for_each(|(i, commit_info)| {
                     let Some(prepared_image) = state_ref.prepared_image(commit_info, i) else {
                         return;
                     };
                     let y = area.top() + i as u16;
+                    let native_cells = prepared_image.cell_width();
+
+                    // Two reasons to take the cropped-placement path:
+                    //   1. native graph wider than the column cap (overflow)
+                    //   2. user has scrolled horizontally (scroll_x > 0)
+                    //
+                    // Without (2), the rows whose native graph fits the cap
+                    // would stay glued to scroll_x=0 while the wider rows
+                    // slide under them — the lanes desync visually.
+                    // Re-emitting every visible row through the crop path
+                    // when scroll_x > 0 keeps the whole graph coherent.
+                    let needs_crop_path = native_cells > max_graph_width || scroll_x > 0;
+                    if needs_crop_path {
+                        if supports_kitty_crop {
+                            let hash = &commit_info.commit.commit_hash;
+                            if let Some(bytes) =
+                                state_ref.graph_image_manager.graph_row_bytes(hash)
+                            {
+                                let image_id =
+                                    state_ref.graph_image_manager.image_id_for(hash);
+                                let visible_cells = max_graph_width.min(
+                                    native_cells.saturating_sub(scroll_x),
+                                );
+                                if visible_cells == 0 {
+                                    // Scrolled past this row's last lane.
+                                    // Evict any prior placement and leave
+                                    // the graph zone blank for this row.
+                                    unsupported_overflow_rows.push(y);
+                                    for x in area.left()..area.right() {
+                                        let cell = &mut buf[(x, y)];
+                                        cell.set_symbol(" ");
+                                        cell.set_style(bg_style);
+                                        cell.set_skip(false);
+                                    }
+                                    return;
+                                }
+                                let scroll_px = (scroll_x as u32) * px_per_cell;
+                                let crop_w_px = (visible_cells as u32) * px_per_cell;
+                                let symbol = kitty_encode_cropped(
+                                    bytes,
+                                    image_id,
+                                    scroll_px,
+                                    crop_w_px,
+                                    visible_cells,
+                                );
+                                let head_cell = &mut buf[(area.left(), y)];
+                                head_cell.set_symbol(&symbol);
+                                head_cell.set_style(bg_style);
+                                head_cell.set_skip(false);
+                                for off in 1..visible_cells {
+                                    let cell = &mut buf[(area.left() + off as u16, y)];
+                                    cell.set_symbol(" ");
+                                    cell.set_style(bg_style);
+                                    cell.set_skip(false);
+                                }
+                                let pad_x = area.left() + visible_cells as u16;
+                                if pad_x < area.right() {
+                                    let cell = &mut buf[(pad_x, y)];
+                                    cell.set_symbol(" ");
+                                    cell.set_style(bg_style);
+                                    cell.set_skip(false);
+                                }
+                                return;
+                            }
+                        }
+                        // No crop support OR bytes unavailable — clear the
+                        // graph zone and let the message column take over
+                        // (also catches scroll-past-end on non-Kitty
+                        // protocols, which is the best we can do).
+                        unsupported_overflow_rows.push(y);
+                        for x in area.left()..area.right() {
+                            let cell = &mut buf[(x, y)];
+                            cell.set_symbol(" ");
+                            cell.set_style(bg_style);
+                            cell.set_skip(false);
+                        }
+                        return;
+                    }
+
                     let _is_selected = i == state_ref.selected
                         && state_ref.hovered_branch.is_none()
                         && state_ref.hovered_tag.is_none();
@@ -1557,12 +1748,18 @@ impl CommitList<'_> {
                     if pad_x < area.right() {
                         let cell = &mut buf[(pad_x, y)];
                         cell.set_symbol(" ");
-                        cell.set_style(
-                            ratatui::style::Style::default().bg(self.ctx.color_theme.bg),
-                        );
+                        cell.set_style(bg_style);
                         cell.set_skip(false);
                     }
                 });
+        }
+
+        // Non-Kitty terminals can't crop persistent placements: writing
+        // spaces over the cells above clears iTerm2/Sixel/KittyUnicode
+        // outputs, but Kitty's persistent placement also needs an explicit
+        // per-row delete for rows we couldn't repaint with a cropped image.
+        for y in &unsupported_overflow_rows {
+            let _ = self.ctx.image_protocol.delete_row(*y);
         }
 
         state.graph_render_state = Some(key);

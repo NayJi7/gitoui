@@ -570,12 +570,41 @@ fn kitty_encode_inner(
     image_id: u32,
     with_delete_prefix: bool,
 ) -> String {
+    kitty_encode_with_crop(
+        bytes,
+        cell_width,
+        cell_height,
+        image_id,
+        with_delete_prefix,
+        None,
+    )
+}
+
+/// Optional source-rect crop in pixels of the original image. When `Some`,
+/// emits Kitty's `x=<px>,w=<px>` params alongside `a=T` so the terminal
+/// uploads the full bytes but only displays the sub-rectangle. Used for the
+/// commit-list horizontal-scroll path on repos whose graph is wider than
+/// the terminal cap (rust-lang/rust, linux kernel, …).
+#[derive(Debug, Clone, Copy)]
+pub struct KittySourceCrop {
+    pub x_px: u32,
+    pub w_px: u32,
+}
+
+fn kitty_encode_with_crop(
+    bytes: &[u8],
+    cell_width: usize,
+    cell_height: usize,
+    image_id: u32,
+    with_delete_prefix: bool,
+    crop: Option<KittySourceCrop>,
+) -> String {
     let base64_str = to_base64_str(bytes);
     let chunk_size = 4096;
 
     let total_chunks = base64_str.len().div_ceil(chunk_size).max(1);
     // Pre-allocate: optional delete prefix (14) + per-chunk overhead (~55) + base64 data
-    let capacity = 14 + total_chunks * 55 + base64_str.len();
+    let capacity = 14 + total_chunks * 70 + base64_str.len();
     let mut s = String::with_capacity(capacity);
 
     let chunks = base64_str.as_bytes().chunks(chunk_size);
@@ -590,6 +619,9 @@ fn kitty_encode_inner(
             s.push_str(&format!(
                 "a=T,f=100,q=2,i={image_id},c={cell_width},r={cell_height},"
             ));
+            if let Some(c) = crop {
+                s.push_str(&format!("x={},w={},", c.x_px, c.w_px));
+            }
         }
         if i < total_chunks - 1 {
             s.push_str("m=1;");
@@ -601,6 +633,32 @@ fn kitty_encode_inner(
     }
 
     s
+}
+
+/// Encode a Kitty placement of `bytes` with a source-rect crop applied, sized
+/// to occupy `display_cells × 1` terminal cells. Used in the commit-list
+/// render path: when the native graph image is wider than the column cap,
+/// we emit one of these per overflow row using `graph_scroll_x` to slide
+/// the visible window over the lanes. Always includes the `a=d,d=C` delete
+/// prefix so any previous placement at the cursor is evicted.
+pub fn kitty_encode_cropped(
+    bytes: &[u8],
+    image_id: u32,
+    scroll_x_px: u32,
+    crop_w_px: u32,
+    display_cells: usize,
+) -> String {
+    kitty_encode_with_crop(
+        bytes,
+        display_cells,
+        1,
+        image_id,
+        true,
+        Some(KittySourceCrop {
+            x_px: scroll_x_px,
+            w_px: crop_w_px,
+        }),
+    )
 }
 
 fn kitty_unicode_prepare(

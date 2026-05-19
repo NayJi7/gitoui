@@ -200,6 +200,21 @@ impl<'a> ListView<'a> {
                 UserEvent::Config => {
                     self.tx.send(AppEvent::OpenConfig);
                 }
+                // Horizontal scroll over the graph lanes when the native
+                // graph image is wider than the column cap (rust-lang/rust,
+                // linux, …). No-op on small repos where everything fits.
+                // Gated to the non-search branch — inside `SearchState::
+                // Applied` the same keys cycle search matches (see below).
+                UserEvent::NavigateLeft => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_graph_left(1);
+                    }
+                }
+                UserEvent::NavigateRight => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_graph_right(1);
+                    }
+                }
                 _ => {}
             }
         }
@@ -299,7 +314,13 @@ impl<'a> ListView<'a> {
     }
 
     pub fn prepare_graph_uploads(&mut self) {
-        self.as_mut_list_state().ensure_visible_graph_uploaded();
+        // Skip the SVG/PNG generation + terminal-image upload entirely
+        // when the user has disabled the graph column. This is the
+        // single biggest perf win on huge repos: no per-commit image
+        // rendering, no Kitty `a=T` round-trips.
+        if self.ctx.ui_config.list.graph_enabled {
+            self.as_mut_list_state().ensure_visible_graph_uploaded();
+        }
         let ctx = self.ctx.clone();
         self.as_mut_list_state().ensure_visible_avatars_uploaded(
             &mut ctx.avatar_manager.lock().unwrap(),

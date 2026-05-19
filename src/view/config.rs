@@ -29,20 +29,32 @@ use crate::{
 //   5  Rebase Mode       ← interactive-rebase editor layout
 //   6  Order             ← commit order: chrono vs topo
 //   7  Initial Selection
-//   8  Initial Load Count ← INITIAL_LOAD_COUNT_INDEX (text input, digits only, [10..99999])
-//   9  Mouse
-//  10  Date Format
-//  11  Image Protocol
-//  12  Git Name          ← TEXT_EDIT_START_INDEX
-//  13  Git Email
-//  14  Default Branch
-//  15  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  16  Github Avatars    ← GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 17;
-const INITIAL_LOAD_COUNT_INDEX: usize = 8;
-const TEXT_EDIT_START_INDEX: usize = 12;
-const GITHUB_AUTH_INDEX: usize = 15;
-const GITHUB_AVATARS_INDEX: usize = 16;
+//   0  Theme
+//   1  Graph Enabled     ← GRAPH_ENABLED_INDEX (yes/no toggle, applies on close)
+//   2  Graph Style       (grayed when Graph Enabled = no)
+//   3  Graph Width       (grayed when Graph Enabled = no)
+//   4  Diff Mode
+//   5  Resolve Mode
+//   6  Rebase Mode
+//   7  Order
+//   8  Initial Selection
+//   9  Initial Load Count ← INITIAL_LOAD_COUNT_INDEX (text input, digits only, [10..99999])
+//  10  Mouse
+//  11  Date Format
+//  12  Image Protocol
+//  13  Git Name          ← TEXT_EDIT_START_INDEX
+//  14  Git Email
+//  15  Default Branch
+//  16  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  17  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 18;
+const GRAPH_ENABLED_INDEX: usize = 1;
+const GRAPH_STYLE_INDEX: usize = 2;
+const GRAPH_WIDTH_INDEX: usize = 3;
+const INITIAL_LOAD_COUNT_INDEX: usize = 9;
+const TEXT_EDIT_START_INDEX: usize = 13;
+const GITHUB_AUTH_INDEX: usize = 16;
+const GITHUB_AVATARS_INDEX: usize = 17;
 const INITIAL_LOAD_COUNT_MIN: usize = 10;
 const INITIAL_LOAD_COUNT_MAX: usize = 99_999;
 const CONFIG_ITEM_INDENT: &str = " ";
@@ -115,6 +127,11 @@ impl<'a> ConfigView<'a> {
         // vec there for the actual rendering order.
         let values = [
             self.core_config.option.theme.clone(),
+            if self.ui_config.list.graph_enabled {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            },
             graph_style_display(self.core_config.graph_style()),
             graph_width_display(self.core_config.graph_width()),
             diff_mode_display(self.ui_config.common.diff_mode),
@@ -150,6 +167,7 @@ impl<'a> ConfigView<'a> {
         ];
         let names = [
             "Theme",
+            "Graph Enabled",
             "Graph Style",
             "Graph Width",
             "Diff Mode",
@@ -241,6 +259,24 @@ impl<'a> ConfigView<'a> {
         self.github_auth_state.is_authenticated()
     }
 
+    /// Graph Style and Graph Width depend on the graph being enabled —
+    /// when the user has toggled it off, those rows are grayed out and
+    /// don't respond to cycle / click, mirroring the Github Avatars row
+    /// behaviour when GitHub auth is missing.
+    fn graph_options_selectable(&self) -> bool {
+        self.ui_config.list.graph_enabled
+    }
+
+    /// True when `idx` is a row currently shown dimmed (its underlying
+    /// requirement isn't met). Up/Down arrows skip these so the user
+    /// can't park selection on a row they can't touch; click / hover
+    /// also bail out so the selection doesn't drift onto a dead row.
+    fn is_item_grayed(&self, idx: usize) -> bool {
+        (idx == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable())
+            || ((idx == GRAPH_STYLE_INDEX || idx == GRAPH_WIDTH_INDEX)
+                && !self.graph_options_selectable())
+    }
+
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
         if self.editing_text {
             self.handle_text_edit_event(event_with_count, key);
@@ -252,7 +288,10 @@ impl<'a> ConfigView<'a> {
         match event {
             UserEvent::NavigateUp | UserEvent::SelectUp if self.selected > 0 => {
                 self.selected -= 1;
-                if self.selected == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
+                // Walk past any grayed row in the same direction; only
+                // bail when we hit the top so the user still ends up
+                // on a usable row instead of stuck on a dead one.
+                while self.selected > 0 && self.is_item_grayed(self.selected) {
                     self.selected -= 1;
                 }
             }
@@ -260,10 +299,15 @@ impl<'a> ConfigView<'a> {
                 if self.selected + 1 < CONFIG_ITEM_COUNT =>
             {
                 self.selected += 1;
-                if self.selected == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
-                    if self.selected + 1 < CONFIG_ITEM_COUNT {
-                        self.selected += 1;
-                    } else {
+                while self.selected + 1 < CONFIG_ITEM_COUNT
+                    && self.is_item_grayed(self.selected)
+                {
+                    self.selected += 1;
+                }
+                // Hit the bottom edge on a grayed row — bounce back up
+                // past it to the last usable row.
+                if self.is_item_grayed(self.selected) {
+                    while self.selected > 0 && self.is_item_grayed(self.selected) {
                         self.selected -= 1;
                     }
                 }
@@ -275,6 +319,11 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
+                } else if (self.selected == GRAPH_STYLE_INDEX
+                    || self.selected == GRAPH_WIDTH_INDEX)
+                    && !self.graph_options_selectable()
+                {
+                    // Grayed out (Graph Enabled = no) — no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -288,6 +337,11 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
+                } else if (self.selected == GRAPH_STYLE_INDEX
+                    || self.selected == GRAPH_WIDTH_INDEX)
+                    && !self.graph_options_selectable()
+                {
+                    // Grayed out (Graph Enabled = no) — no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -301,6 +355,11 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option_prev();
                     }
+                } else if (self.selected == GRAPH_STYLE_INDEX
+                    || self.selected == GRAPH_WIDTH_INDEX)
+                    && !self.graph_options_selectable()
+                {
+                    // Grayed out (Graph Enabled = no) — no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -332,11 +391,15 @@ impl<'a> ConfigView<'a> {
                         self.selected += 1;
                     }
                 }
-                if self.selected == GITHUB_AVATARS_INDEX
-                    && !self.github_avatars_selectable()
-                    && self.selected + 1 < CONFIG_ITEM_COUNT
+                while self.selected + 1 < CONFIG_ITEM_COUNT
+                    && self.is_item_grayed(self.selected)
                 {
                     self.selected += 1;
+                }
+                if self.is_item_grayed(self.selected) {
+                    while self.selected > 0 && self.is_item_grayed(self.selected) {
+                        self.selected -= 1;
+                    }
                 }
             }
             UserEvent::PageUp => {
@@ -345,10 +408,7 @@ impl<'a> ConfigView<'a> {
                         self.selected -= 1;
                     }
                 }
-                if self.selected == GITHUB_AVATARS_INDEX
-                    && !self.github_avatars_selectable()
-                    && self.selected > 0
-                {
+                while self.selected > 0 && self.is_item_grayed(self.selected) {
                     self.selected -= 1;
                 }
             }
@@ -357,10 +417,7 @@ impl<'a> ConfigView<'a> {
             }
             UserEvent::GoToBottom => {
                 self.selected = CONFIG_ITEM_COUNT - 1;
-                if self.selected == GITHUB_AVATARS_INDEX
-                    && !self.github_avatars_selectable()
-                    && self.selected > 0
-                {
+                while self.selected > 0 && self.is_item_grayed(self.selected) {
                     self.selected -= 1;
                 }
             }
@@ -371,9 +428,9 @@ impl<'a> ConfigView<'a> {
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
             INITIAL_LOAD_COUNT_INDEX => self.core_config.option.initial_load_count.to_string(),
-            12 => self.core_config.user_name().unwrap_or("").to_string(),
-            13 => self.core_config.user_email().unwrap_or("").to_string(),
-            14 => self.core_config.default_branch().unwrap_or("").to_string(),
+            13 => self.core_config.user_name().unwrap_or("").to_string(),
+            14 => self.core_config.user_email().unwrap_or("").to_string(),
+            15 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -568,9 +625,9 @@ impl<'a> ConfigView<'a> {
                     }
                 }
             }
-            12 => self.core_config.set_user_name(value),
-            13 => self.core_config.set_user_email(value),
-            14 => self.core_config.set_default_branch(value),
+            13 => self.core_config.set_user_name(value),
+            14 => self.core_config.set_user_email(value),
+            15 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -596,7 +653,10 @@ impl<'a> ConfigView<'a> {
                 self.core_config.option.theme = new_theme;
                 self.theme_preview = None;
             }
-            1 => {
+            GRAPH_ENABLED_INDEX => {
+                self.ui_config.list.graph_enabled = !self.ui_config.list.graph_enabled;
+            }
+            GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
                 let prev = match current {
                     GraphStyle::Rounded => GraphStyle::Smooth,
@@ -605,7 +665,7 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_graph_style(prev);
             }
-            2 => {
+            GRAPH_WIDTH_INDEX => {
                 let prev = match self.core_config.graph_width() {
                     GraphWidthType::Auto => GraphWidthType::Single,
                     GraphWidthType::Double => GraphWidthType::Auto,
@@ -616,7 +676,7 @@ impl<'a> ConfigView<'a> {
                 // the new cell width.
                 self.graph_preview = None;
             }
-            3 => {
+            4 => {
                 let prev = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::SideBySideEnhanced,
                     DiffMode::Raw => DiffMode::Enhanced,
@@ -625,7 +685,7 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(prev);
             }
-            4 => {
+            5 => {
                 let prev = match self.ui_config.common.conflict_view {
                     ConflictViewMode::ThreePane => ConflictViewMode::Inline,
                     ConflictViewMode::TwoPane => ConflictViewMode::ThreePane,
@@ -633,7 +693,7 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_conflict_view(prev);
             }
-            5 => {
+            6 => {
                 let prev = match self.ui_config.common.rebase_view {
                     RebaseViewMode::Compact => RebaseViewMode::Split,
                     RebaseViewMode::Inline => RebaseViewMode::Compact,
@@ -641,14 +701,14 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_rebase_view(prev);
             }
-            6 => {
+            7 => {
                 let prev = match self.core_config.order() {
                     crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
                     crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
                 };
                 self.core_config.set_order(prev);
             }
-            7 => {
+            8 => {
                 let prev = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
@@ -660,16 +720,16 @@ impl<'a> ConfigView<'a> {
                 // to edit; arrows fall through to the no-op default
                 // and the row stays unchanged.
             }
-            9 => {
+            10 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            10 => {
+            11 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            11 => {
+            12 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -709,7 +769,10 @@ impl<'a> ConfigView<'a> {
                 self.core_config.option.theme = new_theme;
                 self.theme_preview = None;
             }
-            1 => {
+            GRAPH_ENABLED_INDEX => {
+                self.ui_config.list.graph_enabled = !self.ui_config.list.graph_enabled;
+            }
+            GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
                 let next = match current {
                     GraphStyle::Rounded => GraphStyle::Angular,
@@ -718,7 +781,7 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_graph_style(next);
             }
-            2 => {
+            GRAPH_WIDTH_INDEX => {
                 let next = match self.core_config.graph_width() {
                     GraphWidthType::Auto => GraphWidthType::Double,
                     GraphWidthType::Double => GraphWidthType::Single,
@@ -727,7 +790,7 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_graph_width(next);
                 self.graph_preview = None;
             }
-            3 => {
+            4 => {
                 let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::SideBySide,
@@ -736,7 +799,7 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(next);
             }
-            4 => {
+            5 => {
                 let next = match self.ui_config.common.conflict_view {
                     ConflictViewMode::ThreePane => ConflictViewMode::TwoPane,
                     ConflictViewMode::TwoPane => ConflictViewMode::Inline,
@@ -744,7 +807,7 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_conflict_view(next);
             }
-            5 => {
+            6 => {
                 let next = match self.ui_config.common.rebase_view {
                     RebaseViewMode::Compact => RebaseViewMode::Inline,
                     RebaseViewMode::Inline => RebaseViewMode::Split,
@@ -752,14 +815,14 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_rebase_view(next);
             }
-            6 => {
+            7 => {
                 let next = match self.core_config.order() {
                     crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
                     crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
                 };
                 self.core_config.set_order(next);
             }
-            7 => {
+            8 => {
                 let next = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
@@ -769,16 +832,16 @@ impl<'a> ConfigView<'a> {
             INITIAL_LOAD_COUNT_INDEX => {
                 // Text input, no cycle. See cycle_option_prev for the rationale.
             }
-            9 => {
+            10 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            10 => {
+            11 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            11 => {
+            12 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -894,6 +957,15 @@ impl<'a> ConfigView<'a> {
         // requires shifting indices in all of those places too.
         let items = vec![
             ("Theme", self.core_config.option.theme.clone(), false),
+            (
+                "Graph Enabled",
+                if self.ui_config.list.graph_enabled {
+                    "yes".to_string()
+                } else {
+                    "no".to_string()
+                },
+                false,
+            ),
             (
                 "Graph Style",
                 graph_style_display(self.core_config.graph_style()),
@@ -1015,7 +1087,9 @@ impl<'a> ConfigView<'a> {
                 self.editing_text && i == self.selected,
                 &self.editing_value,
             );
-            let is_grayed = *indented && !avatars_selectable;
+            let is_grayed = (*indented && !avatars_selectable)
+                || ((i == GRAPH_STYLE_INDEX || i == GRAPH_WIDTH_INDEX)
+                    && !self.ui_config.list.graph_enabled);
             let label = format!("{CONFIG_ITEM_INDENT}{name}");
             let value_prefix = "";
             let label_fg = if is_grayed {
@@ -1148,6 +1222,7 @@ impl<'a> ConfigView<'a> {
         let git_email = &self.ctx.git_user_email;
         let descriptions: Vec<String> = vec![
             "Color theme applied to the entire interface, including diff syntax highlighting.".into(),
+            "Toggle the commit-graph image column.\n\nDisabling it skips all image rendering for near-instant scrolling on huge repos.".into(),
             "Controls how commit connection lines are rendered in the graph.".into(),
             "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
             diff_mode_description(self.ui_config.common.diff_mode),
@@ -1242,7 +1317,7 @@ impl<'a> ConfigView<'a> {
                     }
                 }
             }
-            1 | 2 => {
+            GRAPH_STYLE_INDEX | GRAPH_WIDTH_INDEX => {
                 right_lines.push(Line::from(""));
                 right_lines.push(Line::from(vec![Span::styled(
                     "Preview",
@@ -1265,7 +1340,7 @@ impl<'a> ConfigView<'a> {
         // write the new content (e.g. the theme code preview) over those
         // spaces. Kitty persistent placements are evicted via the post-draw
         // `pending_preview_deletes` queue.
-        let preview_active = matches!(self.selected, 1 | 2);
+        let preview_active = matches!(self.selected, GRAPH_STYLE_INDEX | GRAPH_WIDTH_INDEX);
         if !preview_active {
             if let Some((y, count)) = self.last_preview_rows.take() {
                 self.clear_preview_cells(f, right_area, y, count);
@@ -1328,7 +1403,11 @@ impl<'a> ConfigView<'a> {
         }
         let Some(item_idx) = hit else { return };
         if item_idx < CONFIG_ITEM_COUNT {
-            if item_idx == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable() {
+            // Grayed rows swallow the click entirely: no selection change,
+            // no action. Mirrors the hover behaviour in
+            // `handle_mouse_move`, so a click on a dead row never leaves
+            // the cursor parked there.
+            if self.is_item_grayed(item_idx) {
                 return;
             }
             self.selected = item_idx;
@@ -1361,7 +1440,7 @@ impl<'a> ConfigView<'a> {
             return;
         }
         if let Some(idx) = self.left_area_item_index(col, row) {
-            if idx < CONFIG_ITEM_COUNT {
+            if idx < CONFIG_ITEM_COUNT && !self.is_item_grayed(idx) {
                 self.selected = idx;
             }
         }

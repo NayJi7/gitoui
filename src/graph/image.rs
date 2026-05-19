@@ -35,6 +35,11 @@ pub enum GraphImageWidthMode {
 #[derive(Debug)]
 pub struct GraphImageManager<'a> {
     prepared_image_map: FxHashMap<CommitHash, PreparedImage>,
+    // Raw PNG bytes per commit, retained so the horizontal-scroll path
+    // (Kitty source-rect crop) can re-encode the same image with new x/w
+    // params per frame without rebuilding it from `Graph` data. ~5 KB per
+    // commit on Single-cell width, so a 300-commit view stays under 2 MB.
+    graph_row_bytes: FxHashMap<CommitHash, Vec<u8>>,
     image_ids: FxHashSet<u32>,
     pending_uploads: Vec<String>,
     head_commit_hash: Option<CommitHash>,
@@ -63,6 +68,7 @@ impl<'a> GraphImageManager<'a> {
 
         GraphImageManager {
             prepared_image_map: FxHashMap::default(),
+            graph_row_bytes: FxHashMap::default(),
             image_ids: FxHashSet::default(),
             pending_uploads: Vec::default(),
             head_commit_hash: None,
@@ -79,6 +85,30 @@ impl<'a> GraphImageManager<'a> {
 
     pub fn prepared_image(&self, commit_hash: &CommitHash) -> Option<&PreparedImage> {
         self.prepared_image_map.get(commit_hash)
+    }
+
+    /// Raw PNG bytes of a commit's graph row. Used by the horizontal-scroll
+    /// path to feed re-encoded placements (with crop) back to Kitty.
+    pub fn graph_row_bytes(&self, commit_hash: &CommitHash) -> Option<&[u8]> {
+        self.graph_row_bytes.get(commit_hash).map(|v| v.as_slice())
+    }
+
+    /// Image-id currently associated with a commit, accounting for whether
+    /// it's the HEAD (HEAD uses a hollow circle, so it has a distinct id
+    /// from the same hash rendered non-HEAD).
+    pub fn image_id_for(&self, commit_hash: &CommitHash) -> u32 {
+        let is_head = self.head_commit_hash.as_ref() == Some(commit_hash);
+        graph_image_id(self.session_nonce, commit_hash, is_head)
+    }
+
+    /// Number of source-image pixels that map to one terminal cell of width
+    /// in the rendered placement. Single-width: 25; Double-width: still 25
+    /// (image is 50 px per lane = 2 cells, so 25 px per cell).
+    pub fn pixel_width_per_cell(&self) -> u32 {
+        match self.cell_width_type {
+            CellWidthType::Single => self.image_params.width as u32,
+            CellWidthType::Double => (self.image_params.width as u32) / 2,
+        }
     }
 
     pub fn image_ids(&self) -> &FxHashSet<u32> {
@@ -99,6 +129,7 @@ impl<'a> GraphImageManager<'a> {
 
     pub fn clear_prepared_images(&mut self) {
         self.prepared_image_map.clear();
+        self.graph_row_bytes.clear();
         self.image_ids.clear();
         self.pending_uploads.clear();
     }
@@ -180,6 +211,8 @@ impl<'a> GraphImageManager<'a> {
         if let Some(upload_data) = image.take_upload_data() {
             self.pending_uploads.push(upload_data);
         }
+        self.graph_row_bytes
+            .insert(commit_hash.clone(), graph_row_image.bytes);
         self.prepared_image_map.insert(commit_hash.clone(), image);
         self.image_ids.insert(image_id);
     }
@@ -197,6 +230,7 @@ impl<'a> GraphImageManager<'a> {
 
     pub fn invalidate(&mut self, commit_hash: &CommitHash) {
         self.prepared_image_map.remove(commit_hash);
+        self.graph_row_bytes.remove(commit_hash);
         self.image_ids
             .remove(&graph_image_id(self.session_nonce, commit_hash, true));
         self.image_ids

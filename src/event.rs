@@ -844,6 +844,10 @@ impl Receiver {
     ) -> Result<AppEvent, mpsc::RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
     }
+
+    fn try_recv(&self) -> Result<AppEvent, mpsc::TryRecvError> {
+        self.rx.try_recv()
+    }
 }
 
 impl Debug for Receiver {
@@ -1016,6 +1020,14 @@ impl EventController {
         timeout: std::time::Duration,
     ) -> Result<AppEvent, mpsc::RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
+    }
+
+    /// Non-blocking pull from the event queue. Used by the main loop to
+    /// drain backed-up input (held-down arrow keys, fast trackpad scroll)
+    /// in one frame so the cursor stops exactly when the user lets go,
+    /// instead of catching up on a still-full queue several frames later.
+    pub fn try_recv(&self) -> Result<AppEvent, mpsc::TryRecvError> {
+        self.rx.try_recv()
     }
 }
 

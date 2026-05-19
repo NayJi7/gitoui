@@ -47,7 +47,7 @@ diagnostic at boot.
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
 | `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
 | `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |
-| `initial_load_count`| usize / `1000` (clamped `10..99_999`)     | Number of commits loaded on startup. Editable from the Configuration view (`p`) as a text input, takes effect on the **next launch**. |
+| `initial_load_count`| usize / `500` (clamped `10..99_999`)     | Number of commits loaded on startup. Editable from the Configuration view (`p`) as a text input, takes effect on the **next launch**. |
 | `load_more_count`   | usize / `200`                             | Step size each time you press `LoadMore` (`]`). |
 
 ## `[core.search]`
@@ -71,6 +71,14 @@ back to disk when the user flips them.
 | `diff_mode`     | `enhanced` / `unified` (default `enhanced`) | Side-by-side vs unified diff view. |
 | `conflict_view` | `two-pane` / `inline` (default `two-pane`)  | Conflict editor layout. |
 | `rebase_view`   | `inline` / `compact` / `split` (default `inline`) | Interactive-rebase plan layout. |
+
+## `[ui.list]`
+
+| Key             | Type / default | Effect                                                                                                                                                                                          |
+|-----------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `graph_enabled` | bool / `true`  | Render the inline commit-graph image column. Set to `false` to skip all SVG/PNG generation and terminal-image uploads, for near-instant scrolling on huge repos (rust-lang/rust, linux kernel). |
+
+When the native graph is wider than ~40% of the panel (heavy multi-branch repos), the column is capped to that 40% and the visible lane window slides with `←` / `→` from the commit list (Kitty terminals only — uses Kitty's source-rect crop).
 
 ## `[graph.color]` and `[color]`
 

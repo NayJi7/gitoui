@@ -240,7 +240,7 @@ pub struct CoreOptionConfig {
     pub auto_refresh: bool,
     #[default = 500]
     pub auto_refresh_debounce_ms: u64,
-    #[default = 1000]
+    #[default = 500]
     pub initial_load_count: usize,
     #[default = 200]
     pub load_more_count: usize,
@@ -546,6 +546,16 @@ pub struct UiListConfig {
     #[garde(range(min = 0))]
     #[default = 20]
     pub name_width: u16,
+    /// Whether to render the inline commit graph image (Kitty/iTerm2/Sixel)
+    /// at all. Disabling it removes the lane image pipeline entirely —
+    /// no SVG/PNG generation, no terminal-image protocol uploads — which
+    /// makes scrolling near-instant on huge repos (rust-lang/rust, linux,
+    /// …) at the cost of losing the visual branch view. The `Marker`
+    /// column still draws the per-commit `│` accent so the active branch
+    /// color is still legible.
+    #[garde(skip)]
+    #[default = true]
+    pub graph_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -926,6 +936,12 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
         core.option.github_avatars,
     );
 
+    set_nested_bool(
+        &mut doc,
+        &["ui", "list", "graph_enabled"],
+        ui.list.graph_enabled,
+    );
+
     let toml_string =
         toml::to_string_pretty(&doc).map_err(|e| format!("Failed to serialize config: {}", e))?;
     std::fs::write(&path, toml_string).map_err(|e| format!("Failed to write config: {}", e))?;
@@ -1282,7 +1298,7 @@ mod tests {
         let cfg = Config::default();
 
         // Performance: lazy-load tunables.
-        assert_eq!(cfg.core.option.initial_load_count, 1000);
+        assert_eq!(cfg.core.option.initial_load_count, 500);
         assert_eq!(cfg.core.option.load_more_count, 200);
 
         // Auto-refresh on by default with anti-flicker debounce.

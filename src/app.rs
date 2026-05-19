@@ -251,7 +251,35 @@ pub struct App<'a> {
     /// during a session; the alternative would be spawning a
     /// `git remote -v` process on every footer render / keystroke.
     has_github_remote: bool,
+    /// Held-arrow / sustained-scroll burst tracking. When the user
+    /// keeps a navigation key down (or rolls the trackpad), the
+    /// terminal emits a steady stream of repeats; we accelerate the
+    /// per-event step once the burst has run for `NAV_BURST_ACCEL_AT`
+    /// so reaching the far end of a 300k-commit list doesn't take all
+    /// day. Reset as soon as the gap between two nav events exceeds
+    /// `NAV_BURST_GAP`, so a press-pause-press sequence stays slow.
+    nav_burst: Option<NavBurst>,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct NavBurst {
+    started_at: std::time::Instant,
+    last_at: std::time::Instant,
+}
+
+/// Maximum gap between two nav events that still counts as the same
+/// "hold-down" burst. ~200ms covers worst-case terminal autorepeat
+/// without bleeding into deliberate separate presses.
+const NAV_BURST_GAP: std::time::Duration = std::time::Duration::from_millis(200);
+/// Two-tier acceleration ramp so a sustained hold ramps up gently
+/// instead of jumping straight to a teleport. First tier kicks in
+/// quickly so the user feels the speed change while they're still
+/// holding; second tier covers "I really need to traverse the whole
+/// history" cases without sending the cursor into orbit.
+const NAV_BURST_TIER_1_AT: std::time::Duration = std::time::Duration::from_millis(800);
+const NAV_BURST_TIER_1_MULT: usize = 2;
+const NAV_BURST_TIER_2_AT: std::time::Duration = std::time::Duration::from_secs(3);
+const NAV_BURST_TIER_2_MULT: usize = 4;
 
 /// One step of the PR-originated drilldown stack, the view kind
 /// to restore when the user backs out one level.
@@ -474,6 +502,7 @@ impl<'a> App<'a> {
                 }
             },
             has_github_remote: crate::github::RepoCoords::from_repo(repository.path()).is_some(),
+            nav_burst: None,
         };
 
         if let Some(context) = refresh_view_context {
@@ -503,7 +532,7 @@ impl App<'_> {
         self.clear_terminal(terminal)?;
 
         let mut needs_draw = true;
-        loop {
+        'main_loop: loop {
             // Clear notifications after 3 seconds
             if let Some(timestamp) = self.app_status.notification_timestamp {
                 if timestamp.elapsed() >= std::time::Duration::from_secs(2) {
@@ -629,7 +658,19 @@ impl App<'_> {
             };
 
             let Some(event) = event else { continue };
-            match event {
+            // Coalesce: dispatch this event, then keep draining the
+            // queue (try_recv, non-blocking) without yielding to
+            // render until it's empty. Held-down arrows and fast
+            // trackpad scrolls otherwise back up dozens of events,
+            // which the loop would re-render between, the scroll
+            // would visibly keep moving for a second or two after
+            // the user let go. Coalescing makes the cursor stop on
+            // the exact event the user emitted last. Cap at 1024 per
+            // cycle so a runaway producer can't starve render.
+            let mut current_event = event;
+            let mut drained = 0usize;
+            'dispatch: loop {
+                match current_event {
                 AppEvent::Key(key) => {
                     // The change-directory overlay hijacks every key while
                     // open, typing extends the input, Esc cancels, Enter
@@ -653,7 +694,7 @@ impl App<'_> {
                             // the next prepare_graph_uploads cycle.
                             self.view.clear_graph_images();
                             self.clear_terminal(terminal)?;
-                            continue;
+                            continue 'main_loop;
                         }
                         if let Some(target) = target_path {
                             // Reject invalid targets *before* doing the cd
@@ -669,7 +710,7 @@ impl App<'_> {
                                     "directory does not exist".to_string(),
                                     std::time::Instant::now(),
                                 ));
-                                continue;
+                                continue 'main_loop;
                             }
                             let repo_root = match crate::git::find_repo_root(&target) {
                                 Some(r) => r,
@@ -678,7 +719,7 @@ impl App<'_> {
                                         "not a git directory".to_string(),
                                         std::time::Instant::now(),
                                     ));
-                                    continue;
+                                    continue 'main_loop;
                                 }
                             };
                             match std::env::set_current_dir(&repo_root) {
@@ -725,7 +766,7 @@ impl App<'_> {
                                 }
                             }
                         }
-                        continue;
+                        continue 'main_loop;
                     }
 
                     match self.app_status.status_line {
@@ -749,7 +790,7 @@ impl App<'_> {
                         StatusLine::NotificationError(_) => {
                             // Clear message and cancel key input
                             self.clear_status_line();
-                            continue;
+                            continue 'main_loop;
                         }
                     }
 
@@ -759,7 +800,7 @@ impl App<'_> {
                         if !self.app_status.numeric_prefix.is_empty() {
                             // Clear numeric prefix and cancel the event
                             self.app_status.numeric_prefix.clear();
-                            continue;
+                            continue 'main_loop;
                         }
                     }
 
@@ -1703,6 +1744,15 @@ impl App<'_> {
                     }
                 }
             }
+                drained += 1;
+                if drained >= 1024 {
+                    break 'dispatch;
+                }
+                match self.ec.try_recv() {
+                    Ok(next) => current_event = next,
+                    Err(_) => break 'dispatch,
+                }
+            }
         }
     }
 
@@ -1850,9 +1900,61 @@ impl App<'_> {
         key: KeyEvent,
         _terminal: &mut DefaultTerminal,
     ) -> Result<(), std::io::Error> {
+        let event_with_count = self.apply_nav_burst_acceleration(event_with_count);
         self.view.handle_event(event_with_count, key);
         self.apply_live_config_theme();
         Ok(())
+    }
+
+    /// Detect a sustained navigation hold and multiply the step once
+    /// the burst has run for `NAV_BURST_ACCEL_AT`. Non-nav events
+    /// reset the burst so a key release stops the acceleration cleanly
+    /// (paired with the per-cycle event drain in `run()` which makes
+    /// the actual stop instant — together they kill the "scroll keeps
+    /// going for a few seconds after I let go" complaint).
+    fn apply_nav_burst_acceleration(
+        &mut self,
+        ewc: UserEventWithCount,
+    ) -> UserEventWithCount {
+        use crate::event::UserEvent;
+        let is_nav = matches!(
+            ewc.event,
+            UserEvent::NavigateUp
+                | UserEvent::NavigateDown
+                | UserEvent::SelectUp
+                | UserEvent::SelectDown
+                | UserEvent::ScrollUp
+                | UserEvent::ScrollDown
+        );
+        if !is_nav {
+            self.nav_burst = None;
+            return ewc;
+        }
+        let now = std::time::Instant::now();
+        let burst = match self.nav_burst {
+            Some(b) if now.saturating_duration_since(b.last_at) < NAV_BURST_GAP => NavBurst {
+                started_at: b.started_at,
+                last_at: now,
+            },
+            _ => NavBurst {
+                started_at: now,
+                last_at: now,
+            },
+        };
+        self.nav_burst = Some(burst);
+        let elapsed = now.saturating_duration_since(burst.started_at);
+        let mult = if elapsed >= NAV_BURST_TIER_2_AT {
+            NAV_BURST_TIER_2_MULT
+        } else if elapsed >= NAV_BURST_TIER_1_AT {
+            NAV_BURST_TIER_1_MULT
+        } else {
+            1
+        };
+        if mult == 1 {
+            ewc
+        } else {
+            crate::event::UserEventWithCount::new(ewc.event, ewc.count.saturating_mul(mult))
+        }
     }
 
     /// Re-read the Config view's current theme and push it into the
@@ -4983,6 +5085,13 @@ impl<'a> App<'a> {
             let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
             let mouse_changed = self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
             let auth_changed = github_auth_state != self.ctx.github_auth_state;
+            // Toggling graph_enabled flips the entire layout (the Graph
+            // column appears/disappears and the message column expands).
+            // When it goes true → false we also evict any still-painted
+            // Kitty image placement, otherwise the prior frame's lanes
+            // stay on screen until the user scrolls past them.
+            let graph_enabled_changed =
+                self.ctx.ui_config.list.graph_enabled != ui.list.graph_enabled;
             // Two settings can't be applied without rebuilding the
             // entire app:
             //  - `order` (chrono / topo) gates `git log` itself in
@@ -5072,8 +5181,22 @@ impl<'a> App<'a> {
             // Kitty's stored graph images so the next `a=T` re-upload
             // installs the freshly-baked pixels. Without this delete,
             // some Kitty setups keep displaying the previous bake.
-            if theme_changed || graph_style_changed || graph_width_changed {
+            // Toggling graph_enabled also needs the cleanup so disabling
+            // the graph evicts the still-painted placements (and so
+            // re-enabling forces a fresh upload at the new column width).
+            if theme_changed || graph_style_changed || graph_width_changed || graph_enabled_changed
+            {
                 let _ = self.cleanup_graph_images();
+            }
+            // The per-row graph cache (`graph_render_state` on
+            // `CommitListState`) lives on the list view, NOT on ctx —
+            // make sure a graph_enabled toggle invalidates it too,
+            // otherwise the next frame's cache-hit path skips re-paint
+            // and the disable / re-enable transition shows blank lanes.
+            if graph_enabled_changed {
+                if let View::List(ref mut list_view) = self.view {
+                    list_view.clear_graph_images();
+                }
             }
 
             // `order` / `protocol` need a full restart, the smooth

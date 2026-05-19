@@ -44,12 +44,15 @@ fn decide_cell_width_type_from(
             if double_required_width <= term_width {
                 return Ok(CellWidthType::Double);
             }
-            let single_required_width = single_image_cell_width + 2;
-            if single_required_width <= term_width {
-                return Ok(CellWidthType::Single);
-            }
-            let msg = format!("Terminal too small ({term_width}x{term_height} characters). The current graph needs at least {single_required_width} columns to display properly.");
-            Err(msg.into())
+            // Even when Single doesn't strictly "fit", we still pick it
+            // and let the renderer cap the graph column to ~40 % of the
+            // panel (see `content_column_widths` in
+            // `widget/commit_list.rs`). The overflowing lanes get
+            // truncated at draw time, which is far friendlier than a
+            // hard bail on huge multi-branch repos
+            // (rust-lang/rust, linux, etc.) opened in a normal-sized
+            // terminal.
+            Ok(CellWidthType::Single)
         }
     }
 }
