@@ -40,7 +40,7 @@ impl GraphPreview {
             m0.commit_hash.clone(),
         ];
 
-        let mut commit_map: FxHashMap<CommitHash, Commit> = FxHashMap::default();
+        let mut commit_map: FxHashMap<CommitHash, std::sync::Arc<Commit>> = FxHashMap::default();
         let mut parents_map: FxHashMap<CommitHash, Vec<CommitHash>> = FxHashMap::default();
         let mut children_map: FxHashMap<CommitHash, Vec<CommitHash>> = FxHashMap::default();
 
@@ -54,7 +54,7 @@ impl GraphPreview {
             }
         }
         for c in [m1, f1, m0] {
-            commit_map.insert(c.commit_hash.clone(), c);
+            commit_map.insert(c.commit_hash.clone(), std::sync::Arc::new(c));
         }
         for hash in &commit_hashes {
             parents_map.entry(hash.clone()).or_default();

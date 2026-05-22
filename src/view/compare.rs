@@ -281,16 +281,17 @@ impl<'a> CompareView<'a> {
             return;
         }
 
-        // Enter activates whichever cursor was used most recently.
+        // Always forward Confirm to the diff pane. The pane's own
+        // handler checks `focused_button` and only fires when a
+        // button is actually focused; if no button is focused it's
+        // a no-op. Gating this on `active_cursor == Button` (the
+        // previous behaviour) meant clicking "show more" with the
+        // mouse never reached the handler, because mouse focus
+        // doesn't transition `active_cursor`.
         if matches!(event, UserEvent::Confirm) {
-            if self.active_cursor == ActiveCursor::Button {
-                if let Some(pane) = &mut self.diff_pane {
-                    pane.handle_event(event_with_count, key);
-                }
+            if let Some(pane) = &mut self.diff_pane {
+                pane.handle_event(event_with_count, key);
             }
-            // File-cursor Enter is a no-op for v1: the diff is already
-            // displayed in the right pane. (Future: open the file in
-            // fullscreen DiffView for more vertical space.)
             return;
         }
 

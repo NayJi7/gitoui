@@ -559,7 +559,6 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                     "Mark / unmark a commit for 2-commit compare",
                 ),
                 sg(kb, UserEvent::Refresh, "Refetch from remote"),
-                sg(kb, UserEvent::LoadMore, "Load older commits"),
                 sg(kb, UserEvent::Push, "Push current branch"),
                 sg(kb, UserEvent::Pull, "Pull current branch"),
                 sg(

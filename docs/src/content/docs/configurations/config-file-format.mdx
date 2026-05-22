@@ -47,8 +47,7 @@ diagnostic at boot.
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
 | `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
 | `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |
-| `initial_load_count`| usize / `500` (clamped `10..99_999`)     | Number of commits loaded on startup. Editable from the Configuration view (`p`) as a text input, takes effect on the **next launch**. |
-| `load_more_count`   | usize / `200`                             | Step size each time you press `LoadMore` (`]`). |
+| `huge_repo_threshold` | usize / `50_000`                        | Commit-count cap above which gitoui auto-disables the graph column at startup. On very large repos (kernel, rust-lang/rust, chromium, ...) the inline-image pipeline can struggle to keep up: lag, freezes, render glitches. When the live `git rev-list --count HEAD` exceeds this value, `[ui.list] graph_enabled` is forced to `false` at launch and the Configuration view's `Graph Enabled` row shows a red warning in its Details panel. The user can still toggle the graph back on from that view. Set to `0` to disable the auto-disable entirely. |
 
 ## `[core.search]`
 
@@ -79,6 +78,12 @@ back to disk when the user flips them.
 | `graph_enabled` | bool / `true`  | Render the inline commit-graph image column. Set to `false` to skip all SVG/PNG generation and terminal-image uploads, for near-instant scrolling on huge repos (rust-lang/rust, linux kernel). |
 
 When the native graph is wider than ~40% of the panel (heavy multi-branch repos), the column is capped to that 40% and the visible lane window slides with `←` / `→` from the commit list (Kitty terminals only — uses Kitty's source-rect crop).
+
+## `[ui.refs]`
+
+| Key             | Type / default | Effect                                                                                                                                                                          |
+|-----------------|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `width`         | u16 / `42`     | Width (in cells) of the refs side-panel that opens with `Tab`. Minimum `1`. Bump if you have long branch names like `origin/dependabot/github_actions/...` and want them visible without scrolling. |
 
 ## `[graph.color]` and `[color]`
 

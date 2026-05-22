@@ -69,9 +69,6 @@ pub enum InitialSelection {
 pub enum Ret {
     Quit,
     Refresh(RefreshRequest),
-    /// Like `Refresh`, but the outer `run()` loop should bump the loaded commit
-    /// count by `core.option.load_more_count` before reloading the repository.
-    LoadMore(RefreshRequest),
 }
 
 #[derive(Debug)]
@@ -97,6 +94,10 @@ impl Clone for AppContext {
             graph_config: self.graph_config.clone(),
             current_branch_remote_state: self.current_branch_remote_state,
             repo_path: self.repo_path.clone(),
+            graph_huge_repo_warning: self.graph_huge_repo_warning,
+            bg_full_load_in_progress: std::sync::atomic::AtomicBool::new(
+                self.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire),
+            ),
         }
     }
 }
@@ -146,6 +147,23 @@ pub struct AppContext {
     /// any other repo-state probes) without having to thread the path
     /// through every render call.
     pub repo_path: std::path::PathBuf,
+    /// Set to true when `lib::run` detected this is a repo too large
+    /// for the graph column to render comfortably (commit count >
+    /// HUGE_REPO_THRESHOLD). At app init we default `graph_enabled`
+    /// to false in that case, and the Config view prints a red
+    /// warning next to the toggle so the user knows what they're
+    /// signing up for if they flip it back on. Re-enabling is NOT
+    /// blocked - the user can opt in and accept the freezes /
+    /// missing rows that come with it.
+    pub graph_huge_repo_warning: bool,
+    /// True between app launch and the moment the background
+    /// streaming thread finishes shipping batches. Drives the
+    /// header logo animation. AtomicBool (not plain bool) because
+    /// the AppContext lives in `Rc<AppContext>` shared with the
+    /// active view - `Rc::get_mut` returns None while any view
+    /// holds a clone, so we can't mutate the inner directly.
+    /// Atomic interior mutability sidesteps that.
+    pub bg_full_load_in_progress: std::sync::atomic::AtomicBool,
 }
 
 impl Default for AppContext {
@@ -171,6 +189,8 @@ impl Default for AppContext {
             graph_config: crate::config::GraphConfig::default(),
             current_branch_remote_state: None,
             repo_path: std::path::PathBuf::new(),
+            graph_huge_repo_warning: false,
+            bg_full_load_in_progress: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -181,7 +201,16 @@ struct AppStatus {
     numeric_prefix: String,
     view_area: Rect,
     notification_timestamp: Option<std::time::Instant>,
-    spinner_active: bool,
+    /// Current frame of the header logo animation. The animation
+    /// itself is driven SOLELY by `AppContext::bg_full_load_in_progress`
+    /// - this counter is incremented on each animation tick while bg
+    /// loading is in flight, and stays put (last frame visible)
+    /// otherwise. Nothing else animates the logo; there used to be a
+    /// generic `spinner_active` flag toggled by `start_spinner` /
+    /// `stop_spinner` during git operations (fetch, push, fast-forward,
+    /// `cd`, ...) and the logo would animate for any of those. That
+    /// coupling was removed: spinning the logo is reserved for the
+    /// one operation where the wait is unbounded and worth signalling.
     spinner_frame: usize,
     /// Wall-clock of the last auto-refresh (FilesystemChanged → view.refresh()).
     /// Used to throttle bursts of refreshes, the watcher already debounces and
@@ -189,6 +218,15 @@ struct AppStatus {
     /// couple seconds (e.g. checkout immediately followed by a fetch in
     /// another shell) still shouldn't double-flicker the screen.
     last_auto_refresh: Option<std::time::Instant>,
+    /// Wall-clock of the last spinner-frame advance. Used to drive
+    /// the header logo animation off elapsed time rather than off the
+    /// `recv_timeout` Timeout branch - mouse movement floods the
+    /// channel with events, every `recv_timeout` then returns
+    /// `Ok(ev)` immediately and the Timeout branch never fires; with
+    /// the old per-Timeout tick the animation stuck on whatever frame
+    /// was current when the user grabbed the mouse. Now we check
+    /// elapsed time on every iteration of the main loop instead.
+    last_spinner_tick: Option<std::time::Instant>,
 }
 
 #[derive(Debug)]
@@ -199,6 +237,29 @@ pub struct App<'a> {
     ctx: Rc<AppContext>,
     ec: &'a EventController,
     file_stream: Vec<crate::git::diff::DiffLine>,
+    /// Bg streaming `AppendCommits` batches that arrived while the
+    /// active view wasn't `View::List` (Detail/Diff/Config/PR/etc.).
+    /// Held here until the user returns to the list, at which point
+    /// we drain it into the now-visible `CommitListState`. Without
+    /// this buffering the user would silently lose new commits
+    /// every time they opened anything else mid-streaming and feel
+    /// "bloqué à certains commits" when scrolling later.
+    pending_append_batches: Vec<Vec<crate::widget::commit_list::CommitInfo>>,
+    /// Working-tree status fingerprint + last poll timestamp. The .git/
+    /// watcher only fires on `.git/` changes, so a bare file edit in
+    /// the working tree (mtime change, no `git add`) wouldn't trigger
+    /// an Uncommitted view refresh. We poll `git status --porcelain`
+    /// every ~2s while the Uncommitted view is active and fire a
+    /// RefreshUncommitted only when the output actually differs.
+    last_status_poll: Option<std::time::Instant>,
+    last_status_fingerprint: Option<String>,
+    /// Set by the FilesystemChanged handler when the event arrives
+    /// during a throttle / dialog / input window and can't fire
+    /// view.refresh() immediately. The main loop drains it back to
+    /// false as soon as the blocking condition clears, ensuring the
+    /// external git change is eventually picked up instead of
+    /// silently dropped.
+    deferred_auto_refresh: bool,
     brand_logo: Option<crate::protocol::PreparedImage>,
     brand_wordmark: Option<crate::protocol::PreparedImage>,
     brand_pending_uploads: Vec<String>,
@@ -270,6 +331,13 @@ struct NavBurst {
 /// Maximum gap between two nav events that still counts as the same
 /// "hold-down" burst. ~200ms covers worst-case terminal autorepeat
 /// without bleeding into deliberate separate presses.
+/// Minimum interval between two consecutive auto-refreshes triggered
+/// by the filesystem watcher. Events that arrive inside this window
+/// after the previous refresh aren't dropped - they flip the
+/// `deferred_auto_refresh` flag and a tick at the top of the main
+/// loop fires the refresh once the window expires.
+const AUTO_REFRESH_THROTTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
 const NAV_BURST_GAP: std::time::Duration = std::time::Duration::from_millis(200);
 /// Two-tier acceleration ramp so a sustained hold ramps up gently
 /// instead of jumping straight to a teleport. First tier kicks in
@@ -314,9 +382,13 @@ impl<'a> App<'a> {
             .iter()
             .enumerate()
             .map(|(i, commit)| {
-                let refs = repository.refs(&commit.commit_hash);
+                let refs: Vec<crate::git::Ref> = repository
+                    .refs(&commit.commit_hash)
+                    .into_iter()
+                    .cloned()
+                    .collect();
                 for r in &refs {
-                    ref_name_to_commit_index_map.insert(r.name(), i);
+                    ref_name_to_commit_index_map.insert(r.name().to_string(), i);
                 }
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
                 let color_index = if graph_style == GraphStyle::Smooth {
@@ -329,6 +401,9 @@ impl<'a> App<'a> {
                     pos_x
                 };
                 let graph_color = graph_color_set.get(color_index).to_ratatui_color();
+                let commit_arc = repository
+                    .commit_arc(&commit.commit_hash)
+                    .expect("commit must exist in Repository");
                 if commit.commit_type == crate::git::CommitType::Uncommitted {
                     let changes = repository.uncommitted_changes().unwrap();
                     let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
@@ -341,7 +416,7 @@ impl<'a> App<'a> {
                     // line, keeps the marker `│` and the message text visually
                     // consistent with the graph rendering.
                     CommitInfo::new_uncommitted(
-                        commit,
+                        commit_arc,
                         ratatui::style::Color::Rgb(0x80, 0x80, 0x80),
                         changes.staged.len(),
                         changes.unstaged.len(),
@@ -350,7 +425,7 @@ impl<'a> App<'a> {
                         last_modified,
                     )
                 } else {
-                    CommitInfo::new(commit, refs, graph_color)
+                    CommitInfo::new(commit_arc, refs, graph_color)
                 }
             })
             .collect();
@@ -476,6 +551,10 @@ impl<'a> App<'a> {
             ctx,
             ec,
             file_stream: Vec::new(),
+            pending_append_batches: Vec::new(),
+            last_status_poll: None,
+            last_status_fingerprint: None,
+            deferred_auto_refresh: false,
             brand_logo,
             brand_wordmark,
             brand_pending_uploads,
@@ -527,10 +606,16 @@ impl<'a> App<'a> {
 
 impl App<'_> {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<Ret, std::io::Error> {
-        // Clearing the screen here, as it should be cleared upon refresh
-        self.clear_image(Some(terminal))?;
-        self.clear_terminal(terminal)?;
-
+        // No proactive `clear_image` / `clear_terminal` here. Those
+        // emitted Kitty delete-all escapes and full-screen blanks
+        // at EVERY entry into the App, including the silent swap
+        // path where the bg thread shipped a full-history
+        // Repository back: the user saw "3-4 s of load, then the
+        // screen wiped, then the app was unusable". Ratatui's
+        // per-frame diff handles the redraw naturally; individual
+        // view transitions still call clear_image / clear_terminal
+        // themselves at the right moments (CloseDetail, OpenConfig,
+        // etc.).
         let mut needs_draw = true;
         'main_loop: loop {
             // Clear notifications after 3 seconds
@@ -556,7 +641,55 @@ impl App<'_> {
                 }
             }
 
+            // Drain a pending auto-refresh deferred from an earlier
+            // FilesystemChanged that arrived inside the throttle
+            // window / during a dialog / during text input. Once the
+            // window expires and no input is blocking, fire it.
+            if self.deferred_auto_refresh {
+                let is_dialog = matches!(self.view, View::Dialog(_));
+                let is_input =
+                    matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+                let is_view_input = self.view.is_input_active();
+                let throttled = self
+                    .app_status
+                    .last_auto_refresh
+                    .map(|t| t.elapsed() < AUTO_REFRESH_THROTTLE)
+                    .unwrap_or(false);
+                if !is_dialog && !is_input && !is_view_input && !throttled {
+                    self.deferred_auto_refresh = false;
+                    self.app_status.last_auto_refresh = Some(std::time::Instant::now());
+                    crate::glog_info!("watcher: draining deferred refresh");
+                    self.view.refresh();
+                }
+            }
+
+            // Working-tree polling: the .git/ watcher doesn't fire for
+            // raw file edits (mtime change without `git add`), so the
+            // Uncommitted view would otherwise stay stale until manual
+            // `R`. Poll `git status --porcelain` every 2 s when that
+            // view is active, compare fingerprint vs last, fire a
+            // RefreshUncommitted only on change. Idle-cheap: no work
+            // outside the Uncommitted view.
+            if matches!(self.view, View::Uncommitted(_))
+                && self
+                    .last_status_poll
+                    .map(|t| t.elapsed() >= std::time::Duration::from_secs(2))
+                    .unwrap_or(true)
+            {
+                self.last_status_poll = Some(std::time::Instant::now());
+                let new_fp = self.poll_working_tree_fingerprint();
+                if new_fp != self.last_status_fingerprint {
+                    self.last_status_fingerprint = new_fp;
+                    self.ec.sender().send(AppEvent::RefreshUncommitted);
+                }
+            }
+
             if needs_draw {
+                // Catch any queued bg-stream batches that arrived
+                // while a non-list view was active: they'll only
+                // become visible to the user if we extend the list
+                // state BEFORE the next render computes its layout.
+                self.drain_pending_append_batches();
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
                 terminal.draw(|f| self.render(f))?;
@@ -602,14 +735,56 @@ impl App<'_> {
                     }
                 }
             }
+            // Advance the spinner animation on EVERY iteration of
+            // the main loop when bg loading is in flight, based on
+            // wall-clock elapsed time. We used to advance the frame
+            // counter only in the `Err(Timeout)` branch of
+            // `recv_timeout` below, but mouse movement floods the
+            // channel with events: every `recv_timeout` then returns
+            // `Ok(ev)` immediately, the Timeout branch never fires,
+            // and the animation gets stuck. Driving it off elapsed
+            // time decouples the cadence from event volume.
+            if self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire) {
+                const FRAME_INTERVAL_MS: u128 = 50;
+                let should_tick = self
+                    .app_status
+                    .last_spinner_tick
+                    .map(|t| t.elapsed().as_millis() >= FRAME_INTERVAL_MS)
+                    .unwrap_or(true);
+                if should_tick {
+                    let total = if self.spinner_frames.is_empty() {
+                        10
+                    } else {
+                        crate::brand::SPINNER_FRAME_COUNT
+                    };
+                    self.app_status.spinner_frame =
+                        (self.app_status.spinner_frame + 1) % total;
+                    self.app_status.last_spinner_tick = Some(std::time::Instant::now());
+                    needs_draw = true;
+                }
+            } else {
+                // Bg done - reset the tick clock so a new animation
+                // starts from frame 0 next time (defensive; bg only
+                // runs once per session today).
+                self.app_status.last_spinner_tick = None;
+            }
             // When an animation is in flight (spinner, notification countdown,
             // file streaming, or debounce window) we need to wake up on a
             // regular cadence even with no user input. Otherwise we block
             // indefinitely, no spurious 50 ms wakeups while browsing.
-            let animated = self.app_status.spinner_active
+            let animated = self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire)
                 || self.app_status.notification_timestamp.is_some()
                 || !self.file_stream.is_empty()
-                || (self.dir_input.active && self.dir_input.text_dirty_since.is_some());
+                || (self.dir_input.active && self.dir_input.text_dirty_since.is_some())
+                // Uncommitted view polls `git status --porcelain`
+                // periodically to pick up working-tree edits the
+                // `.git/` watcher can't see; we need the timeout-based
+                // recv to wake us up on cadence even with no events.
+                || matches!(self.view, View::Uncommitted(_))
+                // Deferred auto-refresh waiting for its throttle
+                // window to expire needs the loop to tick so the
+                // drain check at the top runs.
+                || self.deferred_auto_refresh;
 
             let event = if animated {
                 match self.ec.recv_timeout(std::time::Duration::from_millis(50)) {
@@ -634,18 +809,16 @@ impl App<'_> {
                         } else {
                             false
                         };
-                        if self.app_status.spinner_active {
-                            let total = if self.spinner_frames.is_empty() {
-                                10
-                            } else {
-                                crate::brand::SPINNER_FRAME_COUNT
-                            };
-                            self.app_status.spinner_frame =
-                                (self.app_status.spinner_frame + 1) % total;
-                            needs_draw = true;
-                        } else {
-                            needs_draw = notif_expiring || streaming;
-                        }
+                        // Spinner frame is now advanced at the top
+                        // of the loop based on elapsed time; nothing
+                        // to do here besides bubble up other
+                        // animation-driven redraw triggers. If bg
+                        // loading is still in flight, the next iter
+                        // will tick on the elapsed-time check.
+                        needs_draw = needs_draw
+                            || notif_expiring
+                            || streaming
+                            || self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire);
                         None
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -727,7 +900,6 @@ impl App<'_> {
                                     self.dir_recents =
                                         crate::recents::push(&repo_root, &self.dir_recents);
                                     self.dir_input.close();
-                                    self.app_status.spinner_active = false;
                                     let _ = ratatui::crossterm::execute!(
                                         std::io::stdout(),
                                         ratatui::crossterm::cursor::Show
@@ -753,8 +925,6 @@ impl App<'_> {
                                         .send(AppEvent::NotifyError(format!("cd failed: {}", e)));
                                     self.dir_input.close();
                                     self.dir_dropdown_area = None;
-                                    self.app_status.spinner_active = false;
-                                    self.header_logo_last = None;
                                     let _ = ratatui::crossterm::execute!(
                                         std::io::stdout(),
                                         ratatui::crossterm::cursor::Show
@@ -872,9 +1042,6 @@ impl App<'_> {
                             // header G-logo animates and the footer braille
                             // ticks at the same cadence as the Pull / Fetch
                             // background tasks.
-                            self.app_status.spinner_active = true;
-                            self.app_status.spinner_frame = 0;
-                            self.header_logo_last = None;
                             self.app_status.numeric_prefix.clear();
                             // Hide the real terminal cursor, we draw a fake
                             // one into the buffer so image-protocol writes
@@ -1122,40 +1289,99 @@ impl App<'_> {
                     let request = RefreshRequest { context };
                     return Ok(Ret::Refresh(request));
                 }
-                AppEvent::LoadMoreCommits(context) => {
-                    self.stop_spinner();
-                    self.cleanup_graph_images()?;
-                    let request = RefreshRequest { context };
-                    return Ok(Ret::LoadMore(request));
-                }
                 AppEvent::FilesystemChanged => {
-                    // Auto-refresh from external git activity. Three guards:
-                    // 1. Don't disrupt user input, skip while a dialog or any
-                    //    text-input (commit message, search bar, …) is active.
-                    // 2. Throttle to at most one refresh every 2 s. The watcher
-                    //    already debounces + fingerprint-compares, but a heavy
-                    //    burst of legitimate changes shouldn't trigger
+                    // Auto-refresh from external git activity. Guards:
+                    // 1. Don't disrupt user input, defer while a dialog
+                    //    or any text-input (commit message, search bar,
+                    //    ...) is active.
+                    // 2. Throttle to at most one refresh every 2 s. The
+                    //    watcher already debounces + fingerprint-compares,
+                    //    but a burst of changes shouldn't trigger
                     //    repeated terminal redraws within a few seconds.
-                    // 3. Don't refresh if a spinner is active, gitoui itself
-                    //    is currently running a git command, the post-action
-                    //    refresh path will handle the UI update.
-                    const THROTTLE: std::time::Duration = std::time::Duration::from_secs(2);
+                    //
+                    // CRITICAL change vs. prior behaviour: throttled
+                    // events used to be SILENTLY DROPPED. That left
+                    // the user with a stale UI when they committed in
+                    // another shell soon after launch (the startup
+                    // throttle seed was still active). We now flip a
+                    // `deferred_auto_refresh` flag and a follow-up
+                    // tick in the main loop drains it once the throttle
+                    // window expires.
+                    crate::glog_info!("watcher: FilesystemChanged received");
                     let is_dialog = matches!(self.view, View::Dialog(_));
                     let is_input =
                         matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
                     let is_view_input = self.view.is_input_active();
-                    let is_spinning = self.app_status.spinner_active;
                     let throttled = self
                         .app_status
                         .last_auto_refresh
-                        .map(|t| t.elapsed() < THROTTLE)
+                        .map(|t| t.elapsed() < AUTO_REFRESH_THROTTLE)
                         .unwrap_or(false);
-                    if !is_dialog && !is_input && !is_view_input && !is_spinning && !throttled {
+                    if is_dialog || is_input || is_view_input || throttled {
+                        crate::glog_info!(
+                            "watcher: deferring refresh (dialog={}, input={}, view_input={}, throttled={})",
+                            is_dialog,
+                            is_input,
+                            is_view_input,
+                            throttled
+                        );
+                        self.deferred_auto_refresh = true;
+                    } else {
                         self.app_status.last_auto_refresh = Some(std::time::Instant::now());
+                        self.deferred_auto_refresh = false;
+                        crate::glog_info!("watcher: firing view.refresh()");
                         self.view.refresh();
                     }
                 }
                 AppEvent::AvatarsUpdated => {}
+                AppEvent::BackgroundCacheReady { total_commits } => {
+                    // Bg streaming + cache write are done. Flip
+                    // the global flag so the header logo stops
+                    // animating and the 50 ms wakeup tick goes
+                    // back to event-driven idle. Without this,
+                    // the G keeps spinning forever even after
+                    // every commit is loaded.
+                    crate::glog_info!(
+                        "background work done: {} commits", total_commits
+                    );
+                    self.ctx
+                        .bg_full_load_in_progress
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
+                AppEvent::AppendCommits(batch) => {
+                    // Queue first, drain second: the batch might
+                    // arrive while the user has any non-List view
+                    // open (Detail / Diff / Config / PR / Issue / ...).
+                    // If we dropped these, the user would come back
+                    // to the list missing the commits that streamed
+                    // in during the detour, and feel randomly
+                    // "blocked" when scrolling past the live tip.
+                    self.pending_append_batches.push(batch);
+                    self.drain_pending_append_batches();
+                }
+                AppEvent::FullRepositoryReady(repo) => {
+                    // Swap mechanism dropped: rebuilding the App
+                    // with 332k CommitInfo entries inside a Refresh
+                    // iteration broke the event loop in ways we
+                    // couldn't diagnose at a distance (the user
+                    // reported the app frozen after the swap -
+                    // hover stopped tracking, arrows + `q` did
+                    // nothing). The repo here is discarded, the
+                    // session stays on the fg-loaded 500 commits.
+                    //
+                    // The bg thread still writes the disk cache
+                    // for future use; the proper streaming append
+                    // (CommitInfo<'a> → owned Arc<Commit>) is the
+                    // ongoing Phase 2+ refactor that'll consume
+                    // this without rebuilding the App.
+                    crate::glog_info!(
+                        "bg-loaded repository ready ({} commits) - dropped, swap disabled",
+                        repo.commit_count()
+                    );
+                    self.ctx
+                        .bg_full_load_in_progress
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
                 AppEvent::ClearStatusLine => {
                     self.clear_status_line();
                 }
@@ -1255,7 +1481,7 @@ impl App<'_> {
                     } else {
                         false
                     };
-                    if self.app_status.spinner_active {
+                    if self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire) {
                         let total = if self.spinner_frames.is_empty() {
                             10
                         } else {
@@ -1778,8 +2004,6 @@ impl App<'_> {
             KeyCode::Esc => {
                 self.dir_input.close();
                 self.dir_dropdown_area = None;
-                self.app_status.spinner_active = false;
-                self.header_logo_last = None;
                 let _ = ratatui::crossterm::execute!(
                     std::io::stdout(),
                     ratatui::crossterm::cursor::Show
@@ -2070,6 +2294,44 @@ impl App<'_> {
             self.ctx.image_protocol.delete_row(row)?;
         }
         Ok(())
+    }
+
+    /// Quick fingerprint of the working tree's git-tracked state:
+    /// the porcelain `git status --porcelain=v1 -z` output. Same
+    /// bytes -> same fingerprint -> no refresh. Different bytes
+    /// (file added/modified/staged/unstaged/deleted) -> refresh.
+    /// Cheaper than reparsing all the status records and lets the
+    /// expensive load happen only when something actually changed.
+    /// Returns None on git failure (we then keep the previous
+    /// fingerprint and skip the refresh).
+    fn poll_working_tree_fingerprint(&self) -> Option<String> {
+        let repo_path = self.ctx.repo_path.clone();
+        std::process::Command::new("git")
+            .arg("status")
+            .arg("--porcelain=v1")
+            .arg("-z")
+            .current_dir(&repo_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    }
+
+    /// Apply any queued `AppendCommits` batches to the active list
+    /// state. No-op if the active view isn't `View::List` - the
+    /// batches stay queued until the user returns to the list,
+    /// then drain in order on the next event-loop iteration.
+    fn drain_pending_append_batches(&mut self) {
+        if self.pending_append_batches.is_empty() {
+            return;
+        }
+        if let View::List(list_view) = &mut self.view {
+            if let Some(state) = list_view.commit_list_state_mut() {
+                for batch in self.pending_append_batches.drain(..) {
+                    state.extend_commits(batch);
+                }
+            }
+        }
     }
 
     fn cleanup_graph_images(&self) -> Result<(), std::io::Error> {
@@ -2486,7 +2748,7 @@ impl App<'_> {
         if has_brand {
             // Determine current logo "identity": None = static G, Some(idx) = animation frame.
             let logo_id: Option<usize> =
-                if self.app_status.spinner_active && !self.spinner_frames.is_empty() {
+                if self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire) && !self.spinner_frames.is_empty() {
                     Some(self.app_status.spinner_frame % self.spinner_frames.len())
                 } else {
                     None
@@ -3348,7 +3610,17 @@ impl<'a> App<'a> {
             }
         };
 
-        match DiffEntry::load_for_commit_range(&repo_path, &older, &newer, 3) {
+        // Load with a large context (`-U500`) up front so the
+        // "show more" buttons in the compare view actually have
+        // room to expand. The original `-U3` matched git's
+        // default but the compare-view diff pane only reveals
+        // lines already present in the parsed hunk, so a 3-line
+        // hunk could only ever show ±3 context regardless of how
+        // many times the user clicked "show more". The user saw
+        // the gap counter update visually but no new lines
+        // appeared. 500 lines per side covers virtually every
+        // realistic file diff while staying bounded.
+        match DiffEntry::load_for_commit_range(&repo_path, &older, &newer, 500) {
             Ok(diff_entries) if !diff_entries.is_empty() => {
                 // Open the dedicated 2-pane CompareView (file list on the
                 // left, full diff of the selected file on the right). The
@@ -4962,7 +5234,13 @@ impl<'a> App<'a> {
 
     fn close_refs(&mut self) {
         if let View::Refs(ref mut view) = self.view {
-            let commit_list_state = view.take_list_state();
+            let mut commit_list_state = view.take_list_state();
+            // Hover on refs intentionally suppressed avatar
+            // refresh to keep navigation snappy on huge repos;
+            // now that the user has settled on a row and is
+            // returning to the list, force a prep on the next
+            // render so the visible window's avatars catch up.
+            commit_list_state.invalidate_visible_avatars();
             self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
         }
     }
@@ -5105,7 +5383,19 @@ impl<'a> App<'a> {
             // actually takes effect.
             let order_changed = old_core.option.order != core.option.order;
             let protocol_changed = old_core.option.protocol != core.option.protocol;
-            let needs_refresh = order_changed || protocol_changed;
+            // Toggling `graph_enabled` swaps the calc_graph backend
+            // (real topology walk ↔ cheap calc_colors_only stub).
+            // Without a full refresh, the layout stored in the
+            // existing `Graph` value stays put and the renderer
+            // shows either the broken stub when going OFF→ON (red
+            // dots on lane 0, no edges) or stale lanes when going
+            // ON→OFF. A refresh re-runs the right calc and
+            // rebuilds the GraphImageManager so the column is
+            // either pristine real-graph or properly tinted
+            // colour-only.
+            let needs_refresh = order_changed
+                || protocol_changed
+                || graph_enabled_changed;
 
             self.view = view.take_before_view();
             let github_avatars = core.github_avatars();
@@ -5463,7 +5753,6 @@ impl<'a> App<'a> {
                                                 crate::recents::push(&repo_root, &self.dir_recents);
                                             self.dir_input.close();
                                             self.dir_dropdown_area = None;
-                                            self.app_status.spinner_active = false;
                                             let _ = ratatui::crossterm::execute!(
                                                 std::io::stdout(),
                                                 ratatui::crossterm::cursor::Show
@@ -5498,8 +5787,6 @@ impl<'a> App<'a> {
                                             )));
                                             self.dir_input.close();
                                             self.dir_dropdown_area = None;
-                                            self.app_status.spinner_active = false;
-                                            self.header_logo_last = None;
                                             let _ = ratatui::crossterm::execute!(
                                                 std::io::stdout(),
                                                 ratatui::crossterm::cursor::Show
@@ -5558,22 +5845,26 @@ impl<'a> App<'a> {
         self.app_status.status_line = StatusLine::Input(msg, cursor_pos, transient_msg);
     }
 
+    /// Set the footer text to a spinner-style `Spinner(msg)` line.
+    /// Does NOT animate the header logo - that animation is now
+    /// reserved for the background full-load thread (see
+    /// `AppContext::bg_full_load_in_progress`). Keeping this entry
+    /// point so existing call sites that wanted a busy footer text
+    /// during git pull / fetch / fast-forward / cd still work; the
+    /// footer renderer still shows a braille tick on the
+    /// `StatusLine::Spinner` variant.
     fn start_spinner(&mut self, msg: &str) {
-        self.app_status.spinner_active = true;
-        self.app_status.spinner_frame = 0;
         self.app_status.status_line = StatusLine::Spinner(msg.to_string());
-        self.header_logo_last = None; // logo switches from static to animated
     }
 
+    /// Clear a spinner-style footer line. The header logo is
+    /// untouched (it has been decoupled from this code path - see
+    /// `start_spinner`). The footer renderer keeps showing
+    /// `Spinner(msg)` until *something* overwrites it, and not
+    /// every caller dispatches a Notify* afterwards (e.g. opening
+    /// a dialog leaves no replacement). Without this, "Fetching
+    /// commit..." lingers in the footer after the action completes.
     fn stop_spinner(&mut self) {
-        self.app_status.spinner_active = false;
-        self.header_logo_last = None; // logo switches from animated back to static
-                                      // Clear the status line too, the spinner renderer keeps
-                                      // showing `Spinner(msg)` until *something* overwrites it,
-                                      // and not every caller dispatches a Notify* afterwards
-                                      // (e.g. opening a dialog leaves no replacement). Without
-                                      // this, "Fetching commit…" lingers in the footer after
-                                      // the spinner stops.
         if matches!(self.app_status.status_line, StatusLine::Spinner(_)) {
             self.app_status.status_line = StatusLine::None;
         }

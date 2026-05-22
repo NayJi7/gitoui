@@ -6,7 +6,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    thread,
 };
 
 use image::{imageops::FilterType, GenericImageView, ImageFormat, Rgba, RgbaImage};
@@ -235,8 +234,21 @@ impl AvatarManager {
             .is_ok_and(|metadata| metadata.len() > 0)
     }
 
+    /// Reset the upload-tracking state so the next render re-emits the
+    /// image-protocol bytes for whatever cells happen to be on screen.
+    ///
+    /// Notably DOES NOT drop `prepared_image_map`: the PreparedImage
+    /// values (decoded PNG + image-protocol payload) survive across
+    /// view transitions. Dropping them would force a disk read +
+    /// image decode + PNG re-encode for every visible avatar on the
+    /// next frame, which is what we used to do and the user
+    /// reported as a "long freeze" after closing a commit detail or
+    /// escaping the config view. The image-protocol bytes are still
+    /// in the cells from the previous render; ratatui's diff will
+    /// re-emit them naturally if cells changed, and the in-memory
+    /// cache means `ensure_uploaded` short-circuits on the cache-hit
+    /// path instead of paying the encode cost again.
     pub fn clear_prepared_images(&mut self) {
-        self.prepared_image_map.clear();
         self.pending_uploads.clear();
         self.image_ids.clear();
         // Allow previously-failed lookups to be retried on the next upload cycle.
@@ -358,7 +370,7 @@ impl AvatarManager {
             "https://github.com/{}.png?size=128",
             trimmed.replace(' ', "")
         );
-        thread::spawn(move || {
+        crate::panic_guard::spawn_protected("avatar-fetch-login", move || {
             let mut found_avatar = false;
             if let Ok(resp) = client.get(&url).header("User-Agent", "gitoui").send() {
                 if resp.status().is_success() {
@@ -428,7 +440,7 @@ impl AvatarManager {
         let event_sender = self.event_sender.clone();
         let client = self.http_client.clone();
 
-        thread::spawn(move || {
+        crate::panic_guard::spawn_protected("avatar-fetch-commit", move || {
             let mut found_avatar = false;
 
             let url = resolve_github_commit_avatar_url(&client, &repos, &commit_hashes, &token);

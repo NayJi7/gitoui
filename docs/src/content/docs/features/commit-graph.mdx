@@ -59,13 +59,29 @@ the config.
 
 ![2-commit compare, Space on A, scroll, Space on B, Compare view opens with the cumulative diff](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/compare-2-commits.gif)
 
-## Lazy load
+## Background load
 
-The initial run loads `core.option.initial_load_count` commits (500 by
-default). `]` (`load_more`) appends another `core.option.load_more_count`
-to the list, repeat as many times as you need to walk back in history.
+The launch shows ~500 recent commits instantly, while a background
+thread walks the full `git log` (or reads the on-disk cache from a
+previous run). As batches come back, commits stream in incrementally
+and append to the list, the cursor / scroll position / search state
+all stay put, and new rows simply become scrollable as they arrive.
 
-`-n N` on the CLI overrides the initial count for one run.
+A subtle `...` indicator appears in the row just below the last
+loaded commit while the background loader is still in flight; it
+disappears the moment streaming completes.
+
+The animated **G** logomark in the top-right of the header pulses
+during streaming too — that's your at-a-glance "still loading" signal.
+
+The on-disk cache lives at `$XDG_CACHE_HOME/gitoui/<repo-hash>/commits.bin`
+and is invalidated automatically if `HEAD` has moved since the last
+walk. Run `gitoui -C` (or `--clear-cache`) to wipe it manually.
+
+`-n N` on the CLI caps the foreground slice to exactly N commits, the
+amount you see in the very first frame. The background loader pays no
+attention to `-n` and always walks the full history, appending
+commits in batches until every reachable commit is loaded.
 
 ## Huge repos: wide graph + horizontal scroll
 

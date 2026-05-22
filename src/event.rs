@@ -52,9 +52,6 @@ pub enum AppEvent {
     },
     OpenUrl(String),
     Refresh(RefreshViewContext),
-    /// Same as `Refresh` but also bumps the loaded commit count by
-    /// `core.option.load_more_count` in the outer `run()` loop.
-    LoadMoreCommits(RefreshViewContext),
     /// Open the cumulative diff between two commits (`git diff from..to`).
     /// Triggered by the 2-commit comparison flow once both endpoints are
     /// chosen via Space / Ctrl+click.
@@ -63,6 +60,26 @@ pub enum AppEvent {
         to_hash: String,
     },
     AvatarsUpdated,
+    /// Background commit loader finished a full git-log walk and
+    /// wrote the result to the on-disk cache. The next session that
+    /// opens this repo gets to skip the walk entirely. Fires once
+    /// per session at most (when bg load completes); the main thread
+    /// uses this signal to drop the "loading" indicator and refresh
+    /// the status line.
+    BackgroundCacheReady { total_commits: usize },
+    /// Bg full-load thread shipped the full-history Repository back.
+    /// Deprecated by the streaming `AppendCommits` flow but kept on
+    /// the enum until the bg thread is fully migrated.
+    FullRepositoryReady(Box<crate::git::Repository>),
+    /// Bg streaming loader shipped a batch of pre-built
+    /// `CommitInfo` entries. The main thread appends them to the
+    /// active commit list state via
+    /// `CommitListState::extend_commits` - no App rebuild, no view
+    /// teardown, the cursor stays put, scroll position is
+    /// preserved. The batch carries fully-owned data (Arc<Commit> +
+    /// Vec<Ref> + color) so the bg thread can build it without
+    /// borrowing main's Repository.
+    AppendCommits(Vec<crate::widget::commit_list::CommitInfo>),
     ClearStatusLine,
     UpdateStatusInput(String, Option<u16>, Option<String>),
     NotifyInfo(String),
@@ -885,7 +902,11 @@ impl EventController {
         self.stop.store(false, Ordering::Relaxed);
         let stop = self.stop.clone();
         let tx = self.tx.clone();
-        let handle = thread::spawn(move || loop {
+        // panic_guard catches any panic in the polling loop and
+        // logs it - without this the UI freezes silently if
+        // crossterm or a transitive dep panics on a malformed
+        // event sequence.
+        let handle = crate::panic_guard::spawn_protected("event-poller", move || loop {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
@@ -932,12 +953,17 @@ impl EventController {
                         _ => {}
                     },
                     Err(e) => {
-                        panic!("Failed to read event: {e}");
+                        // Don't panic - crossterm errors here used to
+                        // crash the entire event polling thread, which
+                        // froze UI input permanently (user saw a stuck
+                        // screen with no diagnostic). Log and keep
+                        // polling; the next iteration usually recovers.
+                        crate::glog_warn!("event read error: {}", e);
                     }
                 },
                 Ok(false) => {}
                 Err(e) => {
-                    panic!("Failed to poll event: {e}");
+                    crate::glog_warn!("event poll error: {}", e);
                 }
             }
         });
@@ -1138,8 +1164,6 @@ pub enum UserEvent {
     // Open the inline change-directory overlay (header turns into a text
     // input with a recents + filesystem autocomplete dropdown).
     ChangeDir,
-    // Load more commits (extends the initial_load_count by load_more_count)
-    LoadMore,
     // 2-commit comparison: Space / Ctrl+click toggles a "marked" commit
     // and, on a second commit, opens the cumulative diff between them.
     MarkCompare,
@@ -1203,7 +1227,6 @@ impl<'de> Deserialize<'de> for UserEvent {
                         "ignore_case_toggle" => Ok(UserEvent::IgnoreCaseToggle),
                         "fuzzy_toggle" => Ok(UserEvent::FuzzyToggle),
                         "refresh" => Ok(UserEvent::Refresh),
-                        "load_more" => Ok(UserEvent::LoadMore),
                         "mark_compare" => Ok(UserEvent::MarkCompare),
                         "push" => Ok(UserEvent::Push),
                         "pull" => Ok(UserEvent::Pull),

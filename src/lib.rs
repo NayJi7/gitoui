@@ -6,6 +6,7 @@ pub mod github;
 pub mod github_auth;
 pub mod graph;
 pub mod highlight;
+pub mod log;
 pub mod protocol;
 pub mod themes;
 
@@ -16,6 +17,7 @@ mod dir_input;
 mod event;
 mod external;
 mod keybind;
+mod panic_guard;
 mod recents;
 mod update;
 mod view;
@@ -64,6 +66,13 @@ struct Args {
     /// Skip the once-a-day automatic update check at startup
     #[arg(long)]
     no_update_check: bool,
+
+    /// Delete the on-disk commit cache for the current repository,
+    /// then exit. Next launch re-walks `git log` from scratch and
+    /// rebuilds the cache. Useful when the cache appears stale or
+    /// corrupt, or to reclaim disk space.
+    #[arg(short = 'C', long)]
+    clear_cache: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -206,6 +215,13 @@ impl From<garde::Report> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn run() -> Result<()> {
+    // Init the file logger BEFORE anything else so even early-bailout
+    // paths (clap parse errors, missing repo splash) can leave a trail.
+    #[cfg(debug_assertions)]
+    log::init(log::Level::Debug);
+    #[cfg(not(debug_assertions))]
+    log::init(log::Level::Info);
+
     // Print the gitoui splash above clap's help / error output so the brand
     // shows on every entry path, not just the "no-repo" prompt. clap's
     // `parse()` would auto-exit before we get a chance to draw, so we use
@@ -249,6 +265,27 @@ pub fn run() -> Result<()> {
         update::force_check(|| print_no_repo_splash(proto));
         return Ok(());
     }
+
+    // `--clear-cache` / `-C`: one-shot cache wipe for the current
+    // repository, then exit. Resolves the repo root first so the
+    // command works from any subdirectory (matches `git`'s own
+    // behaviour). On a non-repo dir the cache key wouldn't have
+    // existed anyway, so reporting "not in a repo" and exiting is
+    // the cleanest UX.
+    if args.clear_cache {
+        let repo_root = git::find_repo_root(Path::new("."));
+        match repo_root {
+            Some(root) => {
+                git::cache::invalidate(&root);
+                println!("Cleared gitoui commit cache for {}", root.display());
+            }
+            None => {
+                eprintln!("Not inside a git repository - nothing to clear.");
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
     // Otherwise, do the silent once-a-day check + prompt. The function
     // bails out fast (no network) when the cache is fresh, the user has
     // chosen "never", or we're not attached to a TTY. On `Updated` it
@@ -279,10 +316,13 @@ pub fn run() -> Result<()> {
     let ec = event::EventController::init();
     let mut refresh_view_context = None;
     let mut terminal = None;
-    // Counter incremented each time the user triggers `LoadMore` from the
-    // commit list. Multiplies `core.option.load_more_count` to compute the
-    // current commit cap when the CLI did not pass an explicit `-n`.
-    let mut load_more_count: usize = 0;
+    // Latch the huge-repo auto-disable to FIRST launch only. Without
+    // this, every subsequent Refresh iteration (close Config view,
+    // etc.) would re-force `ui_config.list.graph_enabled = false`
+    // and silently undo a user who explicitly toggled the graph
+    // back on via the Config view. Once we've auto-disabled, we
+    // step out of the way and let the saved config drive.
+    let mut huge_repo_autodisable_applied = false;
     // Filesystem watcher on .git/, keeps the UI in sync with external git
     // operations (commits from another shell, push/pull/fetch, branch
     // switches, …). Held alive for the whole `run()` lifetime; dropping it
@@ -292,6 +332,19 @@ pub fn run() -> Result<()> {
     // gitoui takes those phantom events as a reason to full-refresh.
     let mut _git_watcher: Option<_> = None;
     let mut watched_git_dir: Option<std::path::PathBuf> = None;
+    // Single-shot latch for the background full-load thread. Every
+    // `Ret::Refresh` (open detail + close, open config + Esc, git
+    // side-effects that re-instantiate the App) goes through this
+    // loop, but only the FIRST iteration actually spawns the bg
+    // walker. Later iterations see the latch true and skip.
+    let bg_load_started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Shared latch flipped to true by the bg streaming thread's
+    // RAII guard when it exits (success OR panic). Used to seed
+    // `bg_full_load_in_progress` on every `Ret::Refresh` iteration:
+    // the flag must NOT spuriously re-arm to "loading" after the bg
+    // thread already finished, otherwise the header logo loops
+    // forever on every config/cd refresh.
+    let bg_load_finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let ret = loop {
         // First iteration uses the diagnostic-bearing loader so any
@@ -346,16 +399,16 @@ pub fn run() -> Result<()> {
         }
         let keybind = keybind::KeyBinds::new(keybind_patch);
 
-        // Lazy-load policy: an explicit CLI `-n` always wins. Otherwise default
-        // to `initial_load_count` and grow by `load_more_count` each time the
-        // user requests "load more" from the commit list.
-        let max_count = match args.max_count {
-            Some(n) => Some(n),
-            None => Some(
-                core_config.option.initial_load_count
-                    + load_more_count * core_config.option.load_more_count,
-            ),
-        };
+        // Load policy: an explicit CLI `-n` always wins. Otherwise
+        // cap the foreground walk to a small fixed number so the
+        // launch stays under ~100 ms even on 332k-commit repos.
+        // The COMPLETE history is loaded in the background thread
+        // spawned a few lines below and silently swapped in as soon
+        // as it's ready - the user starts scrolling immediately on
+        // the recent slice and gets the full set without ever
+        // hitting a blocking `git log` walk.
+        const FG_INITIAL_LOAD: usize = 500;
+        let max_count = args.max_count.or(Some(FG_INITIAL_LOAD));
         let image_protocol = args.protocol.or(core_config.option.protocol).into();
         let order = args.order.or(core_config.option.order).into();
         let graph_width = args.graph_width.or(core_config.option.graph_width);
@@ -439,6 +492,17 @@ pub fn run() -> Result<()> {
             // Filled after the repository is loaded, see below.
             current_branch_remote_state: None,
             repo_path: std::path::PathBuf::new(),
+            graph_huge_repo_warning: false,
+            // True from launch until the bg streaming thread's
+            // RAII guard fires. Drives the header logo animation
+            // and the 50 ms wakeup tick. On every iteration we
+            // seed it from the persistent `bg_load_finished`
+            // latch: if bg already finished in a prior iteration,
+            // the flag starts false (no animation); otherwise
+            // true (still loading).
+            bg_full_load_in_progress: std::sync::atomic::AtomicBool::new(
+                !bg_load_finished.load(std::sync::atomic::Ordering::Acquire),
+            ),
         });
 
         // If we were launched from a sub-directory of a repo, jump up to
@@ -451,6 +515,14 @@ pub fn run() -> Result<()> {
         if let Some(root) = git::find_repo_root(Path::new(".")) {
             let _ = std::env::set_current_dir(&root);
         }
+        // Foreground load: `Repository::load(., max_count)` walks
+        // `git log --max-count=N` only. Stays UI-snappy on huge
+        // repos because the walk is bounded. The bg cache writer
+        // below runs in a separate OS thread and never touches the
+        // main thread - it just persists the full history to disk
+        // for future use.
+        // Bg streaming via AppendCommits now feeds the live list
+        // directly; no Repository swap to consume.
         let repository = match git::Repository::load(Path::new("."), order, max_count) {
             Ok(repo) => repo,
             Err(e) if terminal.is_none() => {
@@ -503,6 +575,209 @@ pub fn run() -> Result<()> {
             }
         };
 
+        // Background full-load thread. Walks the FULL `git log`
+        // (or reads the disk cache) on its own OS thread, then
+        // ships the hydrated Repository back via the channel for
+        // a silent swap. Spawned at most once per session: the
+        // atomic latch flips true on first call and every Refresh
+        // iteration after that sees it true and skips.
+        // Background streaming loader. Walks the FULL `git log` (or
+        // reads the disk cache) on its own OS thread, builds
+        // CommitInfo entries for every commit BEYOND the fg-loaded
+        // initial slice, and ships them back in small batches via
+        // `AppendCommits` events. The main thread appends each
+        // batch into the live `CommitListState` without ANY rebuild
+        // - cursor / scroll position / search state survive
+        // untouched. Spawned at most once per session.
+        let already_started = bg_load_started.swap(true, std::sync::atomic::Ordering::AcqRel);
+        if !already_started {
+            let repo_path_for_bg = repository.path().to_path_buf();
+            let head_for_bg = repository.head().clone();
+            let stashes_for_bg = repository.stashes();
+            let sender = ec.sender();
+            // Snapshot of what main's fg load already has - skip those
+            // in the stream so we don't double-display.
+            let fg_loaded: rustc_hash::FxHashSet<git::CommitHash> = repository
+                .all_commits()
+                .iter()
+                .map(|c| c.commit_hash.clone())
+                .collect();
+            let graph_color_set_for_bg = graph_color_set.clone();
+            // Mirror the fg's colour-picking rule so streamed
+            // rows match what app.rs builds for the initial slice:
+            // Smooth reads `commit_color_map`, every other style
+            // reads `pos_x`. Without this the bg ships colours
+            // computed via the wrong path and the user sees a
+            // tint discontinuity at the streaming boundary.
+            let graph_style_for_bg = graph_style;
+            let bg_load_finished_for_bg = bg_load_finished.clone();
+            std::thread::Builder::new()
+                .name("gitoui-bg-stream".into())
+                .spawn(move || {
+                    // RAII guard: ALWAYS sends `BackgroundCacheReady`
+                    // when the thread exits, regardless of which
+                    // path drops us out of this closure (normal
+                    // completion, early return from a Repository
+                    // hydrate failure, or a panic deeper in
+                    // calc_graph_colors_only). Without this, any
+                    // failure in the bg pipeline silently left the
+                    // header logo spinning forever - the user saw
+                    // "le G ne s'arrete jamais de load" because the
+                    // single flag-clearing event never fired.
+                    struct BgDoneGuard {
+                        sender: crate::event::Sender,
+                        total: std::cell::Cell<usize>,
+                        finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
+                    }
+                    impl Drop for BgDoneGuard {
+                        fn drop(&mut self) {
+                            // Flip the persistent latch so the next
+                            // Ret::Refresh iteration in the outer
+                            // loop initialises `bg_full_load_in_progress`
+                            // to false (no animation, no spurious
+                            // 50 ms wakeup tick).
+                            self.finished
+                                .store(true, std::sync::atomic::Ordering::Release);
+                            self.sender.send(event::AppEvent::BackgroundCacheReady {
+                                total_commits: self.total.get(),
+                            });
+                        }
+                    }
+                    let _bg_done = BgDoneGuard {
+                        sender: sender.clone(),
+                        total: std::cell::Cell::new(0),
+                        finished: bg_load_finished_for_bg,
+                    };
+                    // Get the full commit set: cache hit or fresh walk.
+                    // Cache lookup order:
+                    //   1. `load_for` - exact match (HEAD + count unchanged).
+                    //   2. `try_extend` - cached HEAD is an ancestor of
+                    //      live HEAD; walk only the small delta range
+                    //      and prepend instead of re-walking everything.
+                    //      Covers the typical "user committed once"
+                    //      scenario in ~100 ms instead of multi-second.
+                    //   3. Full fresh walk - cache missing, schema
+                    //      changed, count drifted (fetch / gc), or
+                    //      HEAD diverged (force-push, rebase).
+                    let all_commits = if let Some(cached) =
+                        git::cache::load_for(&repo_path_for_bg)
+                    {
+                        glog_info!("bg-stream: cache hit ({} commits)", cached.len());
+                        cached
+                    } else if let Some(extended) =
+                        git::cache::try_extend(&repo_path_for_bg, order)
+                    {
+                        glog_info!(
+                            "bg-stream: cache surgical-extended ({} commits)",
+                            extended.len()
+                        );
+                        extended
+                    } else {
+                        let mut all = Vec::new();
+                        git::stream_commits_after(
+                            &repo_path_for_bg,
+                            order,
+                            &head_for_bg,
+                            &stashes_for_bg,
+                            0,
+                            500,
+                            |batch| {
+                                all.extend(batch);
+                                false
+                            },
+                        );
+                        if all.is_empty() {
+                            return;
+                        }
+                        if let Err(e) = git::cache::save_for(&repo_path_for_bg, &all) {
+                            glog_warn!("cache save failed: {}", e);
+                        }
+                        all
+                    };
+                    let total = all_commits.len();
+                    _bg_done.total.set(total);
+                    // Hydrate a bg-local Repository so we can resolve
+                    // ref membership for color-coding the inline `│`
+                    // separator on each appended row.
+                    let bg_repo = match git::Repository::from_cached_commits(
+                        &repo_path_for_bg,
+                        all_commits,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            glog_warn!("bg Repository hydrate failed: {}", e);
+                            return;
+                        }
+                    };
+                    // Lane-assignment ONLY: same colour mapping as
+                    // the fg's `calc_graph` (so streamed rows match
+                    // the rendered graph image) but skips the
+                    // O(N × lanes) `build_legacy_edges` allocation.
+                    // That edges Vec hit several hundred MB on
+                    // rust-lang/rust + caused an OOM kill of the
+                    // bg thread after ~55 s; the bg thread doesn't
+                    // need edges (the image renderer runs on the
+                    // fg side), so we drop them entirely here.
+                    let color_graph = crate::graph::calc_graph_colors_only(&bg_repo);
+                    let default_color = graph_color_set_for_bg.get(0).to_ratatui_color();
+                    // Stream in chunks: ship a batch every N commits
+                    // so the UI sees progress vs sitting on a single
+                    // huge final ship.
+                    const BATCH_SIZE: usize = 500;
+                    let mut batch: Vec<crate::widget::commit_list::CommitInfo> =
+                        Vec::with_capacity(BATCH_SIZE);
+                    for commit_ref in color_graph.commits.iter() {
+                        if fg_loaded.contains(&commit_ref.commit_hash) {
+                            continue;
+                        }
+                        let Some(commit_arc) = bg_repo.commit_arc(&commit_ref.commit_hash)
+                        else {
+                            continue;
+                        };
+                        let refs: Vec<git::Ref> = bg_repo
+                            .refs(&commit_ref.commit_hash)
+                            .into_iter()
+                            .cloned()
+                            .collect();
+                        // Mirror app.rs colour selection: Smooth
+                        // -> commit_color_map, others -> pos_x.
+                        let pos_x = color_graph
+                            .commit_pos_map
+                            .get(&commit_ref.commit_hash)
+                            .map(|&(x, _)| x)
+                            .unwrap_or(0);
+                        let color_index = if graph_style_for_bg == graph::GraphStyle::Smooth {
+                            color_graph
+                                .commit_color_map
+                                .get(&commit_ref.commit_hash)
+                                .copied()
+                                .unwrap_or(pos_x)
+                        } else {
+                            pos_x
+                        };
+                        let color = graph_color_set_for_bg
+                            .get(color_index)
+                            .to_ratatui_color();
+                        let _ = default_color;
+                        batch.push(crate::widget::commit_list::CommitInfo::new(
+                            commit_arc, refs, color,
+                        ));
+                        if batch.len() >= BATCH_SIZE {
+                            sender.send(event::AppEvent::AppendCommits(std::mem::take(
+                                &mut batch,
+                            )));
+                        }
+                    }
+                    if !batch.is_empty() {
+                        sender.send(event::AppEvent::AppendCommits(batch));
+                    }
+                    // BgDoneGuard's Drop fires BackgroundCacheReady on
+                    // function exit (normal OR panic), the total is
+                    // already populated above.
+                })
+                .ok();
+        }
+
         // (Re)start the filesystem watcher whenever the repo path changes
         // (first launch, or after `cd`-into-another-repo). Config-reload
         // iterations keep the same path and reuse the existing watcher.
@@ -515,7 +790,51 @@ pub fn run() -> Result<()> {
             .unwrap_or(true);
         if needs_rebind {
             _git_watcher = None;
-            _git_watcher = watcher::start(&current_git_dir, ec.sender());
+            // `Repository.path()` is the WORK TREE root, not the
+            // `.git/` directory. The watcher needs `.git/` so it
+            // monitors HEAD / refs / packed-refs / index, not every
+            // file edit in the working tree. Resolve via
+            // `git rev-parse --git-dir`; if that fails, fall back
+            // to the conventional `<root>/.git`.
+            let dotgit = std::process::Command::new("git")
+                .arg("rev-parse")
+                .arg("--git-dir")
+                .current_dir(&current_git_dir)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| {
+                    let rel = s.trim().to_string();
+                    if std::path::Path::new(&rel).is_absolute() {
+                        std::path::PathBuf::from(rel)
+                    } else {
+                        current_git_dir.join(rel)
+                    }
+                })
+                .and_then(|p| std::fs::canonicalize(&p).ok())
+                .unwrap_or_else(|| current_git_dir.join(".git"));
+            glog_info!(
+                "watcher rebind: work_tree={:?} -> .git={:?}",
+                current_git_dir,
+                dotgit
+            );
+            _git_watcher = watcher::start(&dotgit, ec.sender());
+            if _git_watcher.is_none() {
+                // notify-debouncer init failed (inotify limit exhausted,
+                // permission denied, malformed .git symlink, ...). The
+                // app still works, but external git ops (commit from
+                // another shell, fetch, branch checkout) will NOT
+                // auto-refresh - user has to press `R` manually.
+                // Log it so the silent degradation is at least
+                // debuggable from the rotating session log.
+                glog_warn!(
+                    "filesystem watcher init failed for {:?}; \
+                     external git changes won't auto-refresh until \
+                     you press `R`",
+                    current_git_dir
+                );
+            }
             watched_git_dir = Some(current_git_dir);
         }
 
@@ -543,11 +862,78 @@ pub fn run() -> Result<()> {
             }
             _ => None,
         };
+        // Force-disable the graph column on repos too large for inline
+        // PNG rendering to keep up. The threshold is user-overridable
+        // via `[core.option] huge_repo_threshold` in config.toml
+        // (default 50000); set to 0 to disable the auto-disable.
+        // The Config view still allows toggling back on - it just
+        // displays a red warning in the Details panel so the user
+        // knows what they're signing up for.
+        //
+        // `repository.commit_count()` is NOT usable here - the
+        // foreground load is clipped to `max_count` so it only sees
+        // ~400 commits at this point and would never trip a
+        // mid-thousands threshold. Shell out to
+        // `git rev-list --count HEAD` for the true total (one git
+        // plumbing call, ~10 ms even on 300k repos).
+        // `core_config` has already moved into AppContext by this
+        // point, so grab the threshold off the (Rc-wrapped) ctx instead.
+        let huge_repo_threshold = ctx.core_config.option.huge_repo_threshold;
+        let total_commits = std::process::Command::new("git")
+            .args(["rev-list", "--count", "HEAD"])
+            .current_dir(repository.path())
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .and_then(|s| s.trim().parse::<usize>().ok())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        let huge_repo = huge_repo_threshold > 0 && total_commits > huge_repo_threshold;
+        if huge_repo {
+            glog_info!(
+                "huge repo detected ({} commits > {} threshold) - forcing graph_enabled=false",
+                total_commits,
+                huge_repo_threshold
+            );
+        }
         if let Some(ctx_mut) = Rc::get_mut(&mut ctx) {
             ctx_mut.current_branch_remote_state = remote_state;
             ctx_mut.repo_path = repository.path().to_path_buf();
+            if huge_repo {
+                // Warning lives for the whole session - the user
+                // should always see it on the Config view's Graph
+                // Enabled row, even after they explicitly opted in.
+                ctx_mut.graph_huge_repo_warning = true;
+                // Force-disable ONCE: at first launch the cached
+                // saved-config may have `graph_enabled = true`
+                // (default for fresh installs), so we override it
+                // to false. On every later iteration we trust the
+                // user's saved choice - if they toggled it back
+                // on via Config view, that value is reloaded from
+                // disk on Refresh and the override here would
+                // silently undo it.
+                if !huge_repo_autodisable_applied {
+                    ctx_mut.ui_config.list.graph_enabled = false;
+                    huge_repo_autodisable_applied = true;
+                }
+            }
         }
 
+        // Always run the real `calc_graph`. The cheap stub
+        // `calc_colors_only` used branch-membership first-parent
+        // walks to assign colours, which produced a DIFFERENT
+        // colour-per-commit mapping than the lane-based scheme
+        // calc_graph uses. The user saw inconsistent tints
+        // between graph-enabled and graph-disabled modes for
+        // the same commit; running the real walk here keeps the
+        // colours stable across both. The cost on the
+        // fg-loaded 500-commit slice is a few ms.
         let graph = graph::calc_graph(&repository);
 
         let cell_width_type = check::decide_cell_width_type(&graph, graph_width)?;
@@ -606,14 +992,6 @@ pub fn run() -> Result<()> {
                 break Ok(());
             }
             Ok(Ret::Refresh(request)) => {
-                refresh_view_context = Some(request.context);
-                continue;
-            }
-            Ok(Ret::LoadMore(request)) => {
-                // CLI `-n` is hard cap; only grow when no explicit limit was given.
-                if args.max_count.is_none() {
-                    load_more_count = load_more_count.saturating_add(1);
-                }
                 refresh_view_context = Some(request.context);
                 continue;
             }

@@ -61,6 +61,17 @@ impl<'a> ListView<'a> {
                 self.as_mut_list_state().select_head_commit();
                 return;
             }
+            // Hard cap on the repeat count so an absurd numeric
+            // prefix (the user typed `5000000000000` and pressed an
+            // arrow) doesn't spin the main thread for hours
+            // calling no-op select_*'s. The commit list has at
+            // most `total` rows, so any iteration past that is
+            // wasted; we clamp to that and add a 1-row floor so
+            // an empty list still gets one "no-op" call (cheap).
+            let count = {
+                let total = self.as_list_state().total().max(1);
+                count.min(total)
+            };
             match event {
                 UserEvent::Quit => {
                     self.tx.send(AppEvent::Quit);
@@ -170,9 +181,6 @@ impl<'a> ListView<'a> {
                 }
                 UserEvent::Refresh => {
                     self.refresh();
-                }
-                UserEvent::LoadMore => {
-                    self.load_more();
                 }
                 UserEvent::Push => {
                     self.tx.send(AppEvent::PushCurrentBranch);
@@ -289,14 +297,6 @@ impl<'a> ListView<'a> {
         // no-op outside search mode.
         self.maybe_sync_search_status();
 
-        // Auto lazy-load: when the cursor approaches the bottom of
-        // what we've loaded, pre-fetch the next batch transparently
-        // so the user never feels a "limit". The state's helper
-        // de-dupes the request so we only fire once per growth step.
-        if self.as_list_state().should_trigger_lazy_load() {
-            self.as_mut_list_state().mark_lazy_attempt();
-            self.load_more();
-        }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
@@ -346,6 +346,14 @@ impl<'a> ListView<'a> {
 
     pub fn as_list_state(&self) -> &CommitListState<'a> {
         self.commit_list_state.as_ref().unwrap()
+    }
+
+    /// Mutable accessor for the bg streaming loader. Returns
+    /// `None` if the list state has been taken (e.g. mid-Detail
+    /// open). Used by `AppEvent::AppendCommits` to push freshly
+    /// loaded `CommitInfo` batches into the live list.
+    pub fn commit_list_state_mut(&mut self) -> Option<&mut CommitListState<'a>> {
+        self.commit_list_state.as_mut()
     }
 
     pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
@@ -497,19 +505,6 @@ impl<'a> ListView<'a> {
         self.tx.send(AppEvent::Refresh(context));
     }
 
-    /// Request that the outer `run()` loop reload the repository with
-    /// `core.option.load_more_count` more commits than currently loaded. The
-    /// view state (selected commit, scroll position) is preserved through the
-    /// same `RefreshViewContext` mechanism as `refresh()`.
-    pub fn load_more(&self) {
-        let list_state = self.as_list_state();
-        let list_context = ListRefreshViewContext::from(list_state);
-        let context = RefreshViewContext::List {
-            list_context,
-            pending_notification: None,
-        };
-        self.tx.send(AppEvent::LoadMoreCommits(context));
-    }
 
     /// Handle a Ctrl+click in the commit list area: select the row at the
     /// click position, then drive the same compare flow as Space.

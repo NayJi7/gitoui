@@ -240,10 +240,15 @@ pub struct CoreOptionConfig {
     pub auto_refresh: bool,
     #[default = 500]
     pub auto_refresh_debounce_ms: u64,
-    #[default = 500]
-    pub initial_load_count: usize,
-    #[default = 200]
-    pub load_more_count: usize,
+    /// Commit-count cap above which gitoui force-disables the graph
+    /// column at startup. Repos exceeding this many commits would
+    /// otherwise hit lag / freeze / glitch in the inline-image
+    /// pipeline. The user can still flip the toggle back on from
+    /// the Config view; the Details panel shows a warning when the
+    /// threshold was tripped. Set to 0 to disable the auto-disable
+    /// entirely.
+    #[default = 50_000]
+    pub huge_repo_threshold: usize,
     #[default = "Tokyo Night"]
     pub theme: String,
     #[default = "base16-ocean.dark"]
@@ -596,7 +601,7 @@ pub struct UiUserCommandConfig {
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault, Validate)]
 pub struct UiRefsConfig {
     #[garde(range(min = 1))]
-    #[default = 26]
+    #[default = 36]
     pub width: u16,
 }
 
@@ -830,17 +835,6 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
     // earlier `save()` calls, the in-memory value updated cleanly
     // when the user edited them in the Config view but reverted to the
     // file's previous value on the next launch.
-    set_nested_integer(
-        &mut doc,
-        &["core", "option", "initial_load_count"],
-        core.option.initial_load_count as i64,
-    );
-    set_nested_integer(
-        &mut doc,
-        &["core", "option", "load_more_count"],
-        core.option.load_more_count as i64,
-    );
-
     set_nested_string(
         &mut doc,
         &["ui", "common", "diff_mode"],
@@ -975,21 +969,6 @@ fn set_nested_bool(doc: &mut toml::Table, keys: &[&str], value: bool) {
     table.insert(
         keys.last().unwrap().to_string(),
         toml::Value::Boolean(value),
-    );
-}
-
-fn set_nested_integer(doc: &mut toml::Table, keys: &[&str], value: i64) {
-    let mut table = doc;
-    for key in &keys[..keys.len() - 1] {
-        table = table
-            .entry(key.to_string())
-            .or_insert_with(|| toml::Value::Table(toml::Table::new()))
-            .as_table_mut()
-            .unwrap();
-    }
-    table.insert(
-        keys.last().unwrap().to_string(),
-        toml::Value::Integer(value),
     );
 }
 
@@ -1296,10 +1275,6 @@ mod tests {
         // behavior. The full struct shape is exercised via `Config::default()` as
         // the base in the partial / complete TOML tests below.
         let cfg = Config::default();
-
-        // Performance: lazy-load tunables.
-        assert_eq!(cfg.core.option.initial_load_count, 500);
-        assert_eq!(cfg.core.option.load_more_count, 200);
 
         // Auto-refresh on by default with anti-flicker debounce.
         assert!(cfg.core.option.auto_refresh);

@@ -264,8 +264,44 @@ impl<'a> RefsView<'a> {
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
         let graph_width = self.as_list_state().graph_area_cell_width() + 1; // graph area + marker
-        let refs_width =
-            (area.width.saturating_sub(graph_width)).min(self.ctx.ui_config.refs.width);
+        // Adaptive refs-panel width:
+        //   - Walk each Ref to compute its rendered width = tree-depth
+        //     indent + open/close symbol (2 cells) + LAST path segment
+        //     length. The Tree widget shows only the last segment per
+        //     row (parents are rendered as their own nodes), so a long
+        //     `origin/dependabot/foo/bar/baz` line takes
+        //     `depth * 2 + 2 + len("baz")` cells.
+        //   - Add 4 cells for the panel's left border + horizontal
+        //     padding (cf. `Block::default().borders(LEFT)
+        //     .padding(horizontal(1))` in `ref_list.rs::render`).
+        //   - Clamp to `[MIN_WIDTH, ui.refs.width]` so the panel
+        //     never collapses to nothing or eats the whole screen.
+        //     If the natural width exceeds the cap, the Tree widget
+        //     cuts at the area boundary (long branch names get
+        //     visually truncated rather than overflowing the layout).
+        const MIN_WIDTH: u16 = 16;
+        const CHROME: u16 = 4; // border + padding
+        let natural = self
+            .refs
+            .iter()
+            .map(|r| {
+                let name = match r {
+                    Ref::Branch { name, .. }
+                    | Ref::RemoteBranch { name, .. }
+                    | Ref::Tag { name, .. }
+                    | Ref::Stash { name, .. } => name.as_str(),
+                };
+                let parts = name.split('/').count();
+                let last = name.rsplit('/').next().unwrap_or(name);
+                let depth = parts.saturating_sub(1) as u16;
+                depth * 2 + 2 + console::measure_text_width(last) as u16
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(CHROME);
+        let cap = self.ctx.ui_config.refs.width;
+        let area_cap = area.width.saturating_sub(graph_width);
+        let refs_width = natural.clamp(MIN_WIDTH, cap).min(area_cap);
         Layout::horizontal([Constraint::Min(0), Constraint::Length(refs_width)]).areas(area)
     }
 

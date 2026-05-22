@@ -6993,14 +6993,40 @@ pub(crate) struct AvatarSlot {
 /// Materialised avatar position, what was painted on screen during
 /// a particular frame. The diff helper compares the previous frame's
 /// list against the current one to decide which cells to clear vs.
-/// skip vs. paint anew. Equality includes the selected state so a
-/// row swapping selected/unselected forces a repaint (different bg).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// skip vs. paint anew. **Equality is intentionally restricted to
+/// `(login, screen_x, screen_y)`** - i.e. ignores `is_selected`.
+/// Including the selected flag in the comparison caused the diff
+/// helper to see every hover/cursor transition as a "different
+/// avatar at the same slot", trigger a delete-then-repaint cycle
+/// (Kitty `a=d,d=C` placement eviction + fresh upload), and the
+/// user saw a brief blink on each row crossed. The image bytes
+/// differ only in the alpha-blended background tint, the silhouette
+/// is identical, so keeping the previous placement and just letting
+/// the surrounding bg change is visually fine and removes the blink.
+#[derive(Debug, Clone)]
 pub(crate) struct PaintedAvatar {
     pub(crate) login: String,
     pub(crate) screen_x: u16,
     pub(crate) screen_y: u16,
     pub(crate) is_selected: bool,
+}
+
+impl PartialEq for PaintedAvatar {
+    fn eq(&self, other: &Self) -> bool {
+        self.login == other.login
+            && self.screen_x == other.screen_x
+            && self.screen_y == other.screen_y
+    }
+}
+
+impl Eq for PaintedAvatar {}
+
+impl std::hash::Hash for PaintedAvatar {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.login.hash(state);
+        self.screen_x.hash(state);
+        self.screen_y.hash(state);
+    }
 }
 
 /// Diff-aware avatar painter. Given the previous frame's painted set
@@ -7075,9 +7101,13 @@ pub(crate) fn paint_avatars_with_diff(
         let _ = stdout.flush();
     }
     // 2. For each current slot, decide whether to skip-paint (no
-    //    re-emit, preserve terminal pixels) or paint fresh.
-    for (pa, bg) in &current {
-        if prev.contains(pa) {
+    //    re-emit, preserve terminal pixels) or paint fresh. Track which
+    //    slots are actually backed by pixels on screen so we don't
+    //    falsely tell the next frame "skip, already there" for an
+    //    avatar that bailed early (image not yet on disk).
+    let mut painted: Vec<PaintedAvatar> = Vec::with_capacity(current.len());
+    for (pa, bg) in current {
+        if prev.contains(&pa) {
             let buf = f.buffer_mut();
             let area = buf.area();
             let right = area.right();
@@ -7089,19 +7119,30 @@ pub(crate) fn paint_avatars_with_diff(
                 }
                 buf[(x, pa.screen_y)].set_skip(true);
             }
+            // Slot was in `prev`: by definition we painted it last
+            // frame, so the terminal already has the right pixels.
+            // Carry it forward.
+            painted.push(pa);
         } else {
-            paint_login_avatar(
+            let did_paint = paint_login_avatar(
                 f,
                 ctx,
                 &pa.login,
                 pa.screen_x,
                 pa.screen_y,
                 pa.is_selected,
-                *bg,
+                bg,
             );
+            if did_paint {
+                painted.push(pa);
+            }
+            // If paint_login_avatar returned false (avatar not on
+            // disk yet, prefetch fired), DON'T record this slot.
+            // Next frame will see it as "new" again and try to
+            // paint once the AvatarsUpdated redraw lands the file.
         }
     }
-    current.into_iter().map(|(p, _)| p).collect()
+    painted
 }
 
 /// Paint a single login's avatar at `(screen_x, screen_y)`. No-op
@@ -7118,6 +7159,17 @@ pub(crate) fn paint_avatars_with_diff(
 /// `theme.bg`. The `is_selected` flag keys a separate cached variant
 /// of the prepared image so a row toggling selected/unselected
 /// doesn't churn the cache.
+/// Returns `true` when the avatar was actually written to the buffer,
+/// `false` when the function bailed early (login empty, avatars
+/// disabled, image not yet on disk and a background prefetch was
+/// fired instead). The caller uses this to decide whether to remember
+/// the slot as "painted last frame" — a slot that bailed must NOT be
+/// remembered, otherwise the next frame's diff sees the same slot
+/// in `prev` and short-circuits to "no need to repaint" while the
+/// terminal still has nothing painted there. That's the bug the user
+/// hit: avatars only appeared after they hovered a row, because hover
+/// flips `is_selected` and thus the slot's identity, taking it out
+/// of `prev` and forcing a real paint pass on the now-on-disk image.
 pub(crate) fn paint_login_avatar(
     f: &mut Frame,
     ctx: &AppContext,
@@ -7126,27 +7178,27 @@ pub(crate) fn paint_login_avatar(
     screen_y: u16,
     is_selected: bool,
     bg: Color,
-) {
+) -> bool {
     if login.is_empty() {
-        return;
+        return false;
     }
     let mut manager = ctx.avatar_manager.lock().unwrap();
     if !manager.is_enabled() {
-        return;
+        return false;
     }
-    // Try to bring the avatar online, `ensure_uploaded_login` is
-    // idempotent and cheap when the image is already prepared.
     let on_disk = manager.cached_avatar_exists_login(login);
     if on_disk {
         manager.ensure_uploaded_login(login, 1, is_selected, bg);
     } else {
         // Fire-and-forget background fetch; the AvatarsUpdated event
-        // triggers a redraw once the image lands.
+        // triggers a redraw once the image lands. Return false so the
+        // caller doesn't record this slot as "painted" - that bookkeeping
+        // would prevent the next render from actually drawing.
         manager.prefetch_login(login);
-        return;
+        return false;
     }
     let Some(prepared) = manager.prepared_image_login(login, 1, is_selected) else {
-        return;
+        return false;
     };
     let buf = f.buffer_mut();
     for (dx, cell) in prepared.cells().iter().take(2).enumerate() {
@@ -7159,6 +7211,7 @@ pub(crate) fn paint_login_avatar(
         bc.set_style(cell.style().bg(bg));
         bc.set_skip(cell.skip());
     }
+    true
 }
 
 /// Layout coordinates a caller needs after `push_comment_card` to

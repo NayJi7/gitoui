@@ -15,12 +15,15 @@ defaults for one specific run.
 
 | Flag                          | Default       | Effect                                              |
 |-------------------------------|---------------|-----------------------------------------------------|
-| `-n`, `--max-count <NUMBER>`  | `500`         | Initial number of commits to load. Lazy-load grows from there. |
+| `-n`, `--max-count <NUMBER>`  | `500`         | How many commits are visible in the **first frame** at startup. The background loader walks the full history in parallel regardless of `-n` and keeps appending until every reachable commit is loaded. Cap this only to influence the initial paint. |
 | `-p`, `--protocol <TYPE>`     | `auto`        | Force an image protocol, one of `kitty`, `iterm2`, `sixel`, `unicode`. |
 | `-o`, `--order <TYPE>`        | `chrono`      | Commit ordering algorithm. `chrono` (date-based) or `topo` (`git log --topo-order`). |
 | `-g`, `--graph-width <TYPE>`  | `auto`        | Graph image cell width. `auto` / `single` / `double`. |
 | `-s`, `--graph-style <TYPE>`  | `rounded`     | Graph edge style. `rounded` / `angular` / `smooth`. |
 | `-i`, `--initial-selection <TYPE>` | `latest` | Cursor position on open. `latest`, `head`, or `top`. |
+| `--update`                    |               | Force an update check + prompt now, then exit. Bypasses the once-a-day silent check and the "never ask" preference. |
+| `--no-update-check`           |               | Skip the once-a-day automatic update check at startup. |
+| `-C`, `--clear-cache`         |               | Delete the on-disk commit cache for the current repo, then exit. Next launch re-walks `git log` from scratch. Useful when the cache appears stale or to reclaim disk space. |
 | `-h`, `--help`                |               | Print help and exit.                                |
 | `-V`, `--version`             |               | Print version and exit.                             |
 
@@ -29,10 +32,29 @@ defaults for one specific run.
 <Tabs>
 <TabItem label="Huge repo">
 
-Load fewer commits up front and rely on `]` (`load_more`) to grow the list:
+Cap the foreground load to keep startup snappy. The full history walks
+in a background thread regardless of `-n`, ships commits back in batches,
+and keeps going until every reachable commit has been appended. Your
+cursor, scroll position, and search state stay put across appends:
 
 ```sh
 gitoui -n 200
+```
+
+`-n` only controls **how much is visible in the very first frame**; the
+background streamer pays no attention to it and always loads the whole
+history. There is no manual "load more" gesture.
+
+</TabItem>
+
+<TabItem label="Reset the cache">
+
+If the on-disk commit cache for this repo looks stale or corrupt, or you
+just want to reclaim disk space, wipe it and exit. The next normal launch
+re-walks `git log` from scratch:
+
+```sh
+gitoui -C
 ```
 
 </TabItem>

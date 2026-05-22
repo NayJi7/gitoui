@@ -32,7 +32,6 @@ search = ["f"]
 ignore_case_toggle = ["s"]
 fuzzy_toggle = ["z"]
 refresh = ["r"]
-load_more = ["]"]
 
 # 2-commit comparison: Space on a first commit marks it, then Space on a
 # second commit opens `git diff <a>..<b>`. The mouse equivalent is

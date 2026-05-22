@@ -486,15 +486,26 @@ impl<'a> DetailView<'a> {
     }
 
     pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        // Local helper: clear hover, but BEFORE clearing copy the
+        // last hovered index into `selected_file` so the highlight
+        // sticks where the user last pointed instead of snapping
+        // back to file 0. Without this the left pane visually
+        // "resets" every time the cursor leaves the file column.
+        let freeze_selection = |state: &mut crate::widget::commit_detail::CommitDetailState| {
+            if let Some(idx) = state.hover_file.take() {
+                state.selected_file = idx;
+            }
+        };
+
         let row = row as usize;
         let Some(detail_area) = self.detail_area else {
-            self.commit_detail_state.hover_file = None;
+            freeze_selection(&mut self.commit_detail_state);
             return;
         };
         let detail_y = detail_area.y as usize;
 
         if row < detail_y {
-            self.commit_detail_state.hover_file = None;
+            freeze_selection(&mut self.commit_detail_state);
             self.commit_detail_state.hovered_action = None;
             return;
         }
@@ -504,7 +515,7 @@ impl<'a> DetailView<'a> {
         if col >= action_bar_x {
             let action_bar_row = (row - detail_y).saturating_sub(4);
             self.commit_detail_state.hovered_action = self.action_index_at_row(action_bar_row);
-            self.commit_detail_state.hover_file = None;
+            freeze_selection(&mut self.commit_detail_state);
             return;
         } else {
             self.commit_detail_state.hovered_action = None;
@@ -513,7 +524,7 @@ impl<'a> DetailView<'a> {
         let detail_local_row = row - detail_y;
         // Detail widget layout: separator(0) + title(1) + underline(2) + spacer(3) + content(4+)
         if detail_local_row < 4 {
-            self.commit_detail_state.hover_file = None;
+            freeze_selection(&mut self.commit_detail_state);
             return;
         }
 
@@ -524,7 +535,7 @@ impl<'a> DetailView<'a> {
         if hover_line >= changes_start && hover_line < changes_start + self.changes.len() {
             self.commit_detail_state.hover_file = Some(hover_line - changes_start);
         } else {
-            self.commit_detail_state.hover_file = None;
+            freeze_selection(&mut self.commit_detail_state);
         }
     }
 

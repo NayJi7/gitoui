@@ -315,6 +315,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link 0.2.0",
 ]
@@ -1100,6 +1101,7 @@ dependencies = [
  "ansi-to-tui",
  "arboard",
  "base64 0.22.1",
+ "bincode",
  "chrono",
  "clap",
  "console",

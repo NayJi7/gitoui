@@ -127,36 +127,63 @@ impl GitFingerprint {
 /// `.git/` doesn't exist yet).
 pub fn start(git_dir: &Path, sender: Sender) -> Option<Debouncer<RecommendedWatcher>> {
     if !git_dir.exists() {
+        crate::glog_warn!("watcher: .git dir does not exist: {:?}", git_dir);
         return None;
     }
 
     let last_fingerprint = Arc::new(Mutex::new(GitFingerprint::capture(git_dir)));
     let git_dir_owned = git_dir.to_path_buf();
+    crate::glog_info!("watcher: spawning debouncer on {:?}", git_dir);
 
-    let mut debouncer = new_debouncer(
+    let mut debouncer = match new_debouncer(
         Duration::from_millis(DEBOUNCE_MS),
         move |res: DebounceEventResult| {
-            let Ok(events) = res else { return };
+            let events = match res {
+                Ok(events) => events,
+                Err(e) => {
+                    crate::glog_warn!("watcher: debouncer error: {:?}", e);
+                    return;
+                }
+            };
+            crate::glog_info!("watcher: got {} debounced event(s)", events.len());
             // Whitelist filter first, cheap.
-            if !events.iter().any(|e| is_relevant_event(&e.path)) {
+            let relevant: Vec<&std::path::Path> = events
+                .iter()
+                .map(|e| e.path.as_path())
+                .filter(|p| is_relevant_event(p))
+                .collect();
+            if relevant.is_empty() {
+                crate::glog_info!(
+                    "watcher: no relevant paths in burst (paths: {:?})",
+                    events.iter().map(|e| &e.path).collect::<Vec<_>>()
+                );
                 return;
             }
+            crate::glog_info!("watcher: relevant paths: {:?}", relevant);
             // Content compare next, eliminates touch / no-op writes.
             let now = GitFingerprint::capture(&git_dir_owned);
             let mut last = last_fingerprint.lock().unwrap();
             if *last == now {
+                crate::glog_info!("watcher: fingerprint unchanged, skipping");
                 return;
             }
             *last = now;
+            crate::glog_info!("watcher: fingerprint changed, sending FilesystemChanged");
             sender.try_send(AppEvent::FilesystemChanged);
         },
-    )
-    .ok()?;
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            crate::glog_warn!("watcher: new_debouncer failed: {:?}", e);
+            return None;
+        }
+    };
 
-    debouncer
-        .watcher()
-        .watch(git_dir, RecursiveMode::Recursive)
-        .ok()?;
+    if let Err(e) = debouncer.watcher().watch(git_dir, RecursiveMode::Recursive) {
+        crate::glog_warn!("watcher: watch() failed on {:?}: {:?}", git_dir, e);
+        return None;
+    }
+    crate::glog_info!("watcher: armed and watching");
 
     Some(debouncer)
 }

@@ -44,9 +44,9 @@ static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default(
 const ELLIPSIS: &str = "...";
 
 #[derive(Debug)]
-pub struct CommitInfo<'a> {
-    pub commit: &'a Commit,
-    refs: Vec<&'a Ref>,
+pub struct CommitInfo {
+    pub commit: std::sync::Arc<Commit>,
+    refs: Vec<Ref>,
     pub graph_color: Color,
     pub is_uncommitted: bool,
     pub uncommitted_staged: usize,
@@ -58,8 +58,8 @@ pub struct CommitInfo<'a> {
     pub uncommitted_last_modified: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
-impl<'a> CommitInfo<'a> {
-    pub fn new(commit: &'a Commit, refs: Vec<&'a Ref>, graph_color: Color) -> Self {
+impl CommitInfo {
+    pub fn new(commit: std::sync::Arc<Commit>, refs: Vec<Ref>, graph_color: Color) -> Self {
         Self {
             commit,
             refs,
@@ -74,7 +74,7 @@ impl<'a> CommitInfo<'a> {
     }
 
     pub fn new_uncommitted(
-        commit: &'a Commit,
+        commit: std::sync::Arc<Commit>,
         graph_color: Color,
         staged: usize,
         unstaged: usize,
@@ -95,8 +95,8 @@ impl<'a> CommitInfo<'a> {
         }
     }
 
-    pub fn commit(&self) -> &'a Commit {
-        self.commit
+    pub fn commit(&self) -> &Commit {
+        &self.commit
     }
 }
 
@@ -165,10 +165,10 @@ struct SearchMatch {
 }
 
 impl SearchMatch {
-    fn set(&mut self, c: &Commit, refs: &[&Ref], matcher: &SearchMatcher) {
+    fn set(&mut self, c: &Commit, refs: &[Ref], matcher: &SearchMatcher) {
         self.refs = refs
             .iter()
-            .filter(|r| !matches!(*r, Ref::Stash { .. }))
+            .filter(|r| !matches!(r, Ref::Stash { .. }))
             .filter_map(|r| {
                 matcher
                     .matched_position(r.name())
@@ -294,14 +294,19 @@ pub struct RefHitArea {
 
 #[derive(Debug)]
 pub struct CommitListState<'a> {
-    commits: Vec<CommitInfo<'a>>,
-    commit_hash_set: FxHashSet<&'a CommitHash>,
+    commits: Vec<CommitInfo>,
+    /// Maps each commit hash to its index in `commits`. Replaces the
+    /// previous `FxHashSet<CommitHash>` — `.contains_key(h)` covers the
+    /// old membership-check use, and the index value gives `select_*`
+    /// O(1) lookups instead of the O(N) linear scan they used to do
+    /// (catastrophic on 332k-commit repos).
+    commit_hash_to_index: FxHashMap<CommitHash, usize>,
     graph_image_manager: GraphImageManager<'a>,
     graph_cell_width: u16,
     head: &'a Head,
     head_commit_hash: Option<CommitHash>,
 
-    ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
+    ref_name_to_commit_index_map: FxHashMap<String, usize>,
     branch_color_map: FxHashMap<String, Color>,
 
     search_state: SearchState,
@@ -319,6 +324,15 @@ pub struct CommitListState<'a> {
     offset: usize,
     total: usize,
     height: usize,
+    /// Cached max widths so the per-frame `content_column_widths`
+    /// call doesn't have to iterate the entire commit list
+    /// (catastrophic on 332k-commit repos: ~664k string-measure
+    /// calls per frame × 20 frames per second froze the UI for
+    /// the whole bg-streaming window). Recomputed only when
+    /// commits are appended (`extend_commits`) - which is
+    /// itself a one-shot per-batch O(batch_size) pass, not a
+    /// per-frame cost.
+    cached_author_name_width: u16,
     // Lazy-load dedup lives in a module-level static (see
     // `LAST_LAZY_TRIGGER_POS` below) so it survives the state rebuild
     // that happens on every refresh. Storing it here would be reset
@@ -360,11 +374,11 @@ pub struct CommitListState<'a> {
 
 impl<'a> CommitListState<'a> {
     pub fn new(
-        commits: Vec<CommitInfo<'a>>,
+        commits: Vec<CommitInfo>,
         graph_image_manager: GraphImageManager<'a>,
         graph_cell_width: u16,
         head: &'a Head,
-        ref_name_to_commit_index_map: FxHashMap<&'a str, usize>,
+        ref_name_to_commit_index_map: FxHashMap<String, usize>,
         branch_color_map: FxHashMap<String, Color>,
         default_ignore_case: bool,
         default_fuzzy: bool,
@@ -372,7 +386,21 @@ impl<'a> CommitListState<'a> {
     ) -> CommitListState<'a> {
         let total = commits.len();
         let _has_uncommitted = commits.first().is_some_and(|c| c.is_uncommitted);
-        let commit_hash_set = commits.iter().map(|c| &c.commit.commit_hash).collect();
+        let commit_hash_to_index: FxHashMap<CommitHash, usize> = commits
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.commit.commit_hash.clone(), i))
+            .collect();
+        // Seed the column-width cache from the initial commit set
+        // (the cheap path: 500 commits at launch, walks once). The
+        // bg streaming loader keeps it up to date via
+        // `extend_commits`.
+        let cached_author_name_width: u16 = commits
+            .iter()
+            .filter(|c| !c.is_uncommitted)
+            .map(|c| console::measure_text_width(&c.commit.author_name) as u16)
+            .max()
+            .unwrap_or(0);
         let head_commit_hash = match head {
             Head::Detached { target } => Some(target.clone()),
             Head::Branch { name } => ref_name_to_commit_index_map
@@ -383,7 +411,7 @@ impl<'a> CommitListState<'a> {
         };
         CommitListState {
             commits,
-            commit_hash_set,
+            commit_hash_to_index,
             graph_image_manager,
             graph_cell_width,
             head,
@@ -398,6 +426,7 @@ impl<'a> CommitListState<'a> {
             offset: 0,
             total,
             height: 0,
+            cached_author_name_width,
             default_ignore_case,
             default_fuzzy,
             default_regex,
@@ -631,6 +660,81 @@ impl<'a> CommitListState<'a> {
     /// live `graph_width` exit path so the caller can resolve the
     /// `Option<GraphWidthType>` (Auto / Single / Double) into a
     /// concrete `CellWidthType` via `check::decide_cell_width_type`.
+    /// Append more commits to the in-memory list. Used by the
+    /// background streaming loader: bg walks `git log` (or reads
+    /// the disk cache) on its own OS thread and ships batched
+    /// `CommitInfo` entries to the main thread via
+    /// `AppEvent::AppendCommits`. The handler in `app.rs` calls
+    /// this to extend the list WITHOUT rebuilding the App - the
+    /// cursor / scroll position / search state survive
+    /// untouched.
+    pub fn extend_commits(&mut self, new_commits: Vec<CommitInfo>) {
+        if new_commits.is_empty() {
+            return;
+        }
+        let grow = new_commits.len();
+        let base_index = self.commits.len();
+        // Roll the cached author column width over the new batch
+        // (one O(batch_size) pass here, vs. the previous O(N) per
+        // RENDER frame on the full list). Date width is a function
+        // of the format string only, not the individual values, so
+        // it stays put.
+        //
+        // Also extend `ref_name_to_commit_index_map` with refs
+        // present on the streamed commits: without this, the Refs
+        // tab (Tab key) sees the new refs in `repository.all_refs()`
+        // but `select_ref` returns None when the user hovers or
+        // clicks one of them (the map only had refs found on the
+        // fg-loaded initial 500). Symptom: refs view hover and
+        // click silently no-op on bg-streamed branches.
+        for (offset, info) in new_commits.iter().enumerate() {
+            let i = base_index + offset;
+            self.commit_hash_to_index
+                .insert(info.commit.commit_hash.clone(), i);
+            if !info.is_uncommitted {
+                let w = console::measure_text_width(&info.commit.author_name) as u16;
+                if w > self.cached_author_name_width {
+                    self.cached_author_name_width = w;
+                }
+            }
+            for r in &info.refs {
+                self.ref_name_to_commit_index_map
+                    .insert(r.name().to_string(), i);
+            }
+        }
+        self.commits.extend(new_commits);
+        // Keep the parallel `search_matches` vec the same length as
+        // `commits` so per-row lookups don't panic.
+        self.search_matches
+            .extend(std::iter::repeat_with(SearchMatch::default).take(grow));
+        // CRITICAL: `total` is the scroll/navigation cap (used by
+        // select_next, select_last, render bounds, etc.). Without
+        // bumping it the appended commits sit in the Vec but are
+        // unreachable - the cursor would refuse to leave the
+        // initial 500-commit window.
+        self.total += grow;
+        // Force a recompute on the next render so visible newly-loaded
+        // rows pick up their avatar / graph cells.
+        self.avatars_fully_prepared = false;
+    }
+
+    /// Cached longest author name across the entire commit list.
+    /// Computed at `new()` and rolled forward on `extend_commits`,
+    /// so per-frame access is O(1) instead of the old O(N).
+    pub fn cached_author_name_width(&self) -> u16 {
+        self.cached_author_name_width
+    }
+
+    /// Mark the visible-avatars cache as needing a refresh on the
+    /// next render. Used by the Refs view close path: hover does
+    /// NOT clear this flag (so hovering through refs stays snappy),
+    /// but once the user actually settles on a ref and closes the
+    /// view back to the commit list, we want the freshly-shown
+    /// window's avatars to materialise.
+    pub fn invalidate_visible_avatars(&mut self) {
+        self.avatars_fully_prepared = false;
+    }
+
     pub fn graph(&self) -> &crate::graph::Graph<'a> {
         self.graph_image_manager.graph()
     }
@@ -647,22 +751,36 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_next(&mut self) {
-        if self.selected < (self.total - 1).min(self.height - 1) {
+        // Saturating subs everywhere: a numeric-prefix batch scroll
+        // (e.g. user types `99999` then `j`) runs this in a tight
+        // loop before any render gets a chance to refresh `height`.
+        // If `total == 0` or `height == 0` the old `self.total - 1`
+        // / `self.height - 1` underflow panicked in debug; if the
+        // count was wildly larger than the commit list, offset
+        // could grow without an upper bound and `current_selected_index`
+        // would index past `commits.len()`.
+        let total = self.total;
+        let height = self.height;
+        if total == 0 || height == 0 {
+            return;
+        }
+        let max_selected = (total - 1).min(height - 1);
+        let max_offset = total.saturating_sub(height);
+        if self.selected < max_selected {
             self.selected += 1;
-            self.avatars_fully_prepared = false; // selected row changed
-        } else if self.selected + self.offset < self.total - 1 {
+            self.avatars_fully_prepared = false;
+        } else if self.offset < max_offset {
             self.offset += 1;
-            self.avatars_fully_prepared = false; // visible set scrolled
+            self.avatars_fully_prepared = false;
         }
     }
 
     pub fn select_parent(&mut self) {
         if let Some(target_commit) = self.selected_commit_parent_hash().cloned() {
-            if self.commit_hash_set.contains(&target_commit) {
-                while target_commit.as_str() != self.selected_commit_hash().as_str() {
-                    self.select_next();
-                }
-            }
+            // O(1) jump via the hash->index map instead of the
+            // previous loop-and-select_next dance that was O(N)
+            // on huge repos.
+            self.select_commit_hash(&target_commit);
         }
     }
 
@@ -721,6 +839,9 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_last(&mut self) {
+        if self.total == 0 || self.height == 0 {
+            return;
+        }
         self.selected = (self.height - 1).min(self.total - 1);
         if self.height < self.total {
             self.offset = self.total - self.height;
@@ -949,7 +1070,15 @@ impl<'a> CommitListState<'a> {
     }
 
     fn current_selected_index(&self) -> usize {
-        self.offset + self.selected
+        // Clamp to the last valid commit index. The raw
+        // `offset + selected` could exceed `commits.len()` if
+        // `extend_commits` was called between two render frames
+        // and a stale offset survives, or if `select_*` was
+        // invoked before the first render set `height`. Returning
+        // a guaranteed-in-bounds index lets every call site index
+        // `self.commits[...]` without panicking.
+        let raw = self.offset + self.selected;
+        raw.min(self.commits.len().saturating_sub(1))
     }
 
     pub fn current_list_status(&self) -> (usize, usize, usize) {
@@ -969,7 +1098,16 @@ impl<'a> CommitListState<'a> {
             if self.total > self.height {
                 self.selected = 0;
                 self.offset = index;
-                self.avatars_fully_prepared = false;
+                // Intentionally DON'T clear `avatars_fully_prepared` here.
+                // The Refs view drives this on every hover frame; if
+                // each hover transition triggered a sync sweep of the
+                // newly-visible rows for avatar disk-read + image
+                // decode + PNG encode, hovering through a list of
+                // refs felt ultra-laggy on huge repos (~50 rows × ~30 ms
+                // per new author = 1-2 s per hover). The avatars
+                // behind the refs panel are partially obscured anyway;
+                // the next stable render after the user closes the
+                // Refs view will pick up the avatars naturally.
             } else {
                 self.selected = index;
             }
@@ -977,20 +1115,19 @@ impl<'a> CommitListState<'a> {
     }
 
     pub fn select_commit_hash(&mut self, commit_hash: &CommitHash) {
-        if !self.commit_hash_set.contains(commit_hash) {
+        // O(1) via the hash->index map; previously this scanned
+        // the full `commits` vec linearly which on 332k-commit
+        // repos meant a 5-10 ms hit per call (and could be
+        // triggered repeatedly by ref hover, parent jump, etc.).
+        let Some(&i) = self.commit_hash_to_index.get(commit_hash) else {
             return;
-        }
-        for (i, commit_info) in self.commits.iter().enumerate() {
-            if commit_info.commit.commit_hash == *commit_hash {
-                if self.total > self.height {
-                    self.selected = 0;
-                    self.offset = i;
-                    self.avatars_fully_prepared = false;
-                } else {
-                    self.selected = i;
-                }
-                break;
-            }
+        };
+        if self.total > self.height {
+            self.selected = 0;
+            self.offset = i;
+            self.avatars_fully_prepared = false;
+        } else {
+            self.selected = i;
         }
     }
 
@@ -1320,7 +1457,7 @@ impl<'a> CommitListState<'a> {
         let mut match_index = 1;
         for (i, commit_info) in self.commits.iter().enumerate() {
             let m = &mut self.search_matches[i];
-            m.set(commit_info.commit, commit_info.refs.as_slice(), &matcher);
+            m.set(&commit_info.commit, commit_info.refs.as_slice(), &matcher);
             if m.matched() {
                 m.match_index = match_index;
                 match_index += 1;
@@ -1343,6 +1480,9 @@ impl<'a> CommitListState<'a> {
     }
 
     fn select_next_match_index(&mut self, current_index: usize) {
+        if self.total == 0 {
+            return;
+        }
         let mut i = (current_index + 1) % self.total;
         while i != current_index {
             if self.search_matches[i].matched() {
@@ -1360,6 +1500,9 @@ impl<'a> CommitListState<'a> {
     }
 
     fn select_prev_match_index(&mut self, current_index: usize) {
+        if self.total == 0 {
+            return;
+        }
         let mut i = (current_index + self.total - 1) % self.total;
         while i != current_index {
             if self.search_matches[i].matched() {
@@ -1422,7 +1565,30 @@ impl<'a> StatefulWidget for CommitList<'a> {
             (None, area)
         };
 
-        self.update_state(rows_area, state);
+        // Reserve the bottom row of the commit list area for a
+        // "..." loading indicator while the background streamer is
+        // still appending commits. The commit-row rendering then
+        // runs against a slightly smaller area (height - 1); the
+        // reserved row gets painted at the end of this function.
+        let bg_loading = self
+            .ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire);
+        let (commits_area, loading_row_y) = if bg_loading && rows_area.height >= 2 {
+            (
+                Rect::new(
+                    rows_area.x,
+                    rows_area.y,
+                    rows_area.width,
+                    rows_area.height - 1,
+                ),
+                Some(rows_area.y + rows_area.height - 1),
+            )
+        } else {
+            (rows_area, None)
+        };
+
+        self.update_state(commits_area, state);
 
         if let Some(header_area) = header_area {
             self.render_header(buf, header_area, state, avatars_enabled);
@@ -1451,14 +1617,14 @@ impl<'a> StatefulWidget for CommitList<'a> {
                 .collect()
         };
 
-        let widths = self.content_column_widths(rows_area.width, state, avatars_enabled);
+        let widths = self.content_column_widths(commits_area.width, state, avatars_enabled);
         let constraints = calc_cell_widths(
-            rows_area.width,
+            commits_area.width,
             self.ctx.ui_config.list.commit_message_min_width,
             widths,
             &columns,
         );
-        let chunks = Layout::horizontal(constraints).split(rows_area);
+        let chunks = Layout::horizontal(constraints).split(commits_area);
 
         for (i, col) in columns.iter().enumerate() {
             match col {
@@ -1482,6 +1648,35 @@ impl<'a> StatefulWidget for CommitList<'a> {
                 }
             }
         }
+
+        // Background-streaming indicator: paint a centered "..."
+        // on the row we reserved above. Stays visible the whole
+        // time the bg thread is still shipping batches; disappears
+        // automatically once `bg_full_load_in_progress` flips false
+        // and the reserved row reverts to a regular commit row.
+        if let Some(y) = loading_row_y {
+            let dots = "...";
+            let dots_width = dots.chars().count() as u16;
+            let x = rows_area.x
+                + rows_area
+                    .width
+                    .saturating_sub(dots_width)
+                    / 2;
+            // Subtler than `divider_fg` alone: stack DIM on top so
+            // the "..." reads as a low-attention loading hint
+            // rather than competing with the commit rows above.
+            let style = Style::default()
+                .fg(self.ctx.color_theme.divider_fg)
+                .add_modifier(Modifier::DIM);
+            for (i, ch) in dots.chars().enumerate() {
+                let cx = x + i as u16;
+                if cx < rows_area.right() {
+                    let cell = &mut buf[(cx, y)];
+                    cell.set_symbol(&ch.to_string());
+                    cell.set_style(style);
+                }
+            }
+        }
     }
 }
 
@@ -1493,19 +1688,25 @@ impl CommitList<'_> {
         avatars_enabled: bool,
     ) -> CommitListColumnWidths {
         let avatar_width = if avatars_enabled { 3 } else { 0 };
-        let names: Vec<&str> = state
+        // Use the cached longest-author width (O(1)) instead of
+        // re-iterating the entire commit list on EVERY frame. The
+        // cache is seeded at CommitListState::new and rolled
+        // forward on extend_commits, so it's always in sync with
+        // the longest visible name regardless of how many
+        // background-streamed batches have arrived.
+        let author_content_width = state.cached_author_name_width();
+        // Date width is governed by the configured format string,
+        // not the individual values - all dates of the same format
+        // render to the same number of characters. Sample the
+        // FIRST commit's date for representativeness; falls back
+        // to a "-" placeholder if the list is empty. Stable
+        // across the bg stream.
+        let sample_date: String = state
             .commits
-            .iter()
-            .filter(|commit_info| !commit_info.is_uncommitted)
-            .map(|commit_info| commit_info.commit.author_name.as_str())
-            .collect();
-        let dates: Vec<String> = state
-            .commits
-            .iter()
-            .map(|commit_info| {
-                if commit_info.is_uncommitted {
-                    commit_info
-                        .uncommitted_last_modified
+            .first()
+            .map(|c| {
+                if c.is_uncommitted {
+                    c.uncommitted_last_modified
                         .as_ref()
                         .map(|dt| {
                             self.ctx
@@ -1516,12 +1717,13 @@ impl CommitList<'_> {
                         .unwrap_or_else(|| "-".to_string())
                 } else {
                     self.ctx.core_config.date_time_format().format(
-                        &commit_info.commit.author_date,
+                        &c.commit.author_date,
                         self.ctx.core_config.date_time_local(),
                     )
                 }
             })
-            .collect();
+            .unwrap_or_else(|| "-".to_string());
+        let dates = [sample_date];
 
         // Cap graph column at ~40 % of the panel so a wide multi-branch
         // history (rust-lang/rust, linux kernel, …) doesn't squeeze the
@@ -1534,7 +1736,11 @@ impl CommitList<'_> {
         let graph_cap = (area_width * 40 / 100).max(8);
         CommitListColumnWidths {
             graph: state.graph_area_cell_width().min(area_width).min(graph_cap),
-            author: author_column_width(area_width, avatar_width, &names),
+            author: author_column_width_from_cached(
+                area_width,
+                avatar_width,
+                author_content_width,
+            ),
             hash: 9,
             date: date_column_width(&dates),
         }
@@ -1847,7 +2053,7 @@ impl CommitList<'_> {
             // clips when the terminal is narrow, exactly the opposite
             // of what we want (it has to stay visible because it's the
             // call-to-action telling the user to press `e`).
-            let commit = commit_info.commit;
+            let commit = &commit_info.commit;
             let paused_here = paused_sha
                 .as_deref()
                 .map(|s| s == commit.commit_hash.as_str())
@@ -1939,7 +2145,7 @@ impl CommitList<'_> {
                     spans.push("/".fg(slash_fg));
                     return self.to_commit_list_item(i, spans, state);
                 }
-                let commit = commit_info.commit;
+                let commit = &commit_info.commit;
                 let effective_max = if avatars_enabled && max_width > 10 {
                     max_width.saturating_sub(avatar_width)
                 } else {
@@ -2155,7 +2361,7 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = commit_info.commit;
+                let commit = &commit_info.commit;
                 let hash = commit.commit_hash.as_short_hash();
                 let spans =
                     if let Some(pos) = state.search_matches[state.offset + i].commit_hash.clone() {
@@ -2200,7 +2406,7 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = commit_info.commit;
+                let commit = &commit_info.commit;
                 let date = &commit.author_date;
                 let date_str = self
                     .ctx
@@ -2220,7 +2426,7 @@ impl CommitList<'_> {
     fn rendering_commit_info_iter<'a>(
         &'a self,
         state: &'a CommitListState,
-    ) -> impl Iterator<Item = (usize, &'a CommitInfo<'a>)> {
+    ) -> impl Iterator<Item = (usize, &'a CommitInfo)> {
         state
             .commits
             .iter()
@@ -2342,7 +2548,7 @@ fn refs_spans<'a>(
     let refs = &commit_info.refs;
 
     if refs.len() == 1 {
-        if let Ref::Stash { name, .. } = refs[0] {
+        if let Ref::Stash { name, .. } = &refs[0] {
             return (
                 vec![
                     Span::raw("⌧ ").fg(color_theme.list_ref_stash_fg).bold(),
@@ -2602,12 +2808,11 @@ const DATE_MIN_WIDTH: u16 = 7;
 const AUTHOR_MAX_WIDTH: u16 = 24;
 const DATE_MAX_WIDTH: u16 = 22;
 
-fn author_column_width(area_width: u16, avatar_width: u16, names: &[&str]) -> u16 {
-    let content_width = names
-        .iter()
-        .map(|name| console::measure_text_width(name) as u16)
-        .max()
-        .unwrap_or(0);
+fn author_column_width_from_cached(
+    area_width: u16,
+    avatar_width: u16,
+    content_width: u16,
+) -> u16 {
     let max_width = AUTHOR_MAX_WIDTH.min(area_width);
     (content_width + avatar_width + 2).max(9).min(max_width)
 }
@@ -2823,13 +3028,23 @@ mod tests {
 
     #[test]
     fn content_widths_clamp_long_author_names() {
-        let width = author_column_width(80, 3, &["Short", "A Very Very Very Long Author Name"]);
+        let content = ["Short", "A Very Very Very Long Author Name"]
+            .iter()
+            .map(|s| console::measure_text_width(s) as u16)
+            .max()
+            .unwrap_or(0);
+        let width = author_column_width_from_cached(80, 3, content);
         assert_eq!(width, 24);
     }
 
     #[test]
     fn content_widths_keep_short_author_names_compact() {
-        let width = author_column_width(80, 0, &["Al", "Bob"]);
+        let content = ["Al", "Bob"]
+            .iter()
+            .map(|s| console::measure_text_width(s) as u16)
+            .max()
+            .unwrap_or(0);
+        let width = author_column_width_from_cached(80, 0, content);
         assert_eq!(width, 9);
     }
 

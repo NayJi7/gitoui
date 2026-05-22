@@ -365,17 +365,34 @@ pub fn build_single_graph_row_image(
     commit_hash: &CommitHash,
     head: bool,
 ) -> GraphRowImage {
-    let (pos_x, pos_y) = graph.commit_pos_map[&commit_hash];
-    let edges = &graph.edges[pos_y];
+    // Defensive lookup: bg-streamed commits aren't in fg's
+    // `commit_pos_map` (the fg's `calc_graph` only walks the
+    // initial 500-commit slice). When the user opens a detail
+    // view on a bg-streamed row the renderer used to direct-index
+    // this map and panic with "no entry found for key"; fall back
+    // to a single-row stub image instead so the click just works.
+    let Some(&(pos_x, pos_y)) = graph.commit_pos_map.get(&commit_hash) else {
+        return GraphRowImage {
+            bytes: Vec::new(),
+            cell_count: 0,
+        };
+    };
+    let edges = graph.edges.get(pos_y).map(|v| v.as_slice()).unwrap_or(&[]);
 
-    // Determine render style based on commit type
-    let commit = graph
+    // Determine render style based on commit type. Bg-streamed
+    // commits also aren't in `graph.commits` so the find() can
+    // miss; fall back to "normal commit" defaults rather than
+    // unwrapping a None.
+    let commit_opt = graph
         .commits
         .iter()
-        .find(|c| c.commit_hash == *commit_hash)
-        .unwrap();
-    let is_stash = matches!(commit.commit_type, crate::git::CommitType::Stash);
-    let is_uncommitted = matches!(commit.commit_type, crate::git::CommitType::Uncommitted);
+        .find(|c| c.commit_hash == *commit_hash);
+    let is_stash = commit_opt
+        .map(|c| matches!(c.commit_type, crate::git::CommitType::Stash))
+        .unwrap_or(false);
+    let is_uncommitted = commit_opt
+        .map(|c| matches!(c.commit_type, crate::git::CommitType::Uncommitted))
+        .unwrap_or(false);
 
     // Uncommitted uses #808080, matching VS Code Git Graph's convention
     const UNCOMMITTED_COLOR: image::Rgba<u8> = image::Rgba([0x80, 0x80, 0x80, 0xff]);

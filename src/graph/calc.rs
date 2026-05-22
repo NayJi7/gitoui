@@ -362,6 +362,198 @@ fn determine_path(
     }
 }
 
+/// Cheap stand-in for `calc_graph` used when the user has disabled
+/// (or auto-disabled) the graph column. Skips the topology walk
+/// entirely. The ONLY useful output is `commit_color_map`, which is
+/// built from a first-parent walk per branch ref so the inline `│`
+/// separator drawn left of each commit message still gets a
+/// per-branch tint:
+///
+/// 1. Branch refs are visited in a stable order (HEAD's branch first
+///    so it always claims the primary colour, then the rest
+///    alphabetically).
+/// 2. For each branch, walk first-parent from its tip; every commit
+///    reached that isn't already coloured gets the branch's index as
+///    its colour slot.
+/// 3. Commits not reachable from any branch (orphans, dangling, etc.)
+///    fall back to colour 0.
+///
+/// All other fields are empty / zeroed: `commit_pos_map` pins every
+/// row to lane 0, `edges` is empty per row, `max_pos_x = 0`, no
+/// branch segments. The image-rendering pipeline never runs when the
+/// graph column is disabled, so those fields are never consumed -
+/// they're only present so the `Graph` struct's downstream readers
+/// in `app.rs` (which still do a generic `commit_pos_map[hash]`
+/// lookup for sizing purposes) keep compiling.
+///
+/// Runs in O(N) total across all branch walks (each commit visited
+/// once), tens of milliseconds on a 300k-commit repo vs several
+/// seconds for the full `calc_graph`.
+pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
+    let commits = repository.all_commits();
+    let n = commits.len();
+
+    // Seed pos_map with pos_x = 0 for every commit; we'll overwrite
+    // pos_x below with the branch colour index so the downstream
+    // colour selector in `app.rs` (which uses `pos_x` directly for
+    // non-Smooth styles) picks up per-branch tints. Smooth style
+    // already reads `commit_color_map` and gets the same result.
+    let mut commit_pos_map: CommitPosMap = FxHashMap::default();
+    commit_pos_map.reserve(n);
+    for (i, c) in commits.iter().enumerate() {
+        commit_pos_map.insert(&c.commit_hash, (0, i));
+    }
+
+    let mut commit_color_map: CommitColorMap = FxHashMap::default();
+    commit_color_map.reserve(n);
+
+    // Collect branch tips in a stable order so colours don't shuffle
+    // between runs. HEAD's branch wins slot 0 so the user's working
+    // line stays the primary palette colour.
+    let head_branch_name = match repository.head() {
+        crate::git::Head::Branch { name } => Some(name.clone()),
+        _ => None,
+    };
+    // Include BOTH local and remote branch tips. Many repos
+    // (dependabot, ci, fork PRs) live entirely on remote branches
+    // with no matching local; without those, the first-parent walks
+    // miss the commits and they all fall through to colour 0 in the
+    // fallback below, rendering the entire `│` separator column in
+    // the palette's first colour.
+    let mut branch_tips: Vec<(String, &CommitHash)> = Vec::new();
+    for r in repository.all_refs() {
+        match r {
+            crate::git::Ref::Branch { name, target }
+            | crate::git::Ref::RemoteBranch { name, target } => {
+                branch_tips.push((name.clone(), target));
+            }
+            _ => {}
+        }
+    }
+    // Stable sort: HEAD's local branch first (claims slot 0), then
+    // every other ref alphabetically. Dedup so a local branch and
+    // its matching remote (e.g. `master` + `origin/master`) don't
+    // both walk the same first-parent chain and the same commit
+    // doesn't get re-claimed by a different colour.
+    branch_tips.sort_by(|a, b| {
+        let a_is_head = head_branch_name.as_ref() == Some(&a.0);
+        let b_is_head = head_branch_name.as_ref() == Some(&b.0);
+        b_is_head.cmp(&a_is_head).then_with(|| a.0.cmp(&b.0))
+    });
+
+    // First-parent walk from each tip. Stop on already-coloured
+    // commits so the first branch to claim a commit owns it.
+    for (color_index, (_, tip)) in branch_tips.iter().enumerate() {
+        let mut cur: Option<&CommitHash> = Some(tip);
+        while let Some(hash) = cur {
+            if commit_color_map.contains_key(hash) {
+                break;
+            }
+            // Locate the cached `&CommitHash` from the canonical
+            // `commits` Vec so the lifetime matches the map key
+            // signature.
+            let canonical_idx = commit_pos_map.get(hash).map(|&(_, y)| y);
+            let (key, y) = match canonical_idx.and_then(|i| commits.get(i).map(|c| (i, c)))
+            {
+                Some((i, c)) => (&c.commit_hash, i),
+                None => break,
+            };
+            commit_color_map.insert(key, color_index);
+            // Mirror the colour into pos_x as well: app.rs's
+            // non-Smooth path (`color_index = pos_x`) would
+            // otherwise read 0 for every commit and render the
+            // whole separator column in the palette's first
+            // colour. Storing the branch index here makes both
+            // paths agree.
+            commit_pos_map.insert(key, (color_index, y));
+            cur = repository.parents_hash(hash).first().copied();
+        }
+    }
+
+    // Any remaining commits (orphans, unreferenced) fall back to 0.
+    for c in &commits {
+        commit_color_map.entry(&c.commit_hash).or_insert(0);
+    }
+
+    Graph {
+        commits,
+        commit_pos_map,
+        commit_color_map,
+        edges: vec![Vec::new(); n],
+        max_pos_x: 0,
+        branch_segments: Vec::new(),
+    }
+}
+
+/// Lane-assignment phase of `calc_graph` only - returns the same
+/// `commit_pos_map` and `commit_color_map` as the full version
+/// without paying for the `build_legacy_edges` step. That step
+/// allocates a `Vec<Vec<WrappedEdge>>` whose memory usage on a
+/// 332k-commit repo with many branches reaches several hundred MB,
+/// triggering an OOM kill of the bg streaming thread on machines
+/// with limited RAM. The bg thread only needs colours, not edges,
+/// so it calls this lighter variant; the fg path still uses the
+/// full `calc_graph` so the image renderer has the edge data.
+pub fn calc_graph_colors_only(repository: &Repository) -> Graph<'_> {
+    let commits = repository.all_commits();
+    let n = commits.len();
+
+    let mut vertices = load_commits(&commits, repository);
+    let mut branches: Vec<LayoutBranch> = Vec::new();
+    let mut available_colours: Vec<usize> = Vec::new();
+
+    for i in 0..n {
+        loop {
+            let has_more = {
+                let v = &vertices[i];
+                v.next_parent < v.parent_ids.len()
+            };
+            if !has_more {
+                break;
+            }
+            determine_path(i, &mut vertices, &mut branches, &mut available_colours);
+        }
+        if vertices[i].not_on_branch() {
+            let colour = get_available_colour(i, &available_colours);
+            while available_colours.len() <= colour {
+                available_colours.push(0);
+            }
+            let branch_id = branches.len();
+            branches.push(LayoutBranch::new(colour));
+            let x = vertices[i].next_x;
+            vertices[i].add_to_branch(branch_id, x);
+            vertices[i].register_unavailable_point(x, i, branch_id);
+            branches[branch_id].set_end(i + 1);
+            available_colours[colour] = i + 1;
+        }
+    }
+
+    let mut commit_pos_map: CommitPosMap = FxHashMap::default();
+    let mut commit_color_map: CommitColorMap = FxHashMap::default();
+    let mut max_pos_x = 0usize;
+    for (i, commit) in commits.iter().enumerate() {
+        let x = vertices[i].x.unwrap_or(0);
+        commit_pos_map.insert(&commit.commit_hash, (x, i));
+        let color = vertices[i]
+            .branch_id
+            .map(|branch_id| branches[branch_id].colour)
+            .unwrap_or(x);
+        commit_color_map.insert(&commit.commit_hash, color);
+        if x > max_pos_x {
+            max_pos_x = x;
+        }
+    }
+
+    Graph {
+        commits,
+        commit_pos_map,
+        commit_color_map,
+        edges: vec![Vec::new(); n],
+        max_pos_x,
+        branch_segments: Vec::new(),
+    }
+}
+
 pub fn calc_graph(repository: &Repository) -> Graph<'_> {
     let commits = repository.all_commits();
     let n = commits.len();
@@ -491,11 +683,22 @@ fn build_legacy_edges<'a>(
     let mut edges: Vec<Vec<WrappedEdge>> = vec![vec![]; commits.len()];
 
     for commit in commits {
-        let (pos_x, pos_y) = commit_pos_map[&commit.commit_hash];
+        // Defensive lookup: orphaned children referenced from
+        // `children_map` but absent from the laid-out commit set
+        // (stash boundaries, partial Repository views, edge cases
+        // around shallow clones) used to panic the bg streaming
+        // thread silently and leave the user stuck at the last
+        // successfully-streamed commit (e.g. blocked at
+        // c2bb45ec on rust-lang/rust). Skip rather than crash.
+        let Some(&(pos_x, pos_y)) = commit_pos_map.get(&commit.commit_hash) else {
+            continue;
+        };
         let hash = &commit.commit_hash;
 
         for child_hash in repository.children_hash(hash) {
-            let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
+            let Some(&(child_pos_x, child_pos_y)) = commit_pos_map.get(child_hash) else {
+                continue;
+            };
 
             if pos_x == child_pos_x {
                 edges[pos_y].push(WrappedEdge::new(EdgeType::Up, pos_x, pos_x, hash));
@@ -582,11 +785,17 @@ fn build_legacy_edges<'a>(
     }
 
     for commit in commits {
-        let (pos_x, pos_y) = commit_pos_map[&commit.commit_hash];
+        // Same defensive lookup as `build_legacy_edges` above:
+        // skip orphan / missing entries instead of panicking.
+        let Some(&(pos_x, pos_y)) = commit_pos_map.get(&commit.commit_hash) else {
+            continue;
+        };
         let hash = &commit.commit_hash;
 
         for child_hash in repository.children_hash(hash) {
-            let (child_pos_x, child_pos_y) = commit_pos_map[child_hash];
+            let Some(&(child_pos_x, child_pos_y)) = commit_pos_map.get(child_hash) else {
+                continue;
+            };
 
             if pos_x != child_pos_x {
                 let child_first_parent_hash = &commits[child_pos_y].parent_commit_hashes[0];
@@ -793,7 +1002,7 @@ mod tests {
             .collect::<Vec<_>>();
         let commit_map = commits
             .into_iter()
-            .map(|c| (c.commit_hash.clone(), c))
+            .map(|c| (c.commit_hash.clone(), std::sync::Arc::new(c)))
             .collect::<FxHashMap<_, _>>();
         let repository = Repository::new(
             Default::default(),
@@ -839,7 +1048,7 @@ mod tests {
             .collect::<Vec<_>>();
         let commit_map = commits
             .into_iter()
-            .map(|c| (c.commit_hash.clone(), c))
+            .map(|c| (c.commit_hash.clone(), std::sync::Arc::new(c)))
             .collect::<FxHashMap<_, _>>();
         let parents_map = FxHashMap::from_iter([
             (
@@ -912,7 +1121,7 @@ mod tests {
         let commit_hashes: Vec<_> = commits.iter().map(|c| c.commit_hash.clone()).collect();
         let commit_map = commits
             .into_iter()
-            .map(|c| (c.commit_hash.clone(), c))
+            .map(|c| (c.commit_hash.clone(), std::sync::Arc::new(c)))
             .collect::<FxHashMap<_, _>>();
         let repository = Repository::new(
             Default::default(),

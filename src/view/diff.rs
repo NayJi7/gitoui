@@ -189,15 +189,32 @@ impl<'a> DiffView<'a> {
         all_file_paths: Vec<(String, bool)>,
         repo_path: std::path::PathBuf,
     ) -> DiffView<'a> {
-        let file_path = title
+        // File path resolution order:
+        // 1. Strip a known title prefix (the regular Detail/Uncommitted
+        //    paths build their title as "Diff: <path>", "Diff (staged): <path>",
+        //    or "Diff (unstaged): <path>").
+        // 2. Fall back to the FIRST diff entry's path. The compare
+        //    view's title is "Compare X..Y" (no path in the title) - without
+        //    this fallback, `file_path` was "" and `git show newer:` returned
+        //    an empty body, leaving `new_file_lines` empty. The user clicked
+        //    "show more" but no extra context lines could be rendered
+        //    because the line lookup `new_file_lines[line_no - 1]` always
+        //    fell through the bounds check.
+        let file_path: String = title
             .strip_prefix("Diff (staged): ")
             .or_else(|| title.strip_prefix("Diff (unstaged): "))
             .or_else(|| title.strip_prefix("Diff: "))
-            .unwrap_or("");
+            .map(|s| s.to_string())
+            .or_else(|| {
+                diff_entries
+                    .first()
+                    .and_then(|e| e.new_path.clone().or_else(|| e.old_path.clone()))
+            })
+            .unwrap_or_default();
         let (old_lines, new_lines) = Self::load_file_versions(
             &repo_path,
             &commit_hash,
-            file_path,
+            &file_path,
             title.contains("(staged)"),
         );
 

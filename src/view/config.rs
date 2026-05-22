@@ -22,14 +22,6 @@ use crate::{
 // Item indices, listed here so future inserts only have to touch one spot
 // instead of hunting for `selected == N` matches scattered through the file.
 //   0  Theme
-//   1  Graph Style
-//   2  Graph Width
-//   3  Diff Mode
-//   4  Resolve Mode      ← merge-conflict editor layout
-//   5  Rebase Mode       ← interactive-rebase editor layout
-//   6  Order             ← commit order: chrono vs topo
-//   7  Initial Selection
-//   0  Theme
 //   1  Graph Enabled     ← GRAPH_ENABLED_INDEX (yes/no toggle, applies on close)
 //   2  Graph Style       (grayed when Graph Enabled = no)
 //   3  Graph Width       (grayed when Graph Enabled = no)
@@ -38,25 +30,21 @@ use crate::{
 //   6  Rebase Mode
 //   7  Order
 //   8  Initial Selection
-//   9  Initial Load Count ← INITIAL_LOAD_COUNT_INDEX (text input, digits only, [10..99999])
-//  10  Mouse
-//  11  Date Format
-//  12  Image Protocol
-//  13  Git Name          ← TEXT_EDIT_START_INDEX
-//  14  Git Email
-//  15  Default Branch
-//  16  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  17  Github Avatars    ← GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 18;
+//   9  Mouse
+//  10  Date Format
+//  11  Image Protocol
+//  12  Git Name          ← TEXT_EDIT_START_INDEX
+//  13  Git Email
+//  14  Default Branch
+//  15  GitHub Auth       ← GITHUB_AUTH_INDEX
+//  16  Github Avatars    ← GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 17;
 const GRAPH_ENABLED_INDEX: usize = 1;
 const GRAPH_STYLE_INDEX: usize = 2;
 const GRAPH_WIDTH_INDEX: usize = 3;
-const INITIAL_LOAD_COUNT_INDEX: usize = 9;
-const TEXT_EDIT_START_INDEX: usize = 13;
-const GITHUB_AUTH_INDEX: usize = 16;
-const GITHUB_AVATARS_INDEX: usize = 17;
-const INITIAL_LOAD_COUNT_MIN: usize = 10;
-const INITIAL_LOAD_COUNT_MAX: usize = 99_999;
+const TEXT_EDIT_START_INDEX: usize = 12;
+const GITHUB_AUTH_INDEX: usize = 15;
+const GITHUB_AVATARS_INDEX: usize = 16;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -139,7 +127,6 @@ impl<'a> ConfigView<'a> {
             rebase_view_display(self.ui_config.common.rebase_view),
             commit_order_display(self.core_config.order()),
             initial_selection_display(self.core_config.initial_selection()),
-            self.core_config.option.initial_load_count.to_string(),
             mouse_display(self.ui_config.common.mouse_enabled),
             self.core_config
                 .date_time_format()
@@ -427,10 +414,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            INITIAL_LOAD_COUNT_INDEX => self.core_config.option.initial_load_count.to_string(),
-            13 => self.core_config.user_name().unwrap_or("").to_string(),
-            14 => self.core_config.user_email().unwrap_or("").to_string(),
-            15 => self.core_config.default_branch().unwrap_or("").to_string(),
+            12 => self.core_config.user_name().unwrap_or("").to_string(),
+            13 => self.core_config.user_email().unwrap_or("").to_string(),
+            14 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -552,11 +538,7 @@ impl<'a> ConfigView<'a> {
             KeyCode::Char(c) if !ctrl => {
                 // Numeric-only fields filter at the keystroke level so
                 // the user never sees an invalid character land in the
-                // buffer. Right now only `Initial Load Count` (index
-                // INITIAL_LOAD_COUNT_INDEX) is digit-restricted.
-                if self.selected == INITIAL_LOAD_COUNT_INDEX && !c.is_ascii_digit() {
-                    return;
-                }
+                // buffer. No digit-restricted fields remain.
                 self.editing_value.insert(self.editing_cursor, c);
                 self.editing_cursor += c.len_utf8();
             }
@@ -613,21 +595,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            INITIAL_LOAD_COUNT_INDEX => {
-                // Parse + clamp into the allowed window. Empty input
-                // or non-digit junk reverts to the previous value
-                // (the buffer is digit-filtered during entry but a
-                // user could clear it entirely with Backspace).
-                if let Some(s) = value.as_ref() {
-                    if let Ok(n) = s.parse::<usize>() {
-                        let clamped = n.clamp(INITIAL_LOAD_COUNT_MIN, INITIAL_LOAD_COUNT_MAX);
-                        self.core_config.option.initial_load_count = clamped;
-                    }
-                }
-            }
-            13 => self.core_config.set_user_name(value),
-            14 => self.core_config.set_user_email(value),
-            15 => self.core_config.set_default_branch(value),
+            12 => self.core_config.set_user_name(value),
+            13 => self.core_config.set_user_email(value),
+            14 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -715,21 +685,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            INITIAL_LOAD_COUNT_INDEX => {
-                // Text-input field, no left/right cycle. Press Enter
-                // to edit; arrows fall through to the no-op default
-                // and the row stays unchanged.
-            }
-            10 => {
+            9 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            11 => {
+            10 => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
-            12 => {
+            11 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -829,19 +794,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(next);
             }
-            INITIAL_LOAD_COUNT_INDEX => {
-                // Text input, no cycle. See cycle_option_prev for the rationale.
-            }
-            10 => {
+            9 => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            11 => {
+            10 => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
-            12 => {
+            11 => {
                 let current = self
                     .core_config
                     .protocol()
@@ -999,11 +961,6 @@ impl<'a> ConfigView<'a> {
             (
                 "Initial Select",
                 initial_selection_display(self.core_config.initial_selection()),
-                false,
-            ),
-            (
-                "Load Count",
-                self.core_config.option.initial_load_count.to_string(),
                 false,
             ),
             (
@@ -1222,7 +1179,17 @@ impl<'a> ConfigView<'a> {
         let git_email = &self.ctx.git_user_email;
         let descriptions: Vec<String> = vec![
             "Color theme applied to the entire interface, including diff syntax highlighting.".into(),
-            "Toggle the commit-graph image column.\n\nDisabling it skips all image rendering for near-instant scrolling on huge repos.".into(),
+            {
+                let base = "Toggle the commit-graph image column.\n\nDisabling it skips all image rendering for near-instant scrolling on huge repos.";
+                if self.ctx.graph_huge_repo_warning {
+                    format!(
+                        "{}\n\n⚠ Huge repo detected: re-enabling the graph here will likely cause lag, freezes, crashes, and broken rendering.",
+                        base
+                    )
+                } else {
+                    base.into()
+                }
+            },
             "Controls how commit connection lines are rendered in the graph.".into(),
             "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
             diff_mode_description(self.ui_config.common.diff_mode),
@@ -1230,10 +1197,6 @@ impl<'a> ConfigView<'a> {
             rebase_view_description(self.ui_config.common.rebase_view),
             "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children, branches stay grouped, like `git log --topo-order`.".into(),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.\n\nWill update at next launch of gitoui.".into(),
-            format!(
-                "Number of commits loaded into the graph on startup.\n\nDigits only, between {} and {}.\n\nWill update at next launch of gitoui.",
-                INITIAL_LOAD_COUNT_MIN, INITIAL_LOAD_COUNT_MAX,
-            ),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
             "Terminal image protocol used for rendering commit graph images.".into(),
@@ -1273,7 +1236,7 @@ impl<'a> ConfigView<'a> {
             Line::from(""),
         ];
         for line in descriptions[self.selected].lines() {
-            let style = if line.contains("Might cause") {
+            let style = if line.contains("Might cause") || line.starts_with("⚠") {
                 Style::default().fg(self.ctx.color_theme.status_warn_fg)
             } else if line.starts_with("Current git config") {
                 Style::default().fg(self.ctx.color_theme.status_success_fg)
@@ -2017,7 +1980,7 @@ fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -
         } else {
             ""
         }
-    } else if selected >= TEXT_EDIT_START_INDEX || selected == INITIAL_LOAD_COUNT_INDEX {
+    } else if selected >= TEXT_EDIT_START_INDEX {
         "Enter:edit"
     } else {
         "Enter/⇆:cycle"
@@ -2054,10 +2017,6 @@ enum ConfigValueKind {
 fn config_value_kind(index: usize) -> ConfigValueKind {
     if index == GITHUB_AUTH_INDEX {
         ConfigValueKind::Button
-    } else if index == INITIAL_LOAD_COUNT_INDEX {
-        // Text-input field sandwiched between cycle items, has to be
-        // classified explicitly because it sits below TEXT_EDIT_START_INDEX.
-        ConfigValueKind::Input
     } else if index == GITHUB_AVATARS_INDEX || index < TEXT_EDIT_START_INDEX {
         ConfigValueKind::Cycle
     } else {
