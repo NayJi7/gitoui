@@ -6757,8 +6757,7 @@ impl<'a> App<'a> {
             (String::new(), String::new(), String::new())
         };
         let (tip_hash, tip_commit_message, tip_author, tip_date) =
-            actions::branch_tip_detail(repo_path, &branch_name)
-                .unwrap_or_default();
+            actions::branch_tip_detail(repo_path, &branch_name).unwrap_or_default();
         let metadata = BranchMetadata {
             branch_name: branch_name.clone(),
             is_remote,
@@ -6792,15 +6791,13 @@ impl<'a> App<'a> {
             _ => None,
         };
         let repo_path = self.repository.path();
-        let info = actions::tag_info(repo_path, &tag_name).unwrap_or_else(|_| {
-            actions::TagInfo {
-                tag_type: "Tag".to_string(),
-                target_hash: String::new(),
-                target_commit_message: String::new(),
-                tagger: None,
-                date: None,
-                message: None,
-            }
+        let info = actions::tag_info(repo_path, &tag_name).unwrap_or_else(|_| actions::TagInfo {
+            tag_type: "Tag".to_string(),
+            target_hash: String::new(),
+            target_commit_message: String::new(),
+            tagger: None,
+            date: None,
+            message: None,
         });
         let metadata = TagMetadata {
             tag_name: tag_name.clone(),

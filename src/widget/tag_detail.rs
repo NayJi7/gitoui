@@ -283,8 +283,7 @@ impl TagDetail<'_> {
 
         // Tagger identity (annotated only)
         if let Some(tagger) = &self.metadata.tagger {
-            label_lines
-                .push(Line::from("   Tagger: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("   Tagger: ").fg(self.ctx.color_theme.detail_label_fg));
             value_lines.push(Line::from(Span::styled(
                 tagger.as_str(),
                 Style::default().fg(self.ctx.color_theme.detail_name_fg),
@@ -293,14 +292,13 @@ impl TagDetail<'_> {
 
         // Date (annotated only), formatted with the user's configured format
         if let Some(date) = &self.metadata.date {
-            label_lines
-                .push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
             let formatted = DateTime::parse_from_str(date, "%Y-%m-%d %H:%M:%S %z")
                 .map(|dt| {
-                    self.ctx.core_config.date_time_format().format(
-                        &dt,
-                        self.ctx.core_config.date_time_local(),
-                    )
+                    self.ctx
+                        .core_config
+                        .date_time_format()
+                        .format(&dt, self.ctx.core_config.date_time_local())
                 })
                 .unwrap_or_else(|_| date.clone());
             value_lines.push(Line::from(Span::styled(
@@ -318,8 +316,7 @@ impl TagDetail<'_> {
         // Tag message body (annotated only, multi-line supported)
         if let Some(message) = &self.metadata.message {
             let msg_lines: Vec<&str> = message.lines().collect();
-            label_lines
-                .push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
+            label_lines.push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
             if let Some((first, rest)) = msg_lines.split_first() {
                 value_lines.push(Line::from(*first));
                 for line in rest {
@@ -335,10 +332,6 @@ impl TagDetail<'_> {
     }
 
     fn divider_line(&self, width: usize) -> Line<'_> {
-        Line::from(
-            "\u{2500}"
-                .repeat(width)
-                .fg(self.ctx.color_theme.divider_fg),
-        )
+        Line::from("\u{2500}".repeat(width).fg(self.ctx.color_theme.divider_fg))
     }
 }

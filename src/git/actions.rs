@@ -686,8 +686,7 @@ pub fn tag_info(path: &Path, tag: &str) -> Result<TagInfo, String> {
 
     // Target commit: `git log -1 --format=<hash> <subject>` resolves
     // through annotated tags automatically.
-    let target_line = run_git(path, &["log", "-1", "--format=%h %s", tag])
-        .unwrap_or_default();
+    let target_line = run_git(path, &["log", "-1", "--format=%h %s", tag]).unwrap_or_default();
     let (target_hash, target_msg) = match target_line.find(' ') {
         Some(pos) => (
             target_line[..pos].to_string(),
@@ -738,7 +737,11 @@ pub fn tag_info(path: &Path, tag: &str) -> Result<TagInfo, String> {
         // First line of body = subject, rest = message body
         let message = if body_lines.len() > 1 {
             let body = body_lines[1..].join("\n").trim().to_string();
-            if body.is_empty() { None } else { Some(body) }
+            if body.is_empty() {
+                None
+            } else {
+                Some(body)
+            }
         } else {
             None
         };
@@ -812,12 +815,7 @@ pub fn branch_tip_detail(
 ) -> Result<(String, String, String, String), String> {
     let line = run_git(
         path,
-        &[
-            "log",
-            "-1",
-            "--format=%h\x1f%s\x1f%an <%ae>\x1f%ai",
-            branch,
-        ],
+        &["log", "-1", "--format=%h\x1f%s\x1f%an <%ae>\x1f%ai", branch],
     )?;
     let parts: Vec<&str> = line.split('\x1f').collect();
     if parts.len() >= 4 {

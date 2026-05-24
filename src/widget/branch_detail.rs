@@ -324,17 +324,15 @@ impl BranchDetail<'_> {
         // Date of tip commit, formatted with the user's configured format
         if !self.metadata.tip_date.is_empty() {
             label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
-            let formatted = DateTime::parse_from_str(
-                self.metadata.tip_date.trim(),
-                "%Y-%m-%d %H:%M:%S %z",
-            )
-            .map(|dt| {
-                self.ctx.core_config.date_time_format().format(
-                    &dt,
-                    self.ctx.core_config.date_time_local(),
-                )
-            })
-            .unwrap_or_else(|_| self.metadata.tip_date.clone());
+            let formatted =
+                DateTime::parse_from_str(self.metadata.tip_date.trim(), "%Y-%m-%d %H:%M:%S %z")
+                    .map(|dt| {
+                        self.ctx
+                            .core_config
+                            .date_time_format()
+                            .format(&dt, self.ctx.core_config.date_time_local())
+                    })
+                    .unwrap_or_else(|_| self.metadata.tip_date.clone());
             value_lines.push(Line::from(Span::styled(
                 formatted,
                 Style::default().fg(self.ctx.color_theme.detail_date_fg),
