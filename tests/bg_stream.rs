@@ -37,7 +37,7 @@ fn bg_stream_graph_covers_every_commit() {
     );
     assert_eq!(mapped, total, "every commit must have a position");
     assert!(
-        bg_graph.branch_segments.len() > 0,
+        !bg_graph.branch_segments.is_empty(),
         "must have at least one branch_segment"
     );
 
@@ -254,7 +254,7 @@ fn dump_isolated_row_image() {
         println!("  diff at idx={}: {}", i, h);
     }
     // Dump a non-trivial diff to file for inspection
-    if let Some((i, _hash_str)) = sample_diff.get(0) {
+    if let Some((i, _hash_str)) = sample_diff.first() {
         let hash = bg_repo.all_commits()[*i].commit_hash.clone();
         let row_a = build_single_graph_row_image(
             &bg_full,
@@ -406,13 +406,12 @@ fn replace_graph_renders_bg_streamed_commits() {
     let bg_only_commit_hash = bg_repo
         .all_commits()
         .iter()
-        .filter(|c| {
+        .find(|c| {
             !fg_repo
                 .all_commits()
                 .iter()
                 .any(|fc| fc.commit_hash == c.commit_hash)
         })
-        .next()
         .expect("there must be commits beyond the fg slice")
         .commit_hash
         .clone();
