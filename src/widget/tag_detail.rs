@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use chrono::DateTime;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
@@ -13,6 +14,47 @@ use crate::app::AppContext;
 #[derive(Debug, Default)]
 pub struct TagDetailState {
     pub hovered_action: Option<usize>,
+    height: usize,
+    offset: usize,
+}
+
+impl TagDetailState {
+    pub fn scroll_down(&mut self) {
+        self.offset = self.offset.saturating_add(1);
+    }
+
+    pub fn scroll_up(&mut self) {
+        self.offset = self.offset.saturating_sub(1);
+    }
+
+    pub fn scroll_page_down(&mut self) {
+        self.offset = self.offset.saturating_add(self.height);
+    }
+
+    pub fn scroll_page_up(&mut self) {
+        self.offset = self.offset.saturating_sub(self.height);
+    }
+
+    pub fn scroll_half_page_down(&mut self) {
+        self.offset = self.offset.saturating_add(self.height / 2);
+    }
+
+    pub fn scroll_half_page_up(&mut self) {
+        self.offset = self.offset.saturating_sub(self.height / 2);
+    }
+
+    pub fn select_first(&mut self) {
+        self.offset = 0;
+    }
+
+    pub fn select_last(&mut self) {
+        self.offset = usize::MAX;
+    }
+
+    fn update(&mut self, line_count: usize, area_height: usize) {
+        self.height = area_height;
+        self.offset = self.offset.min(line_count.saturating_sub(area_height));
+    }
 }
 
 pub const TAG_ACTIONS: &[(&str, crate::event::UserEvent)] = &[
@@ -103,7 +145,13 @@ impl StatefulWidget for TagDetail<'_> {
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)])
                 .areas(meta_scroll_area);
 
-        let (label_lines, value_lines) = self.contents();
+        let (mut label_lines, mut value_lines) = self.contents(value_area.width);
+
+        let content_height = meta_scroll_area.height as usize;
+        state.update(value_lines.len(), content_height);
+
+        label_lines = label_lines.into_iter().skip(state.offset).collect();
+        value_lines = value_lines.into_iter().skip(state.offset).collect();
 
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
@@ -201,7 +249,7 @@ impl TagDetail<'_> {
         paragraph.render(action_inner, buf);
     }
 
-    fn contents(&self) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
+    fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
@@ -243,14 +291,28 @@ impl TagDetail<'_> {
             )));
         }
 
-        // Date (annotated only)
+        // Date (annotated only), formatted with the user's configured format
         if let Some(date) = &self.metadata.date {
             label_lines
                 .push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
+            let formatted = DateTime::parse_from_str(date, "%Y-%m-%d %H:%M:%S %z")
+                .map(|dt| {
+                    self.ctx.core_config.date_time_format().format(
+                        &dt,
+                        self.ctx.core_config.date_time_local(),
+                    )
+                })
+                .unwrap_or_else(|_| date.clone());
             value_lines.push(Line::from(Span::styled(
-                date.as_str(),
+                formatted,
                 Style::default().fg(self.ctx.color_theme.detail_date_fg),
             )));
+        }
+
+        // Divider before message
+        if self.metadata.message.is_some() {
+            label_lines.push(Line::from(""));
+            value_lines.push(self.divider_line(width as usize));
         }
 
         // Tag message body (annotated only, multi-line supported)
@@ -270,5 +332,13 @@ impl TagDetail<'_> {
         }
 
         (label_lines, value_lines)
+    }
+
+    fn divider_line(&self, width: usize) -> Line<'_> {
+        Line::from(
+            "\u{2500}"
+                .repeat(width)
+                .fg(self.ctx.color_theme.divider_fg),
+        )
     }
 }

@@ -39,9 +39,46 @@ impl<'a> TagDetailView<'a> {
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, _: KeyEvent) {
         let event = event_with_count.event;
+        let count = event_with_count.count;
         match event {
             UserEvent::Cancel | UserEvent::Close => {
                 self.tx.send(AppEvent::CloseDetail);
+            }
+            UserEvent::NavigateDown | UserEvent::ScrollDown => {
+                for _ in 0..count {
+                    self.tag_detail_state.scroll_down();
+                }
+            }
+            UserEvent::NavigateUp | UserEvent::ScrollUp => {
+                for _ in 0..count {
+                    self.tag_detail_state.scroll_up();
+                }
+            }
+            UserEvent::PageDown => {
+                for _ in 0..count {
+                    self.tag_detail_state.scroll_page_down();
+                }
+            }
+            UserEvent::PageUp => {
+                for _ in 0..count {
+                    self.tag_detail_state.scroll_page_up();
+                }
+            }
+            UserEvent::HalfPageDown => {
+                for _ in 0..count {
+                    self.tag_detail_state.scroll_half_page_down();
+                }
+            }
+            UserEvent::HalfPageUp => {
+                for _ in 0..count {
+                    self.tag_detail_state.scroll_half_page_up();
+                }
+            }
+            UserEvent::GoToTop => {
+                self.tag_detail_state.select_first();
+            }
+            UserEvent::GoToBottom => {
+                self.tag_detail_state.select_last();
             }
             UserEvent::PushTag | UserEvent::Push => {
                 self.tx.send(AppEvent::OpenDialog(DialogKind::PushTag {
