@@ -205,31 +205,68 @@ impl TagDetail<'_> {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
+        // Tag name
         label_lines.push(Line::from("      Tag: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(self.metadata.tag_name.as_str()));
+        value_lines.push(Line::from(Span::styled(
+            self.metadata.tag_name.as_str(),
+            Style::default()
+                .fg(self.ctx.color_theme.detail_name_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
 
+        // Type (annotated vs lightweight)
         label_lines.push(Line::from("     Type: ").fg(self.ctx.color_theme.detail_label_fg));
         value_lines.push(Line::from(self.metadata.tag_type.as_str()));
 
+        // Target commit: short hash + subject
         label_lines.push(Line::from("   Target: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(format!(
-            "{} {}",
-            self.metadata.target_hash, self.metadata.target_commit_message
-        )));
+        if self.metadata.target_hash.is_empty() {
+            value_lines.push(Line::from("(unknown)"));
+        } else {
+            value_lines.push(Line::from(vec![
+                Span::styled(
+                    self.metadata.target_hash.as_str(),
+                    Style::default().fg(self.ctx.color_theme.detail_hash_fg),
+                ),
+                Span::raw(" "),
+                Span::raw(self.metadata.target_commit_message.as_str()),
+            ]));
+        }
 
+        // Tagger identity (annotated only)
         if let Some(tagger) = &self.metadata.tagger {
-            label_lines.push(Line::from("   Tagger: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(tagger.as_str()));
+            label_lines
+                .push(Line::from("   Tagger: ").fg(self.ctx.color_theme.detail_label_fg));
+            value_lines.push(Line::from(Span::styled(
+                tagger.as_str(),
+                Style::default().fg(self.ctx.color_theme.detail_name_fg),
+            )));
         }
 
+        // Date (annotated only)
         if let Some(date) = &self.metadata.date {
-            label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(date.as_str()));
+            label_lines
+                .push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
+            value_lines.push(Line::from(Span::styled(
+                date.as_str(),
+                Style::default().fg(self.ctx.color_theme.detail_date_fg),
+            )));
         }
 
+        // Tag message body (annotated only, multi-line supported)
         if let Some(message) = &self.metadata.message {
-            label_lines.push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(message.as_str()));
+            let msg_lines: Vec<&str> = message.lines().collect();
+            label_lines
+                .push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
+            if let Some((first, rest)) = msg_lines.split_first() {
+                value_lines.push(Line::from(*first));
+                for line in rest {
+                    label_lines.push(Line::from(""));
+                    value_lines.push(Line::from(*line));
+                }
+            } else {
+                value_lines.push(Line::from(message.as_str()));
+            }
         }
 
         (label_lines, value_lines)

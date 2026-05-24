@@ -6756,22 +6756,16 @@ impl<'a> App<'a> {
         } else {
             (String::new(), String::new(), String::new())
         };
-        let (tip_hash, tip_commit_message) = actions::branch_tip_info(repo_path, &branch_name)
-            .map(|s| {
-                let mut parts = s.splitn(2, ' ');
-                (
-                    parts.next().unwrap_or("").to_string(),
-                    parts.next().unwrap_or("").to_string(),
-                )
-            })
-            .unwrap_or_default();
+        let (tip_hash, tip_commit_message, tip_author, tip_date) =
+            actions::branch_tip_detail(repo_path, &branch_name)
+                .unwrap_or_default();
         let metadata = BranchMetadata {
             branch_name: branch_name.clone(),
             is_remote,
             tip_hash,
             tip_commit_message,
-            tip_author: String::new(),
-            tip_date: String::new(),
+            tip_author,
+            tip_date,
             upstream,
             ahead,
             behind,
@@ -6797,15 +6791,25 @@ impl<'a> App<'a> {
             View::TagDetail(ref mut view) => view.take_list_state(),
             _ => None,
         };
-        let _repo_path = self.repository.path();
+        let repo_path = self.repository.path();
+        let info = actions::tag_info(repo_path, &tag_name).unwrap_or_else(|_| {
+            actions::TagInfo {
+                tag_type: "Tag".to_string(),
+                target_hash: String::new(),
+                target_commit_message: String::new(),
+                tagger: None,
+                date: None,
+                message: None,
+            }
+        });
         let metadata = TagMetadata {
             tag_name: tag_name.clone(),
-            tag_type: "Tag".to_string(),
-            target_hash: String::new(),
-            target_commit_message: String::new(),
-            tagger: None,
-            date: None,
-            message: None,
+            tag_type: info.tag_type,
+            target_hash: info.target_hash,
+            target_commit_message: info.target_commit_message,
+            tagger: info.tagger,
+            date: info.date,
+            message: info.message,
         };
         self.view = View::TagDetail(Box::new(crate::view::tag_detail::TagDetailView::new(
             tag_name,

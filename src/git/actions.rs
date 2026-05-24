@@ -658,25 +658,178 @@ pub fn branch_ahead_behind_vs(
     Ok((ahead.trim().to_string(), behind.trim().to_string()))
 }
 
-pub fn branch_tip_info(path: &Path, branch: &str) -> GitResult {
-    run_git(path, &["log", "-1", "--format=%H %s", branch])
-}
-
 // --- Tag Metadata ---
 
-pub fn tag_metadata(path: &Path, tag: &str) -> GitResult {
-    run_git(
-        path,
-        &[
-            "for-each-ref",
-            "--format=%(objecttype)%x00%(objectname)%x00%(*objectname)%x00%(taggername)%x00%(taggeremail)%x00%(taggerdate:iso-strict)%x00%(contents:subject)",
-            &format!("refs/tags/{}", tag),
-        ],
+/// Resolved metadata for a git tag (annotated or lightweight).
+#[derive(Debug, Clone)]
+pub struct TagInfo {
+    /// "Annotated" or "Lightweight"
+    pub tag_type: String,
+    /// Short hash of the target commit
+    pub target_hash: String,
+    /// Subject line of the target commit
+    pub target_commit_message: String,
+    /// Tagger identity (annotated only)
+    pub tagger: Option<String>,
+    /// Tagger date in ISO format (annotated only)
+    pub date: Option<String>,
+    /// Tag message body (annotated only)
+    pub message: Option<String>,
+}
+
+/// Resolve full metadata for a tag. Works for both annotated and
+/// lightweight tags by combining `git cat-file` (for the tag object
+/// itself) with `git log` (for the target commit details).
+pub fn tag_info(path: &Path, tag: &str) -> Result<TagInfo, String> {
+    let obj_type = run_git(path, &["cat-file", "-t", tag])?;
+    let is_annotated = obj_type.trim() == "tag";
+
+    // Target commit: `git log -1 --format=<hash> <subject>` resolves
+    // through annotated tags automatically.
+    let target_line = run_git(path, &["log", "-1", "--format=%h %s", tag])
+        .unwrap_or_default();
+    let (target_hash, target_msg) = match target_line.find(' ') {
+        Some(pos) => (
+            target_line[..pos].to_string(),
+            target_line[pos + 1..].to_string(),
+        ),
+        None => (target_line.clone(), String::new()),
+    };
+
+    if is_annotated {
+        // Parse `git cat-file -p <tag>` output for tagger/message.
+        let raw = run_git(path, &["cat-file", "-p", tag]).unwrap_or_default();
+        let mut tagger: Option<String> = None;
+        let mut date: Option<String> = None;
+        let mut in_body = false;
+        let mut body_lines: Vec<&str> = Vec::new();
+
+        for line in raw.lines() {
+            if in_body {
+                body_lines.push(line);
+                continue;
+            }
+            if line.is_empty() {
+                in_body = true;
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("tagger ") {
+                // Format: "Name <email> timestamp tz"
+                // We want "Name <email>" and a human-readable date.
+                if let Some(email_end) = rest.rfind('>') {
+                    tagger = Some(rest[..=email_end].to_string());
+                    // Remaining is " timestamp tz" - convert via git
+                    let ts_tz = rest[email_end + 1..].trim();
+                    if !ts_tz.is_empty() {
+                        // Use git to format the raw timestamp
+                        let parts: Vec<&str> = ts_tz.split_whitespace().collect();
+                        if parts.len() == 2 {
+                            if let Ok(epoch) = parts[0].parse::<i64>() {
+                                let tz = parts[1];
+                                // Build ISO-ish date manually
+                                date = Some(format_epoch_tz(epoch, tz));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // First line of body = subject, rest = message body
+        let message = if body_lines.len() > 1 {
+            let body = body_lines[1..].join("\n").trim().to_string();
+            if body.is_empty() { None } else { Some(body) }
+        } else {
+            None
+        };
+
+        Ok(TagInfo {
+            tag_type: "Annotated".to_string(),
+            target_hash,
+            target_commit_message: target_msg,
+            tagger,
+            date,
+            message,
+        })
+    } else {
+        Ok(TagInfo {
+            tag_type: "Lightweight".to_string(),
+            target_hash,
+            target_commit_message: target_msg,
+            tagger: None,
+            date: None,
+            message: None,
+        })
+    }
+}
+
+/// Format a Unix epoch + timezone offset string (e.g. "+0200") into a
+/// human-readable date. Falls back to the raw epoch if parsing fails.
+fn format_epoch_tz(epoch: i64, tz: &str) -> String {
+    // Parse tz offset like "+0200" or "-0500"
+    if tz.len() < 5 {
+        return epoch.to_string();
+    }
+    let sign: i64 = if tz.starts_with('-') { -1 } else { 1 };
+    let hours: i64 = tz[1..3].parse().unwrap_or(0);
+    let mins: i64 = tz[3..5].parse().unwrap_or(0);
+    let offset_secs = sign * (hours * 3600 + mins * 60);
+    let local = epoch + offset_secs;
+    // Break into components (no chrono dependency)
+    let days_since_epoch = local.div_euclid(86400);
+    let time_of_day = local.rem_euclid(86400);
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+    let s = time_of_day % 60;
+    // Convert days since 1970-01-01 to y/m/d
+    let (y, mo, d) = days_to_ymd(days_since_epoch);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} {}",
+        y, mo, d, h, m, s, tz
     )
 }
 
-pub fn tag_target_info(path: &Path, tag: &str) -> GitResult {
-    run_git(path, &["log", "-1", "--format=%H %s", tag])
+/// Convert days since Unix epoch to (year, month, day).
+fn days_to_ymd(days: i64) -> (i64, i64, i64) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// Return "short_hash subject" for the tip commit of a branch.
+pub fn branch_tip_detail(
+    path: &Path,
+    branch: &str,
+) -> Result<(String, String, String, String), String> {
+    let line = run_git(
+        path,
+        &[
+            "log",
+            "-1",
+            "--format=%h\x1f%s\x1f%an <%ae>\x1f%ai",
+            branch,
+        ],
+    )?;
+    let parts: Vec<&str> = line.split('\x1f').collect();
+    if parts.len() >= 4 {
+        Ok((
+            parts[0].to_string(),
+            parts[1].to_string(),
+            parts[2].to_string(),
+            parts[3].to_string(),
+        ))
+    } else {
+        Err("unexpected format".to_string())
+    }
 }
 
 // --- File History ---

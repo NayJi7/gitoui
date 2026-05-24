@@ -231,9 +231,16 @@ impl BranchDetail<'_> {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
 
+        // Branch name
         label_lines.push(Line::from("   Branch: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(self.metadata.branch_name.as_str()));
+        value_lines.push(Line::from(Span::styled(
+            self.metadata.branch_name.as_str(),
+            Style::default()
+                .fg(self.ctx.color_theme.detail_name_fg)
+                .add_modifier(Modifier::BOLD),
+        )));
 
+        // Type
         label_lines.push(Line::from("     Type: ").fg(self.ctx.color_theme.detail_label_fg));
         let type_str = if self.metadata.is_remote {
             "Remote Tracking Branch"
@@ -242,20 +249,37 @@ impl BranchDetail<'_> {
         };
         value_lines.push(Line::from(type_str));
 
+        // Tip commit: hash + subject
         label_lines.push(Line::from("      Tip: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(format!(
-            "{} {}",
-            self.metadata.tip_hash, self.metadata.tip_commit_message
-        )));
-
-        if !self.metadata.tip_author.is_empty() {
-            label_lines.push(Line::from("   Author: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(self.metadata.tip_author.as_str()));
+        if self.metadata.tip_hash.is_empty() {
+            value_lines.push(Line::from("(unknown)"));
+        } else {
+            value_lines.push(Line::from(vec![
+                Span::styled(
+                    self.metadata.tip_hash.as_str(),
+                    Style::default().fg(self.ctx.color_theme.detail_hash_fg),
+                ),
+                Span::raw(" "),
+                Span::raw(self.metadata.tip_commit_message.as_str()),
+            ]));
         }
 
+        // Author of tip commit
+        if !self.metadata.tip_author.is_empty() {
+            label_lines.push(Line::from("   Author: ").fg(self.ctx.color_theme.detail_label_fg));
+            value_lines.push(Line::from(Span::styled(
+                self.metadata.tip_author.as_str(),
+                Style::default().fg(self.ctx.color_theme.detail_name_fg),
+            )));
+        }
+
+        // Date of tip commit
         if !self.metadata.tip_date.is_empty() {
             label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(self.metadata.tip_date.as_str()));
+            value_lines.push(Line::from(Span::styled(
+                self.metadata.tip_date.as_str(),
+                Style::default().fg(self.ctx.color_theme.detail_date_fg),
+            )));
         }
 
         if let Some(upstream) = &self.metadata.upstream {
