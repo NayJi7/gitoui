@@ -83,6 +83,8 @@ Help is computed from your live config at render time. If the displayed key is w
 | `~/.config/gitoui/themes/<name>.toml`   | Custom theme files.             |
 | `~/.config/gitoui/github_token.toml`    | OAuth token (mode `0600`).      |
 | `~/.cache/gitoui/avatars/`              | Avatar PNG cache.               |
+| `~/.cache/gitoui/<repo-hash>/commits.bin` | Commit history cache. Speeds up subsequent launches by avoiding a full `git log` walk. Invalidated automatically when HEAD moves or sort order changes. Clear manually with `gitoui -C`. |
+| `~/.config/gitoui/logs/`               | Daily-rotating debug log files.  |
 
 Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder and cache always live next to the config.
 

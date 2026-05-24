@@ -1,9 +1,16 @@
+use std::sync::Arc;
+
 use rustc_hash::FxHashMap;
 
-use crate::git::{Commit, CommitHash, CommitType, Repository};
+use crate::git::{CommitHash, CommitSummary, CommitType, Repository};
 
-type CommitPosMap<'a> = FxHashMap<&'a CommitHash, (usize, usize)>;
-type CommitColorMap<'a> = FxHashMap<&'a CommitHash, usize>;
+/// `(pos_x, pos_y)` keyed by owned `CommitHash`. Owned so the resulting
+/// `Graph` outlives the `Repository` borrow it was built from, the
+/// background streaming thread can ship a fresh `Graph` to the foreground
+/// app long after the temporary `Repository` it computed against is
+/// dropped.
+pub type CommitPosMap = FxHashMap<CommitHash, (usize, usize)>;
+pub type CommitColorMap = FxHashMap<CommitHash, usize>;
 
 #[derive(Debug, Clone)]
 pub struct BranchSegment {
@@ -16,11 +23,15 @@ pub struct BranchSegment {
     pub is_uncommitted: bool,
 }
 
+/// Fully-owned commit graph topology. Holds `Arc<CommitSummary>` so
+/// cloning a `Graph` (e.g. for the bg streamer to ship across thread
+/// boundaries) is a refcount bump per commit rather than a deep clone
+/// of every summary struct.
 #[derive(Debug)]
-pub struct Graph<'a> {
-    pub commits: Vec<&'a Commit>,
-    pub commit_pos_map: CommitPosMap<'a>,
-    pub commit_color_map: CommitColorMap<'a>,
+pub struct Graph {
+    pub commits: Vec<Arc<CommitSummary>>,
+    pub commit_pos_map: CommitPosMap,
+    pub commit_color_map: CommitColorMap,
     pub edges: Vec<Vec<Edge>>,
     pub max_pos_x: usize,
     pub branch_segments: Vec<BranchSegment>,
@@ -163,8 +174,10 @@ impl LayoutBranch {
     }
 }
 
-fn load_commits(commits: &[&Commit], _repository: &Repository) -> Vec<LayoutVertex> {
-    // Build hash → index map
+fn load_commits(commits: &[Arc<CommitSummary>], _repository: &Repository) -> Vec<LayoutVertex> {
+    // Build hash → index map. Hashes are borrowed off the Arc'd commits,
+    // valid for the lifetime of the `commits` slice (and therefore the
+    // map's own lifetime).
     let mut hash_to_id: FxHashMap<&CommitHash, usize> = FxHashMap::default();
     for (i, c) in commits.iter().enumerate() {
         hash_to_id.insert(&c.commit_hash, i);
@@ -389,8 +402,8 @@ fn determine_path(
 /// Runs in O(N) total across all branch walks (each commit visited
 /// once), tens of milliseconds on a 300k-commit repo vs several
 /// seconds for the full `calc_graph`.
-pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
-    let commits = repository.all_commits();
+pub fn calc_colors_only(repository: &Repository) -> Graph {
+    let commits = repository.all_commits_arc();
     let n = commits.len();
 
     // Seed pos_map with pos_x = 0 for every commit; we'll overwrite
@@ -401,7 +414,7 @@ pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
     let mut commit_pos_map: CommitPosMap = FxHashMap::default();
     commit_pos_map.reserve(n);
     for (i, c) in commits.iter().enumerate() {
-        commit_pos_map.insert(&c.commit_hash, (0, i));
+        commit_pos_map.insert(c.commit_hash.clone(), (0, i));
     }
 
     let mut commit_color_map: CommitColorMap = FxHashMap::default();
@@ -420,12 +433,12 @@ pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
     // miss the commits and they all fall through to colour 0 in the
     // fallback below, rendering the entire `│` separator column in
     // the palette's first colour.
-    let mut branch_tips: Vec<(String, &CommitHash)> = Vec::new();
+    let mut branch_tips: Vec<(String, CommitHash)> = Vec::new();
     for r in repository.all_refs() {
         match r {
             crate::git::Ref::Branch { name, target }
             | crate::git::Ref::RemoteBranch { name, target } => {
-                branch_tips.push((name.clone(), target));
+                branch_tips.push((name.clone(), target.clone()));
             }
             _ => {}
         }
@@ -444,21 +457,20 @@ pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
     // First-parent walk from each tip. Stop on already-coloured
     // commits so the first branch to claim a commit owns it.
     for (color_index, (_, tip)) in branch_tips.iter().enumerate() {
-        let mut cur: Option<&CommitHash> = Some(tip);
+        let mut cur: Option<CommitHash> = Some(tip.clone());
         while let Some(hash) = cur {
-            if commit_color_map.contains_key(hash) {
+            if commit_color_map.contains_key(&hash) {
                 break;
             }
-            // Locate the cached `&CommitHash` from the canonical
-            // `commits` Vec so the lifetime matches the map key
-            // signature.
-            let canonical_idx = commit_pos_map.get(hash).map(|&(_, y)| y);
-            let (key, y) = match canonical_idx.and_then(|i| commits.get(i).map(|c| (i, c)))
-            {
-                Some((i, c)) => (&c.commit_hash, i),
+            // Locate the canonical commit row so we can keep the
+            // (pos_x, pos_y) mirroring below in sync with the
+            // commit's actual index.
+            let canonical_idx = commit_pos_map.get(&hash).map(|&(_, y)| y);
+            let (key, y) = match canonical_idx.and_then(|i| commits.get(i).map(|c| (i, c))) {
+                Some((i, c)) => (c.commit_hash.clone(), i),
                 None => break,
             };
-            commit_color_map.insert(key, color_index);
+            commit_color_map.insert(key.clone(), color_index);
             // Mirror the colour into pos_x as well: app.rs's
             // non-Smooth path (`color_index = pos_x`) would
             // otherwise read 0 for every commit and render the
@@ -466,13 +478,13 @@ pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
             // colour. Storing the branch index here makes both
             // paths agree.
             commit_pos_map.insert(key, (color_index, y));
-            cur = repository.parents_hash(hash).first().copied();
+            cur = repository.parents_hash(&hash).first().map(|h| (*h).clone());
         }
     }
 
     // Any remaining commits (orphans, unreferenced) fall back to 0.
     for c in &commits {
-        commit_color_map.entry(&c.commit_hash).or_insert(0);
+        commit_color_map.entry(c.commit_hash.clone()).or_insert(0);
     }
 
     Graph {
@@ -485,77 +497,33 @@ pub fn calc_colors_only(repository: &Repository) -> Graph<'_> {
     }
 }
 
-/// Lane-assignment phase of `calc_graph` only - returns the same
-/// `commit_pos_map` and `commit_color_map` as the full version
-/// without paying for the `build_legacy_edges` step. That step
-/// allocates a `Vec<Vec<WrappedEdge>>` whose memory usage on a
-/// 332k-commit repo with many branches reaches several hundred MB,
-/// triggering an OOM kill of the bg streaming thread on machines
-/// with limited RAM. The bg thread only needs colours, not edges,
-/// so it calls this lighter variant; the fg path still uses the
-/// full `calc_graph` so the image renderer has the edge data.
-pub fn calc_graph_colors_only(repository: &Repository) -> Graph<'_> {
-    let commits = repository.all_commits();
-    let n = commits.len();
-
-    let mut vertices = load_commits(&commits, repository);
-    let mut branches: Vec<LayoutBranch> = Vec::new();
-    let mut available_colours: Vec<usize> = Vec::new();
-
-    for i in 0..n {
-        loop {
-            let has_more = {
-                let v = &vertices[i];
-                v.next_parent < v.parent_ids.len()
-            };
-            if !has_more {
-                break;
-            }
-            determine_path(i, &mut vertices, &mut branches, &mut available_colours);
-        }
-        if vertices[i].not_on_branch() {
-            let colour = get_available_colour(i, &available_colours);
-            while available_colours.len() <= colour {
-                available_colours.push(0);
-            }
-            let branch_id = branches.len();
-            branches.push(LayoutBranch::new(colour));
-            let x = vertices[i].next_x;
-            vertices[i].add_to_branch(branch_id, x);
-            vertices[i].register_unavailable_point(x, i, branch_id);
-            branches[branch_id].set_end(i + 1);
-            available_colours[colour] = i + 1;
-        }
-    }
-
-    let mut commit_pos_map: CommitPosMap = FxHashMap::default();
-    let mut commit_color_map: CommitColorMap = FxHashMap::default();
-    let mut max_pos_x = 0usize;
-    for (i, commit) in commits.iter().enumerate() {
-        let x = vertices[i].x.unwrap_or(0);
-        commit_pos_map.insert(&commit.commit_hash, (x, i));
-        let color = vertices[i]
-            .branch_id
-            .map(|branch_id| branches[branch_id].colour)
-            .unwrap_or(x);
-        commit_color_map.insert(&commit.commit_hash, color);
-        if x > max_pos_x {
-            max_pos_x = x;
-        }
-    }
-
-    Graph {
-        commits,
-        commit_pos_map,
-        commit_color_map,
-        edges: vec![Vec::new(); n],
-        max_pos_x,
-        branch_segments: Vec::new(),
-    }
+pub fn calc_graph(repository: &Repository) -> Graph {
+    calc_graph_inner(repository, true)
 }
 
-pub fn calc_graph(repository: &Repository) -> Graph<'_> {
-    let commits = repository.all_commits();
+/// Lean variant of `calc_graph` used by the background streaming thread
+/// on very large repos. Computes full lane topology - vertices, branches,
+/// `commit_pos_map`, `commit_color_map`, `branch_segments` - but SKIPS
+/// the `build_legacy_edges` pass that on rust-lang/rust (~332k commits)
+/// allocates several hundred MB into `edges: Vec<Vec<Edge>>`. That alone
+/// was the dominant cause of the bg-thread OOM kill the user hit.
+///
+/// Result: `edges` is left empty. The renderer in `graph::image` already
+/// falls back to an empty slice when `edges.get(pos_y)` is None, so the
+/// Smooth style (uses `branch_segments`) renders pixel-accurate and the
+/// Rounded / Angular styles render commit dots in their correct lanes
+/// but WITHOUT the connecting glyphs (lines, corners, merge arrows)
+/// until the user (a) switches to Smooth, or (b) reloads the repo with
+/// a smaller `max_count` so the foreground `calc_graph` path runs. This
+/// graceful degradation is documented; bringing rust-lang/rust under the
+/// 1 GB OOM threshold matters more than per-style fidelity on the
+/// streamed tail of a 332k-commit history.
+pub fn calc_graph_colors_only(repository: &Repository) -> Graph {
+    calc_graph_inner(repository, false)
+}
+
+fn calc_graph_inner(repository: &Repository, with_legacy_edges: bool) -> Graph {
+    let commits = repository.all_commits_arc();
     let n = commits.len();
 
     // 1. Build layout vertices
@@ -592,18 +560,19 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
         }
     }
 
-    // 3. Build commit_pos_map (one (x, y) per commit)
+    // 3. Build commit_pos_map (one (x, y) per commit). Owned hash keys
+    // so the resulting Graph isn't tied to the borrow of `commits`.
     let mut commit_pos_map: CommitPosMap = FxHashMap::default();
     let mut commit_color_map: CommitColorMap = FxHashMap::default();
     let mut max_pos_x = 0usize;
     for (i, commit) in commits.iter().enumerate() {
         let x = vertices[i].x.unwrap_or(0);
-        commit_pos_map.insert(&commit.commit_hash, (x, i));
+        commit_pos_map.insert(commit.commit_hash.clone(), (x, i));
         let color = vertices[i]
             .branch_id
             .map(|branch_id| branches[branch_id].colour)
             .unwrap_or(x);
-        commit_color_map.insert(&commit.commit_hash, color);
+        commit_color_map.insert(commit.commit_hash.clone(), color);
         if x > max_pos_x {
             max_pos_x = x;
         }
@@ -640,9 +609,22 @@ pub fn calc_graph(repository: &Repository) -> Graph<'_> {
         }
     }
 
-    // 5. Build legacy row edges for Rounded/Angular styles. Smooth uses branch_segments.
-    let (edges, legacy_max_pos_x) = build_legacy_edges(&commit_pos_map, &commits, repository);
-    max_pos_x = max_pos_x.max(legacy_max_pos_x);
+    // 5. Build legacy row edges for Rounded/Angular styles. Smooth uses
+    // branch_segments. The bg streaming path (rust-lang/rust scale, ~332k
+    // commits) opts OUT here via `with_legacy_edges = false` - that pass
+    // allocates several hundred MB of `Vec<Vec<Edge>>` and OOM-killed the
+    // bg thread on memory-constrained systems. The downstream renderer
+    // tolerates `graph.edges` being empty: `edges.get(pos_y)` returns
+    // None and the row falls back to an empty slice, so Smooth still
+    // works (it reads `branch_segments` independently) and Rounded /
+    // Angular degrade to "lanes-only" for streamed rows.
+    let edges = if with_legacy_edges {
+        let (edges, legacy_max_pos_x) = build_legacy_edges(&commit_pos_map, &commits, repository);
+        max_pos_x = max_pos_x.max(legacy_max_pos_x);
+        edges
+    } else {
+        Vec::new()
+    };
 
     Graph {
         commits,
@@ -675,8 +657,8 @@ impl<'a> WrappedEdge<'a> {
 }
 
 fn build_legacy_edges<'a>(
-    commit_pos_map: &CommitPosMap<'a>,
-    commits: &[&'a Commit],
+    commit_pos_map: &'a CommitPosMap,
+    commits: &'a [Arc<CommitSummary>],
     repository: &'a Repository,
 ) -> (Vec<Vec<Edge>>, usize) {
     let mut max_pos_x = 0;
@@ -967,21 +949,17 @@ fn build_legacy_edges<'a>(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, FixedOffset};
+    use chrono::DateTime;
     use rustc_hash::FxHashMap;
 
-    use crate::git::{Commit, CommitHash, CommitType, Head, Repository};
+    use crate::git::{CommitHash, CommitSummary, CommitType, Head, Repository};
 
     use super::*;
 
-    fn commit(hash: &str, parents: Vec<&str>, commit_type: CommitType) -> Commit {
-        Commit {
+    fn commit(hash: &str, parents: Vec<&str>, commit_type: CommitType) -> CommitSummary {
+        CommitSummary {
             commit_hash: CommitHash::from(hash),
             author_date: DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap(),
-            committer_date: DateTime::<FixedOffset>::parse_from_rfc3339(
-                "2024-01-01T00:00:00+00:00",
-            )
-            .unwrap(),
             commit_message: hash.to_string(),
             parent_commit_hashes: parents.into_iter().map(CommitHash::from).collect(),
             commit_type,

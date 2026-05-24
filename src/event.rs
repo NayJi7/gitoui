@@ -66,7 +66,10 @@ pub enum AppEvent {
     /// per session at most (when bg load completes); the main thread
     /// uses this signal to drop the "loading" indicator and refresh
     /// the status line.
-    BackgroundCacheReady { total_commits: usize },
+    BackgroundCacheReady {
+        gen: u64,
+        total_commits: usize,
+    },
     /// Bg full-load thread shipped the full-history Repository back.
     /// Deprecated by the streaming `AppendCommits` flow but kept on
     /// the enum until the bg thread is fully migrated.
@@ -79,7 +82,10 @@ pub enum AppEvent {
     /// preserved. The batch carries fully-owned data (Arc<Commit> +
     /// Vec<Ref> + color) so the bg thread can build it without
     /// borrowing main's Repository.
-    AppendCommits(Vec<crate::widget::commit_list::CommitInfo>),
+    AppendCommits {
+        gen: u64,
+        batch: Vec<crate::widget::commit_list::CommitInfo>,
+    },
     ClearStatusLine,
     UpdateStatusInput(String, Option<u16>, Option<String>),
     NotifyInfo(String),
@@ -422,6 +428,16 @@ pub enum AppEvent {
     /// Sent (debounced) when the .git directory changes, triggers a refresh
     /// of the current view if the user isn't in an input/dialog state.
     FilesystemChanged,
+    /// Replace the live commit `Graph` with a freshly-computed one
+    /// (typically from the bg streamer once it finishes walking the
+    /// full history). Boxed so the event enum stays small. The
+    /// foreground handler swaps it into the active `CommitListState`
+    /// and clears the row-image cache so the next render rebakes
+    /// against the new topology.
+    ReplaceGraph {
+        gen: u64,
+        graph: Box<crate::graph::Graph>,
+    },
 }
 
 #[derive(Debug, Clone)]

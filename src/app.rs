@@ -31,7 +31,7 @@ use crate::{
         Commit, CommitHash, FileChange, Head, Ref, Repository,
     },
     github_auth::GithubAuthState,
-    graph::{CellWidthType, Graph, GraphImageManager, GraphStyle},
+    graph::{CellWidthType, GraphImageManager, GraphStyle},
     keybind::KeyBinds,
     protocol::ImageProtocol,
     view::{RefreshViewContext, View},
@@ -96,7 +96,8 @@ impl Clone for AppContext {
             repo_path: self.repo_path.clone(),
             graph_huge_repo_warning: self.graph_huge_repo_warning,
             bg_full_load_in_progress: std::sync::atomic::AtomicBool::new(
-                self.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire),
+                self.bg_full_load_in_progress
+                    .load(std::sync::atomic::Ordering::Acquire),
             ),
         }
     }
@@ -201,16 +202,11 @@ struct AppStatus {
     numeric_prefix: String,
     view_area: Rect,
     notification_timestamp: Option<std::time::Instant>,
-    /// Current frame of the header logo animation. The animation
-    /// itself is driven SOLELY by `AppContext::bg_full_load_in_progress`
-    /// - this counter is incremented on each animation tick while bg
-    /// loading is in flight, and stays put (last frame visible)
-    /// otherwise. Nothing else animates the logo; there used to be a
-    /// generic `spinner_active` flag toggled by `start_spinner` /
-    /// `stop_spinner` during git operations (fetch, push, fast-forward,
-    /// `cd`, ...) and the logo would animate for any of those. That
-    /// coupling was removed: spinning the logo is reserved for the
-    /// one operation where the wait is unbounded and worth signalling.
+    /// Current frame of the header logo animation. Driven solely by
+    /// `AppContext::bg_full_load_in_progress`: incremented on each
+    /// animation tick while bg loading is in flight, stays put
+    /// otherwise. Spinning the logo is reserved for the one operation
+    /// where the wait is unbounded and worth signalling.
     spinner_frame: usize,
     /// Wall-clock of the last auto-refresh (FilesystemChanged → view.refresh()).
     /// Used to throttle bursts of refreshes, the watcher already debounces and
@@ -245,6 +241,31 @@ pub struct App<'a> {
     /// every time they opened anything else mid-streaming and feel
     /// "bloqué à certains commits" when scrolling later.
     pending_append_batches: Vec<Vec<crate::widget::commit_list::CommitInfo>>,
+    /// Held-back `ReplaceGraph` payload when it arrived while a non-List
+    /// view was active (Detail/Diff/Config/PR/...) or while the list
+    /// state was temporarily taken (mid-Detail open). Swapped in on
+    /// the next return to `View::List`. Only the most recent Graph is
+    /// kept - bg only ever ships one final swap, but if a config
+    /// refresh kicks a second bg run before the first swap is consumed,
+    /// the second one wins (it's the more up-to-date topology).
+    pending_replace_graph: Option<Box<crate::graph::Graph>>,
+    /// Generation counter of the bg streaming thread whose events this
+    /// App instance should accept. Events from older generations are
+    /// silently discarded so a stale bg run can't corrupt the new App's
+    /// commit list after a config refresh or cd.
+    bg_generation: u64,
+    /// True from the moment the bg thread sends `BackgroundCacheReady`
+    /// (its RAII guard fired) until every queued `AppendCommits` /
+    /// `ReplaceGraph` payload has actually been applied to the live
+    /// `CommitListState`. The bg-loading gate (`bg_full_load_in_progress`)
+    /// is only flipped to false once this latch is set AND both queues
+    /// are empty. Without this, the gate flipped the moment the bg
+    /// thread exited, even if the user was in another view and dozens
+    /// of `AppendCommits` batches were still queued: the "..." indicator
+    /// disappeared and Shift+G landed on whatever was the last DRAINED
+    /// commit (typically the 500th from the fg slice), not the actual
+    /// repo tip. See `try_finalize_bg_loading`.
+    bg_streaming_drain_pending: bool,
     /// Working-tree status fingerprint + last poll timestamp. The .git/
     /// watcher only fires on `.git/` changes, so a bare file edit in
     /// the working tree (mtime change, no `git add`) wouldn't trigger
@@ -260,6 +281,13 @@ pub struct App<'a> {
     /// external git change is eventually picked up instead of
     /// silently dropped.
     deferred_auto_refresh: bool,
+    /// Earliest `Instant` at which the G spinner is allowed to stop. On
+    /// small repos with a warm cache, bg streaming can finish in <100ms,
+    /// faster than the eye can register the animation. Holding the flag
+    /// true until at least this instant guarantees the animation is
+    /// always perceptible. Only set on iter 0 (no animation on
+    /// `Ret::Refresh` iterations - bg doesn't re-spawn anyway).
+    spinner_visible_until: Option<std::time::Instant>,
     brand_logo: Option<crate::protocol::PreparedImage>,
     brand_wordmark: Option<crate::protocol::PreparedImage>,
     brand_pending_uploads: Vec<String>,
@@ -366,8 +394,7 @@ enum PrNavRestore {
 impl<'a> App<'a> {
     pub fn new(
         repository: &'a Repository,
-        graph_image_manager: GraphImageManager<'a>,
-        graph: &'a Graph,
+        graph_image_manager: GraphImageManager,
         graph_color_set: &'a GraphColorSet,
         cell_width_type: CellWidthType,
         graph_style: GraphStyle,
@@ -375,7 +402,13 @@ impl<'a> App<'a> {
         ctx: Rc<AppContext>,
         ec: &'a EventController,
         refresh_view_context: Option<RefreshViewContext>,
+        bg_generation: u64,
     ) -> Self {
+        // The manager owns the freshly-computed Graph; borrow it here
+        // for the per-commit setup loops. `graph_image_manager` is
+        // consumed below into `CommitListState`, the borrow ends at
+        // that point.
+        let graph = graph_image_manager.graph();
         let mut ref_name_to_commit_index_map = FxHashMap::default();
         let commits = graph
             .commits
@@ -544,6 +577,15 @@ impl<'a> App<'a> {
             (frames, uploads)
         };
 
+        let spinner_visible_until = if ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(1500))
+        } else {
+            None
+        };
+
         let mut app = Self {
             repository,
             view,
@@ -552,9 +594,13 @@ impl<'a> App<'a> {
             ec,
             file_stream: Vec::new(),
             pending_append_batches: Vec::new(),
+            pending_replace_graph: None,
+            bg_generation,
+            bg_streaming_drain_pending: false,
             last_status_poll: None,
             last_status_fingerprint: None,
             deferred_auto_refresh: false,
+            spinner_visible_until,
             brand_logo,
             brand_wordmark,
             brand_pending_uploads,
@@ -647,8 +693,7 @@ impl App<'_> {
             // window expires and no input is blocking, fire it.
             if self.deferred_auto_refresh {
                 let is_dialog = matches!(self.view, View::Dialog(_));
-                let is_input =
-                    matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+                let is_input = matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
                 let is_view_input = self.view.is_input_active();
                 let throttled = self
                     .app_status
@@ -690,6 +735,11 @@ impl App<'_> {
                 // become visible to the user if we extend the list
                 // state BEFORE the next render computes its layout.
                 self.drain_pending_append_batches();
+                // Same for a held-back `ReplaceGraph`: if the bg
+                // streamer's final Graph swap landed while the user
+                // was in Detail / PR / etc., apply it now so the
+                // next render rebakes lanes against the full topology.
+                self.drain_pending_replace_graph();
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
                 terminal.draw(|f| self.render(f))?;
@@ -744,7 +794,10 @@ impl App<'_> {
             // `Ok(ev)` immediately, the Timeout branch never fires,
             // and the animation gets stuck. Driving it off elapsed
             // time decouples the cadence from event volume.
-            if self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire) {
+            // Also tick spinner_frame while the cd popup is open so
+            // the footer braille spinner animates (it reads the same
+            // counter as the header G-logo animation).
+            if self.spinner_should_show() || self.dir_input.active {
                 const FRAME_INTERVAL_MS: u128 = 50;
                 let should_tick = self
                     .app_status
@@ -757,25 +810,23 @@ impl App<'_> {
                     } else {
                         crate::brand::SPINNER_FRAME_COUNT
                     };
-                    self.app_status.spinner_frame =
-                        (self.app_status.spinner_frame + 1) % total;
+                    self.app_status.spinner_frame = (self.app_status.spinner_frame + 1) % total;
                     self.app_status.last_spinner_tick = Some(std::time::Instant::now());
                     needs_draw = true;
                 }
             } else {
-                // Bg done - reset the tick clock so a new animation
-                // starts from frame 0 next time (defensive; bg only
-                // runs once per session today).
+                // Bg done and no overlay - reset the tick clock so a
+                // new animation starts from frame 0 next time.
                 self.app_status.last_spinner_tick = None;
             }
             // When an animation is in flight (spinner, notification countdown,
             // file streaming, or debounce window) we need to wake up on a
             // regular cadence even with no user input. Otherwise we block
             // indefinitely, no spurious 50 ms wakeups while browsing.
-            let animated = self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire)
+            let animated = self.spinner_should_show()
                 || self.app_status.notification_timestamp.is_some()
                 || !self.file_stream.is_empty()
-                || (self.dir_input.active && self.dir_input.text_dirty_since.is_some())
+                || self.dir_input.active
                 // Uncommitted view polls `git status --porcelain`
                 // periodically to pick up working-tree edits the
                 // `.git/` watcher can't see; we need the timeout-based
@@ -818,7 +869,10 @@ impl App<'_> {
                         needs_draw = needs_draw
                             || notif_expiring
                             || streaming
-                            || self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire);
+                            || self
+                                .ctx
+                                .bg_full_load_in_progress
+                                .load(std::sync::atomic::Ordering::Acquire);
                         None
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -842,291 +896,315 @@ impl App<'_> {
             // cycle so a runaway producer can't starve render.
             let mut current_event = event;
             let mut drained = 0usize;
+            // PROGRESSIVE-UX: total commits applied to the live list
+            // state during THIS dispatch cycle (across one or more
+            // `AppendCommits` events coalesced together by `try_recv`).
+            // When this crosses `APPEND_YIELD_THRESHOLD` we break out
+            // of the dispatch loop, render, and come back. Without
+            // this, the bg streamer's 600+ back-to-back batches all
+            // land in a single dispatch cycle and the user sees ONE
+            // jump from 500 -> 332k instead of a progressive flow.
+            let mut appended_this_cycle = 0usize;
+            const APPEND_YIELD_THRESHOLD: usize = 1500;
             'dispatch: loop {
                 match current_event {
-                AppEvent::Key(key) => {
-                    // The change-directory overlay hijacks every key while
-                    // open, typing extends the input, Esc cancels, Enter
-                    // commits. Handled before the keybind dispatch so the
-                    // user can freely type letters that are otherwise bound
-                    // to view actions (`d`, `b`, etc.).
-                    if self.dir_input.active {
-                        let was_active = true;
-                        let target_path = self.handle_dir_input_key(key);
-                        // If the user just cancelled (Esc closed the
-                        // overlay without committing) we force a full
-                        // terminal redraw so ratatui's diff doesn't leave
-                        // popup characters baked into the screen. The
-                        // re-uploaded images come back via the next
-                        // prepare_graph_uploads cycle.
-                        if was_active && !self.dir_input.active && target_path.is_none() {
-                            // Esc / cancel, force the graph re-render. The
-                            // popup-open path deleted the graph placements
-                            // from Kitty, so we need the manager to see
-                            // "nothing uploaded" and queue fresh uploads on
-                            // the next prepare_graph_uploads cycle.
-                            self.view.clear_graph_images();
-                            self.clear_terminal(terminal)?;
-                            continue 'main_loop;
-                        }
-                        if let Some(target) = target_path {
-                            // Reject invalid targets *before* doing the cd
-                            // a transient footer message is friendlier than
-                            // tearing down the overlay and re-opening the
-                            // current repo. The overlay stays open so the
-                            // user can pick another path. We distinguish
-                            // "path missing" from "path exists but isn't a
-                            // git repo root" so the user knows whether to
-                            // fix the typo or pick a different folder.
-                            if !target.exists() {
-                                self.dir_error_message = Some((
-                                    "directory does not exist".to_string(),
-                                    std::time::Instant::now(),
-                                ));
+                    AppEvent::Key(key) => {
+                        // The change-directory overlay hijacks every key while
+                        // open, typing extends the input, Esc cancels, Enter
+                        // commits. Handled before the keybind dispatch so the
+                        // user can freely type letters that are otherwise bound
+                        // to view actions (`d`, `b`, etc.).
+                        if self.dir_input.active {
+                            let was_active = true;
+                            let target_path = self.handle_dir_input_key(key);
+                            // If the user just cancelled (Esc closed the
+                            // overlay without committing) we force a full
+                            // terminal redraw so ratatui's diff doesn't leave
+                            // popup characters baked into the screen. The
+                            // re-uploaded images come back via the next
+                            // prepare_graph_uploads cycle.
+                            if was_active && !self.dir_input.active && target_path.is_none() {
+                                // Esc / cancel, force the graph re-render. The
+                                // popup-open path deleted the graph placements
+                                // from Kitty, so we need the manager to see
+                                // "nothing uploaded" and queue fresh uploads on
+                                // the next prepare_graph_uploads cycle.
+                                self.view.clear_graph_images();
+                                self.clear_terminal(terminal)?;
                                 continue 'main_loop;
                             }
-                            let repo_root = match crate::git::find_repo_root(&target) {
-                                Some(r) => r,
-                                None => {
+                            if let Some(target) = target_path {
+                                // Reject invalid targets *before* doing the cd
+                                // a transient footer message is friendlier than
+                                // tearing down the overlay and re-opening the
+                                // current repo. The overlay stays open so the
+                                // user can pick another path. We distinguish
+                                // "path missing" from "path exists but isn't a
+                                // git repo root" so the user knows whether to
+                                // fix the typo or pick a different folder.
+                                if !target.exists() {
                                     self.dir_error_message = Some((
-                                        "not a git directory".to_string(),
+                                        "directory does not exist".to_string(),
                                         std::time::Instant::now(),
                                     ));
                                     continue 'main_loop;
                                 }
-                            };
-                            match std::env::set_current_dir(&repo_root) {
-                                Ok(_) => {
-                                    self.dir_recents =
-                                        crate::recents::push(&repo_root, &self.dir_recents);
-                                    self.dir_input.close();
-                                    let _ = ratatui::crossterm::execute!(
-                                        std::io::stdout(),
-                                        ratatui::crossterm::cursor::Show
-                                    );
-                                    self.cleanup_graph_images()?;
-                                    return Ok(Ret::Refresh(RefreshRequest {
-                                        context: crate::view::RefreshViewContext::List {
-                                            list_context: crate::view::ListRefreshViewContext {
-                                                commit_hash: String::new(),
-                                                selected: 0,
-                                                height: 20,
-                                                scroll_to_top: true,
+                                let repo_root = match crate::git::find_repo_root(&target) {
+                                    Some(r) => r,
+                                    None => {
+                                        self.dir_error_message = Some((
+                                            "not a git directory".to_string(),
+                                            std::time::Instant::now(),
+                                        ));
+                                        continue 'main_loop;
+                                    }
+                                };
+                                match std::env::set_current_dir(&repo_root) {
+                                    Ok(_) => {
+                                        self.dir_recents =
+                                            crate::recents::push(&repo_root, &self.dir_recents);
+                                        self.dir_input.close();
+                                        let _ = ratatui::crossterm::execute!(
+                                            std::io::stdout(),
+                                            ratatui::crossterm::cursor::Show
+                                        );
+                                        self.cleanup_graph_images()?;
+                                        return Ok(Ret::Refresh(RefreshRequest {
+                                            context: crate::view::RefreshViewContext::List {
+                                                list_context: crate::view::ListRefreshViewContext {
+                                                    commit_hash: String::new(),
+                                                    selected: 0,
+                                                    height: 20,
+                                                    scroll_to_top: true,
+                                                },
+                                                pending_notification: Some(format!(
+                                                    "Switched to {}",
+                                                    target.display()
+                                                )),
                                             },
-                                            pending_notification: Some(format!(
-                                                "Switched to {}",
-                                                target.display()
-                                            )),
-                                        },
-                                    }));
-                                }
-                                Err(e) => {
-                                    self.ec
-                                        .send(AppEvent::NotifyError(format!("cd failed: {}", e)));
-                                    self.dir_input.close();
-                                    self.dir_dropdown_area = None;
-                                    let _ = ratatui::crossterm::execute!(
-                                        std::io::stdout(),
-                                        ratatui::crossterm::cursor::Show
-                                    );
-                                    // Same re-upload trigger as the Esc path
-                                    // so the graph reappears.
-                                    self.view.clear_graph_images();
-                                    self.clear_terminal(terminal)?;
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        self.ec.send(AppEvent::NotifyError(format!(
+                                            "cd failed: {}",
+                                            e
+                                        )));
+                                        self.dir_input.close();
+                                        self.dir_dropdown_area = None;
+                                        let _ = ratatui::crossterm::execute!(
+                                            std::io::stdout(),
+                                            ratatui::crossterm::cursor::Show
+                                        );
+                                        // Same re-upload trigger as the Esc path
+                                        // so the graph reappears.
+                                        self.view.clear_graph_images();
+                                        self.clear_terminal(terminal)?;
+                                    }
                                 }
                             }
+                            continue 'main_loop;
                         }
-                        continue 'main_loop;
-                    }
 
-                    match self.app_status.status_line {
-                        StatusLine::None | StatusLine::Input(_, _, _) | StatusLine::Spinner(_) => {
-                            // do nothing
-                        }
-                        StatusLine::NotificationInfo(_)
-                        | StatusLine::NotificationSuccess(_)
-                        | StatusLine::NotificationWarn(_) => {
-                            // Clear message and pass key input as is,
-                            // but preserve search match messages
-                            if !self.view.is_search_active() {
+                        match self.app_status.status_line {
+                            StatusLine::None
+                            | StatusLine::Input(_, _, _)
+                            | StatusLine::Spinner(_) => {
+                                // do nothing
+                            }
+                            StatusLine::NotificationInfo(_)
+                            | StatusLine::NotificationSuccess(_)
+                            | StatusLine::NotificationWarn(_) => {
+                                // Clear message and pass key input as is,
+                                // but preserve search match messages
+                                if !self.view.is_search_active() {
+                                    self.clear_status_line();
+                                }
+                            }
+                            StatusLine::SearchStatus { .. } => {
+                                // Sticky, stays the whole search-applied
+                                // session. The list view clears it itself
+                                // on cancel_search / clear_search_query.
+                            }
+                            StatusLine::NotificationError(_) => {
+                                // Clear message and cancel key input
                                 self.clear_status_line();
+                                continue 'main_loop;
                             }
                         }
-                        StatusLine::SearchStatus { .. } => {
-                            // Sticky, stays the whole search-applied
-                            // session. The list view clears it itself
-                            // on cancel_search / clear_search_query.
-                        }
-                        StatusLine::NotificationError(_) => {
-                            // Clear message and cancel key input
-                            self.clear_status_line();
-                            continue 'main_loop;
-                        }
-                    }
 
-                    let user_event = self.ctx.keybind.get(&key);
+                        let user_event = self.ctx.keybind.get(&key);
 
-                    if let Some(UserEvent::Cancel) = user_event {
-                        if !self.app_status.numeric_prefix.is_empty() {
-                            // Clear numeric prefix and cancel the event
-                            self.app_status.numeric_prefix.clear();
-                            continue 'main_loop;
-                        }
-                    }
-
-                    // True when a text field is actively capturing character
-                    // input: dialog Input/SecondInput, config text edit, diff
-                    // search, or the list search bar (StatusLine::Input).
-                    let text_input_active = self.view.is_input_active()
-                        || matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
-
-                    match user_event {
-                        Some(UserEvent::ForceQuit) => {
-                            // Ctrl+C always quits, it cannot produce a printable char.
-                            self.ec.send(AppEvent::Quit);
-                        }
-                        Some(UserEvent::Quit) if !text_input_active => {
-                            self.ec.send(AppEvent::Quit);
-                        }
-                        Some(UserEvent::PullRequests)
-                            if !text_input_active
-                                && !matches!(self.view, View::PullRequests(_))
-                                && !matches!(self.view, View::Issues(_))
-                                && self.github_features_available() =>
-                        {
-                            // Global shortcut, open the PR view from
-                            // anywhere EXCEPT when we're already inside
-                            // it OR inside the Issues view. In both of
-                            // those, `R` is reserved for the in-view
-                            // quote-reply action and must fall through
-                            // to the view's own handle_event. Gated on
-                            // (auth + github-hosted remote) so the key
-                            // is a no-op when the feature can't actually
-                            // work, matches the footer's behaviour.
-                            self.ec.send(AppEvent::OpenPullRequests);
-                        }
-                        Some(UserEvent::Issues)
-                            if !text_input_active
-                                && !matches!(self.view, View::Issues(_))
-                                && self.github_features_available() =>
-                        {
-                            self.ec.send(AppEvent::OpenIssues);
-                        }
-                        Some(UserEvent::Drop)
-                            if matches!(self.view, View::List(_))
-                                && !self.view.is_search_querying()
-                                && !self.view.is_input_active() =>
-                        {
-                            // `d` on the commit list doubles as "change
-                            // directory", `drop_commit` is only ever
-                            // relevant in the Detail view anyway, where the
-                            // event falls through to the standard handler.
-                            // We additionally bail out when ANY input is
-                            // active (search bar, dialog text field, config
-                            // edit) so the user can freely type the letter
-                            // `d` while writing.
-                            self.dir_input.open(&self.dir_recents);
-                            // Only nuke the GRAPH placements, the popup
-                            // overlays the graph column at the left, so
-                            // those need to disappear. Avatars sit at the
-                            // far-right columns (well past the popup width)
-                            // so we leave both their Kitty placements AND
-                            // the avatar-manager cache untouched, that's
-                            // what makes the open instant; re-uploading
-                            // every avatar SVG would otherwise add ~1s of
-                            // latency on busy repos.
-                            let graph_ids = self.view.graph_image_ids_sorted();
-                            let _ = self.ctx.image_protocol.delete_images(&graph_ids);
-                            self.view.clear_graph_images();
-                            // Reuse the global spinner machinery so the
-                            // header G-logo animates and the footer braille
-                            // ticks at the same cadence as the Pull / Fetch
-                            // background tasks.
-                            self.app_status.numeric_prefix.clear();
-                            // Hide the real terminal cursor, we draw a fake
-                            // one into the buffer so image-protocol writes
-                            // (avatars, graph) can't visibly teleport the
-                            // hardware caret around the screen.
-                            let _ = ratatui::crossterm::execute!(
-                                std::io::stdout(),
-                                ratatui::crossterm::cursor::Hide
-                            );
-                        }
-                        Some(ue) => {
-                            // When a text field is capturing input, only pass
-                            // through structural dialog events. Everything else
-                            // (letter keys, Backspace, Delete, Ctrl+arrows…)
-                            // is forwarded as Unknown so the view's raw key
-                            // handler inserts the character or moves the cursor.
-                            let forward_as_raw = text_input_active
-                                && !matches!(
-                                    ue,
-                                    UserEvent::Cancel
-                                        | UserEvent::Close
-                                        | UserEvent::Confirm
-                                        | UserEvent::NavigateUp
-                                        | UserEvent::NavigateDown
-                                        | UserEvent::RefList
-                                );
-                            if forward_as_raw {
+                        if let Some(UserEvent::Cancel) = user_event {
+                            if !self.app_status.numeric_prefix.is_empty() {
+                                // Clear numeric prefix and cancel the event
                                 self.app_status.numeric_prefix.clear();
-                                self.handle_view_event_clearing_detail_avatar(
-                                    UserEventWithCount::from_event(UserEvent::Unknown),
-                                    key,
-                                    terminal,
-                                )?;
-                            } else {
-                                let event_with_count = process_numeric_prefix(
-                                    &self.app_status.numeric_prefix,
-                                    *ue,
-                                    key,
-                                );
-                                self.handle_view_event_clearing_detail_avatar(
-                                    event_with_count,
-                                    key,
-                                    terminal,
-                                )?;
-                                self.app_status.numeric_prefix.clear();
+                                continue 'main_loop;
                             }
                         }
-                        None => {
-                            if let StatusLine::Input(_, _, _) = self.app_status.status_line {
-                                // In input mode, pass all key events to the view
-                                // fixme: currently, the only thing that processes key_event is searching the list,
-                                //        so this probably works, but it's not the right process...
+
+                        // True when a text field is actively capturing character
+                        // input: dialog Input/SecondInput, config text edit, diff
+                        // search, or the list search bar (StatusLine::Input).
+                        let text_input_active = self.view.is_input_active()
+                            || matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+
+                        match user_event {
+                            Some(UserEvent::ForceQuit) => {
+                                // Ctrl+C always quits, it cannot produce a printable char.
+                                self.ec.send(AppEvent::Quit);
+                            }
+                            Some(UserEvent::Quit) if !text_input_active => {
+                                self.ec.send(AppEvent::Quit);
+                            }
+                            Some(UserEvent::PullRequests)
+                                if !text_input_active
+                                    && !matches!(self.view, View::PullRequests(_))
+                                    && !matches!(self.view, View::Issues(_))
+                                    && self.github_features_available() =>
+                            {
+                                // Global shortcut, open the PR view from
+                                // anywhere EXCEPT when we're already inside
+                                // it OR inside the Issues view. In both of
+                                // those, `R` is reserved for the in-view
+                                // quote-reply action and must fall through
+                                // to the view's own handle_event. Gated on
+                                // (auth + github-hosted remote) so the key
+                                // is a no-op when the feature can't actually
+                                // work, matches the footer's behaviour.
+                                self.ec.send(AppEvent::OpenPullRequests);
+                            }
+                            Some(UserEvent::Issues)
+                                if !text_input_active
+                                    && !matches!(self.view, View::Issues(_))
+                                    && self.github_features_available() =>
+                            {
+                                self.ec.send(AppEvent::OpenIssues);
+                            }
+                            Some(UserEvent::Drop)
+                                if matches!(self.view, View::List(_))
+                                    && !self.view.is_search_querying()
+                                    && !self.view.is_input_active() =>
+                            {
+                                // `d` on the commit list doubles as "change
+                                // directory", `drop_commit` is only ever
+                                // relevant in the Detail view anyway, where the
+                                // event falls through to the standard handler.
+                                // We additionally bail out when ANY input is
+                                // active (search bar, dialog text field, config
+                                // edit) so the user can freely type the letter
+                                // `d` while writing.
+                                self.dir_input.open(&self.dir_recents);
+                                // Only nuke the GRAPH placements, the popup
+                                // overlays the graph column at the left, so
+                                // those need to disappear. Avatars sit at the
+                                // far-right columns (well past the popup width)
+                                // so we leave both their Kitty placements AND
+                                // the avatar-manager cache untouched, that's
+                                // what makes the open instant; re-uploading
+                                // every avatar SVG would otherwise add ~1s of
+                                // latency on busy repos.
+                                let graph_ids = self.view.graph_image_ids_sorted();
+                                let _ = self.ctx.image_protocol.delete_images(&graph_ids);
+                                self.view.clear_graph_images();
+                                // Reuse the global spinner machinery so the
+                                // header G-logo animates and the footer braille
+                                // ticks at the same cadence as the Pull / Fetch
+                                // background tasks.
                                 self.app_status.numeric_prefix.clear();
-                                self.handle_view_event_clearing_detail_avatar(
-                                    UserEventWithCount::from_event(UserEvent::Unknown),
-                                    key,
-                                    terminal,
-                                )?;
-                            } else if self.view.is_input_active() {
-                                // Config text edit mode: pass all key events
-                                self.app_status.numeric_prefix.clear();
-                                self.handle_view_event_clearing_detail_avatar(
-                                    UserEventWithCount::from_event(UserEvent::Unknown),
-                                    key,
-                                    terminal,
-                                )?;
-                            } else if let KeyCode::Char(c) = key.code {
-                                if c.is_ascii_digit()
-                                    && key.modifiers
-                                        == ratatui::crossterm::event::KeyModifiers::NONE
-                                    && (c != '0' || !self.app_status.numeric_prefix.is_empty())
-                                {
-                                    // Accumulate numeric prefix.
-                                    self.app_status.numeric_prefix.push(c);
+                                // Hide the real terminal cursor, we draw a fake
+                                // one into the buffer so image-protocol writes
+                                // (avatars, graph) can't visibly teleport the
+                                // hardware caret around the screen.
+                                let _ = ratatui::crossterm::execute!(
+                                    std::io::stdout(),
+                                    ratatui::crossterm::cursor::Hide
+                                );
+                            }
+                            Some(ue) => {
+                                // When a text field is capturing input, only pass
+                                // through structural dialog events. Everything else
+                                // (letter keys, Backspace, Delete, Ctrl+arrows…)
+                                // is forwarded as Unknown so the view's raw key
+                                // handler inserts the character or moves the cursor.
+                                let forward_as_raw = text_input_active
+                                    && !matches!(
+                                        ue,
+                                        UserEvent::Cancel
+                                            | UserEvent::Close
+                                            | UserEvent::Confirm
+                                            | UserEvent::NavigateUp
+                                            | UserEvent::NavigateDown
+                                            | UserEvent::RefList
+                                    );
+                                if forward_as_raw {
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
                                 } else {
-                                    // Globally unbound, forward to the
-                                    // view so its scoped resolver gets
-                                    // a chance. Without this, every
-                                    // view-scoped action whose key
-                                    // isn't ALSO bound globally (e.g.
-                                    // every `[scope.pr.conversation]`
-                                    // override, every Alt-letter binding,
-                                    // every F-key) silently dropped at
-                                    // the app layer and never reached
-                                    // the view's resolve_scoped call.
+                                    let event_with_count = process_numeric_prefix(
+                                        &self.app_status.numeric_prefix,
+                                        *ue,
+                                        key,
+                                    );
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        event_with_count,
+                                        key,
+                                        terminal,
+                                    )?;
+                                    self.app_status.numeric_prefix.clear();
+                                }
+                            }
+                            None => {
+                                if let StatusLine::Input(_, _, _) = self.app_status.status_line {
+                                    // In input mode, pass all key events to the view
+                                    // fixme: currently, the only thing that processes key_event is searching the list,
+                                    //        so this probably works, but it's not the right process...
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
+                                } else if self.view.is_input_active() {
+                                    // Config text edit mode: pass all key events
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
+                                } else if let KeyCode::Char(c) = key.code {
+                                    if c.is_ascii_digit()
+                                        && key.modifiers
+                                            == ratatui::crossterm::event::KeyModifiers::NONE
+                                        && (c != '0' || !self.app_status.numeric_prefix.is_empty())
+                                    {
+                                        // Accumulate numeric prefix.
+                                        self.app_status.numeric_prefix.push(c);
+                                    } else {
+                                        // Globally unbound, forward to the
+                                        // view so its scoped resolver gets
+                                        // a chance. Without this, every
+                                        // view-scoped action whose key
+                                        // isn't ALSO bound globally (e.g.
+                                        // every `[scope.pr.conversation]`
+                                        // override, every Alt-letter binding,
+                                        // every F-key) silently dropped at
+                                        // the app layer and never reached
+                                        // the view's resolve_scoped call.
+                                        self.app_status.numeric_prefix.clear();
+                                        self.handle_view_event_clearing_detail_avatar(
+                                            UserEventWithCount::from_event(UserEvent::Unknown),
+                                            key,
+                                            terminal,
+                                        )?;
+                                    }
+                                } else {
+                                    // Non-char unbound keys (F-keys, etc.)
+                                    // same story: forward to the view.
                                     self.app_status.numeric_prefix.clear();
                                     self.handle_view_event_clearing_detail_avatar(
                                         UserEventWithCount::from_event(UserEvent::Unknown),
@@ -1134,844 +1212,912 @@ impl App<'_> {
                                         terminal,
                                     )?;
                                 }
-                            } else {
-                                // Non-char unbound keys (F-keys, etc.)
-                                // same story: forward to the view.
-                                self.app_status.numeric_prefix.clear();
-                                self.handle_view_event_clearing_detail_avatar(
-                                    UserEventWithCount::from_event(UserEvent::Unknown),
-                                    key,
-                                    terminal,
-                                )?;
                             }
                         }
                     }
-                }
-                AppEvent::Resize(w, h) => {
-                    let _ = (w, h);
-                    self.invalidate_header();
-                }
-                AppEvent::Mouse(mouse) => {
-                    needs_draw = self.handle_mouse_event(mouse, terminal)?;
-                    if let Some(req) = self.pending_refresh.take() {
-                        // A handler (currently: dir-input dropdown 2nd-click)
-                        // asked for a full app rebuild. Mirror the keyboard
-                        // Enter path: drop graph images so kitty doesn't carry
-                        // them into the new repo, then bubble up Ret::Refresh.
-                        self.cleanup_graph_images()?;
-                        return Ok(Ret::Refresh(req));
+                    AppEvent::Resize(w, h) => {
+                        let _ = (w, h);
+                        self.invalidate_header();
                     }
-                }
-                AppEvent::Quit => {
-                    self.cleanup_graph_images()?;
-                    return Ok(Ret::Quit);
-                }
-                AppEvent::OpenDetail => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_detail();
-                }
-                AppEvent::CloseDetail => {
-                    if !self.close_detail() {
-                        // No commit list state available (e.g. opened from Refs panel)
-                        // Force a full refresh to rebuild the list view
+                    AppEvent::Mouse(mouse) => {
+                        needs_draw = self.handle_mouse_event(mouse, terminal)?;
+                        if let Some(req) = self.pending_refresh.take() {
+                            // A handler (currently: dir-input dropdown 2nd-click)
+                            // asked for a full app rebuild. Mirror the keyboard
+                            // Enter path: drop graph images so kitty doesn't carry
+                            // them into the new repo, then bubble up Ret::Refresh.
+                            self.cleanup_graph_images()?;
+                            return Ok(Ret::Refresh(req));
+                        }
+                    }
+                    AppEvent::Quit => {
                         self.cleanup_graph_images()?;
-                        return Ok(Ret::Refresh(RefreshRequest {
-                            context: RefreshViewContext::List {
-                                list_context: crate::view::ListRefreshViewContext {
-                                    commit_hash: String::new(),
-                                    selected: 0,
-                                    height: 0,
-                                    scroll_to_top: true,
+                        return Ok(Ret::Quit);
+                    }
+                    AppEvent::OpenDetail => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_detail();
+                    }
+                    AppEvent::CloseDetail => {
+                        if !self.close_detail() {
+                            // No commit list state available (e.g. opened from Refs panel)
+                            // Force a full refresh to rebuild the list view
+                            self.cleanup_graph_images()?;
+                            return Ok(Ret::Refresh(RefreshRequest {
+                                context: RefreshViewContext::List {
+                                    list_context: crate::view::ListRefreshViewContext {
+                                        commit_hash: String::new(),
+                                        selected: 0,
+                                        height: 0,
+                                        scroll_to_top: true,
+                                    },
+                                    pending_notification: None,
                                 },
-                                pending_notification: None,
-                            },
-                        }));
+                            }));
+                        }
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
                     }
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::OpenUserCommand(n) => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_user_command(n, Some(terminal));
-                }
-                AppEvent::CloseUserCommand => {
-                    self.close_user_command();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::OpenRefs => {
-                    self.clear_image(Some(terminal))?;
-                    self.open_refs();
-                }
-                AppEvent::CloseRefs => {
-                    self.clear_image(Some(terminal))?;
-                    self.close_refs();
-                }
-                AppEvent::OpenHelp => {
-                    self.clear_image(Some(terminal))?;
-                    self.open_help();
-                }
-                AppEvent::CloseHelp => {
-                    self.close_help();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::OpenConfig => {
-                    self.clear_image(Some(terminal))?;
-                    self.open_config();
-                }
-                AppEvent::CloseConfig => {
-                    self.close_config();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::OpenConfigFile => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_config_file_in_editor();
-                }
-                AppEvent::GithubAuthFinished(state) => {
-                    self.finish_github_auth(state);
-                }
-                AppEvent::OpenFileDiff { hash, file_path } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_file_diff(hash, file_path);
-                }
-                AppEvent::OpenStashDiff { stash_ref } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_stash_diff(stash_ref);
-                }
-                AppEvent::OpenCompareDiff { from_hash, to_hash } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_compare_diff(from_hash, to_hash);
-                }
-                AppEvent::CloseDiff => {
-                    self.close_diff();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::CloseDiffToDetail => {
-                    self.close_diff_to_detail();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::SelectOlderCommit => {
-                    self.select_older_commit();
-                }
-                AppEvent::SelectNewerCommit => {
-                    self.select_newer_commit();
-                }
-                AppEvent::SelectParentCommit => {
-                    self.select_parent_commit();
-                }
-                AppEvent::CopyToClipboard { name, value } => {
-                    self.copy_to_clipboard(name, value);
-                }
-                AppEvent::CopyRawToClipboard {
-                    value,
-                    success_message,
-                } => {
-                    self.copy_raw_to_clipboard(value, success_message);
-                }
-                AppEvent::OpenUrl(url) => {
-                    if let Err(msg) = open_url(&url) {
-                        self.error_notification(msg);
+                    AppEvent::OpenUserCommand(n) => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_user_command(n, Some(terminal));
                     }
-                }
-                AppEvent::Refresh(context) => {
-                    self.stop_spinner();
-                    self.cleanup_graph_images()?;
-                    let request = RefreshRequest { context };
-                    return Ok(Ret::Refresh(request));
-                }
-                AppEvent::FilesystemChanged => {
-                    // Auto-refresh from external git activity. Guards:
-                    // 1. Don't disrupt user input, defer while a dialog
-                    //    or any text-input (commit message, search bar,
-                    //    ...) is active.
-                    // 2. Throttle to at most one refresh every 2 s. The
-                    //    watcher already debounces + fingerprint-compares,
-                    //    but a burst of changes shouldn't trigger
-                    //    repeated terminal redraws within a few seconds.
-                    //
-                    // CRITICAL change vs. prior behaviour: throttled
-                    // events used to be SILENTLY DROPPED. That left
-                    // the user with a stale UI when they committed in
-                    // another shell soon after launch (the startup
-                    // throttle seed was still active). We now flip a
-                    // `deferred_auto_refresh` flag and a follow-up
-                    // tick in the main loop drains it once the throttle
-                    // window expires.
-                    crate::glog_info!("watcher: FilesystemChanged received");
-                    let is_dialog = matches!(self.view, View::Dialog(_));
-                    let is_input =
-                        matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
-                    let is_view_input = self.view.is_input_active();
-                    let throttled = self
-                        .app_status
-                        .last_auto_refresh
-                        .map(|t| t.elapsed() < AUTO_REFRESH_THROTTLE)
-                        .unwrap_or(false);
-                    if is_dialog || is_input || is_view_input || throttled {
-                        crate::glog_info!(
+                    AppEvent::CloseUserCommand => {
+                        self.close_user_command();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenRefs => {
+                        self.clear_image(Some(terminal))?;
+                        self.open_refs();
+                    }
+                    AppEvent::CloseRefs => {
+                        self.clear_image(Some(terminal))?;
+                        self.close_refs();
+                    }
+                    AppEvent::OpenHelp => {
+                        self.clear_image(Some(terminal))?;
+                        self.open_help();
+                    }
+                    AppEvent::CloseHelp => {
+                        self.close_help();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenConfig => {
+                        self.clear_image(Some(terminal))?;
+                        self.open_config();
+                    }
+                    AppEvent::CloseConfig => {
+                        self.close_config();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenConfigFile => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_config_file_in_editor();
+                    }
+                    AppEvent::GithubAuthFinished(state) => {
+                        self.finish_github_auth(state);
+                    }
+                    AppEvent::OpenFileDiff { hash, file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_file_diff(hash, file_path);
+                    }
+                    AppEvent::OpenStashDiff { stash_ref } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_stash_diff(stash_ref);
+                    }
+                    AppEvent::OpenCompareDiff { from_hash, to_hash } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_compare_diff(from_hash, to_hash);
+                    }
+                    AppEvent::CloseDiff => {
+                        self.close_diff();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::CloseDiffToDetail => {
+                        self.close_diff_to_detail();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::SelectOlderCommit => {
+                        self.select_older_commit();
+                    }
+                    AppEvent::SelectNewerCommit => {
+                        self.select_newer_commit();
+                    }
+                    AppEvent::SelectParentCommit => {
+                        self.select_parent_commit();
+                    }
+                    AppEvent::CopyToClipboard { name, value } => {
+                        self.copy_to_clipboard(name, value);
+                    }
+                    AppEvent::CopyRawToClipboard {
+                        value,
+                        success_message,
+                    } => {
+                        self.copy_raw_to_clipboard(value, success_message);
+                    }
+                    AppEvent::OpenUrl(url) => {
+                        if let Err(msg) = open_url(&url) {
+                            self.error_notification(msg);
+                        }
+                    }
+                    AppEvent::Refresh(context) => {
+                        self.stop_spinner();
+                        self.cleanup_graph_images()?;
+                        let request = RefreshRequest { context };
+                        return Ok(Ret::Refresh(request));
+                    }
+                    AppEvent::FilesystemChanged => {
+                        // Auto-refresh from external git activity. Guards:
+                        // 1. Don't disrupt user input, defer while a dialog
+                        //    or any text-input (commit message, search bar,
+                        //    ...) is active.
+                        // 2. Throttle to at most one refresh every 2 s. The
+                        //    watcher already debounces + fingerprint-compares,
+                        //    but a burst of changes shouldn't trigger
+                        //    repeated terminal redraws within a few seconds.
+                        //
+                        // CRITICAL change vs. prior behaviour: throttled
+                        // events used to be SILENTLY DROPPED. That left
+                        // the user with a stale UI when they committed in
+                        // another shell soon after launch (the startup
+                        // throttle seed was still active). We now flip a
+                        // `deferred_auto_refresh` flag and a follow-up
+                        // tick in the main loop drains it once the throttle
+                        // window expires.
+                        crate::glog_info!("watcher: FilesystemChanged received");
+                        let is_dialog = matches!(self.view, View::Dialog(_));
+                        let is_input =
+                            matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+                        let is_view_input = self.view.is_input_active();
+                        let throttled = self
+                            .app_status
+                            .last_auto_refresh
+                            .map(|t| t.elapsed() < AUTO_REFRESH_THROTTLE)
+                            .unwrap_or(false);
+                        if is_dialog || is_input || is_view_input || throttled {
+                            crate::glog_info!(
                             "watcher: deferring refresh (dialog={}, input={}, view_input={}, throttled={})",
                             is_dialog,
                             is_input,
                             is_view_input,
                             throttled
                         );
-                        self.deferred_auto_refresh = true;
-                    } else {
-                        self.app_status.last_auto_refresh = Some(std::time::Instant::now());
-                        self.deferred_auto_refresh = false;
-                        crate::glog_info!("watcher: firing view.refresh()");
-                        self.view.refresh();
-                    }
-                }
-                AppEvent::AvatarsUpdated => {}
-                AppEvent::BackgroundCacheReady { total_commits } => {
-                    // Bg streaming + cache write are done. Flip
-                    // the global flag so the header logo stops
-                    // animating and the 50 ms wakeup tick goes
-                    // back to event-driven idle. Without this,
-                    // the G keeps spinning forever even after
-                    // every commit is loaded.
-                    crate::glog_info!(
-                        "background work done: {} commits", total_commits
-                    );
-                    self.ctx
-                        .bg_full_load_in_progress
-                        .store(false, std::sync::atomic::Ordering::Release);
-                }
-                AppEvent::AppendCommits(batch) => {
-                    // Queue first, drain second: the batch might
-                    // arrive while the user has any non-List view
-                    // open (Detail / Diff / Config / PR / Issue / ...).
-                    // If we dropped these, the user would come back
-                    // to the list missing the commits that streamed
-                    // in during the detour, and feel randomly
-                    // "blocked" when scrolling past the live tip.
-                    self.pending_append_batches.push(batch);
-                    self.drain_pending_append_batches();
-                }
-                AppEvent::FullRepositoryReady(repo) => {
-                    // Swap mechanism dropped: rebuilding the App
-                    // with 332k CommitInfo entries inside a Refresh
-                    // iteration broke the event loop in ways we
-                    // couldn't diagnose at a distance (the user
-                    // reported the app frozen after the swap -
-                    // hover stopped tracking, arrows + `q` did
-                    // nothing). The repo here is discarded, the
-                    // session stays on the fg-loaded 500 commits.
-                    //
-                    // The bg thread still writes the disk cache
-                    // for future use; the proper streaming append
-                    // (CommitInfo<'a> → owned Arc<Commit>) is the
-                    // ongoing Phase 2+ refactor that'll consume
-                    // this without rebuilding the App.
-                    crate::glog_info!(
-                        "bg-loaded repository ready ({} commits) - dropped, swap disabled",
-                        repo.commit_count()
-                    );
-                    self.ctx
-                        .bg_full_load_in_progress
-                        .store(false, std::sync::atomic::Ordering::Release);
-                }
-                AppEvent::ClearStatusLine => {
-                    self.clear_status_line();
-                }
-                AppEvent::UpdateStatusInput(msg, cursor_pos, msg_r) => {
-                    self.update_status_input(msg, cursor_pos, msg_r);
-                }
-                AppEvent::NotifyInfo(msg) => {
-                    self.stop_spinner();
-                    self.info_notification(msg);
-                }
-                AppEvent::NotifySuccess(msg) => {
-                    self.stop_spinner();
-                    self.success_notification(msg);
-                }
-                AppEvent::NotifyWarn(msg) => {
-                    self.stop_spinner();
-                    self.warn_notification(msg);
-                }
-                AppEvent::NotifyError(msg) => {
-                    self.stop_spinner();
-                    self.error_notification(msg);
-                }
-                AppEvent::SetSearchStatus { msg, warn } => {
-                    self.stop_spinner();
-                    // No timestamp, auto-clear loop skips this variant
-                    // entirely so the message persists as long as
-                    // search-applied state is on.
-                    self.app_status.status_line = StatusLine::SearchStatus { msg, warn };
-                    self.app_status.notification_timestamp = None;
-                }
-                AppEvent::PushCurrentBranch => {
-                    self.execute_push_current_branch();
-                }
-                AppEvent::PullCurrentBranch => {
-                    self.execute_pull_current_branch();
-                }
-                AppEvent::CheckAbortOperation => {
-                    self.check_abort_operation();
-                }
-                // Phase 2 - Git Actions
-                AppEvent::OpenDialog(kind) => self.open_dialog(kind),
-                AppEvent::CloseDialog => self.close_dialog(),
-                AppEvent::DialogConfirm => self.dialog_confirm(),
-                AppEvent::DialogCancel => self.close_dialog(),
-                AppEvent::DialogInput(_input) => {}
-                AppEvent::ExecuteGitAction { target, action } => {
-                    self.execute_git_action(target, action);
-                }
-                AppEvent::OpenBranchDetail { branch_name } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_branch_detail(branch_name);
-                }
-                AppEvent::OpenSetUpstreamDialog { branch } => {
-                    let repo_path = self.repository.path();
-                    match actions::get_remotes(repo_path) {
-                        Ok(remotes) if !remotes.is_empty() => {
-                            self.open_dialog(DialogKind::SetUpstream { remotes, branch });
-                        }
-                        _ => {
-                            self.ec.send(AppEvent::NotifyError(
-                                "No remotes configured. Add a remote first.".into(),
-                            ));
-                        }
-                    }
-                }
-                AppEvent::OpenTagDetail { tag_name } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_tag_detail(tag_name);
-                }
-                AppEvent::OpenUncommitted => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_uncommitted();
-                }
-                AppEvent::StageFile { file } => self.stage_file(file),
-                AppEvent::UnstageFile { file } => self.unstage_file(file),
-                AppEvent::DiscardFile { file } => self.discard_file(file),
-                AppEvent::RefreshUncommitted => {
-                    self.refresh_uncommitted();
-                }
-                AppEvent::Tick => {
-                    let notif_expiring = self
-                        .app_status
-                        .notification_timestamp
-                        .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
-                        .unwrap_or(false);
-                    // Progressive file loading: stream next chunk into the diff view
-                    let streaming = if !self.file_stream.is_empty() {
-                        let chunk_size = 100.min(self.file_stream.len());
-                        let chunk: Vec<_> = self.file_stream.drain(..chunk_size).collect();
-                        if let View::Diff(ref mut view) = self.view {
-                            view.append_addition_lines(chunk);
-                        }
-                        true
-                    } else {
-                        false
-                    };
-                    if self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire) {
-                        let total = if self.spinner_frames.is_empty() {
-                            10
+                            self.deferred_auto_refresh = true;
                         } else {
-                            crate::brand::SPINNER_FRAME_COUNT
-                        };
-                        self.app_status.spinner_frame = (self.app_status.spinner_frame + 1) % total;
+                            self.app_status.last_auto_refresh = Some(std::time::Instant::now());
+                            self.deferred_auto_refresh = false;
+                            crate::glog_info!("watcher: firing view.refresh()");
+                            self.view.refresh();
+                        }
+                    }
+                    AppEvent::ReplaceGraph { gen, graph } if gen == self.bg_generation => {
+                        // Background streamer finished walking the full repo
+                        // history and shipped a fresh `Graph` covering every
+                        // commit (not just the foreground's initial slice).
+                        // Queue it first, then try to drain - the drain is
+                        // a no-op if the user is deep in another view, the
+                        // next return to `View::List` (or the explicit drain
+                        // before the next render) consumes it. Matches the
+                        // `AppendCommits` queue-first-drain-second pattern
+                        // so we never silently drop a Graph the user paid to
+                        // compute.
+                        self.pending_replace_graph = Some(graph);
+                        self.drain_pending_replace_graph();
+                    }
+                    AppEvent::ReplaceGraph { .. } => {
+                        // Stale generation, discard.
+                    }
+                    AppEvent::AvatarsUpdated => {}
+                    AppEvent::BackgroundCacheReady { gen, total_commits }
+                        if gen == self.bg_generation =>
+                    {
+                        // Bg streaming + cache write are done on the thread
+                        // side, but `AppendCommits` / `ReplaceGraph` payloads
+                        // it shipped earlier may still be queued in
+                        // `pending_*` (the user was in Detail/PR/Config and
+                        // the drain no-op'd for those). Flipping
+                        // `bg_full_load_in_progress = false` here unconditionally
+                        // turned off the "..." indicator AND let `select_last`
+                        // (Shift+G) believe the list was complete - so it
+                        // landed on the last DRAINED commit (typically the
+                        // 500th from the fg slice) instead of the actual
+                        // repo tip that was still sitting in the queue.
+                        // Defer the flip to `try_finalize_bg_loading`, which
+                        // runs after every drain and only flips once both
+                        // queues are empty.
+                        crate::glog_info!("background work done: {} commits", total_commits);
+                        self.bg_streaming_drain_pending = true;
+                        self.try_finalize_bg_loading();
+                    }
+                    AppEvent::BackgroundCacheReady { .. } => {
+                        // Stale generation, discard.
+                    }
+                    AppEvent::AppendCommits { gen, batch } if gen == self.bg_generation => {
+                        // Queue first, drain second: the batch might
+                        // arrive while the user has any non-List view
+                        // open (Detail / Diff / Config / PR / Issue / ...).
+                        // If we dropped these, the user would come back
+                        // to the list missing the commits that streamed
+                        // in during the detour, and feel randomly
+                        // "blocked" when scrolling past the live tip.
+                        // PROGRESSIVE-UX: track size BEFORE the push so
+                        // we can credit `appended_this_cycle` accurately.
+                        let batch_len = batch.len();
+                        self.pending_append_batches.push(batch);
+                        self.drain_pending_append_batches();
+                        appended_this_cycle = appended_this_cycle.saturating_add(batch_len);
+                        // Force a redraw whenever new commits land so the
+                        // list visibly grows. The bg streamer ships
+                        // batches as fast as it can compute them; without
+                        // this, AppendCommits events arriving inside the
+                        // 50 ms `recv_timeout` window relied on the
+                        // generic post-dispatch `needs_draw = true` which
+                        // *is* set, but the yield-threshold break below
+                        // lets us render mid-cycle for big repos.
                         needs_draw = true;
-                    } else {
-                        needs_draw = notif_expiring || streaming;
                     }
-                }
-                AppEvent::OpenUncommittedDiff {
-                    file_path,
-                    is_staged,
-                } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_uncommitted_diff(file_path, is_staged);
-                }
-                AppEvent::ToggleHunkStage {
-                    file_path,
-                    hunk_idx,
-                    currently_staged,
-                } => {
-                    self.toggle_hunk_stage(file_path, hunk_idx, currently_staged);
-                }
-                AppEvent::CloseDiffToUncommitted => {
-                    self.close_diff_to_uncommitted();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::BackgroundFetch => {
-                    self.start_spinner("Fetching\u{2026}");
-                    self.start_background_fetch();
-                }
-                AppEvent::OpenFileHistory { file_path } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_file_history(file_path);
-                }
-                AppEvent::CloseFileHistory => {
-                    self.close_file_history();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::OpenBlame { file_path } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_blame(file_path);
-                }
-                AppEvent::CloseBlame => {
-                    self.close_blame();
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                }
-                AppEvent::OpenConflictEditor { file_path } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_conflict_editor(file_path);
-                }
-                AppEvent::CloseConflictEditor => {
-                    // close_conflict_editor() enqueues AppEvent::Refresh, which
-                    // returns Ret::Refresh on its turn and re-initialises the
-                    // whole app (clearing the terminal as part of that re-entry).
-                    // No need to clear manually here, doing so flashed the
-                    // commit list twice on every save.
-                    self.close_conflict_editor();
-                }
-                AppEvent::OpenInteractiveRebase { base_hash } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_interactive_rebase(base_hash);
-                }
-                AppEvent::OpenPullRequests => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_pull_requests();
-                }
-                AppEvent::OpenPullRequestDetail { number } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_pull_requests();
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.open_by_number(number);
+                    AppEvent::AppendCommits { .. } => {
+                        // Stale generation, discard.
                     }
-                }
-                AppEvent::OpenIssueDetail { number } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_issues();
-                    if let View::Issues(ref mut view) = self.view {
-                        view.open_by_number(number);
+                    AppEvent::FullRepositoryReady(repo) => {
+                        // Swap mechanism dropped: rebuilding the App
+                        // with 332k CommitInfo entries inside a Refresh
+                        // iteration broke the event loop in ways we
+                        // couldn't diagnose at a distance (the user
+                        // reported the app frozen after the swap -
+                        // hover stopped tracking, arrows + `q` did
+                        // nothing). The repo here is discarded, the
+                        // session stays on the fg-loaded 500 commits.
+                        //
+                        // The bg thread still writes the disk cache
+                        // for future use; the proper streaming append
+                        // (CommitInfo<'a> → owned Arc<Commit>) is the
+                        // ongoing Phase 2+ refactor that'll consume
+                        // this without rebuilding the App.
+                        crate::glog_info!(
+                            "bg-loaded repository ready ({} commits) - dropped, swap disabled",
+                            repo.commit_count()
+                        );
+                        self.ctx
+                            .bg_full_load_in_progress
+                            .store(false, std::sync::atomic::Ordering::Release);
                     }
-                }
-                AppEvent::ClosePullRequests => {
-                    // Wipe the terminal's image protocol state so
-                    // the PR-view avatars don't bleed into the
-                    // commit list we're about to render. Same
-                    // routine as the open path uses.
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.close_pull_requests();
-                }
-                AppEvent::OpenIssues => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_issues();
-                }
-                AppEvent::CloseIssues => {
-                    // Same as ClosePullRequests, wipe lingering
-                    // image-protocol placements so the avatars from
-                    // the Issues view don't ghost onto the next
-                    // view (commit list) we're about to render.
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.close_issues();
-                }
-                AppEvent::IssueDetailFetched { number, result } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_detail_fetched(number, result);
+                    AppEvent::ClearStatusLine => {
+                        self.clear_status_line();
                     }
-                }
-                AppEvent::IssueActionDone {
-                    number,
-                    action,
-                    result,
-                } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_action_done(number, action, result);
+                    AppEvent::UpdateStatusInput(msg, cursor_pos, msg_r) => {
+                        self.update_status_input(msg, cursor_pos, msg_r);
                     }
-                }
-                AppEvent::IssueTimelineFetched { number, result } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_timeline_fetched(number, result);
+                    AppEvent::NotifyInfo(msg) => {
+                        self.stop_spinner();
+                        self.info_notification(msg);
                     }
-                }
-                AppEvent::IssueLinkedFetched { number, result } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_linked_fetched(number, result);
+                    AppEvent::NotifySuccess(msg) => {
+                        self.stop_spinner();
+                        self.success_notification(msg);
                     }
-                }
-                AppEvent::IssueMentionPrsFetched { result } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_mention_prs_fetched(result);
+                    AppEvent::NotifyWarn(msg) => {
+                        self.stop_spinner();
+                        self.warn_notification(msg);
                     }
-                }
-                AppEvent::PrMentionIssuesFetched { issues } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_mention_issues_fetched(issues);
+                    AppEvent::NotifyError(msg) => {
+                        self.stop_spinner();
+                        self.error_notification(msg);
                     }
-                }
-                AppEvent::IssueReactionApplied {
-                    issue_number,
-                    target_idx,
-                    kind,
-                    reaction_id,
-                } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_reaction_applied(issue_number, target_idx, kind, reaction_id);
+                    AppEvent::SetSearchStatus { msg, warn } => {
+                        self.stop_spinner();
+                        // No timestamp, auto-clear loop skips this variant
+                        // entirely so the message persists as long as
+                        // search-applied state is on.
+                        self.app_status.status_line = StatusLine::SearchStatus { msg, warn };
+                        self.app_status.notification_timestamp = None;
                     }
-                }
-                AppEvent::IssueReactionRemoved {
-                    issue_number,
-                    target_idx,
-                    kind,
-                } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_reaction_removed(issue_number, target_idx, kind);
+                    AppEvent::PushCurrentBranch => {
+                        self.execute_push_current_branch();
                     }
-                }
-                AppEvent::PrReactionApplied {
-                    pr_number,
-                    target_idx,
-                    kind,
-                    reaction_id,
-                } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_reaction_applied(pr_number, target_idx, kind, reaction_id);
+                    AppEvent::PullCurrentBranch => {
+                        self.execute_pull_current_branch();
                     }
-                }
-                AppEvent::PrReactionRemoved {
-                    pr_number,
-                    target_idx,
-                    kind,
-                } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_reaction_removed(pr_number, target_idx, kind);
+                    AppEvent::CheckAbortOperation => {
+                        self.check_abort_operation();
                     }
-                }
-                AppEvent::IssueViewerReactionsFetched {
-                    issue_number,
-                    target_idx,
-                    reactions,
-                } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_viewer_reactions_fetched(issue_number, target_idx, reactions);
+                    // Phase 2 - Git Actions
+                    AppEvent::OpenDialog(kind) => self.open_dialog(kind),
+                    AppEvent::CloseDialog => self.close_dialog(),
+                    AppEvent::DialogConfirm => self.dialog_confirm(),
+                    AppEvent::DialogCancel => self.close_dialog(),
+                    AppEvent::DialogInput(_input) => {}
+                    AppEvent::ExecuteGitAction { target, action } => {
+                        self.execute_git_action(target, action);
                     }
-                }
-                AppEvent::PrViewerReactionsFetched {
-                    pr_number,
-                    target_idx,
-                    reactions,
-                } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_viewer_reactions_fetched(pr_number, target_idx, reactions);
+                    AppEvent::OpenBranchDetail { branch_name } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_branch_detail(branch_name);
                     }
-                }
-                AppEvent::OpenIssueLabelsPicker {
-                    issue_number,
-                    issue_title,
-                    all_labels,
-                    currently_on_issue,
-                } => {
-                    let selected: Vec<bool> = all_labels
-                        .iter()
-                        .map(|l| currently_on_issue.contains(&l.name))
-                        .collect();
-                    self.ec.send(AppEvent::OpenDialog(
-                        crate::event::DialogKind::IssueLabels {
-                            issue_number,
-                            issue_title,
-                            all_labels,
-                            selected,
-                            for_compose: false,
-                        },
-                    ));
-                }
-                AppEvent::OpenIssueAssigneesPicker {
-                    issue_number,
-                    issue_title,
-                    all_users,
-                    currently_assigned,
-                } => {
-                    let selected: Vec<bool> = all_users
-                        .iter()
-                        .map(|u| currently_assigned.contains(u))
-                        .collect();
-                    let initial = selected.clone();
-                    self.ec.send(AppEvent::OpenDialog(
-                        crate::event::DialogKind::IssueAssignees {
-                            issue_number,
-                            issue_title,
-                            all_users,
-                            selected,
-                            initial,
-                            for_compose: false,
-                        },
-                    ));
-                }
-                AppEvent::OpenIssueMilestonePicker {
-                    issue_number,
-                    issue_title,
-                    all_milestones,
-                    currently_set,
-                } => {
-                    self.ec.send(AppEvent::OpenDialog(
-                        crate::event::DialogKind::IssueMilestone {
-                            issue_number,
-                            issue_title,
-                            all_milestones,
-                            selected: currently_set,
-                            for_compose: false,
-                        },
-                    ));
-                }
-                AppEvent::IssueCreated { number } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_issue_created(number);
+                    AppEvent::OpenSetUpstreamDialog { branch } => {
+                        let repo_path = self.repository.path();
+                        match actions::get_remotes(repo_path) {
+                            Ok(remotes) if !remotes.is_empty() => {
+                                self.open_dialog(DialogKind::SetUpstream { remotes, branch });
+                            }
+                            _ => {
+                                self.ec.send(AppEvent::NotifyError(
+                                    "No remotes configured. Add a remote first.".into(),
+                                ));
+                            }
+                        }
                     }
-                }
-                AppEvent::ComposeIssueLabelsPicked { labels } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_compose_labels_picked(labels);
+                    AppEvent::OpenTagDetail { tag_name } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_tag_detail(tag_name);
                     }
-                }
-                AppEvent::ComposeIssueAssigneesPicked { assignees } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_compose_assignees_picked(assignees);
+                    AppEvent::OpenUncommitted => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_uncommitted();
                     }
-                }
-                AppEvent::ComposeIssueMilestonePicked { milestone } => {
-                    if let View::Issues(ref mut view) = self.view {
-                        view.on_compose_milestone_picked(milestone);
+                    AppEvent::StageFile { file } => self.stage_file(file),
+                    AppEvent::UnstageFile { file } => self.unstage_file(file),
+                    AppEvent::DiscardFile { file } => self.discard_file(file),
+                    AppEvent::RefreshUncommitted => {
+                        self.refresh_uncommitted();
                     }
-                }
-                AppEvent::SetIssueLabels {
-                    issue_number,
-                    labels,
-                } => {
-                    self.spawn_issue_write(issue_number, "Labels updated".into(), move |t, c| {
-                        crate::github::issue::set_issue_labels(t, c, issue_number, &labels)
-                    });
-                }
-                AppEvent::SetIssueAssignees {
-                    issue_number,
-                    assignees,
-                } => {
-                    self.spawn_issue_write(
+                    AppEvent::Tick => {
+                        let notif_expiring = self
+                            .app_status
+                            .notification_timestamp
+                            .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
+                            .unwrap_or(false);
+                        // Progressive file loading: stream next chunk into the diff view
+                        let streaming = if !self.file_stream.is_empty() {
+                            let chunk_size = 100.min(self.file_stream.len());
+                            let chunk: Vec<_> = self.file_stream.drain(..chunk_size).collect();
+                            if let View::Diff(ref mut view) = self.view {
+                                view.append_addition_lines(chunk);
+                            }
+                            true
+                        } else {
+                            false
+                        };
+                        if self
+                            .ctx
+                            .bg_full_load_in_progress
+                            .load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            let total = if self.spinner_frames.is_empty() {
+                                10
+                            } else {
+                                crate::brand::SPINNER_FRAME_COUNT
+                            };
+                            self.app_status.spinner_frame =
+                                (self.app_status.spinner_frame + 1) % total;
+                            needs_draw = true;
+                        } else {
+                            needs_draw = notif_expiring || streaming;
+                        }
+                    }
+                    AppEvent::OpenUncommittedDiff {
+                        file_path,
+                        is_staged,
+                    } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_uncommitted_diff(file_path, is_staged);
+                    }
+                    AppEvent::ToggleHunkStage {
+                        file_path,
+                        hunk_idx,
+                        currently_staged,
+                    } => {
+                        self.toggle_hunk_stage(file_path, hunk_idx, currently_staged);
+                    }
+                    AppEvent::CloseDiffToUncommitted => {
+                        self.close_diff_to_uncommitted();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::BackgroundFetch => {
+                        self.start_spinner("Fetching\u{2026}");
+                        self.start_background_fetch();
+                    }
+                    AppEvent::OpenFileHistory { file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_file_history(file_path);
+                    }
+                    AppEvent::CloseFileHistory => {
+                        self.close_file_history();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenBlame { file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_blame(file_path);
+                    }
+                    AppEvent::CloseBlame => {
+                        self.close_blame();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenConflictEditor { file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_conflict_editor(file_path);
+                    }
+                    AppEvent::CloseConflictEditor => {
+                        // close_conflict_editor() enqueues AppEvent::Refresh, which
+                        // returns Ret::Refresh on its turn and re-initialises the
+                        // whole app (clearing the terminal as part of that re-entry).
+                        // No need to clear manually here, doing so flashed the
+                        // commit list twice on every save.
+                        self.close_conflict_editor();
+                    }
+                    AppEvent::OpenInteractiveRebase { base_hash } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_interactive_rebase(base_hash);
+                    }
+                    AppEvent::OpenPullRequests => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pull_requests();
+                    }
+                    AppEvent::OpenPullRequestDetail { number } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pull_requests();
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.open_by_number(number);
+                        }
+                    }
+                    AppEvent::OpenIssueDetail { number } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_issues();
+                        if let View::Issues(ref mut view) = self.view {
+                            view.open_by_number(number);
+                        }
+                    }
+                    AppEvent::ClosePullRequests => {
+                        // Wipe the terminal's image protocol state so
+                        // the PR-view avatars don't bleed into the
+                        // commit list we're about to render. Same
+                        // routine as the open path uses.
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.close_pull_requests();
+                    }
+                    AppEvent::OpenIssues => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_issues();
+                    }
+                    AppEvent::CloseIssues => {
+                        // Same as ClosePullRequests, wipe lingering
+                        // image-protocol placements so the avatars from
+                        // the Issues view don't ghost onto the next
+                        // view (commit list) we're about to render.
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.close_issues();
+                    }
+                    AppEvent::IssueDetailFetched { number, result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_detail_fetched(number, result);
+                        }
+                    }
+                    AppEvent::IssueActionDone {
+                        number,
+                        action,
+                        result,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_action_done(number, action, result);
+                        }
+                    }
+                    AppEvent::IssueTimelineFetched { number, result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_timeline_fetched(number, result);
+                        }
+                    }
+                    AppEvent::IssueLinkedFetched { number, result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_linked_fetched(number, result);
+                        }
+                    }
+                    AppEvent::IssueMentionPrsFetched { result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_mention_prs_fetched(result);
+                        }
+                    }
+                    AppEvent::PrMentionIssuesFetched { issues } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_mention_issues_fetched(issues);
+                        }
+                    }
+                    AppEvent::IssueReactionApplied {
                         issue_number,
-                        "Assignees updated".into(),
-                        move |t, c| {
-                            crate::github::issue::set_issue_assignees(
-                                t,
-                                c,
+                        target_idx,
+                        kind,
+                        reaction_id,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_reaction_applied(issue_number, target_idx, kind, reaction_id);
+                        }
+                    }
+                    AppEvent::IssueReactionRemoved {
+                        issue_number,
+                        target_idx,
+                        kind,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_reaction_removed(issue_number, target_idx, kind);
+                        }
+                    }
+                    AppEvent::PrReactionApplied {
+                        pr_number,
+                        target_idx,
+                        kind,
+                        reaction_id,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_reaction_applied(pr_number, target_idx, kind, reaction_id);
+                        }
+                    }
+                    AppEvent::PrReactionRemoved {
+                        pr_number,
+                        target_idx,
+                        kind,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_reaction_removed(pr_number, target_idx, kind);
+                        }
+                    }
+                    AppEvent::IssueViewerReactionsFetched {
+                        issue_number,
+                        target_idx,
+                        reactions,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_viewer_reactions_fetched(issue_number, target_idx, reactions);
+                        }
+                    }
+                    AppEvent::PrViewerReactionsFetched {
+                        pr_number,
+                        target_idx,
+                        reactions,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_viewer_reactions_fetched(pr_number, target_idx, reactions);
+                        }
+                    }
+                    AppEvent::OpenIssueLabelsPicker {
+                        issue_number,
+                        issue_title,
+                        all_labels,
+                        currently_on_issue,
+                    } => {
+                        let selected: Vec<bool> = all_labels
+                            .iter()
+                            .map(|l| currently_on_issue.contains(&l.name))
+                            .collect();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::IssueLabels {
                                 issue_number,
-                                &assignees,
-                            )
-                        },
-                    );
-                }
-                AppEvent::SetIssueMilestone {
-                    issue_number,
-                    milestone,
-                } => {
-                    self.spawn_issue_write(
-                        issue_number,
-                        "Milestone updated".into(),
-                        move |t, c| {
-                            crate::github::issue::set_issue_milestone(t, c, issue_number, milestone)
-                        },
-                    );
-                }
-                AppEvent::CloseIssueWithReason {
-                    issue_number,
-                    reason,
-                } => {
-                    self.spawn_issue_write(issue_number, "Issue closed".into(), move |t, c| {
-                        crate::github::issue::close_issue(t, c, issue_number, reason)
-                    });
-                }
-                AppEvent::ReopenIssue { issue_number } => {
-                    self.spawn_issue_write(issue_number, "Issue reopened".into(), move |t, c| {
-                        crate::github::issue::reopen_issue(t, c, issue_number)
-                    });
-                }
-                AppEvent::DeleteIssueComment {
-                    issue_number,
-                    comment_id,
-                } => {
-                    self.spawn_issue_write(issue_number, "Comment deleted".into(), move |t, c| {
-                        crate::github::issue::delete_issue_comment(t, c, comment_id)
-                    });
-                }
-                AppEvent::PullRequestDetailFetched { number, result } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_detail_fetched(number, result);
-                    }
-                }
-                AppEvent::PullRequestActionDone {
-                    number,
-                    action,
-                    result,
-                } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_action_done(number, action, result);
-                    }
-                }
-                AppEvent::OpenPrLabelsPicker {
-                    pr_number,
-                    pr_title,
-                    all_labels,
-                    currently_on_pr,
-                } => {
-                    let selected: Vec<bool> = all_labels
-                        .iter()
-                        .map(|l| currently_on_pr.contains(&l.name))
-                        .collect();
-                    self.ec.send(AppEvent::OpenDialog(
-                        crate::event::DialogKind::PullRequestLabels {
-                            pr_number,
-                            pr_title,
-                            all_labels,
-                            selected,
-                            for_compose: false,
-                        },
-                    ));
-                }
-                AppEvent::OpenPrReviewersPicker {
-                    pr_number,
-                    pr_title,
-                    all_users,
-                    currently_requested,
-                } => {
-                    let selected: Vec<bool> = all_users
-                        .iter()
-                        .map(|name| currently_requested.contains(name))
-                        .collect();
-                    let initial = selected.clone();
-                    self.ec.send(AppEvent::OpenDialog(
-                        crate::event::DialogKind::PullRequestReviewers {
-                            pr_number,
-                            pr_title,
-                            all_users,
-                            selected,
-                            initial,
-                        },
-                    ));
-                }
-                AppEvent::PrCommitDetailFetched { sha, result } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_commit_detail_fetched(sha, result);
-                    }
-                }
-                AppEvent::PrCreated { number } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_pr_created(number);
-                    }
-                }
-                AppEvent::OpenComposeLabelsPicker {
-                    all_labels,
-                    currently_selected,
-                } => {
-                    let selected: Vec<bool> = all_labels
-                        .iter()
-                        .map(|l| currently_selected.contains(&l.name))
-                        .collect();
-                    self.ec.send(AppEvent::OpenDialog(
-                        crate::event::DialogKind::PullRequestLabels {
-                            pr_number: 0,
-                            pr_title: "New Pull Request".to_string(),
-                            all_labels,
-                            selected,
-                            for_compose: true,
-                        },
-                    ));
-                }
-                AppEvent::ComposeLabelsPicked { labels } => {
-                    if let View::PullRequests(ref mut view) = self.view {
-                        view.on_compose_labels_picked(labels);
-                    }
-                }
-                AppEvent::OpenPrCommitDetail {
-                    pr_number,
-                    sha,
-                    after_fetch,
-                } => {
-                    // Wipe lingering Kitty/iTerm2/Sixel placements so
-                    // the PR view's avatars (header by-line, commit
-                    // rows, …) don't ghost on top of the CommitDetail
-                    // / Graph view we're about to render. Same routine
-                    // ClosePullRequests / OpenPullRequestDetail use.
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_pr_commit_detail(pr_number, sha, after_fetch);
-                }
-                AppEvent::OpenPrFileDiff {
-                    pr_number,
-                    sha,
-                    file_path,
-                    after_fetch,
-                } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_pr_file_diff(pr_number, sha, file_path, after_fetch);
-                }
-                AppEvent::CloseInteractiveRebase => {
-                    // Same pattern as CloseConflictEditor: close + enqueue
-                    // a full Refresh so the commit list reflects the new
-                    // history (or surfaces a `rebase in progress` state).
-                    self.close_interactive_rebase();
-                }
-                AppEvent::OpenDetailByHash { hash } => {
-                    self.clear_image(Some(terminal))?;
-                    self.clear_terminal(terminal)?;
-                    self.open_detail_by_hash(hash);
-                }
-                AppEvent::SwitchWorktree { path } => {
-                    if let Err(e) = std::env::set_current_dir(&path) {
-                        self.ec.send(AppEvent::NotifyError(format!(
-                            "Cannot switch to worktree: {}",
-                            e
-                        )));
-                    } else {
-                        self.cleanup_graph_images()?;
-                        return Ok(Ret::Refresh(RefreshRequest {
-                            context: crate::view::RefreshViewContext::List {
-                                list_context: crate::view::ListRefreshViewContext {
-                                    commit_hash: String::new(),
-                                    selected: 0,
-                                    height: 20,
-                                    scroll_to_top: true,
-                                },
-                                pending_notification: Some(format!("Switched to {}", path)),
+                                issue_title,
+                                all_labels,
+                                selected,
+                                for_compose: false,
                             },
-                        }));
+                        ));
+                    }
+                    AppEvent::OpenIssueAssigneesPicker {
+                        issue_number,
+                        issue_title,
+                        all_users,
+                        currently_assigned,
+                    } => {
+                        let selected: Vec<bool> = all_users
+                            .iter()
+                            .map(|u| currently_assigned.contains(u))
+                            .collect();
+                        let initial = selected.clone();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::IssueAssignees {
+                                issue_number,
+                                issue_title,
+                                all_users,
+                                selected,
+                                initial,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::OpenIssueMilestonePicker {
+                        issue_number,
+                        issue_title,
+                        all_milestones,
+                        currently_set,
+                    } => {
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::IssueMilestone {
+                                issue_number,
+                                issue_title,
+                                all_milestones,
+                                selected: currently_set,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::IssueCreated { number } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_issue_created(number);
+                        }
+                    }
+                    AppEvent::ComposeIssueLabelsPicked { labels } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_compose_labels_picked(labels);
+                        }
+                    }
+                    AppEvent::ComposeIssueAssigneesPicked { assignees } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_compose_assignees_picked(assignees);
+                        }
+                    }
+                    AppEvent::ComposeIssueMilestonePicked { milestone } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_compose_milestone_picked(milestone);
+                        }
+                    }
+                    AppEvent::SetIssueLabels {
+                        issue_number,
+                        labels,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Labels updated".into(),
+                            move |t, c| {
+                                crate::github::issue::set_issue_labels(t, c, issue_number, &labels)
+                            },
+                        );
+                    }
+                    AppEvent::SetIssueAssignees {
+                        issue_number,
+                        assignees,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Assignees updated".into(),
+                            move |t, c| {
+                                crate::github::issue::set_issue_assignees(
+                                    t,
+                                    c,
+                                    issue_number,
+                                    &assignees,
+                                )
+                            },
+                        );
+                    }
+                    AppEvent::SetIssueMilestone {
+                        issue_number,
+                        milestone,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Milestone updated".into(),
+                            move |t, c| {
+                                crate::github::issue::set_issue_milestone(
+                                    t,
+                                    c,
+                                    issue_number,
+                                    milestone,
+                                )
+                            },
+                        );
+                    }
+                    AppEvent::CloseIssueWithReason {
+                        issue_number,
+                        reason,
+                    } => {
+                        self.spawn_issue_write(issue_number, "Issue closed".into(), move |t, c| {
+                            crate::github::issue::close_issue(t, c, issue_number, reason)
+                        });
+                    }
+                    AppEvent::ReopenIssue { issue_number } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Issue reopened".into(),
+                            move |t, c| crate::github::issue::reopen_issue(t, c, issue_number),
+                        );
+                    }
+                    AppEvent::DeleteIssueComment {
+                        issue_number,
+                        comment_id,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Comment deleted".into(),
+                            move |t, c| {
+                                crate::github::issue::delete_issue_comment(t, c, comment_id)
+                            },
+                        );
+                    }
+                    AppEvent::PullRequestDetailFetched { number, result } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_detail_fetched(number, result);
+                        }
+                    }
+                    AppEvent::PullRequestActionDone {
+                        number,
+                        action,
+                        result,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_action_done(number, action, result);
+                        }
+                    }
+                    AppEvent::OpenPrLabelsPicker {
+                        pr_number,
+                        pr_title,
+                        all_labels,
+                        currently_on_pr,
+                    } => {
+                        let selected: Vec<bool> = all_labels
+                            .iter()
+                            .map(|l| currently_on_pr.contains(&l.name))
+                            .collect();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::PullRequestLabels {
+                                pr_number,
+                                pr_title,
+                                all_labels,
+                                selected,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::OpenPrReviewersPicker {
+                        pr_number,
+                        pr_title,
+                        all_users,
+                        currently_requested,
+                    } => {
+                        let selected: Vec<bool> = all_users
+                            .iter()
+                            .map(|name| currently_requested.contains(name))
+                            .collect();
+                        let initial = selected.clone();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::PullRequestReviewers {
+                                pr_number,
+                                pr_title,
+                                all_users,
+                                selected,
+                                initial,
+                            },
+                        ));
+                    }
+                    AppEvent::PrCommitDetailFetched { sha, result } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_commit_detail_fetched(sha, result);
+                        }
+                    }
+                    AppEvent::PrCreated { number } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_pr_created(number);
+                        }
+                    }
+                    AppEvent::OpenComposeLabelsPicker {
+                        all_labels,
+                        currently_selected,
+                    } => {
+                        let selected: Vec<bool> = all_labels
+                            .iter()
+                            .map(|l| currently_selected.contains(&l.name))
+                            .collect();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::PullRequestLabels {
+                                pr_number: 0,
+                                pr_title: "New Pull Request".to_string(),
+                                all_labels,
+                                selected,
+                                for_compose: true,
+                            },
+                        ));
+                    }
+                    AppEvent::ComposeLabelsPicked { labels } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_compose_labels_picked(labels);
+                        }
+                    }
+                    AppEvent::OpenPrCommitDetail {
+                        pr_number,
+                        sha,
+                        after_fetch,
+                    } => {
+                        // Wipe lingering Kitty/iTerm2/Sixel placements so
+                        // the PR view's avatars (header by-line, commit
+                        // rows, …) don't ghost on top of the CommitDetail
+                        // / Graph view we're about to render. Same routine
+                        // ClosePullRequests / OpenPullRequestDetail use.
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pr_commit_detail(pr_number, sha, after_fetch);
+                    }
+                    AppEvent::OpenPrFileDiff {
+                        pr_number,
+                        sha,
+                        file_path,
+                        after_fetch,
+                    } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pr_file_diff(pr_number, sha, file_path, after_fetch);
+                    }
+                    AppEvent::CloseInteractiveRebase => {
+                        // Same pattern as CloseConflictEditor: close + enqueue
+                        // a full Refresh so the commit list reflects the new
+                        // history (or surfaces a `rebase in progress` state).
+                        self.close_interactive_rebase();
+                    }
+                    AppEvent::OpenDetailByHash { hash } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_detail_by_hash(hash);
+                    }
+                    AppEvent::SwitchWorktree { path } => {
+                        if let Err(e) = std::env::set_current_dir(&path) {
+                            self.ec.send(AppEvent::NotifyError(format!(
+                                "Cannot switch to worktree: {}",
+                                e
+                            )));
+                        } else {
+                            self.cleanup_graph_images()?;
+                            return Ok(Ret::Refresh(RefreshRequest {
+                                context: crate::view::RefreshViewContext::List {
+                                    list_context: crate::view::ListRefreshViewContext {
+                                        commit_hash: String::new(),
+                                        selected: 0,
+                                        height: 20,
+                                        scroll_to_top: true,
+                                    },
+                                    pending_notification: Some(format!("Switched to {}", path)),
+                                },
+                            }));
+                        }
                     }
                 }
-            }
                 drained += 1;
                 if drained >= 1024 {
+                    break 'dispatch;
+                }
+                // PROGRESSIVE-UX: when bg streaming has been pumping
+                // AppendCommits into our queue, periodically break
+                // out of dispatch so render() runs and the user sees
+                // the list growing. Without this, all 600+ batches
+                // for a 332k-commit repo land in a single dispatch
+                // cycle (try_recv drains the channel back-to-back)
+                // and the user perceives a single 1-second freeze
+                // ending in the full list, not a stream. The
+                // threshold is high enough that small/cached repos
+                // (<1500 streamed commits in one cycle) still
+                // coalesce into a single render; big repos get
+                // ~1 frame per 1500 streamed commits.
+                if appended_this_cycle >= APPEND_YIELD_THRESHOLD {
                     break 'dispatch;
                 }
                 match self.ec.try_recv() {
@@ -1987,7 +2133,15 @@ impl App<'_> {
         let [_, view_area, _, _] = split_app_areas_with_header(area);
         self.update_state(view_area);
         self.view.update_layout(view_area);
-        self.view.prepare_graph_uploads();
+        // Skip graph image generation while the cd popup is open.
+        // Kitty's persistent placements sit on top of buffer cells,
+        // so any graph image under the dropdown bleeds through. The
+        // same gate used for bg_streaming applies here: defer all
+        // uploads until the overlay closes, then the next render
+        // cycle regenerates them cleanly.
+        if !self.dir_input.active {
+            self.view.prepare_graph_uploads();
+        }
         Ok(())
     }
 
@@ -2136,10 +2290,7 @@ impl App<'_> {
     /// (paired with the per-cycle event drain in `run()` which makes
     /// the actual stop instant — together they kill the "scroll keeps
     /// going for a few seconds after I let go" complaint).
-    fn apply_nav_burst_acceleration(
-        &mut self,
-        ewc: UserEventWithCount,
-    ) -> UserEventWithCount {
+    fn apply_nav_burst_acceleration(&mut self, ewc: UserEventWithCount) -> UserEventWithCount {
         use crate::event::UserEvent;
         let is_nav = matches!(
             ewc.event,
@@ -2332,6 +2483,126 @@ impl App<'_> {
                 }
             }
         }
+        self.try_finalize_bg_loading();
+    }
+
+    /// Drain the held-back `ReplaceGraph` payload into the list state
+    /// if the user is on `View::List` and the state isn't currently
+    /// taken. Symmetric with `drain_pending_append_batches`: invoked
+    /// both from the `ReplaceGraph` event handler (best-effort
+    /// immediate swap) and from the pre-render drain pass so a Graph
+    /// that landed while the user was in Detail / PR / Config gets
+    /// swapped in the moment they return to the list.
+    fn drain_pending_replace_graph(&mut self) {
+        let Some(new_graph) = self.pending_replace_graph.take() else {
+            return;
+        };
+        if let View::List(list_view) = &mut self.view {
+            if let Some(state) = list_view.commit_list_state_mut() {
+                // Rebuild branch_color_map from the new (full) graph so
+                // branch labels in the ref list, commit detail, and
+                // footer all use topology-derived colors that match
+                // the graph dots and separator bars.
+                let graph_style: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                let mut branch_color_map = FxHashMap::default();
+                for r in self.repository.all_refs() {
+                    match r {
+                        Ref::Branch { name, target } => {
+                            if let Some(&(pos_x, _)) = new_graph.commit_pos_map.get(target) {
+                                let color_index = if graph_style == GraphStyle::Smooth {
+                                    new_graph
+                                        .commit_color_map
+                                        .get(target)
+                                        .copied()
+                                        .unwrap_or(pos_x)
+                                } else {
+                                    pos_x
+                                };
+                                let color =
+                                    self.ctx.graph_color_set.get(color_index).to_ratatui_color();
+                                branch_color_map.insert(name.clone(), color);
+                            }
+                        }
+                        Ref::RemoteBranch { name, target } => {
+                            if let Some(&(pos_x, _)) = new_graph.commit_pos_map.get(target) {
+                                let color_index = if graph_style == GraphStyle::Smooth {
+                                    new_graph
+                                        .commit_color_map
+                                        .get(target)
+                                        .copied()
+                                        .unwrap_or(pos_x)
+                                } else {
+                                    pos_x
+                                };
+                                let color =
+                                    self.ctx.graph_color_set.get(color_index).to_ratatui_color();
+                                branch_color_map.insert(name.clone(), color);
+                                if let Some((_, base)) = name.split_once('/') {
+                                    branch_color_map.insert(base.to_string(), color);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // Push the updated map into CommitListState (used by
+                // branch label rendering). Intentionally NOT cloning
+                // AppContext here: cloning creates a NEW Rc with a
+                // separate AtomicBool for bg_full_load_in_progress,
+                // which diverges from the ListView's copy and leaves
+                // the "Loading" indicator stuck forever on small repos
+                // (the App stores false on the clone's AtomicBool, but
+                // the ListView still reads true from its original).
+                state.set_branch_color_map(branch_color_map);
+
+                state.replace_graph(*new_graph, &self.ctx.graph_color_set);
+                self.try_finalize_bg_loading();
+                return;
+            }
+        }
+        // Couldn't apply right now (user is in another view, or the
+        // list state is mid-take). Stash it back for the next attempt.
+        self.pending_replace_graph = Some(new_graph);
+    }
+
+    /// Flip `bg_full_load_in_progress` to false once the bg thread has
+    /// signaled completion (`BackgroundCacheReady`) AND every queued
+    /// `AppendCommits` / `ReplaceGraph` payload has been applied to
+    /// the live `CommitListState`. Called by both the
+    /// `BackgroundCacheReady` handler (in case the queues happen to
+    /// already be empty - the common in-List case) and by each drain
+    /// function after it shrinks a queue. Keeping the gate true until
+    /// the LAST drain completes is what stops Shift+G from landing
+    /// mid-list when the user was in Detail while bg was streaming.
+    fn try_finalize_bg_loading(&mut self) {
+        if !self.bg_streaming_drain_pending {
+            return;
+        }
+        if !self.pending_append_batches.is_empty() || self.pending_replace_graph.is_some() {
+            return;
+        }
+        self.bg_streaming_drain_pending = false;
+        self.ctx
+            .bg_full_load_in_progress
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// True when the header G logomark should be rendered as the
+    /// animated spinner instead of the static logo. Combines the
+    /// real bg-loading flag with a per-launch minimum visible
+    /// duration so the animation is always perceptible (warm-cache
+    /// sub-second bg completions used to flash by faster than the
+    /// eye could register).
+    fn spinner_should_show(&self) -> bool {
+        if self
+            .ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return true;
+        }
+        self.spinner_visible_until
+            .is_some_and(|until| std::time::Instant::now() < until)
     }
 
     fn cleanup_graph_images(&self) -> Result<(), std::io::Error> {
@@ -2481,10 +2752,17 @@ impl App<'_> {
         // specifies `bg`, and Kitty's Unicode-placeholder protocol encodes
         // the image ID in the foreground colour: a leftover fg is enough
         // for Kitty to keep painting the commit-graph image on top of the
-        // popup. Explicit reset → set the bg → set the char.
+        // popup. Explicit reset -> set the bg -> set the char.
+        //
+        // Clear the MAXIMUM possible dropdown area (MAX_VISIBLE + 2 border
+        // rows), not just the current suggestion count. When the dropdown
+        // shrinks (fewer matching suggestions), cells from the previous
+        // taller dropdown persist as visual junk below the resized popup.
+        let max_height = ((crate::dir_input::MAX_VISIBLE + 2) as u16).min(view_area.height);
+        let clear_height = max_height.max(area.height);
         let popup_bg = theme.bg;
-        for y in area.y..area.y + area.height {
-            for x in area.x..area.x + area.width {
+        for y in area.y..area.y + clear_height {
+            for x in area.x..area.x + width {
                 let cell = &mut f.buffer_mut()[(x, y)];
                 cell.reset();
                 cell.set_style(Style::default().bg(popup_bg));
@@ -2748,7 +3026,7 @@ impl App<'_> {
         if has_brand {
             // Determine current logo "identity": None = static G, Some(idx) = animation frame.
             let logo_id: Option<usize> =
-                if self.ctx.bg_full_load_in_progress.load(std::sync::atomic::Ordering::Acquire) && !self.spinner_frames.is_empty() {
+                if self.spinner_should_show() && !self.spinner_frames.is_empty() {
                     Some(self.app_status.spinner_frame % self.spinner_frames.len())
                 } else {
                     None
@@ -3602,7 +3880,11 @@ impl<'a> App<'a> {
                 .commit(&CommitHash::from(from_hash.as_str()));
             let to = self.repository.commit(&CommitHash::from(to_hash.as_str()));
             match (from, to) {
-                (Some(f), Some(t)) if t.committer_date >= f.committer_date => {
+                // Use author_date as the ordering key; CommitSummary
+                // doesn't carry the committer trio (that's in the on-
+                // demand full `Commit`), and author_date is what the
+                // list view already sorts on anyway.
+                (Some(f), Some(t)) if t.author_date >= f.author_date => {
                     (from_hash.clone(), to_hash.clone())
                 }
                 (Some(_), Some(_)) => (to_hash.clone(), from_hash.clone()),
@@ -5351,10 +5633,9 @@ impl<'a> App<'a> {
             // delete every Kitty image placement before re-rendering,
             // producing a visible double blink when transitioning back
             // to the commit list. Settings that only matter at startup
-            // (initial_load_count, protocol, order, initial_selection,
-            // load_more_count) are persisted on ctx and applied on the
-            // next launch; the user explicitly opted in by editing
-            // them, no surprise here.
+            // (protocol, order, initial_selection) are persisted on ctx
+            // and applied on the next launch; the user explicitly opted
+            // in by editing them, no surprise here.
             let old_core = self.ctx.core_config.clone();
             let theme_changed = old_core.option.theme != core.option.theme
                 || old_core.option.syntax_theme != core.option.syntax_theme;
@@ -5393,9 +5674,7 @@ impl<'a> App<'a> {
             // rebuilds the GraphImageManager so the column is
             // either pristine real-graph or properly tinted
             // colour-only.
-            let needs_refresh = order_changed
-                || protocol_changed
-                || graph_enabled_changed;
+            let needs_refresh = order_changed || protocol_changed || graph_enabled_changed;
 
             self.view = view.take_before_view();
             let github_avatars = core.github_avatars();

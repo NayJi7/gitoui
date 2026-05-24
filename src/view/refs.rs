@@ -264,21 +264,21 @@ impl<'a> RefsView<'a> {
 
     fn split_areas(&self, area: Rect) -> [Rect; 2] {
         let graph_width = self.as_list_state().graph_area_cell_width() + 1; // graph area + marker
-        // Adaptive refs-panel width:
-        //   - Walk each Ref to compute its rendered width = tree-depth
-        //     indent + open/close symbol (2 cells) + LAST path segment
-        //     length. The Tree widget shows only the last segment per
-        //     row (parents are rendered as their own nodes), so a long
-        //     `origin/dependabot/foo/bar/baz` line takes
-        //     `depth * 2 + 2 + len("baz")` cells.
-        //   - Add 4 cells for the panel's left border + horizontal
-        //     padding (cf. `Block::default().borders(LEFT)
-        //     .padding(horizontal(1))` in `ref_list.rs::render`).
-        //   - Clamp to `[MIN_WIDTH, ui.refs.width]` so the panel
-        //     never collapses to nothing or eats the whole screen.
-        //     If the natural width exceeds the cap, the Tree widget
-        //     cuts at the area boundary (long branch names get
-        //     visually truncated rather than overflowing the layout).
+                                                                            // Adaptive refs-panel width:
+                                                                            //   - Walk each Ref to compute its rendered width = tree-depth
+                                                                            //     indent + open/close symbol (2 cells) + LAST path segment
+                                                                            //     length. The Tree widget shows only the last segment per
+                                                                            //     row (parents are rendered as their own nodes), so a long
+                                                                            //     `origin/dependabot/foo/bar/baz` line takes
+                                                                            //     `depth * 2 + 2 + len("baz")` cells.
+                                                                            //   - Add 4 cells for the panel's left border + horizontal
+                                                                            //     padding (cf. `Block::default().borders(LEFT)
+                                                                            //     .padding(horizontal(1))` in `ref_list.rs::render`).
+                                                                            //   - Clamp to `[MIN_WIDTH, ui.refs.width]` so the panel
+                                                                            //     never collapses to nothing or eats the whole screen.
+                                                                            //     If the natural width exceeds the cap, the Tree widget
+                                                                            //     cuts at the area boundary (long branch names get
+                                                                            //     visually truncated rather than overflowing the layout).
         const MIN_WIDTH: u16 = 16;
         const CHROME: u16 = 4; // border + padding
         let natural = self

@@ -1593,7 +1593,7 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
         let text = format!(
             "{} / {}",
             commit.commit_hash.as_short_hash(),
-            commit.committer_date.naive_utc().format("%Y-%m-%d")
+            commit.author_date.naive_utc().format("%Y-%m-%d")
         );
         let text_png = text_renderer
             .render_text_to_png_data(text, height / 4, 0x888888)
@@ -1634,7 +1634,7 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
 /// which made the Smooth style render blank rows (it iterates
 /// `branch_segments`, not `edges`) and stripped the HEAD-hollow visual.
 fn build_graph_row_images(
-    graph: &graph::Graph<'_>,
+    graph: &graph::Graph,
     repository: &git::Repository,
     image_params: &graph::ImageParams,
     drawing_pixels: &graph::DrawingPixels,

@@ -296,7 +296,6 @@ impl<'a> ListView<'a> {
         // gated to SearchState::Applied inside the helper, so it's a
         // no-op outside search mode.
         self.maybe_sync_search_status();
-
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
@@ -315,10 +314,23 @@ impl<'a> ListView<'a> {
 
     pub fn prepare_graph_uploads(&mut self) {
         // Skip the SVG/PNG generation + terminal-image upload entirely
-        // when the user has disabled the graph column. This is the
-        // single biggest perf win on huge repos: no per-commit image
-        // rendering, no Kitty `a=T` round-trips.
-        if self.ctx.ui_config.list.graph_enabled {
+        // when the user has disabled the graph column OR when bg
+        // streaming is still in flight. During streaming, the
+        // foreground's Graph covers only the initial fg-loaded slice
+        // (~500 commits). Generating graph images now would bake stale
+        // topology into the Kitty image cache - even though
+        // ReplaceGraph later clears prepared_image_map, the terminal
+        // may have residual placements from the stale upload pass that
+        // produce visual glitches (wrong colours, dangling
+        // connections at the fg/bg boundary). Deferring all image
+        // generation until bg is done AND ReplaceGraph has swapped in
+        // the full topology ensures every image is built from the
+        // correct Graph.
+        let bg_streaming = self
+            .ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire);
+        if self.ctx.ui_config.list.graph_enabled && !bg_streaming {
             self.as_mut_list_state().ensure_visible_graph_uploaded();
         }
         let ctx = self.ctx.clone();
@@ -339,8 +351,7 @@ impl<'a> ListView<'a> {
         self.commit_list_state.take().unwrap()
     }
 
-    #[allow(dead_code)]
-    fn as_mut_list_state(&mut self) -> &mut CommitListState<'a> {
+    pub fn as_mut_list_state(&mut self) -> &mut CommitListState<'a> {
         self.commit_list_state.as_mut().unwrap()
     }
 
@@ -504,7 +515,6 @@ impl<'a> ListView<'a> {
         };
         self.tx.send(AppEvent::Refresh(context));
     }
-
 
     /// Handle a Ctrl+click in the commit list area: select the row at the
     /// click position, then drive the same compare flow as Space.

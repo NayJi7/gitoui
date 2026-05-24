@@ -116,7 +116,7 @@ pub fn init(min_level: Level) {
             if let Some(f) = guard.as_mut() {
                 let _ = writeln!(
                     f,
-                    "[{}] [INFO ] [gitoui::log] == gitoui {} started at {} ==",
+                    "[{}] [INFO] [gitoui::log] == gitoui {} started at {} ==",
                     timestamp_ms(),
                     env!("CARGO_PKG_VERSION"),
                     timestamp_ms()

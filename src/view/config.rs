@@ -286,9 +286,7 @@ impl<'a> ConfigView<'a> {
                 if self.selected + 1 < CONFIG_ITEM_COUNT =>
             {
                 self.selected += 1;
-                while self.selected + 1 < CONFIG_ITEM_COUNT
-                    && self.is_item_grayed(self.selected)
-                {
+                while self.selected + 1 < CONFIG_ITEM_COUNT && self.is_item_grayed(self.selected) {
                     self.selected += 1;
                 }
                 // Hit the bottom edge on a grayed row — bounce back up
@@ -306,8 +304,7 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
-                } else if (self.selected == GRAPH_STYLE_INDEX
-                    || self.selected == GRAPH_WIDTH_INDEX)
+                } else if (self.selected == GRAPH_STYLE_INDEX || self.selected == GRAPH_WIDTH_INDEX)
                     && !self.graph_options_selectable()
                 {
                     // Grayed out (Graph Enabled = no) — no-op.
@@ -324,8 +321,7 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
-                } else if (self.selected == GRAPH_STYLE_INDEX
-                    || self.selected == GRAPH_WIDTH_INDEX)
+                } else if (self.selected == GRAPH_STYLE_INDEX || self.selected == GRAPH_WIDTH_INDEX)
                     && !self.graph_options_selectable()
                 {
                     // Grayed out (Graph Enabled = no) — no-op.
@@ -342,8 +338,7 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option_prev();
                     }
-                } else if (self.selected == GRAPH_STYLE_INDEX
-                    || self.selected == GRAPH_WIDTH_INDEX)
+                } else if (self.selected == GRAPH_STYLE_INDEX || self.selected == GRAPH_WIDTH_INDEX)
                     && !self.graph_options_selectable()
                 {
                     // Grayed out (Graph Enabled = no) — no-op.
@@ -378,9 +373,7 @@ impl<'a> ConfigView<'a> {
                         self.selected += 1;
                     }
                 }
-                while self.selected + 1 < CONFIG_ITEM_COUNT
-                    && self.is_item_grayed(self.selected)
-                {
+                while self.selected + 1 < CONFIG_ITEM_COUNT && self.is_item_grayed(self.selected) {
                     self.selected += 1;
                 }
                 if self.is_item_grayed(self.selected) {
@@ -1183,7 +1176,7 @@ impl<'a> ConfigView<'a> {
                 let base = "Toggle the commit-graph image column.\n\nDisabling it skips all image rendering for near-instant scrolling on huge repos.";
                 if self.ctx.graph_huge_repo_warning {
                     format!(
-                        "{}\n\n⚠ Huge repo detected: re-enabling the graph here will likely cause lag, freezes, crashes, and broken rendering.",
+                        "{}\n\n⚠ Huge repo detected: the graph is limited to the ~500 most recent commits. Past that, rows show colour bars only. Re-enabling may cause lag on very dense histories.",
                         base
                     )
                 } else {

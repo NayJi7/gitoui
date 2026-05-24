@@ -9,17 +9,29 @@ pub mod status;
 use std::{
     hash::Hash,
     io::{BufRead, BufReader},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Mutex,
 };
 
 use chrono::{DateTime, FixedOffset};
+use lru::LruCache;
 use rustc_hash::FxHashMap;
 
 use crate::{Error, Result};
 
 #[derive(
-    Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub struct CommitHash(String);
 
@@ -60,6 +72,47 @@ pub struct Commit {
     pub body: String,
     pub parent_commit_hashes: Vec<CommitHash>,
     pub commit_type: CommitType,
+}
+
+/// Lightweight commit metadata: everything the LIST view needs (hash,
+/// author, date, subject, parents, kind, email for avatars) and
+/// nothing else. ~150 bytes per record vs ~500-2000 bytes for the full
+/// `Commit` because we drop `%b` (body) and the committer trio.
+///
+/// This is the in-memory representation the streaming loader / disk
+/// cache / `Repository` keep around per commit. The full `Commit` (with
+/// body + committer fields) is fetched on demand via
+/// `Repository::fetch_full_commit` when the user opens the Detail view.
+///
+/// Note: `author_email` is kept here because the commit-list avatars
+/// are looked up per-email at every render, paying a `git show` per
+/// row would be catastrophic on huge repos.
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CommitSummary {
+    pub commit_hash: CommitHash,
+    pub author_name: String,
+    pub author_email: String,
+    pub author_date: DateTime<FixedOffset>,
+    pub commit_message: String,
+    pub parent_commit_hashes: Vec<CommitHash>,
+    pub commit_type: CommitType,
+}
+
+impl CommitSummary {
+    /// Project a full `Commit` down to its list-level subset. Used by
+    /// tests + any future ingest path that still produces full
+    /// `Commit`s but needs to feed the summary-shaped list storage.
+    pub fn from_commit(c: &Commit) -> Self {
+        Self {
+            commit_hash: c.commit_hash.clone(),
+            author_name: c.author_name.clone(),
+            author_email: c.author_email.clone(),
+            author_date: c.author_date,
+            commit_message: c.commit_message.clone(),
+            parent_commit_hashes: c.parent_commit_hashes.clone(),
+            commit_type: c.commit_type.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -110,24 +163,28 @@ pub enum Head {
     None,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortCommit {
     Chronological,
     Topological,
 }
 
-// Boxed values so each Commit lives at a stable heap address.
-// `Repository::append_commits` mutates `commit_map` long after the
-// initial load - without the box, HashMap re-hashing would relocate
-// every Commit, invalidating the `&Commit` borrows the rendering
-// code holds (CommitInfo<'a> on the commit list, the file diff view,
-// etc.). With the box, only the `Box<Commit>` slot moves on rehash;
-// the heap-allocated Commit stays put and the existing borrows
-// survive untouched.
-type CommitMap = FxHashMap<CommitHash, std::sync::Arc<Commit>>;
+// `Arc<CommitSummary>` so each summary lives at a stable, cheaply-shared
+// heap address. Same two reasons as before (HashMap rehash safety +
+// cross-thread Graph ownership) but with summaries instead of full
+// commits, so the per-entry RAM cost dropped roughly 5x. The full
+// `Commit` (body + committer fields) is fetched on demand via
+// `Repository::fetch_full_commit` when the Detail view opens.
+type CommitMap = FxHashMap<CommitHash, std::sync::Arc<CommitSummary>>;
 type CommitsMap = FxHashMap<CommitHash, Vec<CommitHash>>;
 
-type RefMap = FxHashMap<CommitHash, Vec<Ref>>;
+pub(crate) type RefMap = FxHashMap<CommitHash, Vec<Ref>>;
+
+/// Bounded LRU cache for fetched full `Commit`s. Sized to cover the
+/// "user is bouncing between a handful of detail views" pattern
+/// without ever growing unbounded. Backed by the `lru` crate (true
+/// O(1) get/put on a hashmap + linked list).
+const FULL_COMMIT_CACHE_CAPACITY: usize = 50;
 
 #[derive(Debug)]
 pub struct Repository {
@@ -142,6 +199,12 @@ pub struct Repository {
     // to preserve order of the original commits from `git log`, we store the commit hashes
     commit_hashes: Vec<CommitHash>,
     uncommitted_changes: Option<status::UncommittedChanges>,
+    /// On-demand cache of full `Commit` records (body + committer
+    /// fields), populated lazily by `fetch_full_commit`. Bounded by
+    /// `FULL_COMMIT_CACHE_CAPACITY` so the user can bounce between a
+    /// handful of recently-opened detail views with no extra
+    /// `git show` round-trips.
+    full_commit_cache: Mutex<LruCache<CommitHash, std::sync::Arc<Commit>>>,
 }
 
 impl Repository {
@@ -150,13 +213,13 @@ impl Repository {
 
         let (mut ref_map, head) = load_refs(path);
 
-        let stashes = load_all_stashes(path);
-        let commits = load_all_commits(path, sort, &head, &stashes, max_count);
-        if commits.is_empty() {
+        let stashes = load_all_stash_summaries(path);
+        let summaries = load_all_summaries(path, sort, &head, &stashes, max_count);
+        if summaries.is_empty() {
             return Err(Error::Git("no commits in the repository".into()));
         }
 
-        let mut commits = merge_stashes_to_commits(commits, stashes);
+        let mut summaries = merge_stashes_to_summaries(summaries, stashes);
 
         let uncommitted_changes = status::UncommittedChanges::load(path).ok();
         if let Some(changes) = &uncommitted_changes {
@@ -189,28 +252,24 @@ impl Repository {
                     .ok()
                     .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                     .unwrap_or_else(|| chrono::Local::now().fixed_offset());
-                let fake_commit = Commit {
+                let fake_summary = CommitSummary {
                     commit_hash: fake_hash.clone(),
                     parent_commit_hashes,
                     author_name: "".to_string(),
                     author_email: "".to_string(),
                     author_date: now,
-                    committer_name: "".to_string(),
-                    committer_email: "".to_string(),
-                    committer_date: now,
                     commit_message: "Uncommitted changes".to_string(),
-                    body: "".to_string(),
                     commit_type: CommitType::Uncommitted,
                 };
 
-                commits.insert(0, fake_commit);
+                summaries.insert(0, fake_summary);
             }
         }
 
-        let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect();
+        let commit_hashes = summaries.iter().map(|c| c.commit_hash.clone()).collect();
 
-        let (parents_map, children_map) = build_commits_maps(&commits);
-        let commit_map = to_commit_map(commits);
+        let (parents_map, children_map) = build_commits_maps_from_summaries(&summaries);
+        let commit_map = to_commit_map(summaries);
 
         let stash_ref_map = load_stashes_as_refs(path);
         merge_ref_maps(&mut ref_map, stash_ref_map);
@@ -228,22 +287,22 @@ impl Repository {
     }
 
     /// Reconstruct a `Repository` from a previously-cached commit
-    /// list. Skips the `git log` walk - that's the whole point of
-    /// the cache - but still reads stashes, refs, head and
+    /// summary list. Skips the `git log` walk - that's the whole
+    /// point of the cache - but still reads stashes, refs, head and
     /// uncommitted changes fresh (they're cheap and may have moved
     /// since the cache was written). The caller is responsible for
     /// gating this path on a HEAD-equality check (see `cache::load_for`).
-    pub fn from_cached_commits(path: &Path, mut commits: Vec<Commit>) -> Result<Self> {
+    pub fn from_cached_summaries(path: &Path, mut summaries: Vec<CommitSummary>) -> Result<Self> {
         check_git_repository(path)?;
-        if commits.is_empty() {
+        if summaries.is_empty() {
             return Err(Error::Git("cached commit list is empty".into()));
         }
 
         let (mut ref_map, head) = load_refs(path);
-        let stashes = load_all_stashes(path);
+        let stashes = load_all_stash_summaries(path);
         // Merge stashes the same way the fresh load does so the
         // stash markers show up at their parent commits.
-        commits = merge_stashes_to_commits(commits, stashes);
+        summaries = merge_stashes_to_summaries(summaries, stashes);
 
         let uncommitted_changes = status::UncommittedChanges::load(path).ok();
         if let Some(changes) = &uncommitted_changes {
@@ -269,26 +328,22 @@ impl Repository {
                     .ok()
                     .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                     .unwrap_or_else(|| chrono::Local::now().fixed_offset());
-                let fake_commit = Commit {
+                let fake_summary = CommitSummary {
                     commit_hash: fake_hash.clone(),
                     parent_commit_hashes,
                     author_name: "".to_string(),
                     author_email: "".to_string(),
                     author_date: now,
-                    committer_name: "".to_string(),
-                    committer_email: "".to_string(),
-                    committer_date: now,
                     commit_message: "Uncommitted changes".to_string(),
-                    body: "".to_string(),
                     commit_type: CommitType::Uncommitted,
                 };
-                commits.insert(0, fake_commit);
+                summaries.insert(0, fake_summary);
             }
         }
 
-        let commit_hashes = commits.iter().map(|c| c.commit_hash.clone()).collect();
-        let (parents_map, children_map) = build_commits_maps(&commits);
-        let commit_map = to_commit_map(commits);
+        let commit_hashes = summaries.iter().map(|c| c.commit_hash.clone()).collect();
+        let (parents_map, children_map) = build_commits_maps_from_summaries(&summaries);
+        let commit_map = to_commit_map(summaries);
         let stash_ref_map = load_stashes_as_refs(path);
         merge_ref_maps(&mut ref_map, stash_ref_map);
 
@@ -323,65 +378,105 @@ impl Repository {
             head,
             commit_hashes,
             uncommitted_changes,
+            full_commit_cache: Mutex::new(LruCache::new(
+                NonZeroUsize::new(FULL_COMMIT_CACHE_CAPACITY).unwrap(),
+            )),
         }
     }
 
-    pub fn commit(&self, commit_hash: &CommitHash) -> Option<&Commit> {
-        self.commit_map.get(commit_hash).map(|b| b.as_ref())
+    pub fn commit(&self, commit_hash: &CommitHash) -> Option<&CommitSummary> {
+        self.commit_map.get(commit_hash).map(|arc| arc.as_ref())
     }
 
-    /// Owned (Arc-cloned) lookup. Cheap reference-count bump, lets
-    /// downstream code (CommitInfo, bg streaming) hold onto a Commit
-    /// without borrowing Repository - the underlying Commit lives
-    /// on the heap inside the Arc and survives any Repository
-    /// mutation that follows.
-    pub fn commit_arc(&self, commit_hash: &CommitHash) -> Option<std::sync::Arc<Commit>> {
+    /// Clone the `Arc<CommitSummary>` from the in-memory map. Cheap
+    /// (refcount bump only) so callers can hand the summary around to
+    /// long-lived owners (e.g. the owned `Graph` built by `calc_graph`,
+    /// or the bg streamer shipping summaries across the thread
+    /// boundary) without paying for a deep clone, and without holding
+    /// a `&Repository` borrow.
+    pub fn commit_arc(&self, commit_hash: &CommitHash) -> Option<std::sync::Arc<CommitSummary>> {
         self.commit_map.get(commit_hash).cloned()
     }
 
-    pub fn all_commits(&self) -> Vec<&Commit> {
+    pub fn all_commits(&self) -> Vec<&CommitSummary> {
         self.commit_hashes
             .iter()
             .filter_map(|hash| self.commit(hash))
             .collect()
     }
 
-    pub fn stashes(&self) -> Vec<Commit> {
-        load_all_stashes(&self.path)
+    /// Iterate the full commit list in render order as cheaply-shareable `Arc`s.
+    /// Used by `calc_graph` to hand ownership of the summary metadata to the
+    /// resulting `Graph`, which then outlives the foreground `Repository` view
+    /// (e.g. when the background streamer rebuilds the topology).
+    pub fn all_commits_arc(&self) -> Vec<std::sync::Arc<CommitSummary>> {
+        self.commit_hashes
+            .iter()
+            .filter_map(|hash| self.commit_arc(hash))
+            .collect()
+    }
+
+    pub fn stashes(&self) -> Vec<CommitSummary> {
+        load_all_stash_summaries(&self.path)
     }
 
     pub fn commit_count(&self) -> usize {
         self.commit_hashes.len()
     }
 
-    /// Append a freshly-streamed batch from the bg loader. Dedupes
-    /// against `commit_map` so the loader can safely overshoot the
-    /// initial foreground slice without producing duplicates.
-    /// Rebuilds parent/child indices incrementally - we add the new
-    /// commits' edges without touching the existing ones.
-    pub fn append_commits(&mut self, new_commits: Vec<Commit>) -> usize {
+    /// Append a freshly-streamed batch of summaries from the bg
+    /// loader. Dedupes against `commit_map` so the loader can safely
+    /// overshoot the initial foreground slice without producing
+    /// duplicates. Rebuilds parent/child indices incrementally - we
+    /// add the new summaries' edges without touching the existing ones.
+    pub fn append_commits(&mut self, new_summaries: Vec<CommitSummary>) -> usize {
         let mut appended = 0usize;
-        for commit in new_commits {
-            if self.commit_map.contains_key(&commit.commit_hash) {
+        for summary in new_summaries {
+            if self.commit_map.contains_key(&summary.commit_hash) {
                 continue;
             }
             // Update parent/child indices incrementally.
-            for parent in &commit.parent_commit_hashes {
+            for parent in &summary.parent_commit_hashes {
                 self.parents_map
-                    .entry(commit.commit_hash.clone())
+                    .entry(summary.commit_hash.clone())
                     .or_default()
                     .push(parent.clone());
                 self.children_map
                     .entry(parent.clone())
                     .or_default()
-                    .push(commit.commit_hash.clone());
+                    .push(summary.commit_hash.clone());
             }
-            self.commit_hashes.push(commit.commit_hash.clone());
+            self.commit_hashes.push(summary.commit_hash.clone());
             self.commit_map
-                .insert(commit.commit_hash.clone(), std::sync::Arc::new(commit));
+                .insert(summary.commit_hash.clone(), std::sync::Arc::new(summary));
             appended += 1;
         }
         appended
+    }
+
+    /// Resolve a full `Commit` (body + committer trio) by hash. Returns
+    /// a refcounted handle backed by an internal LRU so re-opening the
+    /// same detail view doesn't pay a `git show` round-trip every time.
+    ///
+    /// Path:
+    /// 1. LRU cache hit -> return immediately.
+    /// 2. Spawn `git show --no-patch --pretty=<full>` for the SHA.
+    /// 3. Parse, insert into LRU, return.
+    ///
+    /// Returns `None` when the commit isn't accessible from the local
+    /// git tree (e.g. fully orphaned PR commit that was never fetched).
+    pub fn fetch_full_commit(&self, hash: &CommitHash) -> Option<std::sync::Arc<Commit>> {
+        if let Ok(mut cache) = self.full_commit_cache.lock() {
+            if let Some(cached) = cache.get(hash) {
+                return Some(cached.clone());
+            }
+        }
+        let loaded = load_commit_by_hash(&self.path, hash.as_str())?;
+        let arc = std::sync::Arc::new(loaded);
+        if let Ok(mut cache) = self.full_commit_cache.lock() {
+            cache.put(hash.clone(), arc.clone());
+        }
+        Some(arc)
     }
 
     pub fn parents_hash(&self, commit_hash: &CommitHash) -> Vec<&CommitHash> {
@@ -419,11 +514,14 @@ impl Repository {
 
     pub fn commit_detail(&self, commit_hash: &CommitHash) -> (Commit, Vec<FileChange>) {
         // PR commits fetched on demand (via `refs/pull/<n>/head`) aren't
-        // in the in-memory map, fall back to a one-off `git log -1`
-        // so the existing CommitDetail / DiffView still work for them.
-        let commit = self.commit(commit_hash).cloned().unwrap_or_else(|| {
-            load_commit_by_hash(&self.path, commit_hash.as_str()).unwrap_or_default()
-        });
+        // in the in-memory map; `fetch_full_commit` falls back to a
+        // one-off `git show` for them. When even that misses (totally
+        // orphaned commit), default to an empty Commit so the existing
+        // CommitDetail / DiffView still render gracefully.
+        let commit = self
+            .fetch_full_commit(commit_hash)
+            .map(|arc| arc.as_ref().clone())
+            .unwrap_or_default();
         let changes = if commit.parent_commit_hashes.is_empty() {
             get_initial_commit_additions(&self.path, commit_hash)
         } else {
@@ -524,13 +622,13 @@ fn is_bare_repository(path: &Path) -> bool {
     output.status.success() && output.stdout == b"true\n"
 }
 
-fn load_all_commits(
+fn load_all_summaries(
     path: &Path,
     sort: SortCommit,
     head: &Head,
-    stashes: &[Commit],
+    stashes: &[CommitSummary],
     max_count: Option<usize>,
-) -> Vec<Commit> {
+) -> Vec<CommitSummary> {
     let mut cmd = Command::new("git");
     cmd.arg("log");
 
@@ -538,7 +636,7 @@ fn load_all_commits(
         SortCommit::Chronological => "--date-order",
         SortCommit::Topological => "--topo-order",
     })
-    .arg(format!("--pretty={}", load_commits_format()))
+    .arg(format!("--pretty={LOAD_SUMMARIES_FORMAT}"))
     .arg("--date=iso-strict")
     .arg("-z"); // use NUL as a delimiter
 
@@ -581,7 +679,7 @@ fn load_all_commits(
 
     let reader = BufReader::new(stdout);
 
-    let mut commits = Vec::new();
+    let mut summaries = Vec::new();
 
     for bytes in reader.split(b'\0') {
         let Ok(bytes) = bytes else {
@@ -590,39 +688,27 @@ fn load_all_commits(
             crate::glog_warn!("git log stdout read failed mid-stream");
             break;
         };
-        let s = String::from_utf8_lossy(&bytes);
-
-        let parts: Vec<&str> = s.split('\x1f').collect();
-        if parts.len() != 10 {
-            eprintln!(
-                "gitoui: skipping malformed commit record (expected 10 fields, got {})",
-                parts.len()
-            );
+        if bytes.is_empty() {
             continue;
         }
+        let s = String::from_utf8_lossy(&bytes);
 
-        let commit = Commit {
-            commit_hash: parts[0].into(),
-            author_name: parts[1].into(),
-            author_email: parts[2].into(),
-            author_date: parse_iso_date(parts[3]),
-            committer_name: parts[4].into(),
-            committer_email: parts[5].into(),
-            committer_date: parse_iso_date(parts[6]),
-            commit_message: parts[7].into(),
-            body: parts[8].into(),
-            parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
-            commit_type: CommitType::Commit,
-        };
-
-        commits.push(commit);
+        match parse_commit_summary(&s, CommitType::Commit) {
+            Some(summary) => summaries.push(summary),
+            None => {
+                eprintln!(
+                    "gitoui: skipping malformed commit record (expected 6 fields, got {})",
+                    s.split('\x1f').count()
+                );
+            }
+        }
     }
 
     if let Err(e) = process.wait() {
         crate::glog_warn!("git log wait failed: {}", e);
     }
 
-    commits
+    summaries
 }
 
 /// Stream commits past an initial-load offset via a `git log --skip=N`
@@ -639,10 +725,10 @@ pub fn stream_commits_after(
     path: &Path,
     sort: SortCommit,
     head: &Head,
-    stashes: &[Commit],
+    stashes: &[CommitSummary],
     skip: usize,
     batch_size: usize,
-    mut on_batch: impl FnMut(Vec<Commit>) -> bool,
+    mut on_batch: impl FnMut(Vec<CommitSummary>) -> bool,
 ) {
     let mut cmd = Command::new("git");
     cmd.arg("log")
@@ -650,7 +736,7 @@ pub fn stream_commits_after(
             SortCommit::Chronological => "--date-order",
             SortCommit::Topological => "--topo-order",
         })
-        .arg(format!("--pretty={}", load_commits_format()))
+        .arg(format!("--pretty={LOAD_SUMMARIES_FORMAT}"))
         .arg("--date=iso-strict")
         .arg("-z");
     cmd.arg("--branches").arg("--remotes").arg("--tags");
@@ -663,7 +749,9 @@ pub fn stream_commits_after(
     if skip > 0 {
         cmd.arg(format!("--skip={skip}"));
     }
-    cmd.current_dir(path).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
 
     let mut process = match cmd.spawn() {
         Ok(p) => p,
@@ -674,33 +762,22 @@ pub fn stream_commits_after(
     };
     let reader = BufReader::new(stdout);
 
-    let mut batch: Vec<Commit> = Vec::with_capacity(batch_size);
+    let mut batch: Vec<CommitSummary> = Vec::with_capacity(batch_size);
     for bytes in reader.split(b'\0') {
         let Ok(bytes) = bytes else { break };
         if bytes.is_empty() {
             continue;
         }
         let s = String::from_utf8_lossy(&bytes);
-        let parts: Vec<&str> = s.split('\x1f').collect();
-        if parts.len() != 10 {
+        let Some(summary) = parse_commit_summary(&s, CommitType::Commit) else {
             continue;
-        }
-        let commit = Commit {
-            commit_hash: parts[0].into(),
-            author_name: parts[1].into(),
-            author_email: parts[2].into(),
-            author_date: parse_iso_date(parts[3]),
-            committer_name: parts[4].into(),
-            committer_email: parts[5].into(),
-            committer_date: parse_iso_date(parts[6]),
-            commit_message: parts[7].into(),
-            body: parts[8].into(),
-            parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
-            commit_type: CommitType::Commit,
         };
-        batch.push(commit);
+        batch.push(summary);
         if batch.len() >= batch_size {
-            let stop = on_batch(std::mem::replace(&mut batch, Vec::with_capacity(batch_size)));
+            let stop = on_batch(std::mem::replace(
+                &mut batch,
+                Vec::with_capacity(batch_size),
+            ));
             if stop {
                 let _ = process.kill();
                 return;
@@ -713,8 +790,68 @@ pub fn stream_commits_after(
     let _ = process.wait();
 }
 
-/// Walk just the commits in the symmetric range `<cached_head>..HEAD`
-/// - i.e. only commits reachable from current HEAD but NOT from the
+/// Spawn `git log` and invoke `on_commit` once per parsed commit. Used
+/// by the bg streamer's cache-miss fallback to feed commits to the UI
+/// AND to the StreamWriter one record at a time, so peak memory stays
+/// bounded even on huge repos (no intermediate Vec<Commit>).
+///
+/// Returns when stdout EOFs (git log finished) or when `on_commit`
+/// returns `false` (caller wants to stop). Safe to call from a bg
+/// thread - all I/O is best-effort.
+pub fn stream_commits_one_by_one(
+    path: &Path,
+    sort: SortCommit,
+    head: &Head,
+    stashes: &[CommitSummary],
+    mut on_commit: impl FnMut(CommitSummary) -> bool,
+) {
+    let mut cmd = Command::new("git");
+    cmd.arg("log")
+        .arg(match sort {
+            SortCommit::Chronological => "--date-order",
+            SortCommit::Topological => "--topo-order",
+        })
+        .arg(format!("--pretty={LOAD_SUMMARIES_FORMAT}"))
+        .arg("--date=iso-strict")
+        .arg("-z");
+    cmd.arg("--branches").arg("--remotes").arg("--tags");
+    stashes.iter().for_each(|stash| {
+        cmd.arg(stash.parent_commit_hashes[0].as_str());
+    });
+    if !matches!(head, Head::None) {
+        cmd.arg("HEAD");
+    }
+    cmd.current_dir(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let mut process = match cmd.spawn() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let Some(stdout) = process.stdout.take() else {
+        return;
+    };
+    let reader = BufReader::new(stdout);
+    for bytes in reader.split(b'\0') {
+        let Ok(bytes) = bytes else { break };
+        if bytes.is_empty() {
+            continue;
+        }
+        let s = String::from_utf8_lossy(&bytes);
+        let Some(summary) = parse_commit_summary(&s, CommitType::Commit) else {
+            continue;
+        };
+        if !on_commit(summary) {
+            let _ = process.kill();
+            break;
+        }
+    }
+    let _ = process.wait();
+}
+
+/// Walk just the commits in the symmetric range `<cached_head>..HEAD`,
+/// i.e. only commits reachable from current HEAD but NOT from the
 /// stored cached head. Used by the cache's surgical-refresh path on
 /// fast-forward HEAD movement: instead of re-walking the entire
 /// history when the user adds one commit, walk only that one and
@@ -722,13 +859,13 @@ pub fn stream_commits_after(
 ///
 /// Returns the new commits in the same chronological-newest-first
 /// order produced by `stream_commits_after`. Returns `None` on any
-/// failure (cached_head unreachable, git rev-list failure, etc.) so
-/// the caller falls back to a full re-walk.
+/// failure (cached_head unreachable, git rev-list failure, etc.)
+/// so the caller falls back to a full re-walk.
 pub fn walk_commits_since(
     path: &Path,
     sort: SortCommit,
     cached_head: &str,
-) -> Option<Vec<Commit>> {
+) -> Option<Vec<CommitSummary>> {
     let range = format!("{}..HEAD", cached_head);
     let mut cmd = Command::new("git");
     cmd.arg("log")
@@ -736,7 +873,7 @@ pub fn walk_commits_since(
             SortCommit::Chronological => "--date-order",
             SortCommit::Topological => "--topo-order",
         })
-        .arg(format!("--pretty={}", load_commits_format()))
+        .arg(format!("--pretty={LOAD_SUMMARIES_FORMAT}"))
         .arg("--date=iso-strict")
         .arg("-z")
         .arg(&range)
@@ -747,30 +884,16 @@ pub fn walk_commits_since(
     let mut process = cmd.spawn().ok()?;
     let stdout = process.stdout.take()?;
     let reader = BufReader::new(stdout);
-    let mut out: Vec<Commit> = Vec::new();
+    let mut out: Vec<CommitSummary> = Vec::new();
     for bytes in reader.split(b'\0') {
         let Ok(bytes) = bytes else { break };
         if bytes.is_empty() {
             continue;
         }
         let s = String::from_utf8_lossy(&bytes);
-        let parts: Vec<&str> = s.split('\x1f').collect();
-        if parts.len() != 10 {
-            continue;
+        if let Some(summary) = parse_commit_summary(&s, CommitType::Commit) {
+            out.push(summary);
         }
-        out.push(Commit {
-            commit_hash: parts[0].into(),
-            author_name: parts[1].into(),
-            author_email: parts[2].into(),
-            author_date: parse_iso_date(parts[3]),
-            committer_name: parts[4].into(),
-            committer_email: parts[5].into(),
-            committer_date: parse_iso_date(parts[6]),
-            commit_message: parts[7].into(),
-            body: parts[8].into(),
-            parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
-            commit_type: CommitType::Commit,
-        });
     }
     let status = process.wait().ok()?;
     if !status.success() {
@@ -779,11 +902,11 @@ pub fn walk_commits_since(
     Some(out)
 }
 
-fn load_all_stashes(path: &Path) -> Vec<Commit> {
+fn load_all_stash_summaries(path: &Path) -> Vec<CommitSummary> {
     let mut cmd = match Command::new("git")
         .arg("stash")
         .arg("list")
-        .arg(format!("--pretty={}", load_commits_format()))
+        .arg(format!("--pretty={LOAD_SUMMARIES_FORMAT}"))
         .arg("--date=iso-strict")
         .arg("-z")
         .current_dir(path)
@@ -806,44 +929,32 @@ fn load_all_stashes(path: &Path) -> Vec<Commit> {
 
     let reader = BufReader::new(stdout);
 
-    let mut commits = Vec::new();
+    let mut summaries = Vec::new();
 
     for bytes in reader.split(b'\0') {
         let Ok(bytes) = bytes else {
             crate::glog_warn!("git stash list stdout read failed");
             break;
         };
-        let s = String::from_utf8_lossy(&bytes);
-
-        let parts: Vec<&str> = s.split('\x1f').collect();
-        if parts.len() != 10 {
-            eprintln!(
-                "gitoui: skipping malformed commit record (expected 10 fields, got {})",
-                parts.len()
-            );
+        if bytes.is_empty() {
             continue;
         }
+        let s = String::from_utf8_lossy(&bytes);
 
-        let commit = Commit {
-            commit_hash: parts[0].into(),
-            author_name: parts[1].into(),
-            author_email: parts[2].into(),
-            author_date: parse_iso_date(parts[3]),
-            committer_name: parts[4].into(),
-            committer_email: parts[5].into(),
-            committer_date: parse_iso_date(parts[6]),
-            commit_message: parts[7].into(),
-            body: parts[8].into(),
-            parent_commit_hashes: parse_parent_commit_hashes(parts[9]),
-            commit_type: CommitType::Stash,
-        };
-
-        commits.push(commit);
+        match parse_commit_summary(&s, CommitType::Stash) {
+            Some(summary) => summaries.push(summary),
+            None => {
+                eprintln!(
+                    "gitoui: skipping malformed stash record (expected 6 fields, got {})",
+                    s.split('\x1f').count()
+                );
+            }
+        }
     }
 
     cmd.wait().unwrap();
 
-    commits
+    summaries
 }
 
 /// Resolve a single commit by hash, even if it isn't reachable from
@@ -854,6 +965,7 @@ pub fn load_commit_by_hash(path: &Path, hash: &str) -> Option<Commit> {
     let output = Command::new("git")
         .arg("log")
         .arg("-1")
+        .arg("-z") // NUL-terminate records so multi-line %b doesn't break parsing
         .arg(format!("--pretty={}", load_commits_format()))
         .arg("--date=iso-strict")
         .arg(hash)
@@ -864,8 +976,15 @@ pub fn load_commit_by_hash(path: &Path, hash: &str) -> Option<Commit> {
         return None;
     }
     let s = String::from_utf8_lossy(&output.stdout);
-    let line = s.lines().next()?;
-    let parts: Vec<&str> = line.split('\x1f').collect();
+    // Split on the single NUL git appends after every record. Without
+    // `-z`, the previous `s.lines().next()` truncated at the first
+    // newline in `%b` (commit body) - any commit with a multi-line
+    // body (most non-trivial ones) parsed as only the first line of
+    // output, so parts.len() < 10 -> None -> caller fell back to
+    // Commit::default() (epoch 1970-01-01 date, empty author / SHA).
+    // The user saw this as "some commits open with empty metadata".
+    let record = s.split('\x00').next()?.trim_end_matches('\n');
+    let parts: Vec<&str> = record.split('\x1f').collect();
     if parts.len() < 10 {
         return None;
     }
@@ -951,6 +1070,41 @@ fn load_commits_format() -> String {
     .join("%x1f") // use Unit Separator as a delimiter
 }
 
+/// Lightweight `git log` format for the list-level `CommitSummary`
+/// records. Strips `%cn` / `%ce` / `%cd` (committer trio) and `%b`
+/// (body), the latter is the dominant byte cost in `git log` output
+/// and is unused outside the Detail view. Saves ~5x bytes per record
+/// on average for large repos.
+///
+/// Field order MUST match `parse_commit_summary`:
+///   0: %H   commit hash
+///   1: %an  author name
+///   2: %ae  author email
+///   3: %ad  author date (iso-strict)
+///   4: %s   subject (commit message first line)
+///   5: %P   space-separated parent hashes
+const LOAD_SUMMARIES_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%P";
+
+/// Parse a single `LOAD_SUMMARIES_FORMAT`-shaped record into a
+/// `CommitSummary` with the given `commit_type` (Commit vs Stash).
+/// Returns `None` when the record is malformed (wrong field count),
+/// so the caller can skip and keep streaming.
+fn parse_commit_summary(s: &str, commit_type: CommitType) -> Option<CommitSummary> {
+    let parts: Vec<&str> = s.split('\x1f').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    Some(CommitSummary {
+        commit_hash: parts[0].into(),
+        author_name: parts[1].into(),
+        author_email: parts[2].into(),
+        author_date: parse_iso_date(parts[3]),
+        commit_message: parts[4].into(),
+        parent_commit_hashes: parse_parent_commit_hashes(parts[5]),
+        commit_type,
+    })
+}
+
 fn parse_iso_date(s: &str) -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339(s).unwrap()
 }
@@ -962,12 +1116,12 @@ fn parse_parent_commit_hashes(s: &str) -> Vec<CommitHash> {
     s.split(' ').map(|s| s.into()).collect()
 }
 
-fn build_commits_maps(commits: &Vec<Commit>) -> (CommitsMap, CommitsMap) {
+fn build_commits_maps_from_summaries(summaries: &[CommitSummary]) -> (CommitsMap, CommitsMap) {
     let mut parents_map: CommitsMap = FxHashMap::default();
     let mut children_map: CommitsMap = FxHashMap::default();
-    for commit in commits {
-        let hash = &commit.commit_hash;
-        for parent_hash in &commit.parent_commit_hashes {
+    for summary in summaries {
+        let hash = &summary.commit_hash;
+        for parent_hash in &summary.parent_commit_hashes {
             parents_map
                 .entry(hash.clone())
                 .or_default()
@@ -982,37 +1136,40 @@ fn build_commits_maps(commits: &Vec<Commit>) -> (CommitsMap, CommitsMap) {
     (parents_map, children_map)
 }
 
-fn to_commit_map(commits: Vec<Commit>) -> CommitMap {
-    commits
+fn to_commit_map(summaries: Vec<CommitSummary>) -> CommitMap {
+    summaries
         .into_iter()
-        .map(|commit| (commit.commit_hash.clone(), std::sync::Arc::new(commit)))
+        .map(|s| (s.commit_hash.clone(), std::sync::Arc::new(s)))
         .collect()
 }
 
-fn merge_stashes_to_commits(commits: Vec<Commit>, stashes: Vec<Commit>) -> Vec<Commit> {
-    // Stash commit has multiple parent commits, but the first parent commit is the commit that the stash was created from.
+fn merge_stashes_to_summaries(
+    summaries: Vec<CommitSummary>,
+    stashes: Vec<CommitSummary>,
+) -> Vec<CommitSummary> {
+    // Stash summary has multiple parent commits, but the first parent commit is the commit that the stash was created from.
     // If the first parent commit is not found, the stash commit is ignored.
     let mut ret = Vec::new();
-    let mut statsh_map: FxHashMap<CommitHash, Vec<Commit>> =
+    let mut stash_map: FxHashMap<CommitHash, Vec<CommitSummary>> =
         stashes
             .into_iter()
-            .fold(FxHashMap::default(), |mut acc, commit| {
-                let parent = commit.parent_commit_hashes[0].clone();
-                acc.entry(parent).or_default().push(commit);
+            .fold(FxHashMap::default(), |mut acc, s| {
+                let parent = s.parent_commit_hashes[0].clone();
+                acc.entry(parent).or_default().push(s);
                 acc
             });
-    for commit in commits {
-        if let Some(stashes) = statsh_map.remove(&commit.commit_hash) {
+    for summary in summaries {
+        if let Some(stashes) = stash_map.remove(&summary.commit_hash) {
             for stash in stashes {
                 ret.push(stash);
             }
         }
-        ret.push(commit);
+        ret.push(summary);
     }
     ret
 }
 
-fn load_refs(path: &Path) -> (RefMap, Head) {
+pub(crate) fn load_refs(path: &Path) -> (RefMap, Head) {
     let mut cmd = Command::new("git")
         .arg("show-ref")
         .arg("--head")
@@ -1074,7 +1231,7 @@ fn load_refs(path: &Path) -> (RefMap, Head) {
     (ref_map, head)
 }
 
-fn load_stashes_as_refs(path: &Path) -> RefMap {
+pub(crate) fn load_stashes_as_refs(path: &Path) -> RefMap {
     let format = ["%gd", "%H", "%s"].join("%x1f"); // use Unit Separator as a delimiter
     let mut cmd = Command::new("git")
         .arg("stash")
@@ -1122,7 +1279,7 @@ fn load_stashes_as_refs(path: &Path) -> RefMap {
     ref_map
 }
 
-fn merge_ref_maps(m1: &mut RefMap, m2: RefMap) {
+pub(crate) fn merge_ref_maps(m1: &mut RefMap, m2: RefMap) {
     for (k, v) in m2 {
         m1.entry(k).or_default().extend(v);
     }

@@ -33,7 +33,7 @@ pub enum GraphImageWidthMode {
 }
 
 #[derive(Debug)]
-pub struct GraphImageManager<'a> {
+pub struct GraphImageManager {
     prepared_image_map: FxHashMap<CommitHash, PreparedImage>,
     // Raw PNG bytes per commit, retained so the horizontal-scroll path
     // (Kitty source-rect crop) can re-encode the same image with new x/w
@@ -44,7 +44,7 @@ pub struct GraphImageManager<'a> {
     pending_uploads: Vec<String>,
     head_commit_hash: Option<CommitHash>,
 
-    graph: &'a Graph<'a>,
+    graph: Graph,
     cell_width_type: CellWidthType,
     graph_style: GraphStyle,
     image_width_mode: GraphImageWidthMode,
@@ -54,9 +54,9 @@ pub struct GraphImageManager<'a> {
     session_nonce: u32,
 }
 
-impl<'a> GraphImageManager<'a> {
+impl GraphImageManager {
     pub fn new(
-        graph: &'a Graph,
+        graph: Graph,
         graph_color_set: &GraphColorSet,
         cell_width_type: CellWidthType,
         graph_style: GraphStyle,
@@ -81,6 +81,19 @@ impl<'a> GraphImageManager<'a> {
             image_protocol,
             session_nonce: create_session_nonce(),
         }
+    }
+
+    /// Replace the inner topology and drop every cached row image so the
+    /// next render rebakes against the new graph. Used by the background
+    /// streaming thread: after a fresh `calc_graph_colors_only` runs
+    /// over the full repo history, the worker ships the resulting
+    /// `Graph` here and the foreground view starts displaying lanes /
+    /// colours for commits the initial 500-commit slice never reached.
+    pub fn replace_graph(&mut self, new_graph: Graph) {
+        self.graph = new_graph;
+        self.prepared_image_map.clear();
+        self.image_ids.clear();
+        self.pending_uploads.clear();
     }
 
     pub fn prepared_image(&self, commit_hash: &CommitHash) -> Option<&PreparedImage> {
@@ -123,8 +136,16 @@ impl<'a> GraphImageManager<'a> {
     /// Lets the caller hand it back to `check::decide_cell_width_type`
     /// when resolving a live `graph_width` change without re-borrowing
     /// state up the call chain.
-    pub fn graph(&self) -> &Graph<'a> {
-        self.graph
+    pub fn graph(&self) -> &Graph {
+        &self.graph
+    }
+
+    /// Current cell-width mode (Single or Double). Exposed so callers
+    /// that hold only a `GraphImageManager` can recompute the terminal
+    /// column width after a `replace_graph` without duplicating the
+    /// CellWidthType elsewhere.
+    pub fn cell_width_type(&self) -> CellWidthType {
+        self.cell_width_type
     }
 
     pub fn clear_prepared_images(&mut self) {
@@ -198,7 +219,7 @@ impl<'a> GraphImageManager<'a> {
         let image_id = graph_image_id(self.session_nonce, commit_hash, head);
 
         let graph_row_image = build_single_graph_row_image(
-            self.graph,
+            &self.graph,
             &self.image_params,
             &self.drawing_pixels,
             self.graph_style,
@@ -357,7 +378,7 @@ impl ImageParams {
 // go through `GraphImageManager` which caches the result.
 #[doc(hidden)]
 pub fn build_single_graph_row_image(
-    graph: &Graph<'_>,
+    graph: &Graph,
     image_params: &ImageParams,
     drawing_pixels: &DrawingPixels,
     graph_style: GraphStyle,
@@ -366,27 +387,32 @@ pub fn build_single_graph_row_image(
     head: bool,
 ) -> GraphRowImage {
     // Defensive lookup: bg-streamed commits aren't in fg's
-    // `commit_pos_map` (the fg's `calc_graph` only walks the
-    // initial 500-commit slice). When the user opens a detail
-    // view on a bg-streamed row the renderer used to direct-index
-    // this map and panic with "no entry found for key"; fall back
-    // to a single-row stub image instead so the click just works.
-    let Some(&(pos_x, pos_y)) = graph.commit_pos_map.get(&commit_hash) else {
+    // `commit_pos_map` until the bg `Graph` swap arrives. When the
+    // user opens a detail view on a bg-streamed row before the swap,
+    // the renderer used to direct-index this map and panic with "no
+    // entry found for key"; fall back to a single-row stub image
+    // instead so the click just works.
+    let Some(&(pos_x, pos_y)) = graph.commit_pos_map.get(commit_hash) else {
         return GraphRowImage {
             bytes: Vec::new(),
             cell_count: 0,
         };
     };
-    let edges = graph.edges.get(pos_y).map(|v| v.as_slice()).unwrap_or(&[]);
+    // Both `calc_graph` and `calc_graph_colors_only` now populate the
+    // full per-row `edges` Vec (the colors-only path used to skip it
+    // for memory savings, but `branch_segments` alone cannot encode the
+    // merge-arrow topology that `build_legacy_edges`'s second pass
+    // emits - bg-streamed rows would render as isolated dots after the
+    // ReplaceGraph swap). Use the stored slice as-is; Smooth ignores it
+    // and works straight off `branch_segments`.
+    let edges_slice = graph.edges.get(pos_y).map(|v| v.as_slice()).unwrap_or(&[]);
+    let edges: &[Edge] = edges_slice;
 
     // Determine render style based on commit type. Bg-streamed
     // commits also aren't in `graph.commits` so the find() can
     // miss; fall back to "normal commit" defaults rather than
     // unwrapping a None.
-    let commit_opt = graph
-        .commits
-        .iter()
-        .find(|c| c.commit_hash == *commit_hash);
+    let commit_opt = graph.commits.iter().find(|c| c.commit_hash == *commit_hash);
     let is_stash = commit_opt
         .map(|c| matches!(c.commit_type, crate::git::CommitType::Stash))
         .unwrap_or(false);

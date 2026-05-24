@@ -71,6 +71,20 @@ pub struct SyntaxHighlighter {
     highlighter: HighlightLines<'static>,
 }
 
+/// Trigger the lazy init of SYNTAX_SET + THEME_SET on a background
+/// thread so the cost (~200-500 ms) is paid while the user is
+/// looking at the commit list, not when they first open Config or
+/// a diff view. Safe to call multiple times (Lazy deduplicates).
+pub fn warm_up_in_background() {
+    std::thread::Builder::new()
+        .name("syntect-warmup".into())
+        .spawn(|| {
+            let _ = SYNTAX_SET.syntaxes().len();
+            let _ = THEME_SET.themes.len();
+        })
+        .ok();
+}
+
 impl SyntaxHighlighter {
     pub fn new(file_path: &str) -> Option<Self> {
         Self::new_with_theme(file_path, "base16-ocean.dark")
@@ -135,11 +149,6 @@ impl SyntaxHighlighter {
             })
             .collect()
     }
-}
-
-pub fn init() {
-    Lazy::force(&SYNTAX_SET);
-    Lazy::force(&THEME_SET);
 }
 
 pub fn list_syntax_themes() -> Vec<&'static str> {

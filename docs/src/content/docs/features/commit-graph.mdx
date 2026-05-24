@@ -61,47 +61,62 @@ the config.
 
 ## Background load
 
-The launch shows ~500 recent commits instantly, while a background
-thread walks the full `git log` (or reads the on-disk cache from a
-previous run). As batches come back, commits stream in incrementally
-and append to the list, the cursor / scroll position / search state
-all stay put, and new rows simply become scrollable as they arrive.
+The launch shows ~500 recent commits instantly. A background thread
+streams the rest of the history in parallel, reading from the on-disk
+cache (fast: a few hundred ms even on 300k-commit repos) or walking
+`git log` from scratch on the first visit.
 
-A subtle `...` indicator appears in the row just below the last
-loaded commit while the background loader is still in flight; it
-disappears the moment streaming completes.
+As batches arrive, commits appear progressively in the list. A
+spinning **Loading N commits** indicator at the bottom of the list
+shows the live count; it disappears the moment streaming completes.
+The animated **G** logomark in the top-right header also pulses
+during loading as an at-a-glance "still working" signal.
 
-The animated **G** logomark in the top-right of the header pulses
-during streaming too — that's your at-a-glance "still loading" signal.
+Only lightweight commit metadata is streamed (hash, author, date,
+subject, parents). The full commit body and committer details are
+fetched on demand when you open the Detail view, keeping memory
+usage low even on huge repositories.
 
-The on-disk cache lives at `$XDG_CACHE_HOME/gitoui/<repo-hash>/commits.bin`
-and is invalidated automatically if `HEAD` has moved since the last
-walk. Run `gitoui -C` (or `--clear-cache`) to wipe it manually.
+The on-disk cache lives at `$XDG_CACHE_HOME/gitoui/<repo-hash>/commits.bin`.
+It is invalidated automatically when `HEAD` moves, when the commit
+sort order changes (Chronological vs Topological), or when the cache
+format is outdated. Run `gitoui -C` (or `--clear-cache`) to wipe it
+manually.
 
-`-n N` on the CLI caps the foreground slice to exactly N commits, the
-amount you see in the very first frame. The background loader pays no
-attention to `-n` and always walks the full history, appending
-commits in batches until every reachable commit is loaded.
+`-n N` on the CLI caps the foreground slice to exactly N commits (the
+amount you see in the very first frame). The background loader always
+walks the full history regardless of `-n`.
 
-## Huge repos: wide graph + horizontal scroll
+## Huge repos
 
-On repos with many parallel branches (rust-lang/rust, linux kernel, …)
-the native graph can be hundreds of lanes wide. gitoui handles this by
-**capping the graph column at ~40 %** of the panel width and exposing a
-horizontal scroll over the visible lane window:
+### Automatic graph disable
 
-- `←` / `→` slide the viewport over the lanes.
-- All visible rows scroll together (Kitty source-rect crop, so every
-  commit's graph image stays aligned).
+On repositories with more than **50 000 commits** (configurable via
+`[core.option] huge_repo_threshold` in your config), the graph column
+is automatically disabled on the first visit to keep things smooth.
+You can always toggle it back on from the Config view (`p`), a warning
+will remind you that performance may be affected.
+
+The threshold is checked per-repo: switching from a huge repo to a
+small one via `d` (change directory) re-enables the graph based on
+your saved config.
+
+### Wide graph + horizontal scroll
+
+On repos with many parallel branches, the native graph can be hundreds
+of lanes wide. gitoui handles this by **capping the graph column at
+~40 %** of the panel width and exposing a horizontal scroll:
+
+- `<` / `>` slide the viewport over the lanes.
+- All visible rows scroll together (Kitty source-rect crop).
 - iTerm2 / Sixel terminals don't support source-rect crop: lanes past
-  the cap stay clipped at column 0 and the message column reclaims the
-  remaining width.
+  the cap are clipped.
 
-If you don't need the graph at all, set
-`[ui.list] graph_enabled = false` (or toggle "Graph Enabled" in the
-`p` config view). That removes the SVG/PNG pipeline entirely — no
-per-commit image generation, no terminal-image upload — and scrolling
-becomes near-instant even on 300 000-commit histories.
+### Disabling the graph entirely
+
+Set `[ui.list] graph_enabled = false` (or toggle "Graph Enabled" in
+the `p` config view). That removes the SVG/PNG pipeline entirely and
+scrolling becomes near-instant even on 300 000-commit histories.
 
 ## Auto-refresh
 

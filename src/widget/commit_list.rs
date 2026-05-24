@@ -34,7 +34,7 @@ use crate::{
     app::AppContext,
     color::ColorTheme,
     config::UserListColumnType,
-    git::{Commit, CommitHash, Head, Ref},
+    git::{CommitHash, CommitSummary, Head, Ref},
     graph::GraphImageManager,
     protocol::{kitty_encode_cropped, ImageProtocol, PreparedImage},
 };
@@ -43,9 +43,14 @@ static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default(
 
 const ELLIPSIS: &str = "...";
 
+/// Commit row metadata used by the list view. `commit` is an `Arc`
+/// rather than a borrow so the manager (which owns the underlying
+/// `Graph<Commits = Vec<Arc<CommitSummary>>>`) can be hot-swapped via
+/// `replace_graph` without invalidating the list state. Refs stay as
+/// borrows off the longer-lived `Repository`.
 #[derive(Debug)]
 pub struct CommitInfo {
-    pub commit: std::sync::Arc<Commit>,
+    pub commit: std::sync::Arc<CommitSummary>,
     refs: Vec<Ref>,
     pub graph_color: Color,
     pub is_uncommitted: bool,
@@ -59,7 +64,7 @@ pub struct CommitInfo {
 }
 
 impl CommitInfo {
-    pub fn new(commit: std::sync::Arc<Commit>, refs: Vec<Ref>, graph_color: Color) -> Self {
+    pub fn new(commit: std::sync::Arc<CommitSummary>, refs: Vec<Ref>, graph_color: Color) -> Self {
         Self {
             commit,
             refs,
@@ -74,7 +79,7 @@ impl CommitInfo {
     }
 
     pub fn new_uncommitted(
-        commit: std::sync::Arc<Commit>,
+        commit: std::sync::Arc<CommitSummary>,
         graph_color: Color,
         staged: usize,
         unstaged: usize,
@@ -95,7 +100,7 @@ impl CommitInfo {
         }
     }
 
-    pub fn commit(&self) -> &Commit {
+    pub fn commit(&self) -> &CommitSummary {
         &self.commit
     }
 }
@@ -165,7 +170,7 @@ struct SearchMatch {
 }
 
 impl SearchMatch {
-    fn set(&mut self, c: &Commit, refs: &[Ref], matcher: &SearchMatcher) {
+    fn set(&mut self, c: &CommitSummary, refs: &[Ref], matcher: &SearchMatcher) {
         self.refs = refs
             .iter()
             .filter(|r| !matches!(r, Ref::Stash { .. }))
@@ -296,12 +301,12 @@ pub struct RefHitArea {
 pub struct CommitListState<'a> {
     commits: Vec<CommitInfo>,
     /// Maps each commit hash to its index in `commits`. Replaces the
-    /// previous `FxHashSet<CommitHash>` — `.contains_key(h)` covers the
+    /// previous `FxHashSet<CommitHash>` - `.contains_key(h)` covers the
     /// old membership-check use, and the index value gives `select_*`
     /// O(1) lookups instead of the O(N) linear scan they used to do
     /// (catastrophic on 332k-commit repos).
     commit_hash_to_index: FxHashMap<CommitHash, usize>,
-    graph_image_manager: GraphImageManager<'a>,
+    graph_image_manager: GraphImageManager,
     graph_cell_width: u16,
     head: &'a Head,
     head_commit_hash: Option<CommitHash>,
@@ -321,6 +326,23 @@ pub struct CommitListState<'a> {
     marked_compare_commit: Option<CommitHash>,
 
     selected: usize,
+    /// Absolute commit index (into `commits[]`) of the currently
+    /// selected row. The canonical source of truth for "which commit
+    /// is selected" - `selected` is just its current visual row in the
+    /// viewport (offset + selected == selected_abs whenever the abs
+    /// is in view). Decoupling these lets the mouse wheel scroll the
+    /// viewport WITHOUT changing the selected commit: scroll only
+    /// adjusts `offset`, then we re-derive `selected` from `abs`.
+    /// When abs falls outside [offset, offset+height), the selection
+    /// is off-screen - `selected_visible` flips false and the render
+    /// path skips highlighting any row until a nav action (j/k/etc.)
+    /// scrolls the abs back into view or moves it explicitly.
+    selected_abs: usize,
+    /// Whether the selected commit is currently visible in the
+    /// viewport. False when scrolling has pushed it off-screen; any
+    /// non-scroll selection mutation flips it true (and updates
+    /// selected_abs at the same time).
+    selected_visible: bool,
     offset: usize,
     total: usize,
     height: usize,
@@ -375,7 +397,7 @@ pub struct CommitListState<'a> {
 impl<'a> CommitListState<'a> {
     pub fn new(
         commits: Vec<CommitInfo>,
-        graph_image_manager: GraphImageManager<'a>,
+        graph_image_manager: GraphImageManager,
         graph_cell_width: u16,
         head: &'a Head,
         ref_name_to_commit_index_map: FxHashMap<String, usize>,
@@ -423,6 +445,8 @@ impl<'a> CommitListState<'a> {
             search_matches: vec![SearchMatch::default(); total],
             marked_compare_commit: None,
             selected: 0,
+            selected_abs: 0,
+            selected_visible: true,
             offset: 0,
             total,
             height: 0,
@@ -508,6 +532,12 @@ impl<'a> CommitListState<'a> {
             self.selected -= diff;
             self.offset += diff;
         }
+        // After height + offset shuffling above, anchor abs to whatever
+        // commit now sits under the visual cursor: a terminal resize
+        // should keep the same row highlighted, not jump to a different
+        // commit because the viewport geometry changed.
+        self.selected_abs = self.offset + self.selected;
+        self.selected_visible = true;
     }
 
     pub fn ensure_visible_graph_uploaded(&mut self) {
@@ -656,10 +686,6 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
-    /// Read-only access to the underlying graph topology, used by the
-    /// live `graph_width` exit path so the caller can resolve the
-    /// `Option<GraphWidthType>` (Auto / Single / Double) into a
-    /// concrete `CellWidthType` via `check::decide_cell_width_type`.
     /// Append more commits to the in-memory list. Used by the
     /// background streaming loader: bg walks `git log` (or reads
     /// the disk cache) on its own OS thread and ships batched
@@ -674,6 +700,20 @@ impl<'a> CommitListState<'a> {
         }
         let grow = new_commits.len();
         let base_index = self.commits.len();
+        // Snapshot "was the user parked at the previous tail?" BEFORE
+        // we grow `total`. The user's mental model of Shift+G is "go
+        // to the end and stay there until I move". Without this
+        // follow-tail snap, a user who hits Shift+G mid-stream lands
+        // at row K (the last loaded commit at the keypress time),
+        // then more batches arrive, and the cursor sits stranded in
+        // the middle of the list with the actual tail far below. The
+        // user reports this as "Shift+G dropped me on a random
+        // commit and I can't scroll past it" (they can press `j` to
+        // advance, but they expect the cursor to track the tail of
+        // a streaming list). Cleared the moment the user moves with
+        // any nav action - those re-call `select_next/prev` etc.
+        // which set selected/offset away from the bottom edge.
+        let was_at_tail = self.total > 0 && self.current_selected_index() + 1 == self.total;
         // Roll the cached author column width over the new batch
         // (one O(batch_size) pass here, vs. the previous O(N) per
         // RENDER frame on the full list). Date width is a function
@@ -713,8 +753,52 @@ impl<'a> CommitListState<'a> {
         // unreachable - the cursor would refuse to leave the
         // initial 500-commit window.
         self.total += grow;
+        // Follow-tail: the user was at the last loaded commit before
+        // this batch arrived, so snap them to the new tail. Mirrors
+        // `select_last` semantics (without touching height when the
+        // list still fits the viewport).
+        if was_at_tail {
+            self.snap_to_last();
+        }
         // Force a recompute on the next render so visible newly-loaded
         // rows pick up their avatar / graph cells.
+        self.avatars_fully_prepared = false;
+    }
+
+    /// Re-anchor the cursor onto the last commit in the current
+    /// `commits` vec. Shared between `select_last` (one-shot Shift+G)
+    /// and the follow-tail snap inside `extend_commits` so both paths
+    /// produce the exact same on-screen position. Safe to call before
+    /// the first render set `height`: when `height == 0` the cursor
+    /// just sits at index 0 of an empty viewport until the next
+    /// render's `update_height` runs the standard clamp.
+    fn snap_to_last(&mut self) {
+        if self.total == 0 {
+            return;
+        }
+        let last = self.total - 1;
+        if self.height == 0 {
+            // Pre-render call: stash the absolute index in `selected`
+            // with offset 0; the first `update_height` will fold the
+            // excess into `offset` via its `selected >= height` arm.
+            self.selected = last;
+            self.offset = 0;
+        } else if self.height >= self.total {
+            // Everything fits on screen - cursor moves but the
+            // viewport doesn't scroll. Reset offset to 0 defensively
+            // so a stale offset from an earlier (smaller-viewport)
+            // state doesn't leave the cursor visually past the end
+            // of the rendered rows.
+            self.selected = last;
+            self.offset = 0;
+        } else {
+            // Standard case: pin offset so the last commit lands on
+            // the bottom-most visible row.
+            self.offset = self.total - self.height;
+            self.selected = self.height - 1;
+        }
+        self.selected_abs = last;
+        self.selected_visible = true;
         self.avatars_fully_prepared = false;
     }
 
@@ -735,8 +819,53 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
-    pub fn graph(&self) -> &crate::graph::Graph<'a> {
+    pub fn graph(&self) -> &crate::graph::Graph {
         self.graph_image_manager.graph()
+    }
+
+    /// Replace the branch-name-to-color map. Called after ReplaceGraph
+    /// so branch labels in the refs column pick up the topology-derived
+    /// lane colors from the full-history graph.
+    pub fn set_branch_color_map(&mut self, map: FxHashMap<String, Color>) {
+        self.branch_color_map = map;
+    }
+
+    /// Hot-swap the graph topology backing this state. Used by the bg
+    /// streaming flow: once the background thread finishes walking the
+    /// full repo history (well beyond the foreground's initial slice)
+    /// and ships a fresh `Graph`, this method clears every cached row
+    /// image so the next render rebakes against the new topology.
+    /// Pending uploads and the cached graph render state are also reset
+    /// so the visible commits get re-uploaded under the new graph.
+    pub fn replace_graph(
+        &mut self,
+        new_graph: crate::graph::Graph,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        // Resync every CommitInfo's bar colour from the Graph's
+        // topology-derived commit_color_map so the inline separator
+        // matches the graph dot. Without this, the bar shows the
+        // streaming-time colour (from the bg's incremental algorithm)
+        // which often differs from the lane-based colour calc_graph
+        // assigns.
+        for info in &mut self.commits {
+            if let Some(&color_idx) = new_graph.commit_color_map.get(&info.commit.commit_hash) {
+                info.graph_color = graph_color_set.get(color_idx).to_ratatui_color();
+            }
+        }
+        // Recompute the graph column width from the new topology.
+        // The full-history graph may have wider lane positions than the
+        // initial foreground slice, so the column must grow to match.
+        let cwt = self.graph_image_manager.cell_width_type();
+        self.graph_cell_width = match cwt {
+            crate::graph::CellWidthType::Double => (new_graph.max_pos_x + 1) as u16 * 2,
+            crate::graph::CellWidthType::Single => (new_graph.max_pos_x + 1) as u16,
+        };
+        self.graph_image_manager.replace_graph(new_graph);
+        self.graph_render_state = None;
+        self.avatar_stable_key = None;
+        self.avatar_prev_selected = None;
+        self.avatars_fully_prepared = false;
     }
 
     pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
@@ -773,6 +902,7 @@ impl<'a> CommitListState<'a> {
             self.offset += 1;
             self.avatars_fully_prepared = false;
         }
+        self.mark_selection_committed();
     }
 
     pub fn select_parent(&mut self) {
@@ -830,23 +960,25 @@ impl<'a> CommitListState<'a> {
             self.offset -= 1;
             self.avatars_fully_prepared = false;
         }
+        self.mark_selection_committed();
     }
 
     pub fn select_first(&mut self) {
         self.selected = 0;
         self.offset = 0;
         self.avatars_fully_prepared = false;
+        self.mark_selection_committed();
     }
 
     pub fn select_last(&mut self) {
-        if self.total == 0 || self.height == 0 {
-            return;
-        }
-        self.selected = (self.height - 1).min(self.total - 1);
-        if self.height < self.total {
-            self.offset = self.total - self.height;
-            self.avatars_fully_prepared = false;
-        }
+        // Delegated to the shared helper so a one-shot Shift+G and the
+        // follow-tail snap inside `extend_commits` produce identical
+        // on-screen state (same offset, same selected, same avatar
+        // invalidation). The previous standalone implementation left
+        // `offset` stale in the `height >= total` branch, which on a
+        // narrow viewport could put the highlight onto an empty row
+        // past the end of the rendered slice.
+        self.snap_to_last();
     }
 
     /// Scroll to and select the commit that HEAD points at, vertically
@@ -871,6 +1003,7 @@ impl<'a> CommitListState<'a> {
         if self.total <= self.height {
             // Everything fits on screen, no scroll, just move the cursor.
             self.selected = index;
+            self.mark_selection_committed();
             return;
         }
         // Aim for the middle row; clamp so we don't scroll past either end.
@@ -881,12 +1014,14 @@ impl<'a> CommitListState<'a> {
         self.selected = index - offset;
         self.offset = offset;
         self.avatars_fully_prepared = false;
+        self.mark_selection_committed();
     }
 
     pub fn scroll_down(&mut self) {
         let max_offset = self.total.saturating_sub(self.height);
         if self.offset < max_offset {
             self.offset += 1;
+            self.sync_visual_from_abs();
             self.avatars_fully_prepared = false;
         }
     }
@@ -894,6 +1029,7 @@ impl<'a> CommitListState<'a> {
     pub fn scroll_up(&mut self) {
         if self.offset > 0 {
             self.offset -= 1;
+            self.sync_visual_from_abs();
             self.avatars_fully_prepared = false;
         }
     }
@@ -904,6 +1040,7 @@ impl<'a> CommitListState<'a> {
         self.offset = current_index.saturating_sub(visual_row).min(max_offset);
         self.selected = current_index.saturating_sub(self.offset);
         self.avatars_fully_prepared = false;
+        self.mark_selection_committed();
     }
 
     pub fn scroll_down_page(&mut self) {
@@ -923,35 +1060,21 @@ impl<'a> CommitListState<'a> {
     }
 
     fn scroll_down_height(&mut self, scroll_height: usize) {
-        if self.offset + self.height + scroll_height < self.total {
-            self.offset += scroll_height;
-        } else {
-            let old_offset = self.offset;
-            let size = self.height.min(self.total);
-            self.offset = self.total - size;
-            self.selected += scroll_height - (self.offset - old_offset);
-            if self.selected >= size {
-                self.selected = size - 1;
-            }
-        }
+        let max_offset = self.total.saturating_sub(self.height);
+        self.offset = (self.offset + scroll_height).min(max_offset);
+        self.sync_visual_from_abs();
         self.avatars_fully_prepared = false;
     }
 
     fn scroll_up_height(&mut self, scroll_height: usize) {
-        if self.offset > scroll_height {
-            self.offset -= scroll_height;
-        } else {
-            let old_offset = self.offset;
-            self.offset = 0;
-            self.selected = self
-                .selected
-                .saturating_sub(scroll_height - (old_offset - self.offset));
-        }
+        self.offset = self.offset.saturating_sub(scroll_height);
+        self.sync_visual_from_abs();
         self.avatars_fully_prepared = false;
     }
 
     pub fn select_high(&mut self) {
         self.selected = 0;
+        self.mark_selection_committed();
     }
 
     pub fn select_middle(&mut self) {
@@ -960,6 +1083,7 @@ impl<'a> CommitListState<'a> {
         } else {
             self.selected = self.total / 2;
         }
+        self.mark_selection_committed();
     }
 
     pub fn select_low(&mut self) {
@@ -968,6 +1092,7 @@ impl<'a> CommitListState<'a> {
         } else {
             self.selected = self.total - 1;
         }
+        self.mark_selection_committed();
     }
 
     fn select_index(&mut self, index: usize) {
@@ -979,6 +1104,7 @@ impl<'a> CommitListState<'a> {
             } else {
                 self.selected = index;
             }
+            self.mark_selection_committed();
         }
     }
 
@@ -990,6 +1116,7 @@ impl<'a> CommitListState<'a> {
                 self.offset = index - self.height + 1;
                 self.avatars_fully_prepared = false;
             }
+            self.mark_selection_committed();
         }
     }
 
@@ -1069,16 +1196,50 @@ impl<'a> CommitListState<'a> {
         self.marked_compare_commit = None;
     }
 
+    /// Stamp the abs from the current (selected, offset) and mark
+    /// visible. Call at the END of any method that mutated
+    /// `self.selected` or `self.offset` for a non-scroll reason
+    /// (nav, search jump, click, etc.). Idempotent.
+    fn mark_selection_committed(&mut self) {
+        self.selected_abs = self.offset + self.selected;
+        self.selected_visible = true;
+    }
+
+    /// Re-derive `selected` from `selected_abs` after the viewport
+    /// has scrolled. When the abs is still in `[offset, offset+height)`,
+    /// `selected` mirrors it (highlight stays glued to the same
+    /// commit). When it falls outside the viewport, flip
+    /// `selected_visible` false: the render path skips the highlight,
+    /// the abs is preserved for when a non-scroll nav brings it back.
+    fn sync_visual_from_abs(&mut self) {
+        if self.height == 0 {
+            return;
+        }
+        if self.selected_abs >= self.offset && self.selected_abs < self.offset + self.height {
+            self.selected = self.selected_abs - self.offset;
+            self.selected_visible = true;
+        } else {
+            self.selected_visible = false;
+        }
+    }
+
+    /// True when `i` is the visual row that currently holds the
+    /// highlighted commit. False when the selection is off-screen
+    /// (scrolled past). Render paths use this instead of
+    /// `i == state.selected` so a scrolled-off selection produces
+    /// no highlighted row.
+    pub fn is_visual_selected(&self, i: usize) -> bool {
+        self.selected_visible && i == self.selected
+    }
+
     fn current_selected_index(&self) -> usize {
-        // Clamp to the last valid commit index. The raw
-        // `offset + selected` could exceed `commits.len()` if
-        // `extend_commits` was called between two render frames
-        // and a stale offset survives, or if `select_*` was
-        // invoked before the first render set `height`. Returning
-        // a guaranteed-in-bounds index lets every call site index
-        // `self.commits[...]` without panicking.
-        let raw = self.offset + self.selected;
-        raw.min(self.commits.len().saturating_sub(1))
+        // Use `selected_abs` directly when valid - it survives scrolls
+        // that pushed the selection off-screen, where `offset+selected`
+        // would otherwise point at whatever happens to be at the now-
+        // visible row. Clamp to the last valid commit index because
+        // `extend_commits` can grow / shrink `self.commits` between
+        // render frames and a stale abs could land out of bounds.
+        self.selected_abs.min(self.commits.len().saturating_sub(1))
     }
 
     pub fn current_list_status(&self) -> (usize, usize, usize) {
@@ -1087,6 +1248,16 @@ impl<'a> CommitListState<'a> {
 
     pub fn total(&self) -> usize {
         self.total
+    }
+
+    pub fn commits_len(&self) -> usize {
+        self.commits.len()
+    }
+
+    pub fn last_commit_hash(&self) -> Option<String> {
+        self.commits
+            .last()
+            .map(|c| c.commit.commit_hash.as_str().to_string())
     }
 
     pub fn reset_height(&mut self, height: usize) {
@@ -1111,6 +1282,7 @@ impl<'a> CommitListState<'a> {
             } else {
                 self.selected = index;
             }
+            self.mark_selection_committed();
         }
     }
 
@@ -1129,6 +1301,7 @@ impl<'a> CommitListState<'a> {
         } else {
             self.selected = i;
         }
+        self.mark_selection_committed();
     }
 
     pub fn search_state(&self) -> SearchState {
@@ -1601,10 +1774,21 @@ impl<'a> StatefulWidget for CommitList<'a> {
             }
         }
 
-        // Filter out the Graph column entirely when the user has disabled
-        // it — its width is freed back to the Message column and no image
-        // pipeline runs (cf. `prepare_graph_uploads` in `view/list.rs`).
-        let columns: Vec<UserListColumnType> = if self.ctx.ui_config.list.graph_enabled {
+        // Filter out the Graph column when: (a) the user has it off, or
+        // (b) bg streaming is still in flight. During streaming, the
+        // foreground's Graph only covers the initial fg-loaded slice
+        // (~500 commits). Rendering graph images for bg-streamed commits
+        // produces boundary artifacts (wrong colors, dangling connections)
+        // because those commits aren't in the Graph topology yet. Hiding
+        // the column during streaming and showing it once ReplaceGraph
+        // has landed gives the user the same clean result they get when
+        // manually disabling graph then re-enabling post-load.
+        // Hide the graph column when the viewport has scrolled entirely
+        // past the Graph's commit coverage. On huge repos where STEP 5
+        // was skipped, the Graph covers only the fg-loaded ~500 commits.
+        // Rows past that have no graph images; showing an empty column
+        let show_graph = self.ctx.ui_config.list.graph_enabled;
+        let columns: Vec<UserListColumnType> = if show_graph {
             self.ctx.ui_config.list.columns.clone()
         } else {
             self.ctx
@@ -1650,34 +1834,81 @@ impl<'a> StatefulWidget for CommitList<'a> {
         }
 
         // Background-streaming indicator: paint a centered "..."
-        // on the row we reserved above. Stays visible the whole
-        // time the bg thread is still shipping batches; disappears
+        // alongside the live loaded-commit count on the row we
+        // reserved above. Stays visible the whole time the bg
+        // thread is still shipping batches; disappears
         // automatically once `bg_full_load_in_progress` flips false
         // and the reserved row reverts to a regular commit row.
+        // The count is taken straight from `state.total` so the
+        // user sees the number tick up live as `extend_commits`
+        // applies each AppendCommits batch.
         if let Some(y) = loading_row_y {
-            let dots = "...";
-            let dots_width = dots.chars().count() as u16;
-            let x = rows_area.x
-                + rows_area
-                    .width
-                    .saturating_sub(dots_width)
-                    / 2;
-            // Subtler than `divider_fg` alone: stack DIM on top so
-            // the "..." reads as a low-attention loading hint
-            // rather than competing with the commit rows above.
+            // Braille spinner (same frames as pull/fetch/cd footer)
+            // driven off wall-clock so it ticks independently of the
+            // event loop cadence.
+            const SPINNER: [&str; 10] = [
+                "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}",
+                "\u{2827}", "\u{2807}", "\u{280f}",
+            ];
+            let elapsed_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let frame = SPINNER[(elapsed_ms / 80) as usize % SPINNER.len()];
+            let count_str = format_thousands(state.total);
+            let label = format!("{frame} Loading  {count_str} commits");
+            let label_width = console::measure_text_width(&label) as u16;
+            let x = rows_area.x + rows_area.width.saturating_sub(label_width) / 2;
+            // Same style as the "Commit message" / "Author" / "SHA"
+            // column headers: `list_ref_paren_fg + BOLD`. Keeps the
+            // indicator on-palette (less shouty than the previous
+            // brand-orange) while staying clearly readable on every
+            // theme. The bg anchor below prevents the dark band
+            // from bleeding through around the centered label.
             let style = Style::default()
-                .fg(self.ctx.color_theme.divider_fg)
-                .add_modifier(Modifier::DIM);
-            for (i, ch) in dots.chars().enumerate() {
-                let cx = x + i as u16;
-                if cx < rows_area.right() {
-                    let cell = &mut buf[(cx, y)];
-                    cell.set_symbol(&ch.to_string());
-                    cell.set_style(style);
+                .fg(self.ctx.color_theme.list_ref_paren_fg)
+                .bg(self.ctx.color_theme.bg)
+                .add_modifier(Modifier::BOLD);
+            // Walk grapheme-by-grapheme so the cell column index
+            // tracks visual width, not byte length. Also paint the
+            // pad cells on either side of the label with the same
+            // bg so the gradient of the dark band underneath doesn't
+            // peek through right next to the text.
+            for cx_pad in rows_area.x..rows_area.right() {
+                let cell = &mut buf[(cx_pad, y)];
+                cell.set_symbol(" ");
+                cell.set_style(Style::default().bg(self.ctx.color_theme.bg));
+            }
+            let mut cx = x;
+            for ch in label.chars() {
+                if cx >= rows_area.right() {
+                    break;
                 }
+                let cell = &mut buf[(cx, y)];
+                cell.set_symbol(&ch.to_string());
+                cell.set_style(style);
+                cx = cx.saturating_add(1);
             }
         }
     }
+}
+
+/// Format an integer with a thin space (U+2009) as the thousands
+/// separator. Avoids the locale-dependent comma/period split and
+/// stays render-safe in narrow terminals. Used by the bg-streaming
+/// indicator so the live count reads naturally even at 6+ digits.
+fn format_thousands(n: usize) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(*b as char);
+    }
+    out
 }
 
 impl CommitList<'_> {
@@ -1736,11 +1967,7 @@ impl CommitList<'_> {
         let graph_cap = (area_width * 40 / 100).max(8);
         CommitListColumnWidths {
             graph: state.graph_area_cell_width().min(area_width).min(graph_cap),
-            author: author_column_width_from_cached(
-                area_width,
-                avatar_width,
-                author_content_width,
-            ),
+            author: author_column_width_from_cached(area_width, avatar_width, author_content_width),
             hash: 9,
             date: date_column_width(&dates),
         }
@@ -1757,7 +1984,8 @@ impl CommitList<'_> {
         state: &CommitListState,
         avatars_enabled: bool,
     ) {
-        let columns: Vec<UserListColumnType> = if self.ctx.ui_config.list.graph_enabled {
+        let show_graph = self.ctx.ui_config.list.graph_enabled;
+        let columns: Vec<UserListColumnType> = if show_graph {
             self.ctx.ui_config.list.columns.clone()
         } else {
             self.ctx
@@ -1817,7 +2045,7 @@ impl CommitList<'_> {
             let pad_x = area.left() + max_graph_width as u16;
             for i in 0..state.height.min(area.height as usize) {
                 let y = area.top() + i as u16;
-                let _is_selected = i == state.selected
+                let _is_selected = state.is_visual_selected(i)
                     && state.hovered_branch.is_none()
                     && state.hovered_tag.is_none();
                 // Pad cell keeps the app background, selection starts at the │ marker
@@ -1871,14 +2099,11 @@ impl CommitList<'_> {
                     if needs_crop_path {
                         if supports_kitty_crop {
                             let hash = &commit_info.commit.commit_hash;
-                            if let Some(bytes) =
-                                state_ref.graph_image_manager.graph_row_bytes(hash)
+                            if let Some(bytes) = state_ref.graph_image_manager.graph_row_bytes(hash)
                             {
-                                let image_id =
-                                    state_ref.graph_image_manager.image_id_for(hash);
-                                let visible_cells = max_graph_width.min(
-                                    native_cells.saturating_sub(scroll_x),
-                                );
+                                let image_id = state_ref.graph_image_manager.image_id_for(hash);
+                                let visible_cells =
+                                    max_graph_width.min(native_cells.saturating_sub(scroll_x));
                                 if visible_cells == 0 {
                                     // Scrolled past this row's last lane.
                                     // Evict any prior placement and leave
@@ -1979,7 +2204,7 @@ impl CommitList<'_> {
             .rendering_commit_info_iter(state)
             .map(|(i, commit_info)| {
                 let span = Span::raw("│").fg(commit_info.graph_color);
-                if i == state.selected
+                if state.is_visual_selected(i)
                     && state.hovered_branch.is_none()
                     && state.hovered_tag.is_none()
                 {
@@ -2053,7 +2278,7 @@ impl CommitList<'_> {
             // clips when the terminal is narrow, exactly the opposite
             // of what we want (it has to stay visible because it's the
             // call-to-action telling the user to press `e`).
-            let commit = &commit_info.commit;
+            let commit: &CommitSummary = &commit_info.commit;
             let paused_here = paused_sha
                 .as_deref()
                 .map(|s| s == commit.commit_hash.as_str())
@@ -2132,7 +2357,7 @@ impl CommitList<'_> {
             .rendering_commit_info_iter(state)
             .map(|(i, commit_info)| {
                 if commit_info.is_uncommitted {
-                    let slash_fg = if i == state.selected {
+                    let slash_fg = if state.is_visual_selected(i) {
                         self.ctx.color_theme.list_selected_fg
                     } else {
                         self.ctx.color_theme.list_name_fg
@@ -2145,7 +2370,7 @@ impl CommitList<'_> {
                     spans.push("/".fg(slash_fg));
                     return self.to_commit_list_item(i, spans, state);
                 }
-                let commit = &commit_info.commit;
+                let commit: &CommitSummary = &commit_info.commit;
                 let effective_max = if avatars_enabled && max_width > 10 {
                     max_width.saturating_sub(avatar_width)
                 } else {
@@ -2222,7 +2447,7 @@ impl CommitList<'_> {
                     continue;
                 }
                 let email = &commit_info.commit.author_email;
-                let is_selected = i == state.selected;
+                let is_selected = state.is_visual_selected(i);
                 if avatar_manager
                     .prepared_image(email.as_str(), 1, is_selected)
                     .is_some()
@@ -2248,7 +2473,7 @@ impl CommitList<'_> {
                     continue;
                 }
                 let email = &commit_info.commit.author_email;
-                let is_newly_selected = i == state.selected;
+                let is_newly_selected = state.is_visual_selected(i);
                 let is_previously_selected = old_selected == Some(i);
                 if is_newly_selected || is_previously_selected {
                     // Re-render this row with the correct variant
@@ -2304,7 +2529,7 @@ impl CommitList<'_> {
             if commit_info.is_uncommitted {
                 // Explicitly clear avatar cells: a committed row's avatar may have been
                 // at this y position before scrolling and must not bleed through.
-                let cell_bg = if i == state.selected {
+                let cell_bg = if state.is_visual_selected(i) {
                     self.ctx.color_theme.list_selected_bg
                 } else {
                     self.ctx.color_theme.bg
@@ -2318,7 +2543,7 @@ impl CommitList<'_> {
                 continue;
             }
             let email = &commit_info.commit.author_email;
-            let is_selected = i == state.selected;
+            let is_selected = state.is_visual_selected(i);
             let cell_bg = if is_selected {
                 self.ctx.color_theme.list_selected_bg
             } else {
@@ -2361,7 +2586,7 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = &commit_info.commit;
+                let commit: &CommitSummary = &commit_info.commit;
                 let hash = commit.commit_hash.as_short_hash();
                 let spans =
                     if let Some(pos) = state.search_matches[state.offset + i].commit_hash.clone() {
@@ -2406,7 +2631,7 @@ impl CommitList<'_> {
                         state,
                     );
                 }
-                let commit = &commit_info.commit;
+                let commit: &CommitSummary = &commit_info.commit;
                 let date = &commit.author_date;
                 let date_str = self
                     .ctx
@@ -2515,7 +2740,7 @@ impl CommitList<'_> {
             line = line
                 .bg(self.ctx.color_theme.list_compare_marked_bg)
                 .fg(self.ctx.color_theme.list_compare_marked_fg);
-        } else if i == state.selected
+        } else if state.is_visual_selected(i)
             && state.hovered_branch.is_none()
             && state.hovered_tag.is_none()
         {
@@ -2574,24 +2799,39 @@ fn refs_spans<'a>(
         let mut remote_branches: Vec<(&'a str, &'a str, Color)> = Vec::new();
         let mut tags: Vec<(&'a str, Color)> = Vec::new();
 
+        // Use the commit's topology-derived lane color for branch and
+        // remote-branch labels so the label, the graph dot, and the
+        // vertical separator bar all share a single consistent color.
+        // Falls back to the branch_color_map (and then theme tokens)
+        // only for the Uncommitted row which has no real lane color.
+        let topo_color = commit_info.graph_color;
+
         for r in refs.iter() {
             match r {
                 Ref::Branch { name, .. } => {
-                    let fg = branch_color_map
-                        .get(name)
-                        .copied()
-                        .unwrap_or(color_theme.list_ref_branch_fg);
+                    let fg = if commit_info.is_uncommitted {
+                        branch_color_map
+                            .get(name)
+                            .copied()
+                            .unwrap_or(color_theme.list_ref_branch_fg)
+                    } else {
+                        topo_color
+                    };
                     local_branches.push((name.as_str(), fg));
                 }
                 Ref::RemoteBranch { name, .. } => {
-                    let fg = branch_color_map
-                        .get(name)
-                        .copied()
-                        .or_else(|| {
-                            name.split_once('/')
-                                .and_then(|(_, branch)| branch_color_map.get(branch).copied())
-                        })
-                        .unwrap_or(color_theme.list_ref_remote_branch_fg);
+                    let fg = if commit_info.is_uncommitted {
+                        branch_color_map
+                            .get(name)
+                            .copied()
+                            .or_else(|| {
+                                name.split_once('/')
+                                    .and_then(|(_, branch)| branch_color_map.get(branch).copied())
+                            })
+                            .unwrap_or(color_theme.list_ref_remote_branch_fg)
+                    } else {
+                        topo_color
+                    };
                     let base = name
                         .split_once('/')
                         .map(|(_, b)| b)
@@ -2808,11 +3048,7 @@ const DATE_MIN_WIDTH: u16 = 7;
 const AUTHOR_MAX_WIDTH: u16 = 24;
 const DATE_MAX_WIDTH: u16 = 22;
 
-fn author_column_width_from_cached(
-    area_width: u16,
-    avatar_width: u16,
-    content_width: u16,
-) -> u16 {
+fn author_column_width_from_cached(area_width: u16, avatar_width: u16, content_width: u16) -> u16 {
     let max_width = AUTHOR_MAX_WIDTH.min(area_width);
     (content_width + avatar_width + 2).max(9).min(max_width)
 }

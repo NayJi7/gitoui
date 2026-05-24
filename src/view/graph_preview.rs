@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     color::GraphColorSet,
-    git::{Commit, CommitHash, CommitType, Head, Ref, Repository},
+    git::{CommitHash, CommitSummary, CommitType, Head, Ref, Repository},
     graph::{calc_graph, CellWidthType, GraphImageManager, GraphImageWidthMode, GraphStyle},
     protocol::{ImageProtocol, PreparedImage},
 };
@@ -40,7 +40,8 @@ impl GraphPreview {
             m0.commit_hash.clone(),
         ];
 
-        let mut commit_map: FxHashMap<CommitHash, std::sync::Arc<Commit>> = FxHashMap::default();
+        let mut commit_map: FxHashMap<CommitHash, std::sync::Arc<CommitSummary>> =
+            FxHashMap::default();
         let mut parents_map: FxHashMap<CommitHash, Vec<CommitHash>> = FxHashMap::default();
         let mut children_map: FxHashMap<CommitHash, Vec<CommitHash>> = FxHashMap::default();
 
@@ -75,8 +76,16 @@ impl GraphPreview {
 
         let graph = calc_graph(&repository);
 
+        // Capture the commit-hash list before moving `graph` into the manager,
+        // we still need to iterate it for the per-row uploads below.
+        let preview_hashes: Vec<crate::git::CommitHash> = graph
+            .commits
+            .iter()
+            .map(|c| c.commit_hash.clone())
+            .collect();
+
         let mut manager = GraphImageManager::new(
-            &graph,
+            graph,
             graph_color_set,
             cell_width_type,
             style,
@@ -87,10 +96,10 @@ impl GraphPreview {
             manager.update_background_color(r, g, b);
         }
 
-        let mut rows = Vec::with_capacity(graph.commits.len());
-        for commit in &graph.commits {
-            manager.ensure_uploaded(&commit.commit_hash);
-            if let Some(img) = manager.prepared_image(&commit.commit_hash) {
+        let mut rows = Vec::with_capacity(preview_hashes.len());
+        for hash in &preview_hashes {
+            manager.ensure_uploaded(hash);
+            if let Some(img) = manager.prepared_image(hash) {
                 rows.push(img.clone());
             }
         }
@@ -108,12 +117,12 @@ impl GraphPreview {
     }
 }
 
-fn preview_commit(hash: &str, parents: &[&str]) -> Commit {
-    Commit {
+fn preview_commit(hash: &str, parents: &[&str]) -> CommitSummary {
+    CommitSummary {
         commit_hash: hash.into(),
         parent_commit_hashes: parents.iter().map(|p| (*p).into()).collect(),
         commit_type: CommitType::Commit,
-        ..Commit::default()
+        ..CommitSummary::default()
     }
 }
 
