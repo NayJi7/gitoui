@@ -72,7 +72,7 @@ jobs:
       - name: Checksum
         run: shasum -a 256 gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: gitoui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
@@ -91,13 +91,30 @@ jobs:
           merge-multiple: true
       - name: Checksum
         run: sha256sum releases/* > ./releases/checksum.txt
+      - name: Checkout (for tag message extraction)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Extract tag message
+        id: tag_msg
+        run: |
+          # Annotated tags carry a message (git tag -a -m "...").
+          # Extract it and pass as the release body so the author's
+          # notes appear at the top, followed by the auto-generated
+          # commit list.
+          msg="$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" | head -500)"
+          # GitHub Actions multiline output
+          {
+            echo "body<<TAGMSG_EOF"
+            echo "$msg"
+            echo "TAGMSG_EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Create Release
         uses: softprops/action-gh-release@v3.0.0
         with:
-          # Publish straight away — `cargo publish` ships in parallel
-          # and the install.sh one-liner needs the binaries live the
-          # moment the tag exists.
           draft: false
+          body: ${{ steps.tag_msg.outputs.body }}
           generate_release_notes: true
           make_latest: true
           files: |
