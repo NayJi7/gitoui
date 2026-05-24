@@ -45,7 +45,7 @@ jobs:
       - name: Lint
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose -- --test-threads=1
 
   build:
     strategy:
