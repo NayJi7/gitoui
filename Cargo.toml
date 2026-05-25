@@ -26,7 +26,7 @@ chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.6.1", features = ["derive"] }
 console = "0.16.3"
 fuzzy-matcher = "0.3.7"
-garde = { version = "0.22.1", features = ["derive", "regex"] }
+garde = { version = "0.23.0", features = ["derive", "regex"] }
 icy_sixel = "0.5"
 image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 resvg = { version = "0.47", default-features = false }
