@@ -16,10 +16,10 @@ defaults for one specific run.
 | Flag                          | Default       | Effect                                              |
 |-------------------------------|---------------|-----------------------------------------------------|
 | `-n`, `--max-count <NUMBER>`  | `500`         | How many commits are visible in the **first frame** at startup. The background loader walks the full history in parallel regardless of `-n` and keeps appending until every reachable commit is loaded. Cap this only to influence the initial paint. |
-| `-p`, `--protocol <TYPE>`     | `auto`        | Force an image protocol, one of `kitty`, `iterm2`, `sixel`, `unicode`. |
+| `-r`, `--graph-renderer <TYPE>` | `auto`      | Force a graph renderer, one of `auto`, `ascii`, `kitty`, `iterm`, `kitty-unicode`, `sixel`. `auto` detects at startup. `ascii` renders with Unicode box-drawing characters. |
 | `-o`, `--order <TYPE>`        | `chrono`      | Commit ordering algorithm. `chrono` (date-based) or `topo` (`git log --topo-order`). |
 | `-g`, `--graph-width <TYPE>`  | `auto`        | Graph image cell width. `auto` / `single` / `double`. |
-| `-s`, `--graph-style <TYPE>`  | `rounded`     | Graph edge style. `rounded` / `angular` / `smooth`. |
+| `-s`, `--graph-style <TYPE>`  | `smooth`      | Graph edge style. `rounded` / `angular` / `smooth`. |
 | `-i`, `--initial-selection <TYPE>` | `latest` | Cursor position on open. `latest`, `head`, or `top`. |
 | `--update`                    |               | Force an update check + prompt now, then exit. Bypasses the once-a-day silent check and the "never ask" preference. |
 | `--no-update-check`           |               | Skip the once-a-day automatic update check at startup. |
@@ -59,15 +59,15 @@ gitoui -C
 
 </TabItem>
 
-<TabItem label="Force a protocol">
+<TabItem label="Force a graph renderer">
 
-When `auto` picks the wrong protocol on a custom terminal:
+When `auto` picks the wrong renderer on a custom terminal:
 
 ```sh
-gitoui --protocol sixel
-gitoui --protocol kitty
-gitoui --protocol iterm2
-gitoui --protocol unicode   # skip images entirely
+gitoui --graph-renderer sixel
+gitoui --graph-renderer kitty
+gitoui --graph-renderer iterm
+gitoui --graph-renderer ascii   # Unicode box-drawing, no images
 ```
 
 </TabItem>

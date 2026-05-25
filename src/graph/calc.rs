@@ -153,6 +153,7 @@ impl LayoutVertex {
 
 #[derive(Debug)]
 struct LayoutBranch {
+    #[allow(dead_code)]
     colour: usize,
     lines: Vec<(Pt, Pt, bool)>, // (p1=newer, p2=older, is_uncommitted) in grid coords
     end: usize,

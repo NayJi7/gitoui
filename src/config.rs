@@ -15,7 +15,7 @@ use crate::{
     color::{ColorTheme, OptionalColorTheme},
     graph::GraphImageWidthMode,
     keybind::KeyBinds,
-    CommitOrderType, GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection, Result,
+    CommitOrderType, GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, Result,
 };
 
 /// Predefined date/time formats for the application.
@@ -188,7 +188,29 @@ fn config_file_path() -> Option<PathBuf> {
 fn read_config_from_path(path: &Path) -> Result<Config> {
     let content = std::fs::read_to_string(path)?;
     let config: OptionalConfig = toml::from_str(&content)?;
-    Ok(config.into())
+    let mut config: Config = config.into();
+    migrate_legacy_protocol(&mut config);
+    Ok(config)
+}
+
+fn migrate_legacy_protocol(config: &mut Config) {
+    let opt = &mut config.core.option;
+    if opt.graph_renderer.is_some() || opt.protocol.is_none() {
+        return;
+    }
+    let mapped = match opt.protocol.as_deref() {
+        Some("auto") => Some(GraphRenderer::Auto),
+        Some("kitty") => Some(GraphRenderer::Kitty),
+        Some("kitty-unicode") => Some(GraphRenderer::KittyUnicode),
+        Some("iterm") | Some("iterm2") => Some(GraphRenderer::Iterm),
+        Some("sixel") => Some(GraphRenderer::Sixel),
+        Some("unicode") => Some(GraphRenderer::Ascii),
+        _ => None,
+    };
+    if let Some(r) = mapped {
+        opt.graph_renderer = Some(r);
+    }
+    opt.protocol = None;
 }
 
 #[optional(derives = [Deserialize])]
@@ -231,7 +253,8 @@ pub struct CoreConfig {
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct CoreOptionConfig {
-    pub protocol: Option<ImageProtocolType>,
+    pub graph_renderer: Option<GraphRenderer>,
+    pub protocol: Option<String>,
     pub order: Option<CommitOrderType>,
     pub graph_width: Option<GraphWidthType>,
     pub graph_style: Option<GraphStyle>,
@@ -677,11 +700,11 @@ impl CoreConfig {
     pub fn set_initial_selection(&mut self, sel: crate::InitialSelection) {
         self.option.initial_selection = Some(sel);
     }
-    pub fn protocol(&self) -> Option<crate::ImageProtocolType> {
-        self.option.protocol
+    pub fn graph_renderer(&self) -> crate::GraphRenderer {
+        self.option.graph_renderer.unwrap_or_default()
     }
-    pub fn set_protocol(&mut self, protocol: crate::ImageProtocolType) {
-        self.option.protocol = Some(protocol);
+    pub fn set_graph_renderer(&mut self, renderer: crate::GraphRenderer) {
+        self.option.graph_renderer = Some(renderer);
     }
     pub fn order(&self) -> crate::CommitOrderType {
         self.option.order.unwrap_or(crate::CommitOrderType::Chrono)
@@ -795,6 +818,21 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
         );
     }
 
+    if let Some(renderer) = core.option.graph_renderer {
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "graph_renderer"],
+            match renderer {
+                crate::GraphRenderer::Auto => "auto",
+                crate::GraphRenderer::Ascii => "ascii",
+                crate::GraphRenderer::Kitty => "kitty",
+                crate::GraphRenderer::Iterm => "iterm",
+                crate::GraphRenderer::KittyUnicode => "kitty-unicode",
+                crate::GraphRenderer::Sixel => "sixel",
+            },
+        );
+    }
+
     if let Some(sel) = core.option.initial_selection {
         set_nested_string(
             &mut doc,
@@ -802,20 +840,6 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
             match sel {
                 crate::InitialSelection::Latest => "latest",
                 crate::InitialSelection::Head => "head",
-            },
-        );
-    }
-
-    if let Some(protocol) = core.option.protocol {
-        set_nested_string(
-            &mut doc,
-            &["core", "option", "protocol"],
-            match protocol {
-                crate::ImageProtocolType::Auto => "auto",
-                crate::ImageProtocolType::Iterm => "iterm",
-                crate::ImageProtocolType::Kitty => "kitty",
-                crate::ImageProtocolType::KittyUnicode => "kitty-unicode",
-                crate::ImageProtocolType::Sixel => "sixel",
             },
         );
     }
@@ -1321,7 +1345,7 @@ mod tests {
     fn test_config_complete_toml() {
         let toml = r##"
             [core.option]
-            protocol = "kitty-unicode"
+            graph_renderer = "kitty-unicode"
             order = "topo"
             graph_width = "single"
             graph_style = "angular"
@@ -1365,7 +1389,7 @@ mod tests {
         // come from `Config::default()`. Adding a new default no longer requires
         // touching this test.
         let mut expected = Config::default();
-        expected.core.option.protocol = Some(ImageProtocolType::KittyUnicode);
+        expected.core.option.graph_renderer = Some(GraphRenderer::KittyUnicode);
         expected.core.option.order = Some(CommitOrderType::Topo);
         expected.core.option.graph_width = Some(GraphWidthType::Single);
         expected.core.option.graph_style = Some(GraphStyle::Angular);

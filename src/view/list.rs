@@ -477,8 +477,13 @@ impl<'a> ListView<'a> {
     /// Drops the image cache so the next render rebakes with the
     /// requested style. Called from `App::close_config` when the user
     /// flips `graph_style` in the Config view.
-    pub fn update_graph_style(&mut self, style: crate::graph::GraphStyle) {
-        self.as_mut_list_state().update_graph_style(style);
+    pub fn update_graph_style(
+        &mut self,
+        style: crate::graph::GraphStyle,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        self.as_mut_list_state()
+            .update_graph_style(style, graph_color_set);
     }
 
     /// Apply a graph cell-width change live (no full app refresh).

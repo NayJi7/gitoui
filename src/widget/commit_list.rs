@@ -35,7 +35,7 @@ use crate::{
     color::ColorTheme,
     config::UserListColumnType,
     git::{CommitHash, CommitSummary, Head, Ref},
-    graph::GraphImageManager,
+    graph::{ascii, GraphImageManager},
     protocol::{kitty_encode_cropped, ImageProtocol, PreparedImage},
 };
 
@@ -663,8 +663,33 @@ impl<'a> CommitListState<'a> {
     /// Clears the image cache so the next render rebakes with the new
     /// style. Lets the Config view apply `graph_style` changes without
     /// a full app refresh.
-    pub fn update_graph_style(&mut self, style: crate::graph::GraphStyle) {
+    pub fn update_graph_style(
+        &mut self,
+        style: crate::graph::GraphStyle,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
         self.graph_image_manager.update_graph_style(style);
+        let graph = self.graph_image_manager.graph();
+        let smooth = style == crate::graph::GraphStyle::Smooth;
+        for info in &mut self.commits {
+            if info.is_uncommitted {
+                continue;
+            }
+            let ci = if smooth {
+                graph
+                    .commit_color_map
+                    .get(&info.commit.commit_hash)
+                    .copied()
+            } else {
+                graph
+                    .commit_pos_map
+                    .get(&info.commit.commit_hash)
+                    .map(|&(px, _)| px)
+            };
+            if let Some(c) = ci {
+                info.graph_color = graph_color_set.get(c).to_ratatui_color();
+            }
+        }
         self.graph_render_state = None;
         self.avatar_stable_key = None;
         self.avatars_fully_prepared = false;
@@ -841,6 +866,7 @@ impl<'a> CommitListState<'a> {
         &mut self,
         new_graph: crate::graph::Graph,
         graph_color_set: &crate::color::GraphColorSet,
+        ascii_mode: bool,
     ) {
         // Resync every CommitInfo's bar colour from the Graph's
         // topology-derived commit_color_map so the inline separator
@@ -848,18 +874,43 @@ impl<'a> CommitListState<'a> {
         // streaming-time colour (from the bg's incremental algorithm)
         // which often differs from the lane-based colour calc_graph
         // assigns.
+        let use_branch_color = self.graph_image_manager.graph_style()
+            == crate::graph::GraphStyle::Smooth
+            && !ascii_mode;
         for info in &mut self.commits {
-            if let Some(&color_idx) = new_graph.commit_color_map.get(&info.commit.commit_hash) {
-                info.graph_color = graph_color_set.get(color_idx).to_ratatui_color();
+            if info.is_uncommitted {
+                continue;
+            }
+            let color_idx = if use_branch_color {
+                new_graph
+                    .commit_color_map
+                    .get(&info.commit.commit_hash)
+                    .copied()
+            } else {
+                new_graph
+                    .commit_pos_map
+                    .get(&info.commit.commit_hash)
+                    .map(|&(px, _)| px)
+            };
+            if let Some(ci) = color_idx {
+                info.graph_color = graph_color_set.get(ci).to_ratatui_color();
             }
         }
         // Recompute the graph column width from the new topology.
         // The full-history graph may have wider lane positions than the
         // initial foreground slice, so the column must grow to match.
-        let cwt = self.graph_image_manager.cell_width_type();
-        self.graph_cell_width = match cwt {
-            crate::graph::CellWidthType::Double => (new_graph.max_pos_x + 1) as u16 * 2,
-            crate::graph::CellWidthType::Single => (new_graph.max_pos_x + 1) as u16,
+        self.graph_cell_width = if ascii_mode {
+            let lw: u16 = match self.graph_image_manager.cell_width_type() {
+                crate::graph::CellWidthType::Double => 3,
+                crate::graph::CellWidthType::Single => 2,
+            };
+            (new_graph.max_pos_x + 1) as u16 * lw
+        } else {
+            let cwt = self.graph_image_manager.cell_width_type();
+            match cwt {
+                crate::graph::CellWidthType::Double => (new_graph.max_pos_x + 1) as u16 * 2,
+                crate::graph::CellWidthType::Single => (new_graph.max_pos_x + 1) as u16,
+            }
         };
         self.graph_image_manager.replace_graph(new_graph);
         self.graph_render_state = None;
@@ -2065,6 +2116,87 @@ impl CommitList<'_> {
                     }
                 }
             }
+            return;
+        }
+
+        let is_ascii_mode = self.ctx.core_config.graph_renderer().is_ascii();
+
+        if is_ascii_mode {
+            let bg = self.ctx.color_theme.bg;
+            let bg_style = Style::default().bg(bg);
+            let graph_style = state.graph_image_manager.graph_style();
+            let edge_colors: Vec<Color> = self
+                .ctx
+                .graph_color_set
+                .colors
+                .iter()
+                .map(|c| c.to_ratatui_color())
+                .collect();
+            let uncommitted_color = Color::Rgb(128, 128, 128);
+            let ascii_lane_width = match state.graph_image_manager.cell_width_type() {
+                crate::graph::CellWidthType::Double => 3,
+                crate::graph::CellWidthType::Single => 2,
+            };
+            let max_w = area.width.saturating_sub(1) as usize;
+            let scroll_x = state.graph_scroll_x() as usize;
+
+            let graph = state.graph_image_manager.graph();
+
+            let uncommitted_lane: Option<(usize, usize)> = graph
+                .commits
+                .iter()
+                .find(|c| matches!(c.commit_type, crate::git::CommitType::Uncommitted))
+                .and_then(|unco| {
+                    let &(unco_x, _) = graph.commit_pos_map.get(&unco.commit_hash)?;
+                    let head_y = unco
+                        .parent_commit_hashes
+                        .first()
+                        .and_then(|h| graph.commit_pos_map.get(h))
+                        .map(|&(_, y)| y)?;
+                    Some((unco_x, head_y))
+                });
+
+            self.rendering_commit_info_iter(state)
+                .for_each(|(i, commit_info)| {
+                    let y = area.top() + i as u16;
+                    let hash = &commit_info.commit.commit_hash;
+                    let is_head = state.head_commit_hash.as_ref().is_some_and(|h| h == hash);
+                    let cells = ascii::render_ascii_row(
+                        graph,
+                        hash,
+                        &commit_info.commit.commit_type,
+                        is_head,
+                        graph_style,
+                        &edge_colors,
+                        uncommitted_color,
+                        uncommitted_lane,
+                        ascii_lane_width,
+                    );
+                    let visible = cells.iter().skip(scroll_x).take(max_w);
+                    for (x, ac) in visible.enumerate() {
+                        let cell = &mut buf[(area.left() + x as u16, y)];
+                        let s = String::from(ac.ch);
+                        cell.set_symbol(&s);
+                        cell.set_style(Style::default().fg(ac.color).bg(bg));
+                        cell.set_skip(false);
+                    }
+                    let drawn = cells.len().saturating_sub(scroll_x).min(max_w);
+                    for x in drawn..max_w {
+                        let cell = &mut buf[(area.left() + x as u16, y)];
+                        cell.set_symbol(" ");
+                        cell.set_style(bg_style);
+                        cell.set_skip(false);
+                    }
+                    let pad_x = area.left() + max_w as u16;
+                    if pad_x < area.right() {
+                        let cell = &mut buf[(pad_x, y)];
+                        cell.set_symbol(" ");
+                        cell.set_style(bg_style);
+                        cell.set_skip(false);
+                    }
+                });
+
+            state.graph_render_state = Some(key);
             return;
         }
 

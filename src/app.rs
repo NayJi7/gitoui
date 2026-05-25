@@ -424,7 +424,9 @@ impl<'a> App<'a> {
                     ref_name_to_commit_index_map.insert(r.name().to_string(), i);
                 }
                 let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
-                let color_index = if graph_style == GraphStyle::Smooth {
+                let use_branch_color = graph_style == GraphStyle::Smooth
+                    && !ctx.core_config.graph_renderer().is_ascii();
+                let color_index = if use_branch_color {
                     graph
                         .commit_color_map
                         .get(&commit.commit_hash)
@@ -463,33 +465,43 @@ impl<'a> App<'a> {
             })
             .collect();
 
-        let graph_cell_width = match cell_width_type {
-            CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
-            CellWidthType::Single => (graph.max_pos_x + 1) as u16,
+        let graph_cell_width = if ctx.core_config.graph_renderer().is_ascii() {
+            let lw: u16 = match cell_width_type {
+                CellWidthType::Double => 3,
+                CellWidthType::Single => 2,
+            };
+            (graph.max_pos_x + 1) as u16 * lw
+        } else {
+            match cell_width_type {
+                CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
+                CellWidthType::Single => (graph.max_pos_x + 1) as u16,
+            }
         };
         let head = repository.head();
+        let use_bc_for_refs =
+            graph_style == GraphStyle::Smooth && !ctx.core_config.graph_renderer().is_ascii();
         let mut branch_color_map = FxHashMap::default();
         for r in repository.all_refs() {
             match r {
                 Ref::Branch { name, target } => {
                     if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
-                        let color_index = if graph_style == GraphStyle::Smooth {
+                        let ci = if use_bc_for_refs {
                             graph.commit_color_map.get(target).copied().unwrap_or(pos_x)
                         } else {
                             pos_x
                         };
-                        let color = graph_color_set.get(color_index).to_ratatui_color();
+                        let color = graph_color_set.get(ci).to_ratatui_color();
                         branch_color_map.insert(name.clone(), color);
                     }
                 }
                 Ref::RemoteBranch { name, target } => {
                     if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
-                        let color_index = if graph_style == GraphStyle::Smooth {
+                        let ci = if use_bc_for_refs {
                             graph.commit_color_map.get(target).copied().unwrap_or(pos_x)
                         } else {
                             pos_x
                         };
-                        let color = graph_color_set.get(color_index).to_ratatui_color();
+                        let color = graph_color_set.get(ci).to_ratatui_color();
                         branch_color_map.insert(name.clone(), color);
                         if let Some((_, base)) = name.split_once('/') {
                             branch_color_map.insert(base.to_string(), color);
@@ -548,16 +560,22 @@ impl<'a> App<'a> {
             ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
             _ => None,
         };
-        let brand_logo = prepare_brand(
-            crate::brand::render_logo_png(brand_bg),
-            crate::brand::LOGO_CELL_WIDTH,
-            0x0B_2A_1D,
-        );
-        let brand_wordmark = prepare_brand(
-            crate::brand::render_wordmark_png(brand_bg),
-            crate::brand::WORDMARK_CELL_WIDTH,
-            0x0B_2A_1E,
-        );
+        let (brand_logo, brand_wordmark) = if ctx.core_config.graph_renderer().is_ascii() {
+            (None, None)
+        } else {
+            (
+                prepare_brand(
+                    crate::brand::render_logo_png(brand_bg),
+                    crate::brand::LOGO_CELL_WIDTH,
+                    0x0B_2A_1D,
+                ),
+                prepare_brand(
+                    crate::brand::render_wordmark_png(brand_bg),
+                    crate::brand::WORDMARK_CELL_WIDTH,
+                    0x0B_2A_1E,
+                ),
+            )
+        };
 
         // Pre-render the 28-frame G spinner animation.
         let (spinner_frames, spinner_pending_uploads) = {
@@ -2380,6 +2398,11 @@ impl App<'_> {
             return;
         }
         self.last_brand_bg = brand_bg;
+
+        if self.ctx.core_config.graph_renderer().is_ascii() {
+            return;
+        }
+
         let protocol = &self.ctx.image_protocol;
 
         if let Some(bytes) = crate::brand::render_logo_png(brand_bg) {
@@ -2503,13 +2526,15 @@ impl App<'_> {
                 // branch labels in the ref list, commit detail, and
                 // footer all use topology-derived colors that match
                 // the graph dots and separator bars.
-                let graph_style: GraphStyle = self.ctx.core_config.option.graph_style.into();
                 let mut branch_color_map = FxHashMap::default();
                 for r in self.repository.all_refs() {
                     match r {
                         Ref::Branch { name, target } => {
                             if let Some(&(pos_x, _)) = new_graph.commit_pos_map.get(target) {
-                                let color_index = if graph_style == GraphStyle::Smooth {
+                                let gs: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                                let use_bc = gs == GraphStyle::Smooth
+                                    && !self.ctx.core_config.graph_renderer().is_ascii();
+                                let ci = if use_bc {
                                     new_graph
                                         .commit_color_map
                                         .get(target)
@@ -2518,14 +2543,16 @@ impl App<'_> {
                                 } else {
                                     pos_x
                                 };
-                                let color =
-                                    self.ctx.graph_color_set.get(color_index).to_ratatui_color();
+                                let color = self.ctx.graph_color_set.get(ci).to_ratatui_color();
                                 branch_color_map.insert(name.clone(), color);
                             }
                         }
                         Ref::RemoteBranch { name, target } => {
                             if let Some(&(pos_x, _)) = new_graph.commit_pos_map.get(target) {
-                                let color_index = if graph_style == GraphStyle::Smooth {
+                                let gs: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                                let use_bc = gs == GraphStyle::Smooth
+                                    && !self.ctx.core_config.graph_renderer().is_ascii();
+                                let ci = if use_bc {
                                     new_graph
                                         .commit_color_map
                                         .get(target)
@@ -2534,8 +2561,7 @@ impl App<'_> {
                                 } else {
                                     pos_x
                                 };
-                                let color =
-                                    self.ctx.graph_color_set.get(color_index).to_ratatui_color();
+                                let color = self.ctx.graph_color_set.get(ci).to_ratatui_color();
                                 branch_color_map.insert(name.clone(), color);
                                 if let Some((_, base)) = name.split_once('/') {
                                     branch_color_map.insert(base.to_string(), color);
@@ -2555,7 +2581,8 @@ impl App<'_> {
                 // the ListView still reads true from its original).
                 state.set_branch_color_map(branch_color_map);
 
-                state.replace_graph(*new_graph, &self.ctx.graph_color_set);
+                let ascii = self.ctx.core_config.graph_renderer().is_ascii();
+                state.replace_graph(*new_graph, &self.ctx.graph_color_set, ascii);
                 self.try_finalize_bg_loading();
                 return;
             }
@@ -3102,12 +3129,35 @@ impl App<'_> {
                 self.header_wordmark_rendered = true;
             }
         } else {
-            let icon_line = Line::from(vec![Span::styled(
-                " ◈ gitoui ",
-                ratatui::style::Style::default()
-                    .fg(path_fg)
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )]);
+            const BRAILLE_SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let primary = ratatui::style::Color::Rgb(0xF0, 0x51, 0x33);
+            let off_white = ratatui::style::Color::Rgb(0xF1, 0xEC, 0xEC);
+            let g_char = if self.spinner_should_show() {
+                let idx = self.app_status.spinner_frame % BRAILLE_SPINNER.len();
+                BRAILLE_SPINNER[idx]
+            } else {
+                '\u{1D5DA}'
+            };
+            let icon_line = Line::from(vec![
+                Span::styled(
+                    format!("{g_char}"),
+                    ratatui::style::Style::default()
+                        .fg(primary)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(
+                    " git",
+                    ratatui::style::Style::default()
+                        .fg(primary)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(
+                    "oui ",
+                    ratatui::style::Style::default()
+                        .fg(off_white)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+            ]);
             f.render_widget(
                 Paragraph::new(icon_line).alignment(ratatui::layout::Alignment::Right),
                 right_area,
@@ -5663,7 +5713,7 @@ impl<'a> App<'a> {
             // persisting + saving, visible flicker, but the change
             // actually takes effect.
             let order_changed = old_core.option.order != core.option.order;
-            let protocol_changed = old_core.option.protocol != core.option.protocol;
+            let protocol_changed = old_core.option.graph_renderer != core.option.graph_renderer;
             // Toggling `graph_enabled` swaps the calc_graph backend
             // (real topology walk ↔ cheap calc_colors_only stub).
             // Without a full refresh, the layout stored in the
@@ -5735,7 +5785,42 @@ impl<'a> App<'a> {
             if let View::List(ref mut list_view) = self.view {
                 let palette = self.ctx.graph_color_set.clone();
                 if graph_style_changed {
-                    list_view.update_graph_style(self.ctx.core_config.option.graph_style.into());
+                    let new_style: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                    list_view.update_graph_style(new_style, &palette);
+                    let smooth = new_style == GraphStyle::Smooth;
+                    let graph = list_view.as_list_state().graph();
+                    let mut new_bcm = FxHashMap::default();
+                    for r in self.repository.all_refs() {
+                        match r {
+                            Ref::Branch { name, target } => {
+                                if let Some(&(px, _)) = graph.commit_pos_map.get(target) {
+                                    let ci = if smooth {
+                                        graph.commit_color_map.get(target).copied().unwrap_or(px)
+                                    } else {
+                                        px
+                                    };
+                                    new_bcm
+                                        .insert(name.clone(), palette.get(ci).to_ratatui_color());
+                                }
+                            }
+                            Ref::RemoteBranch { name, target } => {
+                                if let Some(&(px, _)) = graph.commit_pos_map.get(target) {
+                                    let ci = if smooth {
+                                        graph.commit_color_map.get(target).copied().unwrap_or(px)
+                                    } else {
+                                        px
+                                    };
+                                    let c = palette.get(ci).to_ratatui_color();
+                                    new_bcm.insert(name.clone(), c);
+                                    if let Some((_, base)) = name.split_once('/') {
+                                        new_bcm.insert(base.to_string(), c);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    list_view.as_mut_list_state().set_branch_color_map(new_bcm);
                 }
                 if graph_width_changed {
                     if let Some(new_cwt) =

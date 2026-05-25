@@ -41,7 +41,8 @@ diagnostic at boot.
 |---------------------|-------------------------------------------|--------|
 | `theme`             | string / `"Tokyo Night"`                  | Built-in theme name or custom theme stem (file at `~/.config/gitoui/themes/<name>.toml`). Empty string disables theming. |
 | `syntax_theme`      | string / `"base16-ocean.dark"`            | Syntect theme for diff syntax highlighting. Overridden when `theme` is a named theme. |
-| `graph_style`       | `rounded` / `angular` / `smooth` (default `rounded`) | Branch corner shape. |
+| `graph_renderer`    | `auto` / `ascii` / `kitty` / `iterm` / `kitty-unicode` / `sixel` (default `auto`) | Image protocol for the commit graph. `auto` detects at startup. `ascii` renders with Unicode box-drawing characters (no image protocol). |
+| `graph_style`       | `rounded` / `angular` / `smooth` (default `smooth`) | Branch corner shape. |
 | `graph_width`       | `auto` / `single` / `double` (default `auto`) | Graph image cell width. |
 | `initial_selection` | `latest` / `head` / `top` (default `latest`) | Cursor position when opening. |
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |

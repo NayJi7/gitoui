@@ -39,9 +39,9 @@ struct Args {
     #[arg(short = 'n', long, value_name = "NUMBER")]
     max_count: Option<usize>,
 
-    /// Image protocol to render graph [default: auto]
-    #[arg(short, long, value_name = "TYPE")]
-    protocol: Option<ImageProtocolType>,
+    /// Graph renderer: auto, ascii, kitty, iterm, kitty-unicode, sixel [default: auto]
+    #[arg(long, value_name = "TYPE")]
+    graph_renderer: Option<GraphRenderer>,
 
     /// Commit ordering algorithm [default: chrono]
     #[arg(short, long, value_name = "TYPE")]
@@ -51,7 +51,7 @@ struct Args {
     #[arg(short, long, value_name = "TYPE")]
     graph_width: Option<GraphWidthType>,
 
-    /// Commit graph image edge style [default: rounded]
+    /// Commit graph edge style [default: smooth]
     #[arg(short = 's', long, value_name = "TYPE")]
     graph_style: Option<GraphStyle>,
 
@@ -75,27 +75,36 @@ struct Args {
     clear_cache: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ImageProtocolType {
+pub enum GraphRenderer {
+    #[default]
     Auto,
-    Iterm,
+    Ascii,
     Kitty,
+    Iterm,
     KittyUnicode,
     Sixel,
 }
 
-impl From<Option<ImageProtocolType>> for protocol::ImageProtocol {
-    fn from(protocol: Option<ImageProtocolType>) -> Self {
-        match protocol {
-            Some(ImageProtocolType::Auto) => protocol::auto_detect(),
-            Some(ImageProtocolType::Iterm) => protocol::ImageProtocol::Iterm2,
-            Some(ImageProtocolType::Kitty) => protocol::ImageProtocol::Kitty,
-            Some(ImageProtocolType::KittyUnicode) => protocol::ImageProtocol::KittyUnicode {
+impl GraphRenderer {
+    pub fn is_ascii(self) -> bool {
+        match self {
+            Self::Ascii => true,
+            Self::Auto => !protocol::auto_detect_has_image_support(),
+            _ => false,
+        }
+    }
+
+    pub fn to_image_protocol(self) -> protocol::ImageProtocol {
+        match self {
+            Self::Auto | Self::Ascii => protocol::auto_detect(),
+            Self::Kitty => protocol::ImageProtocol::Kitty,
+            Self::KittyUnicode => protocol::ImageProtocol::KittyUnicode {
                 tmux: protocol::detect_tmux(),
             },
-            Some(ImageProtocolType::Sixel) => protocol::ImageProtocol::Sixel,
-            None => protocol::auto_detect(),
+            Self::Iterm => protocol::ImageProtocol::Iterm2,
+            Self::Sixel => protocol::ImageProtocol::Sixel,
         }
     }
 }
@@ -139,7 +148,7 @@ impl From<Option<GraphStyle>> for graph::GraphStyle {
             Some(GraphStyle::Rounded) => graph::GraphStyle::Rounded,
             Some(GraphStyle::Angular) => graph::GraphStyle::Angular,
             Some(GraphStyle::Smooth) => graph::GraphStyle::Smooth,
-            None => graph::GraphStyle::Rounded,
+            None => graph::GraphStyle::Smooth,
         }
     }
 }
@@ -484,7 +493,12 @@ pub fn run() -> Result<()> {
         // hitting a blocking `git log` walk.
         const FG_INITIAL_LOAD: usize = 500;
         let max_count = args.max_count.or(Some(FG_INITIAL_LOAD));
-        let image_protocol = args.protocol.or(core_config.option.protocol).into();
+        let graph_renderer = args
+            .graph_renderer
+            .or(core_config.option.graph_renderer)
+            .unwrap_or(GraphRenderer::Auto);
+        core_config.option.graph_renderer = Some(graph_renderer);
+        let image_protocol = graph_renderer.to_image_protocol();
         let order = args.order.or(core_config.option.order).into();
 
         // Second pre-reset gate: the top-of-loop check couldn't see
@@ -563,7 +577,8 @@ pub fn run() -> Result<()> {
             Some(ec.sender()),
         );
         let mut avatar_manager = avatar_manager;
-        avatar_manager.set_github_avatars(core_config.github_avatars());
+        let avatars_enabled = core_config.github_avatars() && !graph_renderer.is_ascii();
+        avatar_manager.set_github_avatars(avatars_enabled);
         let default_branch = core_config
             .option
             .default_branch

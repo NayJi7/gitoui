@@ -1,3 +1,4 @@
+pub mod ascii;
 mod calc;
 mod geometry;
 mod image;

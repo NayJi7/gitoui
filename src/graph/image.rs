@@ -140,6 +140,10 @@ impl GraphImageManager {
         &self.graph
     }
 
+    pub fn graph_style(&self) -> GraphStyle {
+        self.graph_style
+    }
+
     /// Current cell-width mode (Single or Double). Exposed so callers
     /// that hold only a `GraphImageManager` can recompute the terminal
     /// column width after a `replace_graph` without duplicating the
@@ -424,15 +428,17 @@ pub fn build_single_graph_row_image(
     const UNCOMMITTED_COLOR: image::Rgba<u8> = image::Rgba([0x80, 0x80, 0x80, 0xff]);
     let commit_color = if is_uncommitted {
         UNCOMMITTED_COLOR
-    } else if graph_style == GraphStyle::Smooth {
-        let color_index = graph
-            .commit_color_map
-            .get(commit_hash)
-            .copied()
-            .unwrap_or(pos_x);
-        image_params.edge_color(color_index)
     } else {
-        image_params.edge_color(pos_x)
+        let color_index = if graph_style == GraphStyle::Smooth {
+            graph
+                .commit_color_map
+                .get(commit_hash)
+                .copied()
+                .unwrap_or(pos_x)
+        } else {
+            pos_x
+        };
+        image_params.edge_color(color_index)
     };
 
     // For rows between uncommitted (pos_y=0) and HEAD, color edges on the
@@ -996,11 +1002,7 @@ pub fn calc_graph_row_image(
     }
 
     // Draw commit circle on top of edges (mirrors VS Code Git Graph SVG z-ordering)
-    let node_color = if graph_style == GraphStyle::Smooth || is_uncommitted || is_stash {
-        commit_color
-    } else {
-        image_params.edge_color(commit_pos_x)
-    };
+    let node_color = commit_color;
     if head {
         draw_head_commit(
             &mut img_buf,
@@ -1707,8 +1709,8 @@ mod tests {
 
         assert_eq!(
             *img.get_pixel(center_x, center_y),
-            image_params.edge_color(1),
-            "rounded nodes should keep legacy lane-based colors"
+            image_params.edge_color(0),
+            "node uses commit_color (passed as edge_color(0)), not lane position"
         );
     }
 

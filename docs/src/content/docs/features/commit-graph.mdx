@@ -7,7 +7,9 @@ import { Aside, Steps } from "@astrojs/starlight/components";
 
 The home screen is `git log --graph --all` rendered as pre-computed SVG/PNG
 that ships inline through your terminal's image protocol (Kitty / iTerm2 /
-Sixel). It auto-detects the protocol at startup; force one with `--protocol`.
+Sixel). It auto-detects the renderer at startup; force one with `--graph-renderer`.
+Alternatively, use `--graph-renderer ascii` to render with Unicode box-drawing
+characters in any terminal (no image protocol needed).
 
 ## What's shown
 
@@ -112,10 +114,16 @@ of lanes wide. gitoui handles this by **capping the graph column at
 - iTerm2 / Sixel terminals don't support source-rect crop: lanes past
   the cap are clipped.
 
-### Disabling the graph entirely
+### ASCII renderer
+
+Set `--graph-renderer ascii` (or `[core.option] graph_renderer = "ascii"` in config)
+to render the graph using Unicode box-drawing characters instead of image protocol.
+This works in any terminal without requiring Kitty, iTerm2, or Sixel support.
+
+## Disabling the graph entirely
 
 Set `[ui.list] graph_enabled = false` (or toggle "Graph Enabled" in
-the `p` config view). That removes the SVG/PNG pipeline entirely and
+the `p` config view). That removes the graph pipeline entirely and
 scrolling becomes near-instant even on 300 000-commit histories.
 
 ## Auto-refresh

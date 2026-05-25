@@ -6,8 +6,6 @@ use std::{
 use base64::Engine;
 use ratatui::style::{Color, Style};
 
-// By default assume the Iterm2 is the best protocol to use for all terminals *unless* an env
-// variable is set that suggests the terminal is probably Kitty.
 pub fn auto_detect() -> ImageProtocol {
     if detect_kitty_graphics_protocol() {
         if detect_tmux() {
@@ -20,6 +18,32 @@ pub fn auto_detect() -> ImageProtocol {
     } else {
         ImageProtocol::Iterm2
     }
+}
+
+pub fn auto_detect_name() -> &'static str {
+    if detect_kitty_graphics_protocol() {
+        if detect_tmux() {
+            "Kitty Unicode"
+        } else {
+            "Kitty"
+        }
+    } else if detect_sixel_support() {
+        "Sixel"
+    } else if detect_iterm2_support() {
+        "iTerm2"
+    } else {
+        "Ascii (no image protocol detected)"
+    }
+}
+
+pub fn auto_detect_has_image_support() -> bool {
+    detect_kitty_graphics_protocol() || detect_sixel_support() || detect_iterm2_support()
+}
+
+fn detect_iterm2_support() -> bool {
+    env::var("TERM_PROGRAM").ok().is_some_and(|tp| {
+        tp == "iTerm.app" || tp == "WezTerm" || tp == "mintty" || tp == "contour" || tp == "rio"
+    }) || env::var("LC_TERMINAL").ok().is_some_and(|t| t == "iTerm2")
 }
 
 fn detect_kitty_graphics_protocol() -> bool {
@@ -121,7 +145,8 @@ impl PreparedImage {
 impl ImageProtocol {
     pub fn prepare_image(&self, bytes: &[u8], cell_width: usize, image_id: u32) -> PreparedImage {
         let symbol = match self {
-            ImageProtocol::Iterm2 | ImageProtocol::Sixel => iterm2_encode(bytes, cell_width, 1),
+            ImageProtocol::Iterm2 => iterm2_encode(bytes, cell_width, 1),
+            ImageProtocol::Sixel => sixel_encode(bytes, cell_width, 1),
             ImageProtocol::Kitty => kitty_encode(bytes, cell_width, 1, image_id),
             ImageProtocol::KittyUnicode { tmux } => {
                 return kitty_unicode_prepare(bytes, cell_width, image_id, *tmux);
@@ -168,9 +193,8 @@ impl ImageProtocol {
         clear_at_cursor: bool,
     ) -> Option<String> {
         match self {
-            ImageProtocol::Iterm2 | ImageProtocol::Sixel => {
-                Some(iterm2_encode(bytes, cell_width, cell_height))
-            }
+            ImageProtocol::Iterm2 => Some(iterm2_encode(bytes, cell_width, cell_height)),
+            ImageProtocol::Sixel => Some(sixel_encode(bytes, cell_width, cell_height)),
             ImageProtocol::Kitty => Some(if clear_at_cursor {
                 kitty_encode(bytes, cell_width, cell_height, image_id)
             } else {
@@ -806,6 +830,19 @@ fn passthrough_escapes(tmux: bool) -> (&'static str, &'static str, &'static str)
         ("\x1bPtmux;", "\x1b\x1b", "\x1b\\")
     } else {
         ("", "\x1b", "")
+    }
+}
+
+fn sixel_encode(png_bytes: &[u8], cell_width: usize, cell_height: usize) -> String {
+    let img = match image::load_from_memory(png_bytes) {
+        Ok(i) => i.to_rgba8(),
+        Err(_) => return iterm2_encode(png_bytes, cell_width, cell_height),
+    };
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let sixel_img = icy_sixel::SixelImage::from_rgba(img.into_raw(), w, h);
+    match sixel_img.encode() {
+        Ok(s) => s,
+        Err(_) => iterm2_encode(png_bytes, cell_width, cell_height),
     }
 }
 

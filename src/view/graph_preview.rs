@@ -117,6 +117,61 @@ impl GraphPreview {
     }
 }
 
+pub struct AsciiGraphPreview {
+    pub graph: crate::graph::Graph,
+}
+
+impl GraphPreview {
+    pub fn build_ascii(_style: GraphStyle, _graph_color_set: &GraphColorSet) -> AsciiGraphPreview {
+        let m1 = preview_commit("m1", &["m0"]);
+        let f1 = preview_commit("f1", &["m0"]);
+        let m0 = preview_commit("m0", &[]);
+
+        let commit_hashes: Vec<CommitHash> = vec![
+            m1.commit_hash.clone(),
+            f1.commit_hash.clone(),
+            m0.commit_hash.clone(),
+        ];
+
+        let mut commit_map: FxHashMap<CommitHash, std::sync::Arc<CommitSummary>> =
+            FxHashMap::default();
+        let mut parents_map: FxHashMap<CommitHash, Vec<CommitHash>> = FxHashMap::default();
+        let mut children_map: FxHashMap<CommitHash, Vec<CommitHash>> = FxHashMap::default();
+
+        for c in [&m1, &f1, &m0] {
+            parents_map.insert(c.commit_hash.clone(), c.parent_commit_hashes.clone());
+            for parent in &c.parent_commit_hashes {
+                children_map
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(c.commit_hash.clone());
+            }
+        }
+        for c in [m1, f1, m0] {
+            commit_map.insert(c.commit_hash.clone(), std::sync::Arc::new(c));
+        }
+        for hash in &commit_hashes {
+            parents_map.entry(hash.clone()).or_default();
+            children_map.entry(hash.clone()).or_default();
+        }
+
+        let ref_map: FxHashMap<CommitHash, Vec<Ref>> = FxHashMap::default();
+        let repository = Repository::new(
+            std::path::PathBuf::from("/dev/null"),
+            commit_map,
+            parents_map,
+            children_map,
+            ref_map,
+            Head::None,
+            commit_hashes,
+            None,
+        );
+
+        let graph = calc_graph(&repository);
+        AsciiGraphPreview { graph }
+    }
+}
+
 fn preview_commit(hash: &str, parents: &[&str]) -> CommitSummary {
     CommitSummary {
         commit_hash: hash.into(),

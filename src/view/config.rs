@@ -16,32 +16,33 @@ use crate::{
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
     view::{graph_preview::GraphPreview, View},
-    GraphStyle, GraphWidthType, ImageProtocolType, InitialSelection,
+    GraphRenderer, GraphStyle, GraphWidthType, InitialSelection,
 };
 
 // Item indices, listed here so future inserts only have to touch one spot
 // instead of hunting for `selected == N` matches scattered through the file.
 //   0  Theme
-//   1  Graph Enabled     ← GRAPH_ENABLED_INDEX (yes/no toggle, applies on close)
-//   2  Graph Style       (grayed when Graph Enabled = no)
-//   3  Graph Width       (grayed when Graph Enabled = no)
-//   4  Diff Mode
-//   5  Resolve Mode
-//   6  Rebase Mode
-//   7  Order
-//   8  Initial Selection
-//   9  Mouse
-//  10  Date Format
-//  11  Image Protocol
-//  12  Git Name          ← TEXT_EDIT_START_INDEX
+//   1  Renderer            <- RENDERER_INDEX (always selectable; Ascii disables avatars)
+//   2  Graph Enabled       <- GRAPH_ENABLED_INDEX (yes/no toggle, applies on close)
+//   3  Graph Style         <- GRAPH_STYLE_INDEX (grayed when Graph Enabled = no; Smooth excluded in Ascii mode)
+//   4  Graph Width         <- GRAPH_WIDTH_INDEX (grayed when Graph Enabled = no)
+//   5  Diff Mode
+//   6  Resolve Mode
+//   7  Rebase Mode
+//   8  Order
+//   9  Initial Selection
+//  10  Mouse
+//  11  Date Format
+//  12  Git Name            <- TEXT_EDIT_START_INDEX
 //  13  Git Email
 //  14  Default Branch
-//  15  GitHub Auth       ← GITHUB_AUTH_INDEX
-//  16  Github Avatars    ← GITHUB_AVATARS_INDEX
+//  15  GitHub Auth         <- GITHUB_AUTH_INDEX
+//  16  Github Avatars      <- GITHUB_AVATARS_INDEX
 const CONFIG_ITEM_COUNT: usize = 17;
-const GRAPH_ENABLED_INDEX: usize = 1;
-const GRAPH_STYLE_INDEX: usize = 2;
-const GRAPH_WIDTH_INDEX: usize = 3;
+const RENDERER_INDEX: usize = 1;
+const GRAPH_ENABLED_INDEX: usize = 2;
+const GRAPH_STYLE_INDEX: usize = 3;
+const GRAPH_WIDTH_INDEX: usize = 4;
 const TEXT_EDIT_START_INDEX: usize = 12;
 const GITHUB_AUTH_INDEX: usize = 15;
 const GITHUB_AVATARS_INDEX: usize = 16;
@@ -115,6 +116,7 @@ impl<'a> ConfigView<'a> {
         // vec there for the actual rendering order.
         let values = [
             self.core_config.option.theme.clone(),
+            graph_renderer_display(self.core_config.graph_renderer()),
             if self.ui_config.list.graph_enabled {
                 "yes".to_string()
             } else {
@@ -132,7 +134,6 @@ impl<'a> ConfigView<'a> {
                 .date_time_format()
                 .display_name()
                 .to_string(),
-            protocol_display(self.core_config.protocol()),
             self.core_config
                 .user_name()
                 .map(|s| s.to_string())
@@ -146,7 +147,9 @@ impl<'a> ConfigView<'a> {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "(from git)".into()),
             github_auth_display(&self.github_auth_state, self.github_auth_pending),
-            if self.core_config.github_avatars() {
+            if self.core_config.graph_renderer().is_ascii() {
+                "disabled (ascii)".to_string()
+            } else if self.core_config.github_avatars() {
                 "enabled".to_string()
             } else {
                 "disabled".to_string()
@@ -154,6 +157,7 @@ impl<'a> ConfigView<'a> {
         ];
         let names = [
             "Theme",
+            "Renderer",
             "Graph Enabled",
             "Graph Style",
             "Graph Width",
@@ -162,10 +166,8 @@ impl<'a> ConfigView<'a> {
             "Rebase Mode",
             "Order",
             "Initial Select",
-            "Load Count",
             "Mouse",
             "Date Format",
-            "Image Protocol",
             "Git Name",
             "Git Email",
             "Default Branch",
@@ -185,6 +187,20 @@ impl<'a> ConfigView<'a> {
         let min_width = 34.min(total_width);
         let max_width = (total_width.saturating_mul(48) / 100).max(min_width);
         (content_width + 4).max(min_width).min(max_width)
+    }
+
+    fn auto_resolved_hint(&self) -> Option<String> {
+        match self.selected {
+            RENDERER_INDEX if self.core_config.graph_renderer() == GraphRenderer::Auto => {
+                Some(crate::protocol::auto_detect_name().to_string())
+            }
+            GRAPH_WIDTH_INDEX if self.core_config.graph_width() == crate::GraphWidthType::Auto => {
+                let (w, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
+                let label = if w >= 100 { "Double" } else { "Single" };
+                Some(label.to_string())
+            }
+            _ => None,
+        }
     }
 
     fn render_vertical_separator(&self, f: &mut Frame, area: Rect) {
@@ -259,9 +275,17 @@ impl<'a> ConfigView<'a> {
     /// can't park selection on a row they can't touch; click / hover
     /// also bail out so the selection doesn't drift onto a dead row.
     fn is_item_grayed(&self, idx: usize) -> bool {
-        (idx == GITHUB_AVATARS_INDEX && !self.github_avatars_selectable())
-            || ((idx == GRAPH_STYLE_INDEX || idx == GRAPH_WIDTH_INDEX)
-                && !self.graph_options_selectable())
+        if idx == GITHUB_AVATARS_INDEX
+            && (!self.github_avatars_selectable() || self.core_config.graph_renderer().is_ascii())
+        {
+            return true;
+        }
+        if (idx == GRAPH_STYLE_INDEX || idx == GRAPH_WIDTH_INDEX)
+            && !self.graph_options_selectable()
+        {
+            return true;
+        }
+        false
     }
 
     pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
@@ -304,10 +328,8 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
-                } else if (self.selected == GRAPH_STYLE_INDEX || self.selected == GRAPH_WIDTH_INDEX)
-                    && !self.graph_options_selectable()
-                {
-                    // Grayed out (Graph Enabled = no) — no-op.
+                } else if self.is_item_grayed(self.selected) {
+                    // Grayed out — no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -321,10 +343,8 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option();
                     }
-                } else if (self.selected == GRAPH_STYLE_INDEX || self.selected == GRAPH_WIDTH_INDEX)
-                    && !self.graph_options_selectable()
-                {
-                    // Grayed out (Graph Enabled = no) — no-op.
+                } else if self.is_item_grayed(self.selected) {
+                    // Grayed out — no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -338,10 +358,8 @@ impl<'a> ConfigView<'a> {
                     if self.github_avatars_selectable() {
                         self.cycle_option_prev();
                     }
-                } else if (self.selected == GRAPH_STYLE_INDEX || self.selected == GRAPH_WIDTH_INDEX)
-                    && !self.graph_options_selectable()
-                {
-                    // Grayed out (Graph Enabled = no) — no-op.
+                } else if self.is_item_grayed(self.selected) {
+                    // Grayed out — no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -616,15 +634,42 @@ impl<'a> ConfigView<'a> {
                 self.core_config.option.theme = new_theme;
                 self.theme_preview = None;
             }
+            RENDERER_INDEX => {
+                let prev = match self.core_config.graph_renderer() {
+                    GraphRenderer::Auto => GraphRenderer::Sixel,
+                    GraphRenderer::Ascii => GraphRenderer::Auto,
+                    GraphRenderer::Kitty => GraphRenderer::Ascii,
+                    GraphRenderer::Iterm => GraphRenderer::Kitty,
+                    GraphRenderer::KittyUnicode => GraphRenderer::Iterm,
+                    GraphRenderer::Sixel => GraphRenderer::KittyUnicode,
+                };
+                self.core_config.set_graph_renderer(prev);
+                self.graph_preview = None;
+                if self.core_config.graph_renderer().is_ascii() {
+                    if self.core_config.graph_style() == GraphStyle::Smooth {
+                        self.core_config.set_graph_style(GraphStyle::Rounded);
+                    }
+                    self.core_config.set_github_avatars(false);
+                }
+            }
             GRAPH_ENABLED_INDEX => {
                 self.ui_config.list.graph_enabled = !self.ui_config.list.graph_enabled;
             }
             GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
-                let prev = match current {
-                    GraphStyle::Rounded => GraphStyle::Smooth,
-                    GraphStyle::Angular => GraphStyle::Rounded,
-                    GraphStyle::Smooth => GraphStyle::Angular,
+                let text_mode = self.core_config.graph_renderer() == GraphRenderer::Ascii;
+                let prev = if text_mode {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Angular,
+                        GraphStyle::Angular => GraphStyle::Rounded,
+                        GraphStyle::Smooth => GraphStyle::Angular,
+                    }
+                } else {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Smooth,
+                        GraphStyle::Angular => GraphStyle::Rounded,
+                        GraphStyle::Smooth => GraphStyle::Angular,
+                    }
                 };
                 self.core_config.set_graph_style(prev);
             }
@@ -639,7 +684,8 @@ impl<'a> ConfigView<'a> {
                 // the new cell width.
                 self.graph_preview = None;
             }
-            4 => {
+            5 => {
+                // Diff Mode (was index 4, now 5 after Graph Render insert)
                 let prev = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::SideBySideEnhanced,
                     DiffMode::Raw => DiffMode::Enhanced,
@@ -648,7 +694,8 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(prev);
             }
-            5 => {
+            6 => {
+                // Resolve Mode (was index 5, now 6)
                 let prev = match self.ui_config.common.conflict_view {
                     ConflictViewMode::ThreePane => ConflictViewMode::Inline,
                     ConflictViewMode::TwoPane => ConflictViewMode::ThreePane,
@@ -656,7 +703,8 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_conflict_view(prev);
             }
-            6 => {
+            7 => {
+                // Rebase Mode (was index 6, now 7)
                 let prev = match self.ui_config.common.rebase_view {
                     RebaseViewMode::Compact => RebaseViewMode::Split,
                     RebaseViewMode::Inline => RebaseViewMode::Compact,
@@ -664,42 +712,32 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_rebase_view(prev);
             }
-            7 => {
+            8 => {
+                // Order (was index 7, now 8)
                 let prev = match self.core_config.order() {
                     crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
                     crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
                 };
                 self.core_config.set_order(prev);
             }
-            8 => {
+            9 => {
+                // Initial Selection (was index 8, now 9)
                 let prev = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            9 => {
+            10 => {
+                // Mouse (was index 9, now 10)
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            10 => {
+            11 => {
+                // Date Format
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
-            }
-            11 => {
-                let current = self
-                    .core_config
-                    .protocol()
-                    .unwrap_or(ImageProtocolType::Auto);
-                let prev = match current {
-                    ImageProtocolType::Auto => ImageProtocolType::KittyUnicode,
-                    ImageProtocolType::Kitty => ImageProtocolType::Auto,
-                    ImageProtocolType::Iterm => ImageProtocolType::Kitty,
-                    ImageProtocolType::Sixel => ImageProtocolType::Iterm,
-                    ImageProtocolType::KittyUnicode => ImageProtocolType::Sixel,
-                };
-                self.core_config.set_protocol(prev);
             }
             GITHUB_AVATARS_INDEX => {
                 self.core_config
@@ -727,15 +765,43 @@ impl<'a> ConfigView<'a> {
                 self.core_config.option.theme = new_theme;
                 self.theme_preview = None;
             }
+            RENDERER_INDEX => {
+                let next = match self.core_config.graph_renderer() {
+                    GraphRenderer::Auto => GraphRenderer::Ascii,
+                    GraphRenderer::Ascii => GraphRenderer::Kitty,
+                    GraphRenderer::Kitty => GraphRenderer::Iterm,
+                    GraphRenderer::Iterm => GraphRenderer::KittyUnicode,
+                    GraphRenderer::KittyUnicode => GraphRenderer::Sixel,
+                    GraphRenderer::Sixel => GraphRenderer::Auto,
+                };
+                self.core_config.set_graph_renderer(next);
+                self.graph_preview = None;
+                if self.core_config.graph_renderer().is_ascii() {
+                    if self.core_config.graph_style() == GraphStyle::Smooth {
+                        self.core_config.set_graph_style(GraphStyle::Rounded);
+                    }
+                    self.core_config.set_github_avatars(false);
+                }
+            }
             GRAPH_ENABLED_INDEX => {
                 self.ui_config.list.graph_enabled = !self.ui_config.list.graph_enabled;
             }
             GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
-                let next = match current {
-                    GraphStyle::Rounded => GraphStyle::Angular,
-                    GraphStyle::Angular => GraphStyle::Smooth,
-                    GraphStyle::Smooth => GraphStyle::Rounded,
+                // In Ascii mode, Smooth is not available - skip it.
+                let text_mode = self.core_config.graph_renderer() == GraphRenderer::Ascii;
+                let next = if text_mode {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Angular,
+                        GraphStyle::Angular => GraphStyle::Rounded,
+                        GraphStyle::Smooth => GraphStyle::Rounded,
+                    }
+                } else {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Angular,
+                        GraphStyle::Angular => GraphStyle::Smooth,
+                        GraphStyle::Smooth => GraphStyle::Rounded,
+                    }
                 };
                 self.core_config.set_graph_style(next);
             }
@@ -748,7 +814,8 @@ impl<'a> ConfigView<'a> {
                 self.core_config.set_graph_width(next);
                 self.graph_preview = None;
             }
-            4 => {
+            5 => {
+                // Diff Mode (was index 4, now 5 after Graph Render insert)
                 let next = match self.ui_config.common.diff_mode {
                     DiffMode::Enhanced => DiffMode::Raw,
                     DiffMode::Raw => DiffMode::SideBySide,
@@ -757,7 +824,8 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_diff_mode(next);
             }
-            5 => {
+            6 => {
+                // Resolve Mode (was index 5, now 6)
                 let next = match self.ui_config.common.conflict_view {
                     ConflictViewMode::ThreePane => ConflictViewMode::TwoPane,
                     ConflictViewMode::TwoPane => ConflictViewMode::Inline,
@@ -765,7 +833,8 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_conflict_view(next);
             }
-            6 => {
+            7 => {
+                // Rebase Mode (was index 6, now 7)
                 let next = match self.ui_config.common.rebase_view {
                     RebaseViewMode::Compact => RebaseViewMode::Inline,
                     RebaseViewMode::Inline => RebaseViewMode::Split,
@@ -773,42 +842,32 @@ impl<'a> ConfigView<'a> {
                 };
                 self.ui_config.common.set_rebase_view(next);
             }
-            7 => {
+            8 => {
+                // Order (was index 7, now 8)
                 let next = match self.core_config.order() {
                     crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
                     crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
                 };
                 self.core_config.set_order(next);
             }
-            8 => {
+            9 => {
+                // Initial Selection (was index 8, now 9)
                 let next = match self.core_config.initial_selection() {
                     InitialSelection::Latest => InitialSelection::Head,
                     InitialSelection::Head => InitialSelection::Latest,
                 };
                 self.core_config.set_initial_selection(next);
             }
-            9 => {
+            10 => {
+                // Mouse (was index 9, now 10)
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            10 => {
+            11 => {
+                // Date Format
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
-            }
-            11 => {
-                let current = self
-                    .core_config
-                    .protocol()
-                    .unwrap_or(ImageProtocolType::Auto);
-                let next = match current {
-                    ImageProtocolType::Auto => ImageProtocolType::Kitty,
-                    ImageProtocolType::Kitty => ImageProtocolType::Iterm,
-                    ImageProtocolType::Iterm => ImageProtocolType::Sixel,
-                    ImageProtocolType::Sixel => ImageProtocolType::KittyUnicode,
-                    ImageProtocolType::KittyUnicode => ImageProtocolType::Auto,
-                };
-                self.core_config.set_protocol(next);
             }
             GITHUB_AVATARS_INDEX => {
                 self.core_config
@@ -913,6 +972,11 @@ impl<'a> ConfigView<'a> {
         let items = vec![
             ("Theme", self.core_config.option.theme.clone(), false),
             (
+                "Renderer",
+                graph_renderer_display(self.core_config.graph_renderer()),
+                false,
+            ),
+            (
                 "Graph Enabled",
                 if self.ui_config.list.graph_enabled {
                     "yes".to_string()
@@ -967,11 +1031,6 @@ impl<'a> ConfigView<'a> {
                     .date_time_format()
                     .display_name()
                     .to_string(),
-                false,
-            ),
-            (
-                "Image Protocol",
-                protocol_display(self.core_config.protocol()),
                 false,
             ),
             (
@@ -1037,9 +1096,7 @@ impl<'a> ConfigView<'a> {
                 self.editing_text && i == self.selected,
                 &self.editing_value,
             );
-            let is_grayed = (*indented && !avatars_selectable)
-                || ((i == GRAPH_STYLE_INDEX || i == GRAPH_WIDTH_INDEX)
-                    && !self.ui_config.list.graph_enabled);
+            let is_grayed = self.is_item_grayed(i) || (*indented && !avatars_selectable);
             let label = format!("{CONFIG_ITEM_INDENT}{name}");
             let value_prefix = "";
             let label_fg = if is_grayed {
@@ -1172,6 +1229,7 @@ impl<'a> ConfigView<'a> {
         let git_email = &self.ctx.git_user_email;
         let descriptions: Vec<String> = vec![
             "Color theme applied to the entire interface, including diff syntax highlighting.".into(),
+            "How gitoui renders images.\n\nAuto: auto-detect the best image protocol for your terminal.\nAscii: no images - graph uses Unicode box-drawing, avatars are disabled.\nKitty: Kitty graphics protocol.\niTerm2: iTerm2 inline images.\nKitty Unicode: Kitty via Unicode placeholders (for tmux).\nSixel: Sixel graphics format.".into(),
             {
                 let base = "Toggle the commit-graph image column.\n\nDisabling it skips all image rendering for near-instant scrolling on huge repos.";
                 if self.ctx.graph_huge_repo_warning {
@@ -1183,7 +1241,7 @@ impl<'a> ConfigView<'a> {
                     base.into()
                 }
             },
-            "Controls how commit connection lines are rendered in the graph.".into(),
+            "Controls how commit connection lines are rendered in the graph.\n\nSmooth is only available in Image render mode.".into(),
             "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
             diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
@@ -1192,7 +1250,6 @@ impl<'a> ConfigView<'a> {
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.\n\nWill update at next launch of gitoui.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
-            "Terminal image protocol used for rendering commit graph images.".into(),
             format!(
                 "Override git user.name for commits.\n\nCurrent git config: '{}'",
                 git_name
@@ -1288,6 +1345,15 @@ impl<'a> ConfigView<'a> {
                 }
             }
             _ => {}
+        }
+
+        if let Some(resolved) = self.auto_resolved_hint() {
+            let hint_fg = self.ctx.color_theme.list_date_fg;
+            right_lines.push(Line::from(""));
+            right_lines.push(Line::from(Span::styled(
+                format!("Auto resolved: {resolved}"),
+                Style::default().fg(hint_fg),
+            )));
         }
 
         // Leaving the Graph Style / Graph Width items, pre-clear the cells
@@ -1418,15 +1484,21 @@ impl<'a> ConfigView<'a> {
     }
 
     fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
+        let renderer = self.core_config.graph_renderer();
         let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
-        // Resolve "Auto" to the same Double/Single mapping the runtime uses
-        //, Sixel + KittyUnicode prefer Single cells, everything else Double.
+
+        if renderer.is_ascii() {
+            self.render_ascii_graph_preview(f, right_area, style);
+            return;
+        }
+
+        let preview_protocol = renderer.to_image_protocol();
         let cell_width = match self.core_config.graph_width() {
             GraphWidthType::Double => crate::graph::CellWidthType::Double,
             GraphWidthType::Single => crate::graph::CellWidthType::Single,
             GraphWidthType::Auto => {
                 use crate::protocol::ImageProtocol;
-                match self.ctx.image_protocol {
+                match preview_protocol {
                     ImageProtocol::Sixel | ImageProtocol::KittyUnicode { .. } => {
                         crate::graph::CellWidthType::Single
                     }
@@ -1449,7 +1521,7 @@ impl<'a> ConfigView<'a> {
                 style,
                 cell_width,
                 &self.ctx.graph_color_set,
-                self.ctx.image_protocol,
+                preview_protocol,
                 bg_rgb,
             );
             self.pending_preview_uploads
@@ -1558,6 +1630,123 @@ impl<'a> ConfigView<'a> {
         self.last_preview_rows = Some((preview_top, preview.rows.len() as u16));
     }
 
+    fn render_ascii_graph_preview(
+        &mut self,
+        f: &mut Frame,
+        right_area: Rect,
+        style: crate::graph::GraphStyle,
+    ) {
+        use crate::git::CommitType;
+        use crate::graph::ascii;
+
+        let preview_top = right_area.y.saturating_add(6);
+        let bg = self.ctx.color_theme.bg;
+        let bg_style = Style::default().bg(bg);
+        let edge_colors: Vec<Color> = self
+            .ctx
+            .graph_color_set
+            .colors
+            .iter()
+            .map(|c| c.to_ratatui_color())
+            .collect();
+
+        let lane_width: usize = match self.core_config.graph_width() {
+            GraphWidthType::Double => 3,
+            GraphWidthType::Single => 2,
+            GraphWidthType::Auto => {
+                let (w, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
+                if w >= 100 {
+                    3
+                } else {
+                    2
+                }
+            }
+        };
+
+        let hashes = ["m1", "f1", "m0"];
+        let types = [CommitType::Commit, CommitType::Commit, CommitType::Commit];
+        let labels = ["main", "feature", ""];
+        let main_color = self.ctx.graph_color_set.get(0).to_ratatui_color();
+        let feature_color = self.ctx.graph_color_set.get(1).to_ratatui_color();
+        let label_styles = [
+            Style::default().fg(main_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(feature_color)
+                .add_modifier(Modifier::BOLD),
+            Style::default(),
+        ];
+
+        let ap = GraphPreview::build_ascii(style, &self.ctx.graph_color_set);
+        let graph = ap.graph;
+
+        let buf = f.buffer_mut();
+        let mut max_used = 0usize;
+        for (i, hash) in hashes.iter().enumerate() {
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            for col in right_area.x..right_area.x.saturating_add(right_area.width) {
+                let c = &mut buf[(col, y)];
+                c.set_symbol(" ");
+                c.set_style(bg_style);
+                c.set_skip(false);
+            }
+            let ch: crate::git::CommitHash = (*hash).into();
+            let cells = ascii::render_ascii_row(
+                &graph,
+                &ch,
+                &types[i],
+                false,
+                style,
+                &edge_colors,
+                Color::Rgb(128, 128, 128),
+                None,
+                lane_width,
+            );
+            if cells.len() > max_used {
+                max_used = cells.len();
+            }
+            for (x, ac) in cells.iter().enumerate() {
+                let col = right_area.x + x as u16;
+                if col >= right_area.x.saturating_add(right_area.width) {
+                    break;
+                }
+                let c = &mut buf[(col, y)];
+                c.set_symbol(&String::from(ac.ch));
+                c.set_style(Style::default().fg(ac.color).bg(bg));
+                c.set_skip(false);
+            }
+        }
+
+        let label_x = right_area.x + max_used as u16 + 2;
+        for (i, label) in labels.iter().enumerate() {
+            if label.is_empty() {
+                continue;
+            }
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            let area = Rect {
+                x: label_x,
+                y,
+                width: right_area
+                    .x
+                    .saturating_add(right_area.width)
+                    .saturating_sub(label_x),
+                height: 1,
+            };
+            if area.width == 0 {
+                continue;
+            }
+            let line = Line::from(Span::styled(label.to_string(), label_styles[i]));
+            f.render_widget(Paragraph::new(line), area);
+        }
+
+        self.last_preview_rows = Some((preview_top, 3));
+    }
+
     fn clear_preview_cells(&self, f: &mut Frame, right_area: Rect, y_start: u16, count: u16) {
         // We only need to overwrite the previous frame's text-bearing cells (image
         // placeholders and labels) with a regular space so the buffer diff sends an
@@ -1653,6 +1842,17 @@ impl<'a> ConfigView<'a> {
             &self.github_auth_state,
             self.github_auth_pending,
         )
+    }
+}
+
+fn graph_renderer_display(renderer: GraphRenderer) -> String {
+    match renderer {
+        GraphRenderer::Auto => "Auto".to_string(),
+        GraphRenderer::Ascii => "Ascii".to_string(),
+        GraphRenderer::Kitty => "Kitty".to_string(),
+        GraphRenderer::Iterm => "iTerm2".to_string(),
+        GraphRenderer::KittyUnicode => "Kitty Unicode".to_string(),
+        GraphRenderer::Sixel => "Sixel".to_string(),
     }
 }
 
@@ -1902,17 +2102,6 @@ fn mouse_display(enabled: bool) -> String {
         "On".to_string()
     } else {
         "Off".to_string()
-    }
-}
-
-fn protocol_display(protocol: Option<ImageProtocolType>) -> String {
-    match protocol {
-        Some(ImageProtocolType::Auto) => "Auto".to_string(),
-        Some(ImageProtocolType::Iterm) => "iTerm2".to_string(),
-        Some(ImageProtocolType::Kitty) => "Kitty".to_string(),
-        Some(ImageProtocolType::KittyUnicode) => "Kitty Unicode".to_string(),
-        Some(ImageProtocolType::Sixel) => "Sixel".to_string(),
-        None => "Auto".to_string(),
     }
 }
 
