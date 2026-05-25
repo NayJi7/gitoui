@@ -48,7 +48,7 @@ umbra = "0.4.0"
 two-face = { version = "0.5.1", default-features = false, features = ["syntect-fancy"] }
 notify-debouncer-mini = { version = "0.7.0", default-features = false }
 thiserror = "2"
-bincode = "1"
+bincode = "3"
 
 [dev-dependencies]
 dircpy = "0.3.20"
