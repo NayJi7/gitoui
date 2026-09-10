@@ -18,7 +18,7 @@ diagnostic at boot.
 - ~/.config/gitoui/
   - **config.toml** the file documented on this page
   - themes/
-    - MySuperTheme.toml [custom themes](/configurations/themes/)
+    - MySuperTheme.toml [custom themes](../themes/)
   - github_token.toml OAuth (mode `0600`, user-only)
 </FileTree>
 
@@ -105,7 +105,7 @@ branches = [
 ```
 
 If a named theme defines its own `graph_branches`, that wins over a generic
-`[graph.color.branches]` setting, see [Themes](/configurations/themes/).
+`[graph.color.branches]` setting, see [Themes](../themes/).
 
 </TabItem>
 
@@ -114,7 +114,7 @@ If a named theme defines its own `graph_branches`, that wins over a generic
 The full theme palette, ~40 tokens (`fg`, `bg`, `list_selected_fg`, etc.).
 Use this section only when you want to override a single token of an active
 named theme. For full custom palettes, prefer
-[`~/.config/gitoui/themes/<name>.toml`](/configurations/themes/), the same
+[`~/.config/gitoui/themes/<name>.toml`](../themes/), the same
 schema, in a dedicated file.
 
 Each token accepts:
@@ -129,7 +129,7 @@ Each token accepts:
 
 ## `[keybind]`
 
-Two-layer keybinding system, see the dedicated [Keybindings](/keybindings/)
+Two-layer keybinding system, see the dedicated [Keybindings](../../keybindings/)
 page for the full reference.
 
 ```toml
