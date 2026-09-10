@@ -111,7 +111,7 @@ jobs:
       - name: Checksum
         run: sha256sum releases/* > ./releases/checksum.txt
       - name: Create Release
-        uses: softprops/action-gh-release@v3.0.0
+        uses: softprops/action-gh-release@v3.0.3
         with:
           draft: false
           body: ${{ steps.tag_msg.outputs.body }}
