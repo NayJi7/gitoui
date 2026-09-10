@@ -1421,10 +1421,7 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
             // For renames, key by `newname` so the numstat lookup matches
             // the `oldname => newname` parse below.
             let key = rename_to.clone().unwrap_or_else(|| path_name.clone());
-            status_map.insert(
-                key,
-                (status, Some(path_name).filter(|_| rename_to.is_some())),
-            );
+            status_map.insert(key, (status, rename_to.is_some().then_some(path_name)));
             if let Some(to) = rename_to {
                 // Keep an extra entry under `oldname` so a `D`/`R` row that
                 // appeared earlier in the stream isn't shadowed by a stale
