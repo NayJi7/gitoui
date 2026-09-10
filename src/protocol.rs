@@ -6,71 +6,83 @@ use std::{
 use base64::Engine;
 use ratatui::style::{Color, Style};
 
-pub fn auto_detect() -> ImageProtocol {
-    if detect_kitty_graphics_protocol() {
-        if detect_tmux() {
-            ImageProtocol::KittyUnicode { tmux: true }
+/// Detect the terminal's inline-image protocol from the process
+/// environment. `None` means "no image protocol detected": callers must
+/// fall back to text (ASCII graph, text brand), never to a protocol
+/// guessed by default. VTE terminals (Ptyxis, GNOME Terminal, Tilix)
+/// export none of the variables below, and blindly emitting iTerm2
+/// escapes there swallows everything printed afterwards.
+pub fn auto_detect() -> Option<ImageProtocol> {
+    detect_from_env(|key| env::var(key).ok())
+}
+
+/// Pure detection over an arbitrary environment lookup, so the rules
+/// can be unit-tested without mutating the process environment.
+pub fn detect_from_env(get: impl Fn(&str) -> Option<String>) -> Option<ImageProtocol> {
+    if kitty_from(&get) {
+        if tmux_from(&get) {
+            Some(ImageProtocol::KittyUnicode { tmux: true })
         } else {
-            ImageProtocol::Kitty
+            Some(ImageProtocol::Kitty)
         }
-    } else if detect_sixel_support() {
-        ImageProtocol::Sixel
+    } else if sixel_from(&get) {
+        Some(ImageProtocol::Sixel)
+    } else if iterm2_from(&get) {
+        Some(ImageProtocol::Iterm2)
     } else {
-        ImageProtocol::Iterm2
+        None
+    }
+}
+
+/// Human-readable name for a detection result, shown in the config
+/// view's "Auto resolved" hint.
+pub fn protocol_name(proto: Option<ImageProtocol>) -> &'static str {
+    match proto {
+        Some(ImageProtocol::Kitty) => "Kitty",
+        Some(ImageProtocol::KittyUnicode { .. }) => "Kitty Unicode",
+        Some(ImageProtocol::Sixel) => "Sixel",
+        Some(ImageProtocol::Iterm2) => "iTerm2",
+        None => "Ascii (no image protocol detected)",
     }
 }
 
 pub fn auto_detect_name() -> &'static str {
-    if detect_kitty_graphics_protocol() {
-        if detect_tmux() {
-            "Kitty Unicode"
-        } else {
-            "Kitty"
-        }
-    } else if detect_sixel_support() {
-        "Sixel"
-    } else if detect_iterm2_support() {
-        "iTerm2"
-    } else {
-        "Ascii (no image protocol detected)"
-    }
+    protocol_name(auto_detect())
 }
 
 pub fn auto_detect_has_image_support() -> bool {
-    detect_kitty_graphics_protocol() || detect_sixel_support() || detect_iterm2_support()
+    auto_detect().is_some()
 }
 
-fn detect_iterm2_support() -> bool {
-    env::var("TERM_PROGRAM").ok().is_some_and(|tp| {
+fn iterm2_from(get: &impl Fn(&str) -> Option<String>) -> bool {
+    get("TERM_PROGRAM").is_some_and(|tp| {
         tp == "iTerm.app" || tp == "WezTerm" || tp == "mintty" || tp == "contour" || tp == "rio"
-    }) || env::var("LC_TERMINAL").ok().is_some_and(|t| t == "iTerm2")
+    }) || get("LC_TERMINAL").is_some_and(|t| t == "iTerm2")
 }
 
-fn detect_kitty_graphics_protocol() -> bool {
-    env::var("KITTY_WINDOW_ID").is_ok()
-        || env::var("TERM")
-            .ok()
-            .is_some_and(|t| t == "xterm-ghostty" || t == "xterm-kitty")
-        || env::var("GHOSTTY_RESOURCES_DIR").is_ok()
-        || env::var("TERM_PROGRAM")
-            .ok()
-            .is_some_and(|tp| tp == "ghostty")
+fn kitty_from(get: &impl Fn(&str) -> Option<String>) -> bool {
+    get("KITTY_WINDOW_ID").is_some()
+        || get("TERM").is_some_and(|t| t == "xterm-ghostty" || t == "xterm-kitty")
+        || get("GHOSTTY_RESOURCES_DIR").is_some()
+        || get("TERM_PROGRAM").is_some_and(|tp| tp == "ghostty")
 }
 
-fn detect_sixel_support() -> bool {
-    env::var("TERM").ok().is_some_and(|t| t.contains("sixel"))
-        || env::var("TERM_PROGRAM")
-            .ok()
-            .is_some_and(|tp| tp == "wezterm")
+fn sixel_from(get: &impl Fn(&str) -> Option<String>) -> bool {
+    get("TERM").is_some_and(|t| t.contains("sixel"))
+        || get("TERM_PROGRAM").is_some_and(|tp| tp == "wezterm")
+}
+
+fn tmux_from(get: &impl Fn(&str) -> Option<String>) -> bool {
+    get("TMUX").is_some_and(|tmux| !tmux.is_empty())
+        || get("TERM").is_some_and(|term| term.starts_with("tmux"))
+        || get("TERM_PROGRAM").is_some_and(|tp| tp == "tmux")
 }
 
 pub fn detect_tmux() -> bool {
-    env::var("TMUX").is_ok_and(|tmux| !tmux.is_empty())
-        || env::var("TERM").is_ok_and(|term| term.starts_with("tmux"))
-        || env::var("TERM_PROGRAM").is_ok_and(|term_program| term_program == "tmux")
+    tmux_from(&|key| env::var(key).ok())
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageProtocol {
     Iterm2,
     Kitty,
@@ -864,5 +876,68 @@ mod tests {
         let prepared = ImageProtocol::Kitty.prepare_image(&[1, 2, 3], 2, 42);
         assert_eq!(prepared.image_id(), Some(42));
         assert!(prepared.cells()[0].symbol().contains("i=42,"));
+    }
+
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |key| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| (*v).to_string())
+        }
+    }
+
+    #[test]
+    fn vte_terminal_without_image_vars_detects_no_protocol() {
+        // Ptyxis / GNOME Terminal: TERM=xterm-256color, VTE_VERSION set,
+        // no TERM_PROGRAM. Must NOT silently become iTerm2.
+        let env = env_of(&[
+            ("TERM", "xterm-256color"),
+            ("VTE_VERSION", "8401"),
+            ("COLORTERM", "truecolor"),
+        ]);
+        assert_eq!(detect_from_env(env), None);
+    }
+
+    #[test]
+    fn ghostty_detects_kitty() {
+        let env = env_of(&[("TERM", "xterm-256color"), ("TERM_PROGRAM", "ghostty")]);
+        assert_eq!(detect_from_env(env), Some(ImageProtocol::Kitty));
+    }
+
+    #[test]
+    fn kitty_inside_tmux_detects_kitty_unicode() {
+        let env = env_of(&[
+            ("KITTY_WINDOW_ID", "1"),
+            ("TMUX", "/tmp/tmux-1000/default,1,0"),
+        ]);
+        assert_eq!(
+            detect_from_env(env),
+            Some(ImageProtocol::KittyUnicode { tmux: true })
+        );
+    }
+
+    #[test]
+    fn iterm_app_detects_iterm2() {
+        let env = env_of(&[("TERM_PROGRAM", "iTerm.app")]);
+        assert_eq!(detect_from_env(env), Some(ImageProtocol::Iterm2));
+    }
+
+    #[test]
+    fn wezterm_detects_sixel() {
+        let env = env_of(&[("TERM_PROGRAM", "wezterm")]);
+        assert_eq!(detect_from_env(env), Some(ImageProtocol::Sixel));
+    }
+
+    #[test]
+    fn auto_detect_name_matches_detection_result() {
+        assert_eq!(protocol_name(None), "Ascii (no image protocol detected)");
+        assert_eq!(protocol_name(Some(ImageProtocol::Kitty)), "Kitty");
+        assert_eq!(
+            protocol_name(Some(ImageProtocol::KittyUnicode { tmux: true })),
+            "Kitty Unicode"
+        );
+        assert_eq!(protocol_name(Some(ImageProtocol::Sixel)), "Sixel");
+        assert_eq!(protocol_name(Some(ImageProtocol::Iterm2)), "iTerm2");
     }
 }

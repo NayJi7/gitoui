@@ -31,7 +31,7 @@ use clap::{Parser, ValueEnum};
 use graph::GraphImageManager;
 use serde::Deserialize;
 
-/// Gitoui - Say oui to the smoothest git terminal youser experience
+/// gitoui - Say oui to the smoothest git terminal youser experience
 #[derive(Parser)]
 #[command(version)]
 struct Args {
@@ -98,7 +98,12 @@ impl GraphRenderer {
 
     pub fn to_image_protocol(self) -> protocol::ImageProtocol {
         match self {
-            Self::Auto | Self::Ascii => protocol::auto_detect(),
+            // Ascii, or Auto with nothing detected: the app never draws
+            // images on this path (text brand, ASCII graph, avatars off),
+            // so any inert protocol will do; keep iTerm2 as before.
+            Self::Auto | Self::Ascii => {
+                protocol::auto_detect().unwrap_or(protocol::ImageProtocol::Iterm2)
+            }
             Self::Kitty => protocol::ImageProtocol::Kitty,
             Self::KittyUnicode => protocol::ImageProtocol::KittyUnicode {
                 tmux: protocol::detect_tmux(),
@@ -645,7 +650,11 @@ pub fn run() -> Result<()> {
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| ".".to_string());
                     use std::io::Write;
-                    print_no_repo_splash(image_protocol);
+                    print_no_repo_splash(if graph_renderer.is_ascii() {
+                        None
+                    } else {
+                        Some(image_protocol)
+                    });
                     print!(
                         "No git repository found in '{}'.\nInitialize a new repository here? (y/n) ",
                         cwd
@@ -1763,8 +1772,24 @@ pub fn run() -> Result<()> {
 /// trailing newlines therefore produce exactly one blank separator row before
 /// the prompt. Falls back to a plain text banner when the protocol can't
 /// render inline (e.g. KittyUnicode placeholder mode).
-fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
-    use std::io::Write;
+/// Print the brand splash on the CLI paths (--help, --update, config
+/// errors, no-repo prompt). `None` means no image protocol: draw the
+/// text brand instead of emitting escape sequences the terminal would
+/// swallow (VTE terminals eat iTerm2 payloads together with whatever
+/// is printed after them).
+fn print_no_repo_splash(image_protocol: Option<protocol::ImageProtocol>) {
+    let mut stdout = std::io::stdout().lock();
+    write_no_repo_splash(&mut stdout, image_protocol);
+}
+
+fn write_no_repo_splash(
+    w: &mut impl std::io::Write,
+    image_protocol: Option<protocol::ImageProtocol>,
+) {
+    let Some(image_protocol) = image_protocol else {
+        write_text_splash(w);
+        return;
+    };
 
     let left_margin: u16 = 2;
     let logo_w: usize = 8;
@@ -1776,15 +1801,14 @@ fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     // Logo and wordmark are now both 5 rows tall, same baseline, no slack.
     let logo_y_offset: u16 = 0;
 
-    println!();
+    let _ = writeln!(w);
 
-    let render_fallback = || println!("        gitoui\n");
     let Some(logo_png) = brand::render_logo_sized(logo_w as u32, logo_h as u32) else {
-        render_fallback();
+        write_text_splash(w);
         return;
     };
     let Some(wm_png) = brand::render_wordmark_sized(wm_w as u32, wm_h as u32) else {
-        render_fallback();
+        write_text_splash(w);
         return;
     };
     // Logo first: emit with the d=C clear prefix (no prior placements to worry
@@ -1792,45 +1816,106 @@ fn print_no_repo_splash(image_protocol: protocol::ImageProtocol) {
     // erase the logo on terminals that interpret d=C row-wide rather than
     // cell-wide (e.g. Ghostty when both images share rows).
     let Some(logo_esc) = image_protocol.encode_inline(&logo_png, logo_w, logo_h, 1, true) else {
-        render_fallback();
+        write_text_splash(w);
         return;
     };
     let Some(wm_esc) = image_protocol.encode_inline(&wm_png, wm_w, wm_h, 2, false) else {
-        render_fallback();
+        write_text_splash(w);
         return;
     };
 
-    let mut stdout = std::io::stdout().lock();
     // Reserve total_h rows so the terminal scrolls if the cursor is near the bottom.
     for _ in 0..total_h {
-        let _ = writeln!(stdout);
+        let _ = writeln!(w);
     }
     // Move cursor back up to the top-left of the reserved band.
-    let _ = write!(stdout, "\x1b[{}A", total_h);
+    let _ = write!(w, "\x1b[{}A", total_h);
     // Save cursor at (top, 0) so we can come back here for the wordmark
     // without depending on how each protocol advances the cursor after an image.
-    let _ = write!(stdout, "\x1b7");
+    let _ = write!(w, "\x1b7");
 
     // --- Emit the small G logomark ---
     if logo_y_offset > 0 {
-        let _ = write!(stdout, "\x1b[{}B", logo_y_offset);
+        let _ = write!(w, "\x1b[{}B", logo_y_offset);
     }
-    let _ = write!(stdout, "\x1b[{}C", left_margin);
-    let _ = write!(stdout, "{}", logo_esc);
+    let _ = write!(w, "\x1b[{}C", left_margin);
+    let _ = write!(w, "{}", logo_esc);
     // Flush so the terminal commits the logo placement before any subsequent
     // cursor manipulation can be (mis)interpreted as overlapping with it.
-    let _ = stdout.flush();
+    let _ = w.flush();
 
     // --- Emit the wordmark ---
     // Restore to (top, 0), then walk right to the wordmark's start column.
-    let _ = write!(stdout, "\x1b8");
-    let _ = write!(stdout, "\x1b[{}C", left_margin + logo_w as u16 + gap);
-    let _ = write!(stdout, "{}", wm_esc);
+    let _ = write!(w, "\x1b8");
+    let _ = write!(w, "\x1b[{}C", left_margin + logo_w as u16 + gap);
+    let _ = write!(w, "{}", wm_esc);
 
     // Two newlines = one blank separator row before the prompt.
-    let _ = writeln!(stdout);
-    let _ = writeln!(stdout);
-    let _ = stdout.flush();
+    let _ = writeln!(w);
+    let _ = writeln!(w);
+    let _ = w.flush();
+}
+
+/// Text brand for terminals without an image protocol. Mirrors
+/// install.sh's `print_banner_ascii`: the G logomark on the brand book's
+/// 4x5 cell grid (2 cols per cell) next to a figlet "gitoui" wordmark,
+/// git-orange for the G and "git", off-white for "oui". Colors are
+/// skipped when stdout is not a terminal or NO_COLOR is set.
+fn write_text_splash(w: &mut impl std::io::Write) {
+    use std::io::IsTerminal;
+    let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let (orange, shadow, cream, reset) = if color {
+        (
+            "\x1b[38;2;240;81;51m\x1b[1m",
+            "\x1b[38;2;139;42;18m\x1b[1m",
+            "\x1b[38;2;241;236;236m\x1b[1m",
+            "\x1b[0m",
+        )
+    } else {
+        ("", "", "", "")
+    };
+    // Wordmark rows split between "git" and "oui" (figlet Standard).
+    let git = [
+        "       _ _   ",
+        "  __ _(_) |_ ",
+        " / _` | | __/",
+        "| (_| | | || ",
+        " \\__, |_|\\__\\",
+        " |___/        ",
+    ];
+    let oui = [
+        "           _ ",
+        "___  _   _(_)",
+        " _ \\| | | | |",
+        "(_) | |_| | |",
+        "___/ \\__,_|_|",
+        "             ",
+    ];
+    // G rows on the 4x5 cell grid, 2 cols per cell, 3 cols gap before the wordmark.
+    let g_rows: [String; 5] = [
+        format!("  {orange}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}{reset}   "),
+        format!("  {orange}\u{2588}\u{2588}{reset}         "),
+        format!("  {orange}\u{2588}\u{2588}{reset}  {orange}\u{2588}\u{2588}\u{2588}\u{2588}{reset}   "),
+        format!("  {orange}\u{2588}\u{2588}{reset}{shadow}\u{2588}\u{2588}\u{2588}\u{2588}{reset}{orange}\u{2588}\u{2588}{reset}   "),
+        format!("  {orange}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}{reset}   "),
+    ];
+    let _ = writeln!(w);
+    // Row 0: wordmark letter-tops only, G zone blank (13 cols).
+    let _ = writeln!(
+        w,
+        "             {orange}{}{reset}{cream}{}{reset}",
+        git[0], oui[0]
+    );
+    for (i, g) in g_rows.iter().enumerate() {
+        let _ = writeln!(
+            w,
+            "{g}{orange}{}{reset}{cream}{}{reset}",
+            git[i + 1],
+            oui[i + 1]
+        );
+    }
+    let _ = writeln!(w);
+    let _ = w.flush();
 }
 
 fn github_repos_from_remotes() -> Vec<String> {
@@ -1878,6 +1963,38 @@ fn parse_github_repo(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn splash_without_image_protocol_is_plain_text_brand() {
+        let mut out = Vec::new();
+        write_no_repo_splash(&mut out, None);
+        let s = String::from_utf8(out).expect("splash is valid UTF-8");
+        assert!(
+            s.contains("\u{2588}\u{2588}\u{2588}\u{2588}"),
+            "G logomark block row missing: {s:?}"
+        );
+        assert!(s.contains("|___/"), "figlet wordmark missing: {s:?}");
+        assert!(
+            !s.contains("\x1b]1337"),
+            "iTerm2 escape leaked into text splash"
+        );
+        assert!(
+            !s.contains("\x1b_G"),
+            "Kitty escape leaked into text splash"
+        );
+        assert!(!s.contains("\x1bP"), "Sixel escape leaked into text splash");
+    }
+
+    #[test]
+    fn splash_with_kitty_emits_kitty_graphics() {
+        let mut out = Vec::new();
+        write_no_repo_splash(&mut out, Some(protocol::ImageProtocol::Kitty));
+        let s = String::from_utf8_lossy(&out);
+        assert!(
+            s.contains("\x1b_G"),
+            "Kitty splash should emit APC graphics"
+        );
+    }
 
     #[test]
     fn parse_github_repo_from_common_remote_urls() {
