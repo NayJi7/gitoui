@@ -14,10 +14,10 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.39.2",
+    "@astrojs/starlight": "^0.42.0",
     "astro": "^6.3.7",
-    "astro-theme-toggle": "^0.8.1",
-    "sharp": "^0.34.5",
+    "astro-theme-toggle": "^0.8.2",
+    "sharp": "^0.35.4",
     "typed.js": "^3.0.0"
   }
 }
