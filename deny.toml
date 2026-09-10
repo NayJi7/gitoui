@@ -1,3 +1,10 @@
+# Dev-dependencies are never shipped to users: `text-to-png` (tests/graph.rs
+# only) pulls resvg 0.45 + rustybuzz + ttf-parser, both flagged unmaintained
+# (RUSTSEC-2026-0206, RUSTSEC-2026-0192) with no replacement. Audit the
+# runtime graph only.
+[graph]
+exclude-dev = true
+
 [licenses]
 allow = [
     "MIT",
@@ -25,7 +32,6 @@ yanked = "warn"
 # pulled in by a transitive dependency we don't own; revisit on every
 # `cargo update` to see whether the upstream chain has moved off them.
 ignore = [
-    "RUSTSEC-2025-0056", # adler — unmaintained; pulled in via miniz_oxide
-    "RUSTSEC-2025-0141", # bincode — unmaintained; pulled in via syntect
-    "RUSTSEC-2024-0320", # yaml-rust — unmaintained; via syntect (no upgrade)
+    "RUSTSEC-2025-0141", # bincode - unmaintained; pulled in via syntect
+    "RUSTSEC-2024-0320", # yaml-rust - unmaintained; via syntect (no upgrade)
 ]
