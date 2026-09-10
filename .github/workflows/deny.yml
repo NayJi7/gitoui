@@ -30,7 +30,7 @@ jobs:
       # https://github.com/actions/checkout/releases/tag/v6.0.1
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       # https://github.com/EmbarkStudios/cargo-deny-action/releases/tag/v2.0.18
-      - uses: EmbarkStudios/cargo-deny-action@a531616d8ce3b9177443e48a1159bc945a099823
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
         with:
           # Run both license and advisory (RustSec / CVE) checks.
           command: check licenses advisories
