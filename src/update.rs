@@ -120,18 +120,37 @@ fn is_newer(latest: &str, current: &str) -> bool {
 /// binary sits on disk. Cargo-installed binaries get `cargo install`,
 /// everything else (curl one-liner, distro package, manual download) gets
 /// the install.sh script.
+/// Shown instead of running an installer when gitoui came from Homebrew.
+const HOMEBREW_UPGRADE_HINT: &str =
+    "gitoui was installed with Homebrew, update it with: brew upgrade gitoui";
+
 fn detect_install_method() -> InstallMethod {
     let Ok(exe) = env::current_exe() else {
         return InstallMethod::CurlScript;
     };
-    let exe_str = exe.to_string_lossy();
+    // macOS can report the symlink the user invoked
+    // (`/opt/homebrew/bin/gitoui`) instead of the real file; resolve it
+    // so a Homebrew install is recognised by its `Cellar/` path.
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    install_method_for_path(&exe.to_string_lossy(), || which("cargo"))
+}
+
+/// Pure classification of the running binary's path, split out so it can
+/// be unit-tested. `cargo_on_path` guards the cargo case: a binary left in
+/// `~/.cargo/bin` after cargo was removed falls back to the script. It is
+/// only invoked for `.cargo/bin` paths, since it spawns `cargo --version`.
+fn install_method_for_path(exe_str: &str, cargo_on_path: impl FnOnce() -> bool) -> InstallMethod {
+    // Homebrew keeps every formula under `<prefix>/Cellar/<name>/<version>/`
+    // (`/opt/homebrew`, `/usr/local`, `/home/linuxbrew/.linuxbrew`). It owns
+    // the binary: updating it with install.sh would drop a second copy in
+    // `~/.local/bin` and leave the Homebrew one stale.
+    if exe_str.contains("/Cellar/gitoui/") {
+        return InstallMethod::Homebrew;
+    }
     // Standard cargo install prefix on every OS we support.
-    if exe_str.contains("/.cargo/bin/") || exe_str.contains("\\.cargo\\bin\\") {
-        // Sanity check that `cargo` is actually on PATH, if not, the
-        // user removed it after installing; fall back to the script.
-        if which("cargo") {
-            return InstallMethod::Cargo;
-        }
+    if (exe_str.contains("/.cargo/bin/") || exe_str.contains("\\.cargo\\bin\\")) && cargo_on_path()
+    {
+        return InstallMethod::Cargo;
     }
     InstallMethod::CurlScript
 }
@@ -140,6 +159,7 @@ fn detect_install_method() -> InstallMethod {
 enum InstallMethod {
     Cargo,
     CurlScript,
+    Homebrew,
 }
 
 /// Short label describing where the current binary was installed
@@ -158,6 +178,7 @@ pub fn install_label() -> &'static str {
     match detect_install_method() {
         InstallMethod::Cargo => "cargo",
         InstallMethod::CurlScript => "curl",
+        InstallMethod::Homebrew => "brew",
     }
 }
 
@@ -185,6 +206,9 @@ fn run_update(keep_welcome: bool) -> io::Result<()> {
     let method = detect_install_method();
     println!();
     match method {
+        InstallMethod::Homebrew => {
+            return Err(io::Error::other(HOMEBREW_UPGRADE_HINT));
+        }
         InstallMethod::Cargo => {
             // `--quiet` mutes cargo's "Compiling …" stream but still
             // surfaces warnings / errors, gives the same visual
@@ -408,6 +432,11 @@ pub fn maybe_check_at_startup(splash: impl FnOnce()) -> CheckOutcome {
     if !is_newer(&latest, current_version()) {
         return CheckOutcome::Continue;
     }
+    // Homebrew owns the binary and ships updates through `brew upgrade`
+    // (which also lags until the tap formula is bumped): never prompt.
+    if matches!(detect_install_method(), InstallMethod::Homebrew) {
+        return CheckOutcome::Continue;
+    }
     // For curl-installed binaries, only prompt once GitHub has the
     // matching archive, otherwise the user says yes and install.sh
     // resolves the OLD tag, prints a misleading "already up to date".
@@ -445,6 +474,15 @@ pub fn force_check(splash: impl FnOnce()) -> CheckOutcome {
 
     if !is_newer(&latest, current_version()) {
         println!("Already on the latest version (v{}).", current_version());
+        return CheckOutcome::Continue;
+    }
+    if matches!(detect_install_method(), InstallMethod::Homebrew) {
+        println!();
+        println!(
+            "  gitoui v{latest} is available, you have v{}.",
+            current_version()
+        );
+        println!("  {HOMEBREW_UPGRADE_HINT}");
         return CheckOutcome::Continue;
     }
     // Curl-installed: confirm GitHub has the matching archive before
@@ -601,6 +639,39 @@ fn disable_in_user_config() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn install_method_recognises_homebrew_cellar_paths() {
+        for p in [
+            "/opt/homebrew/Cellar/gitoui/0.3.2/bin/gitoui",
+            "/usr/local/Cellar/gitoui/0.3.2/bin/gitoui",
+            "/home/linuxbrew/.linuxbrew/Cellar/gitoui/0.3.2/bin/gitoui",
+        ] {
+            assert!(
+                matches!(install_method_for_path(p, || true), InstallMethod::Homebrew),
+                "{p} should be Homebrew"
+            );
+        }
+    }
+
+    #[test]
+    fn install_method_keeps_cargo_and_curl_paths() {
+        assert!(matches!(
+            install_method_for_path("/home/u/.cargo/bin/gitoui", || true),
+            InstallMethod::Cargo
+        ));
+        // cargo uninstalled since: fall back to the script.
+        assert!(matches!(
+            install_method_for_path("/home/u/.cargo/bin/gitoui", || false),
+            InstallMethod::CurlScript
+        ));
+        assert!(matches!(
+            install_method_for_path("/home/u/.local/bin/gitoui", || panic!(
+                "cargo must not be probed for a non-cargo path"
+            )),
+            InstallMethod::CurlScript
+        ));
+    }
 
     #[test]
     fn newer_versions_compare_correctly() {
