@@ -66,7 +66,16 @@ fn save_at(path: &Path, entries: &[PathBuf]) {
         out.push('"');
     }
     out.push(']');
-    if let Err(e) = fs::write(path, out) {
+    // Write to a sibling temp file, then rename over the target: rename is
+    // atomic, so a concurrent `load()` sees either the old or the new list,
+    // never the empty file `fs::write` leaves while it truncates. The temp
+    // name is unique per write so two background saves can't interleave.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.tmp.{}.{seq}", std::process::id()));
+    let result = fs::write(&tmp, out).and_then(|()| fs::rename(&tmp, path));
+    if let Err(e) = result {
+        let _ = fs::remove_file(&tmp);
         eprintln!("gitoui: failed to write recents.json: {}", e);
     }
 }
@@ -204,6 +213,40 @@ mod tests {
         assert_eq!(
             recents[0],
             dirs.last().unwrap().path().canonicalize().unwrap()
+        );
+    }
+
+    /// A reader must never observe a half-written file: `push` saves on a
+    /// background thread while the UI may `load()` at the same moment.
+    /// `fs::write` truncates before writing, so a concurrent read could see
+    /// an empty list (the CI flake in `path_with_special_chars_round_trips`).
+    #[test]
+    fn concurrent_save_never_exposes_a_partial_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("recents.json");
+        let entries: Vec<PathBuf> = (0..MAX_RECENTS)
+            .map(|i| PathBuf::from(format!("/some/fairly/long/path/number/{i}")))
+            .collect();
+        save_at(&path, &entries);
+        let writer = {
+            let (path, entries) = (path.clone(), entries.clone());
+            std::thread::spawn(move || {
+                for _ in 0..3000 {
+                    save_at(&path, &entries);
+                }
+            })
+        };
+        let mut bad_reads = 0;
+        while !writer.is_finished() {
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            if !text.ends_with(']') {
+                bad_reads += 1;
+            }
+        }
+        writer.join().unwrap();
+        assert_eq!(
+            bad_reads, 0,
+            "reader saw a truncated or partial recents file"
         );
     }
 
