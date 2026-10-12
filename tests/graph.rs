@@ -1363,7 +1363,7 @@ fn complex_001() -> TestResult {
     Ok(())
 }
 
-/// Working tree with uncommitted changes — gitoui injects a synthetic
+/// Working tree with uncommitted changes: gitoui injects a synthetic
 /// "Uncommitted" node above HEAD (hollow grey circle) and connects it
 /// to HEAD with a branch segment styled as `is_uncommitted`. Tests the
 /// rendering of that virtual node + its incoming edge across all three
@@ -1387,7 +1387,7 @@ fn uncommitted_001() -> TestResult {
     git.checkout("master");
     git.commit("003", "2024-01-04");
 
-    // Dirty the working tree without staging — `Repository::load`
+    // Dirty the working tree without staging: `Repository::load`
     // detects `git status` non-clean and inserts the synthetic
     // Uncommitted commit node above HEAD.
     std::fs::write(repo_path.join("WIP.txt"), "work in progress\n").unwrap();
@@ -1440,6 +1440,13 @@ impl GitRepository<'_> {
 
     fn init(&self) {
         self.run(&["init", "-b", "master"], "");
+        // Recent git runs `git maintenance run --auto --detach` after
+        // commits. The detached job creates and removes
+        // `.git/objects/maintenance.lock` while `copy_git_dir` walks the
+        // repo, and the copy fails with NotFound on the vanished file
+        // (seen on CI with git 2.5x). Fixture repos never need it.
+        self.run(&["config", "maintenance.auto", "false"], "");
+        self.run(&["config", "gc.auto", "0"], "");
     }
 
     fn commit(&self, message: &str, date: &str) {
@@ -1566,7 +1573,7 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
         option.style,
     );
 
-    // Create concatenated image — cell dimensions MUST match
+    // Create concatenated image: cell dimensions MUST match
     // `ImageParams::new(_, CellWidthType::Double)` in src/graph/image.rs,
     // which produces 50×56 cells. Using a smaller height here would
     // overflow when we `copy_from` each 56-tall row image, panicking
@@ -1583,7 +1590,7 @@ fn generate_and_output_graph_image<P: AsRef<Path>>(path: P, option: &GenerateGra
     for (i, _edges) in graph.edges.iter().enumerate() {
         let y = (height * i) as u32;
 
-        // write graph — one row image per commit, in graph order
+        // write graph: one row image per commit, in graph order
         let graph_row_image = &graph_row_images[i];
         let image = image::load_from_memory(&graph_row_image.bytes).unwrap();
         img_buf.copy_from(&image, 0, y).unwrap();
