@@ -1,4 +1,4 @@
-//! On-disk commit-history cache (streamable v4).
+//! On-disk commit-history cache (streamable v4 layout, version 5).
 //!
 //! Walks `git log` once per session (in the background) and persists
 //! the full commit history to disk as a sequence of independently
@@ -27,8 +27,8 @@
 //! uses `bincode::serialize_into(&mut writer, &summary)` per record
 //! and flushes at the end before atomic rename.
 //!
-//! Old v1/v2/v3 caches fail the magic + version check on load and are
-//! silently deleted so the bg thread re-walks and re-saves in the v4
+//! Older caches (v1 to v4) fail the magic + version check on load and are
+//! silently deleted so the bg thread re-walks and re-saves in the current
 //! format on next run.
 //!
 //! Graph topology is NOT cached. The user wants the cache to cover
@@ -52,8 +52,14 @@ const CACHE_MAGIC: [u8; 4] = *b"GTOI";
 /// Schema version. v4 = streamable: header + sequence of independent
 /// `CommitSummary` records (was `Commit` in v3). Bump when the
 /// on-disk format structurally changes (NOT when `CommitSummary`
-/// itself gains a serde-optional field).
-const CACHE_VERSION: u32 = 4;
+/// itself gains a serde-optional field), or to purge caches written
+/// by a buggy writer.
+///
+/// v5 keeps the v4 layout byte for byte. It exists only to discard v4
+/// caches that `try_extend` corrupted with duplicated commits (fixed
+/// alongside this bump): their header count matches the repo, so no
+/// other check would ever have rejected them.
+const CACHE_VERSION: u32 = 5;
 
 /// Header at the top of every cache file. Bincode-encoded as a single
 /// record so the reader can land on the first commit record by
@@ -84,7 +90,10 @@ pub struct CacheHeader {
 }
 
 impl CacheHeader {
-    fn new(head_hash: String, reachable_count: u64, sort: SortCommit) -> Self {
+    /// Build a header stamped with the current `CACHE_VERSION`. Always go
+    /// through here: a hand-written `version` literal elsewhere silently
+    /// produces caches the reader rejects after the next version bump.
+    pub fn new(head_hash: String, reachable_count: u64, sort: SortCommit) -> Self {
         Self {
             magic: CACHE_MAGIC,
             version: CACHE_VERSION,
@@ -453,10 +462,17 @@ fn read_header(path: &Path) -> Option<CacheHeader> {
 /// stays bounded.
 pub fn try_extend(repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummary>> {
     let path = cache_path_for(repo_path)?;
+    try_extend_at(&path, repo_path, sort)
+}
+
+/// `try_extend` against an explicit cache file, so tests can drive it
+/// without pointing `XDG_CACHE_HOME` somewhere (env mutation races
+/// between parallel tests).
+fn try_extend_at(path: &Path, repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummary>> {
     if !path.exists() {
         return None;
     }
-    let header = read_header(&path)?;
+    let header = read_header(path)?;
     let live_head = current_head_hash(repo_path)?;
     // Sort mismatch: the on-disk records are in the OLD order and
     // splicing new commits walked in the NEW order at the front would
@@ -483,6 +499,19 @@ pub fn try_extend(repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummar
     if new_commits.is_empty() {
         return None;
     }
+    // `cached_head..HEAD` excludes only the ancestors of the cached HEAD,
+    // but the full walk caches the commits of EVERY ref (`--branches
+    // --remotes --tags`). Commits another ref already carried (typically
+    // a remote PR branch merged into main later) are cached already, and
+    // prepending them again duplicated their rows, which shifted every
+    // position in the ReplaceGraph topology. Leave those where they are
+    // (the full walk already placed them after their children) and only
+    // prepend the commits the cache has never seen.
+    let already_cached = cached_hashes_among(path, &new_commits)?;
+    let new_commits: Vec<CommitSummary> = new_commits
+        .into_iter()
+        .filter(|c| !already_cached.contains(&c.commit_hash))
+        .collect();
     // Rewrite the cache: header + new commits (prepended) + existing
     // commits (streamed back from the old file). Memory peak stays
     // bounded - we never hold the existing cache in memory.
@@ -493,8 +522,8 @@ pub fn try_extend(repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummar
     // Re-read the existing file's commits via the streamer. Open
     // separately from the writer so we don't race against our own
     // atomic rename.
-    let mut old_reader = StreamReader::open(&path).ok()?;
-    let mut writer = StreamWriter::create(&path, new_header).ok()?;
+    let mut old_reader = StreamReader::open(path).ok()?;
+    let mut writer = StreamWriter::create(path, new_header).ok()?;
     for c in &new_commits {
         writer.write_commit(c).ok()?;
     }
@@ -519,6 +548,29 @@ pub fn try_extend(repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummar
         new_commits.len()
     );
     Some(new_commits)
+}
+
+/// Which of `candidates` already appear in the cache file at `path`.
+/// Streams the file once; memory is bounded by the candidate set (the
+/// surgical-extend delta), never by the cache size.
+fn cached_hashes_among(
+    path: &Path,
+    candidates: &[CommitSummary],
+) -> Option<rustc_hash::FxHashSet<super::CommitHash>> {
+    let wanted: rustc_hash::FxHashSet<&super::CommitHash> =
+        candidates.iter().map(|c| &c.commit_hash).collect();
+    let mut found = rustc_hash::FxHashSet::default();
+    let mut reader = StreamReader::open(path).ok()?;
+    while let Some(item) = reader.next_commit() {
+        let c = item.ok()?;
+        if wanted.contains(&c.commit_hash) {
+            found.insert(c.commit_hash);
+            if found.len() == wanted.len() {
+                break;
+            }
+        }
+    }
+    Some(found)
 }
 
 /// Persist the full commit-summary history to disk by streaming
@@ -645,5 +697,78 @@ mod tests {
         assert!(reader.next_commit().is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@e")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@e")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Regression (StremioFR, 2026-10): the full walk caches commits
+    /// reachable from EVERY ref, but the surgical extend walked
+    /// `cached_head..HEAD` and prepended the result blindly. Commits
+    /// that were already cached through another ref (a remote PR
+    /// branch merged later into main) were written twice, and the
+    /// duplicated rows shifted every position in the ReplaceGraph
+    /// topology. After an extend, each commit must appear exactly once.
+    #[test]
+    fn try_extend_does_not_duplicate_commits_cached_via_other_refs() {
+        let root = std::env::temp_dir().join(format!("gitoui-extend-dup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "A"]);
+        // `other` runs ahead of main: B and C are cached through it.
+        git(&repo, &["checkout", "-q", "-b", "other"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "B"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "C"]);
+        git(&repo, &["checkout", "-q", "main"]);
+
+        // Full walk over every ref, cached with HEAD = A.
+        let cache = root.join("commits.bin");
+        let full = crate::git::Repository::load(&repo, SortCommit::Chronological, None).unwrap();
+        let head = current_head_hash(&repo).unwrap();
+        let mut writer =
+            StreamWriter::create(&cache, CacheHeader::new(head, 3, SortCommit::Chronological))
+                .unwrap();
+        for c in full.all_commits_arc().iter() {
+            writer.write_commit(c).unwrap();
+        }
+        writer.finish().unwrap();
+
+        // main fast-forwards onto C, then one new commit D on top.
+        git(&repo, &["merge", "-q", "--ff-only", "other"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "D"]);
+
+        try_extend_at(&cache, &repo, SortCommit::Chronological).expect("extend");
+
+        let mut reader = StreamReader::open(&cache).unwrap();
+        let mut hashes = Vec::new();
+        while let Some(c) = reader.next_commit() {
+            hashes.push(c.unwrap().commit_hash);
+        }
+        let unique: std::collections::HashSet<_> = hashes.iter().collect();
+        assert_eq!(
+            hashes.len(),
+            unique.len(),
+            "duplicated commits in cache: {hashes:?}"
+        );
+        assert_eq!(hashes.len(), 4, "A, B, C, D exactly once: {hashes:?}");
+        assert_eq!(reader.header().head_hash, current_head_hash(&repo).unwrap());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

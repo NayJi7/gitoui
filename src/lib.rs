@@ -1220,16 +1220,7 @@ pub fn run() -> Result<()> {
                         let mut cache_writer_handle: Option<std::thread::JoinHandle<()>> = None;
 
                         if let (Some(head), Some(path)) = (head_hash, cache_path) {
-                            let header = git::cache::CacheHeader {
-                                magic: *b"GTOI",
-                                version: 4,
-                                head_hash: head,
-                                reachable_count: reachable,
-                                sort_order: match order {
-                                    git::SortCommit::Chronological => 0,
-                                    git::SortCommit::Topological => 1,
-                                },
-                            };
+                            let header = git::cache::CacheHeader::new(head, reachable, order);
                             match git::cache::StreamWriter::create(&path, header) {
                                 Ok(mut w) => {
                                     let (tx, rx) =
