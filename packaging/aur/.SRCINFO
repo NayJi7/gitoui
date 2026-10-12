@@ -1,0 +1,20 @@
+pkgbase = gitoui-bin
+	pkgdesc = Terminal Git client with an image-rendered commit graph and GitHub PRs
+	pkgver = 0.3.2
+	pkgrel = 1
+	url = https://github.com/NayJi7/gitoui
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	depends = git
+	provides = gitoui
+	conflicts = gitoui
+	options = !debug
+	source = LICENSE-0.3.2::https://raw.githubusercontent.com/NayJi7/gitoui/v0.3.2/LICENSE
+	sha256sums = 99d61b26cd4453bbc03103277ebb8ff89f7854eade50dbf20ac68b86c1b2be05
+	source_x86_64 = gitoui-0.3.2-x86_64.tar.gz::https://github.com/NayJi7/gitoui/releases/download/v0.3.2/gitoui-0.3.2-x86_64-unknown-linux-musl.tar.gz
+	sha256sums_x86_64 = 5b5bbd0031cb2d16e56cce6e788552d977f7b4f6cd8f8c6100052e47976d2b82
+	source_aarch64 = gitoui-0.3.2-aarch64.tar.gz::https://github.com/NayJi7/gitoui/releases/download/v0.3.2/gitoui-0.3.2-aarch64-unknown-linux-musl.tar.gz
+	sha256sums_aarch64 = 90c1111a5e1d8397d74668491f6628c0ab2ffb0f88788f01e3ad348aa6cb4563
+
+pkgname = gitoui-bin

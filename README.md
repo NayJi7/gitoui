@@ -49,6 +49,12 @@ One-liner for Linux + macOS (auto-detects OS/arch, drops `gitoui` into `~/.local
 curl -fsSL https://nayji7.github.io/gitoui/install.sh | sh
 ```
 
+Or with Homebrew on macOS and Linux:
+
+```sh
+brew install nayji7/tap/gitoui
+```
+
 Or via Cargo from crates.io:
 
 ```sh

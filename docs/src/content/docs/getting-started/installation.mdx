@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Three ways to install gitoui, curl-pipe-sh, cargo install, or build from source.
+description: Four ways to install gitoui, curl-pipe-sh, Homebrew, cargo install, or build from source.
 ---
 
 import { Tabs, TabItem, Aside, Steps } from "@astrojs/starlight/components";
@@ -32,6 +32,20 @@ The installer:
 | `GITOUI_VERSION=vX.Y` | Pin to a specific tag instead of `latest`.            |
 | `NO_COLOR=1`          | Disable ANSI colors in the installer output.          |
 | `--ascii` (or `GITOUI_ASCII=1`) | Force ASCII banner when piping the output. |
+
+</TabItem>
+
+<TabItem label="Homebrew">
+
+On macOS (Apple Silicon and Intel) and Linux, install the prebuilt binary
+from the gitoui tap:
+
+```sh
+brew install nayji7/tap/gitoui
+```
+
+Homebrew owns the binary, so updates go through Homebrew too (see
+[Updating](#updating)).
 
 </TabItem>
 
@@ -123,6 +137,13 @@ available, you'll see a prompt:
   stay silent. **To revert**, just remove that line from
   `~/.config/gitoui/config.toml` and the check kicks back in on the next launch.
 
+Installed with Homebrew? <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> never prompts at startup, and `gitoui --update`
+only tells you a new version exists. Update with Homebrew instead:
+
+```sh
+brew upgrade gitoui
+```
+
 The script and `cargo install` are both idempotent, you can also trigger an
 update manually at any time:
 
@@ -143,3 +164,6 @@ touching your config.
 rm ~/.local/bin/gitoui              # binary
 rm -rf ~/.config/gitoui             # config + cached avatars + themes
 ```
+
+Installed with Homebrew? Remove the binary with `brew uninstall gitoui` instead
+of the `rm` above, then delete the config dir the same way.
