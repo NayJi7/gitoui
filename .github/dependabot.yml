@@ -1,4 +1,4 @@
-# Dependabot — keeps dependencies fresh without blocking day-to-day
+# Dependabot: keeps dependencies fresh without blocking day-to-day
 # work. Security alerts are surfaced automatically (configured in repo
 # settings, not here); this file drives the weekly version-bump PRs.
 #
@@ -22,6 +22,15 @@ updates:
     labels:
       - dependencies
       - rust
+    # ratatui >= 0.30.1 rewrote the buffer diff: a cell holding an image
+    # escape sequence now hides every cell up to its (huge) computed width,
+    # which blanks the graph, avatars and text after each image. Held on
+    # 0.30.0 until the image cells declare their real width
+    # (CellDiffOption::ForcedWidth). tui-input 0.15.5 requires ratatui
+    # ^0.30.2, so it is held too.
+    ignore:
+      - dependency-name: "ratatui*"
+      - dependency-name: "tui-input"
     groups:
       cargo-minor-patch:
         update-types:
@@ -49,7 +58,7 @@ updates:
           - minor
           - patch
 
-  # GitHub Actions pinned by SHA — Dependabot will keep the SHAs +
+  # GitHub Actions pinned by SHA: Dependabot will keep the SHAs +
   # version comments in sync with upstream tags.
   - package-ecosystem: github-actions
     directory: /
