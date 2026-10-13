@@ -134,12 +134,15 @@ header.header a.site-title img {
   }
 }
 
-/* Squarer corners across the whole doc - this is a TUI's site, the
-   rounded-pill default reads as wrong context. We don't go to 0 (full
-   rectangles feel brutalist); 4px keeps elements feeling computed
-   without becoming sharp. */
+/* Square corners everywhere, like a TUI: no rounding on anything,
+   including what Starlight, Expressive Code and Pagefind draw. */
 :root {
-  --sl-border-radius: 4px;
+  --sl-border-radius: 0;
+}
+*,
+*::before,
+*::after {
+  border-radius: 0;
 }
 /* Center the content panel horizontally within its column. Starlight
    already does this at >= 72rem viewports via the same rule, but when
@@ -149,21 +152,6 @@ header.header a.site-title img {
 main > .content-panel > .sl-container {
   margin-inline: auto !important;
 }
-.sl-link-card,
-.card,
-[class*="card"],
-.starlight-aside,
-.expressive-code .frame,
-.expressive-code pre,
-input,
-select,
-button,
-.sl-link-button {
-  border-radius: 4px !important;
-}
-.starlight-aside { border-radius: 4px !important; }
-/* Search button (the "Search Ctrl K" pill) lives behind a custom el. */
-site-search button { border-radius: 4px !important; }
 
 /* Brand palette - see `assets/brand/gitoui-brand-standalone.html`. */
 :root {
@@ -217,7 +205,7 @@ site-search button { border-radius: 4px !important; }
 .intro-badges img {
   height: 1.3rem;
   display: block;
-  border-radius: 3px;
+  border-radius: 0;
 }
 
 /* ── FAQ accordion ───────────────────────────────────────────────────
@@ -233,7 +221,7 @@ site-search button { border-radius: 4px !important; }
 }
 .faq-item {
   border: 1px solid var(--sl-color-gray-5);
-  border-radius: 4px;
+  border-radius: 0;
   background: var(--sl-color-bg-nav, transparent);
   transition: border-color 150ms ease, background-color 150ms ease;
   overflow: hidden;
@@ -342,4 +330,11 @@ site-search button { border-radius: 4px !important; }
 .faq-item ul:first-of-type,
 .faq-item table:first-of-type {
   margin-top: 0;
+}
+
+/* Terminal code frames: three square window "dots" instead of circles,
+   same box as Expressive Code's own icon (2.1rem x 0.56rem = 60:16). */
+.expressive-code .frame.is-terminal .header::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 16'%3E%3Crect width='16' height='16'/%3E%3Crect x='22' width='16' height='16'/%3E%3Crect x='44' width='16' height='16'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 16'%3E%3Crect width='16' height='16'/%3E%3Crect x='22' width='16' height='16'/%3E%3Crect x='44' width='16' height='16'/%3E%3C/svg%3E") !important;
 }
