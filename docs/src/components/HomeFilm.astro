@@ -5,13 +5,17 @@
 // is a brand-orange square with a pixel triangle, drawn in the same
 // cell language as the G logomark.
 //
-// The mp4 is the README attachment hosted by GitHub (no copy in the
-// repo). Its URL 302s to a signed S3 link that expires after a few
-// minutes, so a playback error re-requests the stable URL and resumes
-// where it stopped. No autoplay; loops once started. Poster = the
-// film's first frame, served from docs/public.
+// The 1080p60 mp4 is an asset of the `film` pre-release (kept out of
+// the git history and of the published crate; update it with
+// `gh release upload film gitoui_film.mp4 --clobber`). The file is
+// faststart (moov first) so playback begins after the first chunk. The
+// URL 302s to a signed link that expires after a while, so a playback
+// error re-requests the stable URL and resumes where it stopped.
+// No autoplay; loops once started. Metadata is preloaded only once the
+// pane nears the viewport. Poster = the film's first frame, served from
+// docs/public.
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-const src = "https://github.com/user-attachments/assets/2c8f6e42-e478-4212-b3d5-7d674e455b8e";
+const src = "https://github.com/NayJi7/gitoui/releases/download/film/gitoui_film.mp4";
 // Pixel play triangle on a 6x7 grid: filled width of each row.
 const rowWidths = [1, 3, 5, 6, 5, 3, 1];
 ---
@@ -26,14 +30,15 @@ const rowWidths = [1, 3, 5, 6, 5, 3, 1];
     <div class="film-screen">
       <video
         class="film-video"
-        src={src}
         poster={`${base}/film-poster.jpg`}
         preload="none"
         loop
         playsinline
-        width="1280"
-        height="720"
-      ></video>
+        width="1920"
+        height="1080"
+      >
+        <source src={src} type="video/mp4" />
+      </video>
       <button class="film-big" type="button" aria-label="Play the film">
         <span class="film-big-square" aria-hidden="true">
           <svg viewBox="0 0 6 7" width="30" height="35" shape-rendering="crispEdges">
@@ -173,9 +178,23 @@ const rowWidths = [1, 3, 5, 6, 5, 3, 1];
       if (e.key === " ") e.preventDefault();
     });
 
+    // Warm up (headers + first frames) once the pane is close, so the
+    // click starts playback right away without loading 55 MB on page load.
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((entries) => {
+        if (entries.some((en) => en.isIntersecting)) {
+          if (video.preload === "none") video.preload = "metadata";
+          io.disconnect();
+        }
+      }, { rootMargin: "600px 0px" });
+      io.observe(film);
+    }
+
+    // With a <source> child, a failed fetch fires `error` on the source,
+    // not on the video: listen on both. Also covers an expired signed
+    // link while idle (the metadata preload), so the next click works.
     let lastRetry = 0;
-    video.addEventListener("error", () => {
-      if (film.dataset.state === "idle") return;
+    const recover = () => {
       const t = Date.now();
       if (t - lastRetry < 10000) return;
       lastRetry = t;
@@ -183,11 +202,13 @@ const rowWidths = [1, 3, 5, 6, 5, 3, 1];
       const wasPlaying = film.dataset.state === "playing";
       video.src = src;
       video.addEventListener("loadedmetadata", () => {
-        video.currentTime = at;
+        if (at) video.currentTime = at;
         if (wasPlaying) video.play().catch(() => {});
       }, { once: true });
       video.load();
-    });
+    };
+    video.addEventListener("error", recover);
+    film.querySelector("source").addEventListener("error", recover);
   })();
 </script>
 
