@@ -25,6 +25,13 @@
 
 **gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie), a beautifully-rendered `git log --graph` viewer, and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.
 
+## The 90-second tour
+
+Graph, staging, interactive rebase, conflicts, pull requests, themes. Sound on.
+
+<!-- film: drop gitoui_film_v7_10mb.mp4 in the GitHub editor and replace the next line with the user-attachments URL GitHub generates -->
+VIDEO_URL_HERE
+
 ## What's inside
 
 The commit graph stays serie's: pre-rendered SVGs sent inline through your terminal's image protocol (Kitty, iTerm2, Ghostty, Sixel). Around it, gitoui adds the operations you do on top of `git log`:
@@ -62,6 +69,10 @@ cargo install gitoui
 ```
 
 For pinned versions, manual downloads, or building from source, see the [installation guide](https://nayji7.github.io/gitoui/getting-started/installation/).
+
+### Terminals
+
+Linux and macOS. The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel). Anywhere else (Alacritty, Terminal.app, Windows Terminal, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`. Windows is not officially supported. Full matrix in [terminal compatibility](https://nayji7.github.io/gitoui/getting-started/compatibility/).
 
 ## Quick start
 
