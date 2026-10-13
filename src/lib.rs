@@ -22,6 +22,7 @@ mod recents;
 mod update;
 mod view;
 mod watcher;
+mod why;
 mod widget;
 
 use std::{path::Path, rc::Rc};
@@ -73,6 +74,10 @@ struct Args {
     /// corrupt, or to reclaim disk space.
     #[arg(short = 'C', long)]
     clear_cache: bool,
+
+    /// Why gitoui? The short answer, then exits
+    #[arg(long)]
+    why: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -269,6 +274,13 @@ pub fn run() -> Result<()> {
             }
         }
     };
+
+    // `--why`: replay the film's closing card and exit, before any
+    // update check or repository lookup.
+    if args.why {
+        why::run();
+        return Ok(());
+    }
 
     // `--update` is the explicit escape hatch, always prompts, ignores
     // the cache + the "never_ask" preference, and exits afterwards.
