@@ -5,7 +5,7 @@
 # from the release's checksum.txt, then regenerate .SRCINFO with
 # `makepkg --printsrcinfo > .SRCINFO`.
 pkgname=gitoui-bin
-pkgver=0.3.5
+pkgver=0.3.6
 pkgrel=1
 pkgdesc='Terminal Git client with an image-rendered commit graph and GitHub PRs'
 arch=('x86_64' 'aarch64')
@@ -19,8 +19,8 @@ source=("LICENSE-${pkgver}::https://raw.githubusercontent.com/NayJi7/gitoui/v${p
 source_x86_64=("gitoui-${pkgver}-x86_64.tar.gz::${url}/releases/download/v${pkgver}/gitoui-${pkgver}-x86_64-unknown-linux-musl.tar.gz")
 source_aarch64=("gitoui-${pkgver}-aarch64.tar.gz::${url}/releases/download/v${pkgver}/gitoui-${pkgver}-aarch64-unknown-linux-musl.tar.gz")
 sha256sums=('99d61b26cd4453bbc03103277ebb8ff89f7854eade50dbf20ac68b86c1b2be05')
-sha256sums_x86_64=('2444b5bdb24eb32ab694f400797f22aa13cdb238b8b60a3d07ce02aa997d63ac')
-sha256sums_aarch64=('1db1e0a835b05cad06e3902ded801c9fa61d81d016ef5acd215f776b9b69db12')
+sha256sums_x86_64=('b9fe6ab148ff09180245a5f8061887d6d2f13015e538c8ff80cde04912830a45')
+sha256sums_aarch64=('9234d1daaeb2a70767a223adaf49ea9804b39c1f521f33fdbfcaba744fa5280d')
 
 package() {
   install -Dm755 gitoui "${pkgdir}/usr/bin/gitoui"
