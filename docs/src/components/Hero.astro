@@ -183,6 +183,12 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   :root[data-hero-page] .content-panel:has(> .sl-container > .hero) > .sl-container {
     padding: 0;
   }
+  /* The hero bleeds with 100vw, which includes the classic scrollbar on
+     Linux / Windows and pushed the page 8px sideways. Clip (not hidden,
+     so position: sticky keeps working) the horizontal overflow. */
+  :root[data-hero-page] {
+    overflow-x: clip;
+  }
 </style>
 
 <style>
@@ -190,7 +196,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .hero {
     --brand: #f05133;
     --cream: #f1ecec;
-    --radius: 0.25rem;
+    --radius: 0;
     --nav-h: var(--sl-nav-height, 3.75rem);
     position: relative;
     /* Pull the hero up to cover the strip that Starlight normally
@@ -303,15 +309,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
        envelope as the rest of the doc. */
     width: min(100%, 56rem);
   }
-  @media (max-width: 50rem) {
-    .hero-inner {
-      grid-template-columns: 1fr;
-      gap: 2.5rem;
-      text-align: center;
-    }
-    .hero-copy { align-items: center; }
-    .hero-actions { justify-content: center; }
-  }
 
   /* ── copy ─────────────────────────────────────────────────────────── */
   .hero-copy {
@@ -423,11 +420,18 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   }
 
   /* ── actions ──────────────────────────────────────────────────────── */
+  /* Primary CTA on its own row, the two others share the next one
+     (same layout on desktop and mobile). */
   .hero-actions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
+    width: 100%;
+    max-width: 26rem;
     margin-top: 0.5rem;
+  }
+  .cta-primary {
+    grid-column: 1 / -1;
   }
   /* Each button fades up with a small stagger between them so they
      don't all pop in at the same instant. Starts after the tagline
@@ -448,9 +452,11 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .cta {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    white-space: nowrap;
     gap: 0.5rem;
     padding: 0.8rem 1.25rem;
-    border-radius: var(--radius);
+    border-radius: 0;
     font-size: 0.95rem;
     font-weight: 600;
     text-decoration: none;
@@ -626,5 +632,64 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   /* The G logo's drop-shadow reads as a smudge on cream - soften it. */
   :root[data-theme="light"] .hero-mark-img {
     filter: drop-shadow(0 12px 32px rgba(240, 81, 51, 0.2));
+  }
+
+  /* ── narrow screens ────────────────────────────────────────────────
+     Kept at the end of the sheet so it wins over the base rules above
+     (an earlier copy sat before `.hero-copy` and lost the cascade, which
+     left the title flush left). One centered column: small G on top,
+     like an app splash, then title, tagline, CTAs, and the scroll hint
+     in the flow with even breathing room instead of overlapping the
+     mark. */
+  @media (max-width: 50rem) {
+    .hero {
+      /* The negative margin-top already puts the hero at viewport top
+         here, so the extra nav height would only push the hint off. */
+      min-height: 100svh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-block: calc(var(--nav-h) + 2.5rem) 0;
+    }
+    .hero-inner {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+      margin-block: auto;
+      text-align: center;
+    }
+    .hero-mark {
+      order: -1;
+    }
+    .hero-mark-img {
+      width: clamp(5.5rem, 26vw, 8rem);
+      max-width: none;
+    }
+    .hero-copy {
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .hero-title {
+      margin-bottom: 0;
+    }
+    .hero-actions {
+      max-width: 22rem;
+      margin-top: 0;
+    }
+    .cta {
+      gap: 0.4rem;
+      padding-inline: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .hero-scroll-hint {
+      position: static;
+      transform: none;
+      margin-block: 2.5rem 2rem;
+    }
+  }
+  /* Too narrow for two CTAs side by side: stack all three. */
+  @media (max-width: 22rem) {
+    .hero-actions {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
