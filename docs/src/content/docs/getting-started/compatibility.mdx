@@ -12,26 +12,26 @@ speak one of three image protocols.
 
 | Terminal               | Kitty | iTerm2 | Sixel | Notes                              |
 |------------------------|-------|--------|-------|------------------------------------|
-| **Ghostty**            | ✅    |,      |,     | **Recommended**, what <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is developed on, all features tested first here. |
-| **Kitty**              | ✅    |,      |,     | Reference implementation of the protocol. |
+| **Ghostty**            | ✅    |❌      |❌     | **Recommended**, what <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> is developed on, all features tested first here. |
+| **Kitty**              | ✅    |❌      |❌     | Reference implementation of the protocol. |
 | **WezTerm**            | ✅    | ✅     | ✅    | Auto-detects; picks Kitty graphics first. |
-| **iTerm2** (macOS)     |,     | ✅     |,     |                                    |
-| **Konsole**            | ✅    |,      | ✅    | Kitty since 22.04, Sixel optional. |
-| **foot** (Wayland)     |,     |,      | ✅    | Sixel native; very fast.           |
-| **xterm**              |,     |,      | 🟡    | Needs `xterm -ti vt340`.           |
-| **Alacritty**          |,     |,      |,     | No image protocol, graph falls back to Unicode. |
-| **Terminal.app** (macOS) |,   |,      |,     | Same fallback as Alacritty.        |
-| **gnome-terminal / Ptyxis** | 🟡 |,    |,     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
-| **Windows Terminal**   |,     |,      |,     | Unicode fallback only (as of Windows Terminal 1.x). |
+| **iTerm2** (macOS)     |❌     | ✅     |❌     |                                    |
+| **Konsole**            | ✅    |❌      | ✅    | Kitty since 22.04, Sixel optional. |
+| **foot** (Wayland)     |❌     |❌      | ✅    | Sixel native; very fast.           |
+| **xterm**              |❌     |❌      | 🟡    | Needs `xterm -ti vt340`.           |
+| **Alacritty**          |❌     |❌      |❌     | No image protocol, graph falls back to Unicode. |
+| **Terminal.app** (macOS) |❌   |❌      |❌     | Same fallback as Alacritty.        |
+| **gnome-terminal / Ptyxis** | 🟡 |❌    |❌     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
+| **Windows Terminal**   |❌     |❌      |❌     | Unicode fallback only (as of Windows Terminal 1.x). |
 
 ✅ <Badge text="first-class" variant="success" /> &nbsp;
 🟡 <Badge text="config needed" variant="caution" /> &nbsp;
-, <Badge text="not supported" variant="danger" />
+❌ <Badge text="not supported" variant="danger" />
 
-When in doubt, run `gitoui --protocol sixel` (or `kitty`, `iterm2`) to force a
-specific protocol and bypass auto-detect.
+When in doubt, run `gitoui --graph-renderer sixel` (or `kitty`, `iterm`, `ascii`) to
+force a specific renderer and bypass auto-detect.
 
-{/* PHOTO of a side-by-side comparison of the commit graph in Kitty (pretty SVG rendering) vs the same view forced to `--protocol unicode` (ASCII glyph fallback). Same repo, same range, two terminals. Needs the unicode fallback to ship first. */}
+{/* PHOTO of a side-by-side comparison of the commit graph in Kitty (pretty SVG rendering) vs the same view forced to `--graph-renderer ascii` (ASCII glyph fallback). Same repo, same range, two terminals. Needs the unicode fallback to ship first. */}
 
 ## Keyboard protocol
 
