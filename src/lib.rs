@@ -905,16 +905,22 @@ pub fn run() -> Result<()> {
                         }
                     }
 
-                    // STEP 2: open the cache stream. If we have a
-                    // useful surgical-extend (HEAD moved forward),
-                    // rewrite the cache first so the StreamReader
-                    // below picks up the prepended commits in one
-                    // go. The extend rewrites in streaming fashion
-                    // (header + new commits + existing commits via
-                    // StreamReader), no big Vec ever held.
-                    let _ = git::cache::try_extend(&repo_path_for_bg, order);
-
-                    let stream_reader_opt = git::cache::open_stream_for(&repo_path_for_bg, order);
+                    // STEP 2: open the cache stream, but only if it holds
+                    // exactly the walk we would run now. The key covers
+                    // every input of that walk (HEAD, all branch /
+                    // remote / tag tips, the stash parents, the sort);
+                    // anything else moved means a full re-walk below.
+                    // Computed before any walk starts, see
+                    // `CacheKey::compute`.
+                    let stash_parents: Vec<git::CommitHash> = stashes_for_bg
+                        .iter()
+                        .filter_map(|s| s.parent_commit_hashes.first().cloned())
+                        .collect();
+                    let cache_key =
+                        git::cache::CacheKey::compute(&repo_path_for_bg, order, &stash_parents);
+                    let stream_reader_opt = cache_key
+                        .as_ref()
+                        .and_then(|key| git::cache::open_stream_for(&repo_path_for_bg, key));
 
                     // Shared bg-stream state. `inherited_color` is
                     // the bulk allocation here - ~332k entries x
@@ -1192,7 +1198,14 @@ pub fn run() -> Result<()> {
                                     );
                                 }
                                 Some(Err(e)) => {
-                                    glog_warn!("bg-stream cache read error (stopping): {}", e);
+                                    // Damaged file: drop it so the next
+                                    // launch re-walks instead of tripping
+                                    // on it again.
+                                    glog_warn!(
+                                        "bg-stream cache read error (stopping, cache dropped): {}",
+                                        e
+                                    );
+                                    git::cache::invalidate(&repo_path_for_bg);
                                     break;
                                 }
                                 None => break,
@@ -1213,9 +1226,6 @@ pub fn run() -> Result<()> {
                         // can't keep up, the bg streamer back-
                         // pressures naturally into the git log
                         // subprocess instead of unbounded buffering.
-                        let head_hash = git::cache::current_head_hash(&repo_path_for_bg);
-                        let reachable =
-                            git::cache::reachable_commit_count(&repo_path_for_bg).unwrap_or(0);
                         let cache_path = git::cache::cache_path_for(&repo_path_for_bg);
 
                         // Bounded sender to the cache-writer thread.
@@ -1231,8 +1241,10 @@ pub fn run() -> Result<()> {
                         // the post-walk steps re-open the cache.
                         let mut cache_writer_handle: Option<std::thread::JoinHandle<()>> = None;
 
-                        if let (Some(head), Some(path)) = (head_hash, cache_path) {
-                            let header = git::cache::CacheHeader::new(head, reachable, order);
+                        // The cache is stamped with the key computed in
+                        // STEP 2, before this walk started.
+                        if let (Some(key), Some(path)) = (cache_key.as_ref(), cache_path) {
+                            let header = git::cache::CacheHeader::new(key);
                             match git::cache::StreamWriter::create(&path, header) {
                                 Ok(mut w) => {
                                     let (tx, rx) =
@@ -1244,15 +1256,12 @@ pub fn run() -> Result<()> {
                                             // sender drops. Any
                                             // mid-stream write error
                                             // aborts the loop - we
-                                            // skip finish() so the
-                                            // .tmp file (created by
-                                            // StreamWriter::create)
-                                            // is left orphaned and
-                                            // never confused for a
-                                            // valid cache. Atomicity
-                                            // comes for free from the
-                                            // existing tmp+rename in
-                                            // StreamWriter.
+                                            // skip finish(), and
+                                            // dropping the writer
+                                            // deletes its private
+                                            // temp file, so a partial
+                                            // write never becomes the
+                                            // cache.
                                             let mut had_error = false;
                                             while let Ok(commit) = rx.recv() {
                                                 if let Err(e) = w.write_commit(&commit) {
@@ -1275,8 +1284,8 @@ pub fn run() -> Result<()> {
                                             if had_error {
                                                 glog_warn!(
                                                     "bg-stream: cache write aborted; \
-                                                     .tmp left orphaned (will be \
-                                                     ignored on next launch)"
+                                                     previous cache kept, next \
+                                                     launch re-walks"
                                                 );
                                                 return;
                                             }
@@ -1478,8 +1487,9 @@ pub fn run() -> Result<()> {
                     const HUGE_REPO_GRAPH_SKIP: usize = 100_000;
 
                     if graph_enabled_for_bg && total_streamed < HUGE_REPO_GRAPH_SKIP {
-                        if let Some(mut reader) =
-                            git::cache::open_stream_for(&repo_path_for_bg, order)
+                        if let Some(mut reader) = cache_key
+                            .as_ref()
+                            .and_then(|key| git::cache::open_stream_for(&repo_path_for_bg, key))
                         {
                             let mut all: Vec<git::CommitSummary> = Vec::new();
                             while let Some(Ok(c)) = reader.next_commit() {

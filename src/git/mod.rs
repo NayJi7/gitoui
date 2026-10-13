@@ -291,7 +291,8 @@ impl Repository {
     /// point of the cache - but still reads stashes, refs, head and
     /// uncommitted changes fresh (they're cheap and may have moved
     /// since the cache was written). The caller is responsible for
-    /// gating this path on a HEAD-equality check (see `cache::load_for`).
+    /// only feeding it a cache that matches the live refs (see
+    /// `cache::CacheKey`).
     pub fn from_cached_summaries(path: &Path, mut summaries: Vec<CommitSummary>) -> Result<Self> {
         check_git_repository(path)?;
         if summaries.is_empty() {
@@ -848,58 +849,6 @@ pub fn stream_commits_one_by_one(
         }
     }
     let _ = process.wait();
-}
-
-/// Walk just the commits in the symmetric range `<cached_head>..HEAD`,
-/// i.e. only commits reachable from current HEAD but NOT from the
-/// stored cached head. Used by the cache's surgical-refresh path on
-/// fast-forward HEAD movement: instead of re-walking the entire
-/// history when the user adds one commit, walk only that one and
-/// prepend to the cached vector.
-///
-/// Returns the new commits in the same chronological-newest-first
-/// order produced by `stream_commits_after`. Returns `None` on any
-/// failure (cached_head unreachable, git rev-list failure, etc.)
-/// so the caller falls back to a full re-walk.
-pub fn walk_commits_since(
-    path: &Path,
-    sort: SortCommit,
-    cached_head: &str,
-) -> Option<Vec<CommitSummary>> {
-    let range = format!("{}..HEAD", cached_head);
-    let mut cmd = Command::new("git");
-    cmd.arg("log")
-        .arg(match sort {
-            SortCommit::Chronological => "--date-order",
-            SortCommit::Topological => "--topo-order",
-        })
-        .arg(format!("--pretty={LOAD_SUMMARIES_FORMAT}"))
-        .arg("--date=iso-strict")
-        .arg("-z")
-        .arg(&range)
-        .current_dir(path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-
-    let mut process = cmd.spawn().ok()?;
-    let stdout = process.stdout.take()?;
-    let reader = BufReader::new(stdout);
-    let mut out: Vec<CommitSummary> = Vec::new();
-    for bytes in reader.split(b'\0') {
-        let Ok(bytes) = bytes else { break };
-        if bytes.is_empty() {
-            continue;
-        }
-        let s = String::from_utf8_lossy(&bytes);
-        if let Some(summary) = parse_commit_summary(&s, CommitType::Commit) {
-            out.push(summary);
-        }
-    }
-    let status = process.wait().ok()?;
-    if !status.success() {
-        return None;
-    }
-    Some(out)
 }
 
 fn load_all_stash_summaries(path: &Path) -> Vec<CommitSummary> {

@@ -1,108 +1,188 @@
-//! On-disk commit-history cache (streamable v4 layout, version 5).
+//! On-disk commit-history cache (streamable layout, version 6).
 //!
-//! Walks `git log` once per session (in the background) and persists
-//! the full commit history to disk as a sequence of independently
-//! bincode-encoded `CommitSummary` records, prefixed by a single
-//! header describing the schema version + the HEAD + reachable-count
-//! at write time. The streaming format lets readers consume one
-//! summary at a time without ever materialising the whole
-//! `Vec<CommitSummary>` in memory.
-//!
-//! v4 cuts the per-record payload from full `Commit` (with body +
-//! committer trio) down to `CommitSummary` (hash + author + subject +
-//! parents only). The body and committer fields are unused outside
-//! the Detail view, which now fetches them on demand via
-//! `Repository::fetch_full_commit`. On large repos this cuts the
-//! cache footprint and load time roughly 5x.
+//! The background thread walks `git log` once and persists the full
+//! commit history as a sequence of independently bincode-encoded
+//! `CommitSummary` records, prefixed by a header. The streaming format
+//! lets readers consume one summary at a time without materialising the
+//! whole `Vec<CommitSummary>` in memory.
 //!
 //! Cache file layout:
 //!
 //! ```text
-//!   [CacheHeader]                                      bincode-encoded; magic + version + meta
-//!   [CommitSummary] [CommitSummary] ... [CommitSummary] sequence; one bincode record per commit
+//!   [CacheHeader]                                      magic + version + walk key
+//!   [CommitSummary] [CommitSummary] ... [CommitSummary] one record per commit, git log order
 //! ```
 //!
-//! Reader uses `bincode::deserialize_from(&mut reader)` in a loop; EOF
-//! returns an error variant which we map to "stream done". Writer
-//! uses `bincode::serialize_into(&mut writer, &summary)` per record
-//! and flushes at the end before atomic rename.
+//! # When the cache is trusted
 //!
-//! Older caches (v1 to v4) fail the magic + version check on load and are
-//! silently deleted so the bg thread re-walks and re-saves in the current
-//! format on next run.
+//! The cache is the exact output of one `git log` walk, in its order:
+//! the list shows the first slice straight from git and the rest from
+//! the cache, and the graph is computed over the cache, so any
+//! difference in content OR order misaligns rows. It is therefore
+//! reused only when the walk would produce the same output, i.e. when
+//! its inputs are unchanged: HEAD, every branch, remote-tracking branch
+//! and tag tip, the stash parents the walk includes, and the sort
+//! order. `CacheKey` fingerprints those inputs; any difference means a
+//! full re-walk, which runs in the background and rewrites the cache.
 //!
-//! Graph topology is NOT cached. The user wants the cache to cover
-//! `git log` only; calc_graph re-runs each session against the loaded
-//! commit list.
+//! Version 6 replaced the "same HEAD + same reachable count" check and
+//! the surgical extend that prepended `old_head..HEAD`. Both were
+//! approximations: the extend missed commits of other refs that moved
+//! (fetch), kept commits of deleted refs, put prepended commits out of
+//! date order, then stamped the live count into the header so the drift
+//! could never be detected again.
+//!
+//! Older caches fail the magic + version check on load and are deleted.
+//!
+//! Graph topology is NOT cached; calc_graph re-runs each session.
 
 use std::{
     fs,
+    hash::{Hash, Hasher},
     io::{self, BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
-use super::{CommitSummary, SortCommit};
+use bincode::Options;
 
-/// Magic bytes at the top of every v3 cache file. Lets the reader
-/// reject anything that isn't ours (v1/v2 caches, truncated files,
-/// random garbage from disk corruption) before we even try to decode
-/// the header.
+use super::{CommitHash, CommitSummary, SortCommit};
+
+/// Magic bytes at the top of every cache file, so the reader rejects
+/// anything that isn't ours before decoding the header.
 const CACHE_MAGIC: [u8; 4] = *b"GTOI";
 
-/// Schema version. v4 = streamable: header + sequence of independent
-/// `CommitSummary` records (was `Commit` in v3). Bump when the
-/// on-disk format structurally changes (NOT when `CommitSummary`
-/// itself gains a serde-optional field), or to purge caches written
-/// by a buggy writer.
-///
-/// v5 keeps the v4 layout byte for byte. It exists only to discard v4
-/// caches that `try_extend` corrupted with duplicated commits (fixed
-/// alongside this bump): their header count matches the repo, so no
-/// other check would ever have rejected them.
-const CACHE_VERSION: u32 = 5;
+/// Schema version. Bump on any structural change of the header or of
+/// `CommitSummary`'s encoding, or to purge caches written by a buggy
+/// writer. v6: `CacheKey` fingerprint instead of the reachable count.
+const CACHE_VERSION: u32 = 6;
 
-/// Header at the top of every cache file. Bincode-encoded as a single
-/// record so the reader can land on the first commit record by
-/// `deserialize_from`'ing this struct, then looping on commits.
+/// Largest single record (header or commit) the codec accepts. A commit
+/// summary is a few hundred bytes; the bound only exists so a damaged
+/// length prefix fails to decode instead of asking the allocator for
+/// gigabytes, which aborts the whole process.
+const MAX_RECORD_BYTES: u64 = 4 << 20;
+
+/// Wire codec for every record: little-endian, fixed-width integers
+/// (the legacy `bincode::serialize` encoding), bounded per record.
+fn codec() -> impl Options {
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .with_limit(MAX_RECORD_BYTES)
+}
+
+fn sort_byte(sort: SortCommit) -> u8 {
+    match sort {
+        SortCommit::Chronological => 0,
+        SortCommit::Topological => 1,
+    }
+}
+
+/// Everything the history walk depends on, condensed. Two walks with
+/// equal keys produce the same commits in the same order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheKey {
+    /// HEAD at key time. Part of the fingerprint too; kept separately
+    /// for log lines.
+    pub head_hash: String,
+    /// Hash of HEAD, every `refs/heads`, `refs/remotes` and `refs/tags`
+    /// tip, the stash parents and the sort order.
+    pub fingerprint: u64,
+    pub sort_order: u8,
+}
+
+impl CacheKey {
+    /// Compute the key for the walk `stream_commits_one_by_one` runs:
+    /// `--branches --remotes --tags <stash parents> HEAD`. Returns None
+    /// when there is no HEAD yet or git fails; the caller then neither
+    /// reads nor writes a cache.
+    ///
+    /// Compute it BEFORE starting a walk: if a ref moves while the walk
+    /// runs, the stored key is the older one and the next launch simply
+    /// re-walks, instead of trusting a key newer than the content.
+    pub fn compute(
+        repo_path: &Path,
+        sort: SortCommit,
+        stash_parents: &[CommitHash],
+    ) -> Option<Self> {
+        let head_hash = current_head_hash(repo_path)?;
+        let out = std::process::Command::new("git")
+            .args([
+                "for-each-ref",
+                "--format=%(objectname) %(refname)",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ])
+            .current_dir(repo_path)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(Self::from_parts(
+            &head_hash,
+            &out.stdout,
+            stash_parents,
+            sort,
+        ))
+    }
+
+    fn from_parts(
+        head_hash: &str,
+        refs_listing: &[u8],
+        stash_parents: &[CommitHash],
+        sort: SortCommit,
+    ) -> Self {
+        let mut hasher = rustc_hash::FxHasher::default();
+        head_hash.hash(&mut hasher);
+        refs_listing.hash(&mut hasher);
+        for parent in stash_parents {
+            parent.as_str().hash(&mut hasher);
+        }
+        let sort_order = sort_byte(sort);
+        sort_order.hash(&mut hasher);
+        Self {
+            head_hash: head_hash.to_string(),
+            fingerprint: hasher.finish(),
+            sort_order,
+        }
+    }
+
+    fn matches(&self, header: &CacheHeader) -> bool {
+        header.fingerprint == self.fingerprint
+            && header.sort_order == self.sort_order
+            && header.head_hash == self.head_hash
+    }
+}
+
+/// Header at the top of every cache file, decoded on its own so the
+/// reader lands on the first commit record right after it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CacheHeader {
-    /// `CACHE_MAGIC`. Reader rejects any value other than this so we
-    /// can't accidentally try to decode a v1/v2 payload as a v3
-    /// header (their first 4 bytes are bincode's u32-LE
-    /// length-prefix on the wrapping `CachePayload` struct - not the
-    /// ASCII `"GTOI"` we expect here).
+    /// `CACHE_MAGIC`.
     pub magic: [u8; 4],
-    /// `CACHE_VERSION`. Bumped on any structural change.
+    /// `CACHE_VERSION`.
     pub version: u32,
-    /// HEAD hash the cache was sampled at. We only trust the cache
-    /// on load if the live HEAD still matches.
+    /// HEAD the walk ran from (`CacheKey::head_hash`).
     pub head_hash: String,
-    /// Total reachable commit count (`git rev-list --count
-    /// --branches --remotes --tags HEAD`) at cache time. Used to
-    /// detect drift when HEAD itself hasn't moved (fetch, gc,
-    /// force-push). 0 means "unknown" and triggers a defensive
-    /// re-walk on next load.
-    pub reachable_count: u64,
-    /// 0 = chronological, 1 = topological. Recorded so readers can
-    /// verify the cached order matches the runtime sort preference,
-    /// surgical-extend writes the same order as the existing cache.
+    /// `CacheKey::fingerprint` of the walk that wrote this file.
+    pub fingerprint: u64,
+    /// 0 = chronological, 1 = topological.
     pub sort_order: u8,
 }
 
 impl CacheHeader {
-    /// Build a header stamped with the current `CACHE_VERSION`. Always go
-    /// through here: a hand-written `version` literal elsewhere silently
-    /// produces caches the reader rejects after the next version bump.
-    pub fn new(head_hash: String, reachable_count: u64, sort: SortCommit) -> Self {
+    /// Header for a cache holding the walk described by `key`. Always go
+    /// through here so `magic` and `version` are stamped consistently.
+    pub fn new(key: &CacheKey) -> Self {
         Self {
             magic: CACHE_MAGIC,
             version: CACHE_VERSION,
-            head_hash,
-            reachable_count,
-            sort_order: match sort {
-                SortCommit::Chronological => 0,
-                SortCommit::Topological => 1,
-            },
+            head_hash: key.head_hash.clone(),
+            fingerprint: key.fingerprint,
+            sort_order: key.sort_order,
         }
     }
 
@@ -111,10 +191,8 @@ impl CacheHeader {
     }
 }
 
-/// Streamable reader. Opens the cache file, reads the header into
-/// memory, and exposes `next_commit()` which decodes ONE commit at a
-/// time from the underlying file - no Vec<Commit> ever materialises
-/// in process memory at the reader layer.
+/// Streamable reader: decodes the header on open, then ONE commit per
+/// `next_commit()` call.
 pub struct StreamReader {
     reader: BufReader<fs::File>,
     header: CacheHeader,
@@ -122,13 +200,12 @@ pub struct StreamReader {
 
 impl StreamReader {
     /// Open the cache file at `path` and decode its header. Returns
-    /// `Err` if the file is missing, the header doesn't parse, or the
-    /// magic / version don't match - caller treats those as "no
-    /// usable cache" and falls back to a fresh walk.
+    /// `Err` if the file is missing, the header doesn't decode, or the
+    /// magic / version don't match.
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = fs::File::open(path)?;
         let mut reader = BufReader::new(file);
-        let header: CacheHeader = bincode::deserialize_from(&mut reader).map_err(|e| {
+        let header: CacheHeader = codec().deserialize_from(&mut reader).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("cache header decode: {e}"),
@@ -152,27 +229,21 @@ impl StreamReader {
 
     /// Decode the next commit-summary record. Returns:
     ///   - `Some(Ok(summary))` on a successful decode,
-    ///   - `Some(Err(_))` on a partial / corrupt record (caller can
-    ///     treat as EOF and continue with what it got),
+    ///   - `Some(Err(_))` on a partial / corrupt record,
     ///   - `None` on clean EOF (no more bytes).
     pub fn next_commit(&mut self) -> Option<io::Result<CommitSummary>> {
-        // Peek one byte to distinguish "clean EOF" from "decode error
-        // on a real attempt". bincode's `deserialize_from` returns an
-        // Io error wrapped in a bincode::ErrorKind::Io on EOF, which
-        // we'd otherwise have to string-match - cheaper to peek.
+        // Peek one byte to tell a clean EOF from a decode error.
         let mut probe = [0u8; 1];
         match self.reader.read(&mut probe) {
-            Ok(0) => return None, // clean EOF
+            Ok(0) => return None,
             Ok(_) => {}
             Err(e) => return Some(Err(e)),
         }
-        // Rewind the probe byte and let bincode consume the full
-        // record. BufReader retains the byte in its internal buffer,
-        // so the seek-back is cheap (no syscall).
+        // BufReader keeps the byte in its buffer: rewinding is free.
         if let Err(e) = self.reader.seek_relative(-1) {
             return Some(Err(e));
         }
-        match bincode::deserialize_from::<_, CommitSummary>(&mut self.reader) {
+        match codec().deserialize_from::<_, CommitSummary>(&mut self.reader) {
             Ok(c) => Some(Ok(c)),
             Err(e) => Some(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -182,47 +253,59 @@ impl StreamReader {
     }
 }
 
-/// Streamable writer. Opens a temp file, writes the header, then
-/// accepts one `Commit` at a time via `write_commit`. `finish()`
-/// flushes + atomically renames into place.
+/// Distinguishes temp files of writers living in the same process.
+static WRITER_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Streamable writer. Writes into a temp file private to this writer,
+/// then `finish()` flushes and atomically renames it over the cache.
+/// Concurrent writers (two gitoui windows, a bg respawn while the
+/// previous walk still writes) therefore never share a file: each
+/// produces a complete cache and the last rename wins. A writer dropped
+/// without `finish()` deletes its temp file.
 pub struct StreamWriter {
-    writer: BufWriter<fs::File>,
+    writer: Option<BufWriter<fs::File>>,
     final_path: PathBuf,
     tmp_path: PathBuf,
     written: u64,
 }
 
 impl StreamWriter {
-    /// Create a new streaming writer that will land at `path` on
-    /// `finish()`. Writes the header immediately so the file is
-    /// well-formed (header + zero commits) the moment the writer is
-    /// dropped without a `finish()`.
+    /// Create a writer that will land at `path` on `finish()`. The
+    /// header is written immediately.
     pub fn create(path: &Path, header: CacheHeader) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let tmp = path.with_extension("bin.tmp");
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "commits.bin".into());
+        let tmp = path.with_file_name(format!(
+            "{name}.{}-{}.tmp",
+            std::process::id(),
+            WRITER_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         let file = fs::File::create(&tmp)?;
-        let mut writer = BufWriter::new(file);
-        bincode::serialize_into(&mut writer, &header).map_err(|e| {
+        let mut this = Self {
+            writer: Some(BufWriter::new(file)),
+            final_path: path.to_path_buf(),
+            tmp_path: tmp,
+            written: 0,
+        };
+        let w = this.writer.as_mut().expect("writer is set until finish");
+        codec().serialize_into(w, &header).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("cache header encode: {e}"),
             )
         })?;
-        Ok(Self {
-            writer,
-            final_path: path.to_path_buf(),
-            tmp_path: tmp,
-            written: 0,
-        })
+        Ok(this)
     }
 
-    /// Encode one commit-summary record into the stream. Cheap (single
-    /// bincode call into a buffered writer); the underlying file
-    /// write is amortised across `BufWriter`'s 8 KB buffer.
+    /// Encode one commit-summary record into the stream.
     pub fn write_commit(&mut self, c: &CommitSummary) -> io::Result<()> {
-        bincode::serialize_into(&mut self.writer, c).map_err(|e| {
+        let w = self.writer.as_mut().expect("writer is set until finish");
+        codec().serialize_into(w, c).map_err(|e| {
             io::Error::new(io::ErrorKind::InvalidData, format!("commit encode: {e}"))
         })?;
         self.written += 1;
@@ -234,16 +317,22 @@ impl StreamWriter {
     }
 
     /// Flush, fsync, and atomically rename the temp file into place.
-    /// Returns the final path on success. If anything fails the temp
-    /// file is left on disk for the caller to clean up - we don't
-    /// silently delete it because that would mask the original error.
     pub fn finish(mut self) -> io::Result<PathBuf> {
-        self.writer.flush()?;
-        let file = self.writer.into_inner().map_err(|e| e.into_error())?;
+        let mut writer = self.writer.take().expect("writer is set until finish");
+        writer.flush()?;
+        let file = writer.into_inner().map_err(|e| e.into_error())?;
         file.sync_all().ok();
         drop(file);
         fs::rename(&self.tmp_path, &self.final_path)?;
-        Ok(self.final_path)
+        Ok(self.final_path.clone())
+    }
+}
+
+impl Drop for StreamWriter {
+    fn drop(&mut self) {
+        // Unfinished or failed write: never leave the temp file behind.
+        // After a successful finish() the rename already moved it away.
+        let _ = fs::remove_file(&self.tmp_path);
     }
 }
 
@@ -256,17 +345,13 @@ fn cache_root() -> Option<PathBuf> {
 
 /// 64-bit FxHash that identifies a repo for cache purposes.
 ///
-/// Uses `git rev-parse --git-common-dir` so that multiple worktrees
-/// (`git worktree add`) of the same underlying repository SHARE a
-/// single cache file. Without this, each worktree path hashed to a
-/// different key, both wrote their own cache, and a fast-forward in
-/// one worktree left the other's cache stale with no detection - the
-/// caches couldn't see each other.
+/// Uses `git rev-parse --git-common-dir` so that multiple worktrees of
+/// the same repository share a single cache file (their walks cover the
+/// same refs; a worktree with another HEAD just re-walks).
 ///
 /// Falls back to the canonicalized repo path if the `git` call fails
 /// (covers non-repo dirs called with `--clear-cache` etc.).
 fn repo_key(path: &Path) -> String {
-    use std::hash::{Hash, Hasher};
     let common_dir = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--git-common-dir")
@@ -298,10 +383,7 @@ pub fn cache_path_for(repo_path: &Path) -> Option<PathBuf> {
     cache_root().map(|root| root.join(repo_key(repo_path)).join("commits.bin"))
 }
 
-/// `git rev-parse HEAD` - returns the current HEAD commit hash so the
-/// cache loader can detect when HEAD has moved since the cache was
-/// written. Returns None on bare repos, detached-HEAD-with-no-commits,
-/// non-git dirs, etc; cache loading is gated on Some.
+/// `git rev-parse HEAD`. None on bare repos, unborn HEAD, non-git dirs.
 pub fn current_head_hash(repo_path: &Path) -> Option<String> {
     let out = std::process::Command::new("git")
         .arg("rev-parse")
@@ -316,297 +398,41 @@ pub fn current_head_hash(repo_path: &Path) -> Option<String> {
     Some(hash.trim().to_string())
 }
 
-/// `git rev-list --count --branches --remotes --tags HEAD` - total
-/// reachable commit count across every local + remote ref + tag,
-/// not just HEAD's chain. Used to detect cache staleness when HEAD
-/// itself didn't move (typically: `git fetch` brought new remote
-/// commits, `git tag` added a new tag, force-push removed commits).
-/// Returns None on failure; treated as "unknown, skip count check".
-pub fn reachable_commit_count(repo_path: &Path) -> Option<u64> {
-    let out = std::process::Command::new("git")
-        .arg("rev-list")
-        .arg("--count")
-        .arg("--branches")
-        .arg("--remotes")
-        .arg("--tags")
-        .arg("HEAD")
-        .current_dir(repo_path)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8(out.stdout).ok()?;
-    s.trim().parse::<u64>().ok()
+/// Open the repo's cache for streaming if it holds exactly the walk
+/// described by `key`. A stale cache (any ref moved, sort changed) is
+/// left in place: the caller re-walks and overwrites it atomically, and
+/// another worktree sharing the file may still be able to use it. Only
+/// an undecodable header gets the file deleted.
+pub fn open_stream_for(repo_path: &Path, key: &CacheKey) -> Option<StreamReader> {
+    open_stream_at(&cache_path_for(repo_path)?, key)
 }
 
-/// Validate a cache file against the live repo state. Returns a
-/// `StreamReader` positioned just past the header (ready for the
-/// first `next_commit()` call) when:
-///   - the cache file exists,
-///   - the header magic + version match,
-///   - the cached HEAD equals the live HEAD,
-///   - the cached `sort_order` equals the runtime `sort`,
-///   - the cached reachable-count equals the live reachable-count
-///     (defensive against `fetch` / `gc` / force-push under unchanged HEAD).
-///
-/// All other cases (missing file, header reject, HEAD drift, count
-/// drift, sort mismatch) delete the cache file and return None -
-/// caller falls back to a fresh `git log` walk.
-pub fn open_stream_for(repo_path: &Path, sort: SortCommit) -> Option<StreamReader> {
-    let path = cache_path_for(repo_path)?;
+fn open_stream_at(path: &Path, key: &CacheKey) -> Option<StreamReader> {
     if !path.exists() {
         return None;
     }
-    let live_head = current_head_hash(repo_path)?;
-    let reader = match StreamReader::open(&path) {
+    let reader = match StreamReader::open(path) {
         Ok(r) => r,
         Err(e) => {
             crate::glog_info!("cache header rejected ({}): treating as missing", e);
-            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(path);
             return None;
         }
     };
-    if reader.header.head_hash != live_head {
+    if !key.matches(reader.header()) {
         crate::glog_info!(
-            "cache HEAD moved ({} -> {}): re-walking",
-            reader.header.head_hash,
-            live_head
+            "cache stale (HEAD {} -> {}, or other refs / sort changed): re-walking",
+            reader.header().head_hash,
+            key.head_hash
         );
-        let _ = fs::remove_file(&path);
         return None;
-    }
-    let wanted_sort: u8 = match sort {
-        SortCommit::Chronological => 0,
-        SortCommit::Topological => 1,
-    };
-    if reader.header.sort_order != wanted_sort {
-        crate::glog_info!(
-            "cache sort order mismatch (cached={}, wanted={}): re-walking",
-            reader.header.sort_order,
-            wanted_sort
-        );
-        let _ = fs::remove_file(&path);
-        return None;
-    }
-    if reader.header.reachable_count == 0 {
-        crate::glog_info!("cache lacks reachable-count: re-walking once to upgrade payload");
-        let _ = fs::remove_file(&path);
-        return None;
-    }
-    if let Some(live_count) = reachable_commit_count(repo_path) {
-        if reader.header.reachable_count != live_count {
-            crate::glog_info!(
-                "cache reachable-count drifted ({} -> {}): re-walking",
-                reader.header.reachable_count,
-                live_count
-            );
-            let _ = fs::remove_file(&path);
-            return None;
-        }
     }
     crate::glog_info!("cache hit: streaming commits from {}", path.display());
     Some(reader)
 }
 
-/// Returns true if `cached_head` is an ancestor of the live `HEAD`,
-/// i.e. live HEAD is a strict descendant - the kind of move that
-/// happens when the user adds a commit locally. We can then walk
-/// only the delta and prepend, instead of re-walking the full
-/// history.
-fn cached_head_is_ancestor(repo_path: &Path, cached_head: &str) -> bool {
-    std::process::Command::new("git")
-        .arg("merge-base")
-        .arg("--is-ancestor")
-        .arg(cached_head)
-        .arg("HEAD")
-        .current_dir(repo_path)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Read the cache header without holding the file open. Used by
-/// `try_extend` to inspect the cached HEAD before deciding whether a
-/// surgical extend is possible. Returns None on any decode / IO
-/// failure.
-fn read_header(path: &Path) -> Option<CacheHeader> {
-    let file = fs::File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
-    let h: CacheHeader = bincode::deserialize_from(&mut reader).ok()?;
-    if !h.is_valid() {
-        return None;
-    }
-    Some(h)
-}
-
-/// Surgical refresh path: read the on-disk header (without the
-/// HEAD-equal / count-equal gates), and IF live HEAD is a strict
-/// descendant of the cached HEAD, walk just the delta range
-/// `cached_head..HEAD`, prepend those new commits, and rewrite the
-/// cache atomically.
-///
-/// Returns the new commits in chronological-newest-first order on
-/// success; the caller appends the rest by re-opening the cache.
-/// When the cache isn't extensible (missing, schema mismatch, HEAD
-/// diverged via force-push / rebase, reachable count drifted by more
-/// than the HEAD-only delta), returns None and the caller falls
-/// back to a full re-walk.
-///
-/// NOTE: extending the on-disk file in place would require knowing
-/// each record's byte length to prepend new records ahead of the
-/// existing ones. Bincode records are variable-width so that's not
-/// directly doable; we rewrite the whole file in streaming fashion
-/// (header + new commits + existing commits) using `StreamWriter`,
-/// reading the existing commits via `StreamReader` so peak memory
-/// stays bounded.
-pub fn try_extend(repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummary>> {
-    let path = cache_path_for(repo_path)?;
-    try_extend_at(&path, repo_path, sort)
-}
-
-/// `try_extend` against an explicit cache file, so tests can drive it
-/// without pointing `XDG_CACHE_HOME` somewhere (env mutation races
-/// between parallel tests).
-fn try_extend_at(path: &Path, repo_path: &Path, sort: SortCommit) -> Option<Vec<CommitSummary>> {
-    if !path.exists() {
-        return None;
-    }
-    let header = read_header(path)?;
-    let live_head = current_head_hash(repo_path)?;
-    // Sort mismatch: the on-disk records are in the OLD order and
-    // splicing new commits walked in the NEW order at the front would
-    // produce a hybrid stream the reader can't make sense of. Refuse
-    // to extend; the caller's `open_stream_for(.., sort)` will then
-    // reject the same cache on the sort check and force a clean
-    // fresh-walk that rewrites the cache in the wanted order.
-    let wanted_sort: u8 = match sort {
-        SortCommit::Chronological => 0,
-        SortCommit::Topological => 1,
-    };
-    if header.sort_order != wanted_sort {
-        return None;
-    }
-    if header.head_hash == live_head {
-        // Caller should have hit `open_stream_for` first; nothing to do
-        // here - return an empty vec to signal "no extension needed".
-        return Some(Vec::new());
-    }
-    if !cached_head_is_ancestor(repo_path, &header.head_hash) {
-        return None;
-    }
-    let new_commits = super::walk_commits_since(repo_path, sort, &header.head_hash)?;
-    if new_commits.is_empty() {
-        return None;
-    }
-    // `cached_head..HEAD` excludes only the ancestors of the cached HEAD,
-    // but the full walk caches the commits of EVERY ref (`--branches
-    // --remotes --tags`). Commits another ref already carried (typically
-    // a remote PR branch merged into main later) are cached already, and
-    // prepending them again duplicated their rows, which shifted every
-    // position in the ReplaceGraph topology. Leave those where they are
-    // (the full walk already placed them after their children) and only
-    // prepend the commits the cache has never seen.
-    let already_cached = cached_hashes_among(path, &new_commits)?;
-    let new_commits: Vec<CommitSummary> = new_commits
-        .into_iter()
-        .filter(|c| !already_cached.contains(&c.commit_hash))
-        .collect();
-    // Rewrite the cache: header + new commits (prepended) + existing
-    // commits (streamed back from the old file). Memory peak stays
-    // bounded - we never hold the existing cache in memory.
-    let new_head = live_head.clone();
-    let new_count = reachable_commit_count(repo_path).unwrap_or(0);
-    let new_header = CacheHeader::new(new_head, new_count, sort);
-
-    // Re-read the existing file's commits via the streamer. Open
-    // separately from the writer so we don't race against our own
-    // atomic rename.
-    let mut old_reader = StreamReader::open(path).ok()?;
-    let mut writer = StreamWriter::create(path, new_header).ok()?;
-    for c in &new_commits {
-        writer.write_commit(c).ok()?;
-    }
-    loop {
-        match old_reader.next_commit() {
-            Some(Ok(c)) => {
-                if writer.write_commit(&c).is_err() {
-                    return None;
-                }
-            }
-            Some(Err(e)) => {
-                crate::glog_warn!("cache extend: stop reading old cache at error: {}", e);
-                break;
-            }
-            None => break,
-        }
-    }
-    drop(old_reader);
-    writer.finish().ok()?;
-    crate::glog_info!(
-        "cache surgical extend: +{} commits prepended",
-        new_commits.len()
-    );
-    Some(new_commits)
-}
-
-/// Which of `candidates` already appear in the cache file at `path`.
-/// Streams the file once; memory is bounded by the candidate set (the
-/// surgical-extend delta), never by the cache size.
-fn cached_hashes_among(
-    path: &Path,
-    candidates: &[CommitSummary],
-) -> Option<rustc_hash::FxHashSet<super::CommitHash>> {
-    let wanted: rustc_hash::FxHashSet<&super::CommitHash> =
-        candidates.iter().map(|c| &c.commit_hash).collect();
-    let mut found = rustc_hash::FxHashSet::default();
-    let mut reader = StreamReader::open(path).ok()?;
-    while let Some(item) = reader.next_commit() {
-        let c = item.ok()?;
-        if wanted.contains(&c.commit_hash) {
-            found.insert(c.commit_hash);
-            if found.len() == wanted.len() {
-                break;
-            }
-        }
-    }
-    Some(found)
-}
-
-/// Persist the full commit-summary history to disk by streaming
-/// `summaries` one record at a time through a `StreamWriter`. Safe
-/// to call from a background thread - all I/O is best-effort and
-/// silently no-ops on failure (the cache is purely an optimisation).
-///
-/// This wraps `StreamWriter`: callers that already have a
-/// `Vec<CommitSummary>` pay no extra allocation. Callers that want
-/// to stream their own summaries (e.g. fresh `git log` walks that
-/// consume one record at a time) should use `StreamWriter::create`
-/// directly to avoid building the intermediate vec.
-pub fn save_for(repo_path: &Path, summaries: &[CommitSummary]) -> io::Result<()> {
-    let Some(path) = cache_path_for(repo_path) else {
-        return Ok(());
-    };
-    let Some(head) = current_head_hash(repo_path) else {
-        return Ok(());
-    };
-    let reachable_count = reachable_commit_count(repo_path).unwrap_or(0);
-    // Default to chronological in the wire format - the only existing
-    // call site doesn't pass sort, and the v4 reader doesn't gate on
-    // sort_order yet; it's metadata for future use.
-    let header = CacheHeader::new(head, reachable_count, SortCommit::Chronological);
-    let mut writer = StreamWriter::create(&path, header)?;
-    for c in summaries {
-        writer.write_commit(c)?;
-    }
-    let written = writer.written();
-    writer.finish()?;
-    crate::glog_info!("cache write OK: {} commits to {}", written, path.display());
-    Ok(())
-}
-
-/// Drop the cache file for this repo. Use to recover after a corrupt
-/// load (caller already deleted) or from a CLI `--clear-cache` flag.
+/// Drop the cache file for this repo: `--clear-cache`, or after a record
+/// failed to decode mid-stream.
 pub fn invalidate(repo_path: &Path) {
     if let Some(path) = cache_path_for(repo_path) {
         let _ = fs::remove_file(&path);
@@ -631,19 +457,38 @@ mod tests {
         }
     }
 
-    /// End-to-end: write 5 commits through StreamWriter, read them
-    /// back through StreamReader, compare. Locks in the wire format
-    /// so future bincode-encoding tweaks can't silently break v3
-    /// readers in the wild.
+    fn key(head: &str, fingerprint: u64) -> CacheKey {
+        CacheKey {
+            head_hash: head.into(),
+            fingerprint,
+            sort_order: 0,
+        }
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("gitoui-cache-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn read_all(path: &Path) -> io::Result<Vec<CommitSummary>> {
+        let mut reader = StreamReader::open(path)?;
+        let mut out = Vec::new();
+        while let Some(item) = reader.next_commit() {
+            out.push(item?);
+        }
+        Ok(out)
+    }
+
+    /// Write 5 commits through StreamWriter, read them back, compare.
     #[test]
     fn stream_writer_reader_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("gitoui-cache-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir("roundtrip");
         let path = dir.join("commits.bin");
-        let _ = std::fs::remove_file(&path);
 
-        let header = CacheHeader::new("deadbeef".into(), 5, SortCommit::Chronological);
-        let mut writer = StreamWriter::create(&path, header).unwrap();
+        let mut writer =
+            StreamWriter::create(&path, CacheHeader::new(&key("deadbeef", 42))).unwrap();
         let originals = vec![
             make_commit("a", &[]),
             make_commit("b", &["a"]),
@@ -657,49 +502,134 @@ mod tests {
         assert_eq!(writer.written(), 5);
         writer.finish().unwrap();
 
-        let mut reader = StreamReader::open(&path).unwrap();
+        let reader = StreamReader::open(&path).unwrap();
         assert_eq!(reader.header().magic, *b"GTOI");
         assert_eq!(reader.header().version, CACHE_VERSION);
         assert_eq!(reader.header().head_hash, "deadbeef");
-        assert_eq!(reader.header().reachable_count, 5);
+        assert_eq!(reader.header().fingerprint, 42);
         assert_eq!(reader.header().sort_order, 0);
 
-        let mut readback: Vec<CommitSummary> = Vec::new();
-        while let Some(item) = reader.next_commit() {
-            readback.push(item.unwrap());
-        }
+        let readback = read_all(&path).unwrap();
         assert_eq!(readback.len(), originals.len());
         for (a, b) in originals.iter().zip(readback.iter()) {
             assert_eq!(a.commit_hash, b.commit_hash);
             assert_eq!(a.commit_message, b.commit_message);
             assert_eq!(a.parent_commit_hashes, b.parent_commit_hashes);
         }
-
-        let _ = std::fs::remove_dir_all(&dir);
+        // Nothing but the cache itself is left in the directory.
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(&dir);
     }
 
-    /// A 0-commit cache (header-only) must round-trip cleanly: open
-    /// succeeds, next_commit returns None on the first call. Guards
-    /// against a regression where the EOF probe in StreamReader
-    /// mis-detected the end of an empty body as a corrupt record.
+    /// A 0-commit cache (header-only) round-trips: next_commit is None.
     #[test]
     fn stream_reader_handles_empty_body() {
-        let dir = std::env::temp_dir().join(format!("gitoui-cache-empty-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = temp_dir("empty");
         let path = dir.join("commits.bin");
-        let _ = std::fs::remove_file(&path);
-
-        let header = CacheHeader::new("h".into(), 0, SortCommit::Chronological);
-        let writer = StreamWriter::create(&path, header).unwrap();
-        writer.finish().unwrap();
-
+        StreamWriter::create(&path, CacheHeader::new(&key("h", 1)))
+            .unwrap()
+            .finish()
+            .unwrap();
         let mut reader = StreamReader::open(&path).unwrap();
         assert!(reader.next_commit().is_none());
-
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
-    fn git(repo: &Path, args: &[&str]) {
+    /// Two writers aimed at the same cache file (two gitoui windows on
+    /// one repo, or a bg respawn while the previous walk still writes)
+    /// must each produce a complete file: whichever lands last wins, and
+    /// the result decodes end to end.
+    #[test]
+    fn concurrent_writers_never_leave_a_corrupt_cache() {
+        let dir = temp_dir("race");
+        let path = dir.join("commits.bin");
+
+        let first: Vec<_> = (0..200)
+            .map(|i| make_commit(&format!("a{i:03}"), &[]))
+            .collect();
+        let second: Vec<_> = (0..300)
+            .map(|i| make_commit(&format!("b{i:03}"), &[]))
+            .collect();
+        let mut wa = StreamWriter::create(&path, CacheHeader::new(&key("a", 1))).unwrap();
+        let mut wb = StreamWriter::create(&path, CacheHeader::new(&key("b", 2))).unwrap();
+        for (i, b) in second.iter().enumerate() {
+            if let Some(a) = first.get(i) {
+                wa.write_commit(a).unwrap();
+            }
+            wb.write_commit(b).unwrap();
+        }
+        let ra = wa.finish();
+        let rb = wb.finish();
+        assert!(
+            ra.is_ok() && rb.is_ok(),
+            "both writers must finish: {ra:?} {rb:?}"
+        );
+
+        let got = read_all(&path).expect("cache must decode end to end");
+        assert_eq!(got.len(), 300, "the last writer's 300 commits, intact");
+        assert!(got.iter().all(|c| c.commit_hash.as_str().starts_with('b')));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A writer dropped before `finish()` (write error, aborted walk)
+    /// leaves neither a cache nor a temp file behind.
+    #[test]
+    fn abandoned_writer_cleans_up_its_temp_file() {
+        let dir = temp_dir("abandon");
+        let path = dir.join("commits.bin");
+        let mut w = StreamWriter::create(&path, CacheHeader::new(&key("h", 1))).unwrap();
+        w.write_commit(&make_commit("a", &[])).unwrap();
+        drop(w);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A damaged record whose length prefix claims gigabytes must fail
+    /// to decode cleanly instead of trying to allocate that much (which
+    /// aborts the process with no panic hook and no log line).
+    #[test]
+    fn corrupt_length_prefix_is_rejected_without_huge_allocation() {
+        let dir = temp_dir("bad");
+        let path = dir.join("commits.bin");
+        StreamWriter::create(&path, CacheHeader::new(&key("h", 1)))
+            .unwrap()
+            .finish()
+            .unwrap();
+        // A record starts with the commit hash String: u64 length + bytes.
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.extend_from_slice(&(u64::MAX / 4).to_le_bytes());
+        bytes.extend_from_slice(b"garbage");
+        fs::write(&path, bytes).unwrap();
+
+        let mut reader = StreamReader::open(&path).unwrap();
+        let item = reader.next_commit().expect("a record is present");
+        assert!(item.is_err(), "garbage must not decode");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_stream_accepts_only_the_exact_walk_key() {
+        let dir = temp_dir("open");
+        let path = dir.join("commits.bin");
+        let k = key("h1", 7);
+        let mut w = StreamWriter::create(&path, CacheHeader::new(&k)).unwrap();
+        w.write_commit(&make_commit("a", &[])).unwrap();
+        w.finish().unwrap();
+
+        assert!(open_stream_at(&path, &k).is_some());
+        assert!(open_stream_at(&path, &key("h1", 8)).is_none(), "other refs");
+        assert!(open_stream_at(&path, &key("h2", 7)).is_none(), "other HEAD");
+        let topo = CacheKey {
+            sort_order: 1,
+            ..k.clone()
+        };
+        assert!(open_stream_at(&path, &topo).is_none(), "other sort order");
+        // A stale cache is kept for the re-walk to overwrite.
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn git(repo: &Path, args: &[&str]) -> String {
         let out = std::process::Command::new("git")
             .args(args)
             .current_dir(repo)
@@ -714,61 +644,87 @@ mod tests {
             "git {args:?}: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
-    /// Regression (StremioFR, 2026-10): the full walk caches commits
-    /// reachable from EVERY ref, but the surgical extend walked
-    /// `cached_head..HEAD` and prepended the result blindly. Commits
-    /// that were already cached through another ref (a remote PR
-    /// branch merged later into main) were written twice, and the
-    /// duplicated rows shifted every position in the ReplaceGraph
-    /// topology. After an extend, each commit must appear exactly once.
-    #[test]
-    fn try_extend_does_not_duplicate_commits_cached_via_other_refs() {
-        let root = std::env::temp_dir().join(format!("gitoui-extend-dup-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    /// main with two commits, plus `origin/feature` one commit ahead.
+    fn sample_repo(tag: &str) -> (PathBuf, PathBuf) {
+        let root = temp_dir(tag);
         let repo = root.join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
+        fs::create_dir_all(&repo).unwrap();
         git(&repo, &["init", "-q", "-b", "main"]);
         git(&repo, &["commit", "-q", "--allow-empty", "-m", "A"]);
-        // `other` runs ahead of main: B and C are cached through it.
-        git(&repo, &["checkout", "-q", "-b", "other"]);
         git(&repo, &["commit", "-q", "--allow-empty", "-m", "B"]);
-        git(&repo, &["commit", "-q", "--allow-empty", "-m", "C"]);
-        git(&repo, &["checkout", "-q", "main"]);
+        let tree = git(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let f = git(&repo, &["commit-tree", &tree, "-p", "HEAD", "-m", "F"]);
+        git(&repo, &["update-ref", "refs/remotes/origin/feature", &f]);
+        (root, repo)
+    }
 
-        // Full walk over every ref, cached with HEAD = A.
-        let cache = root.join("commits.bin");
-        let full = crate::git::Repository::load(&repo, SortCommit::Chronological, None).unwrap();
-        let head = current_head_hash(&repo).unwrap();
-        let mut writer =
-            StreamWriter::create(&cache, CacheHeader::new(head, 3, SortCommit::Chronological))
-                .unwrap();
-        for c in full.all_commits_arc().iter() {
-            writer.write_commit(c).unwrap();
-        }
-        writer.finish().unwrap();
+    fn key_of(repo: &Path) -> CacheKey {
+        CacheKey::compute(repo, SortCommit::Chronological, &[]).expect("key")
+    }
 
-        // main fast-forwards onto C, then one new commit D on top.
-        git(&repo, &["merge", "-q", "--ff-only", "other"]);
-        git(&repo, &["commit", "-q", "--allow-empty", "-m", "D"]);
+    /// The walk covers every ref, so the key must change whenever any of
+    /// them moves, appears or disappears, not only when HEAD does.
+    /// Each case below is a way the old "HEAD + reachable count" check
+    /// (and the surgical extend) served a cache that no longer matched
+    /// `git log`.
+    #[test]
+    fn cache_key_tracks_every_input_of_the_walk() {
+        let (root, repo) = sample_repo("key");
+        let base = key_of(&repo);
+        assert_eq!(key_of(&repo), base, "stable while nothing changes");
 
-        try_extend_at(&cache, &repo, SortCommit::Chronological).expect("extend");
-
-        let mut reader = StreamReader::open(&cache).unwrap();
-        let mut hashes = Vec::new();
-        while let Some(c) = reader.next_commit() {
-            hashes.push(c.unwrap().commit_hash);
-        }
-        let unique: std::collections::HashSet<_> = hashes.iter().collect();
-        assert_eq!(
-            hashes.len(),
-            unique.len(),
-            "duplicated commits in cache: {hashes:?}"
+        // A fetch advances a remote branch, HEAD untouched.
+        let tree = git(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let f2 = git(
+            &repo,
+            &["commit-tree", &tree, "-p", "origin/feature", "-m", "F2"],
         );
-        assert_eq!(hashes.len(), 4, "A, B, C, D exactly once: {hashes:?}");
-        assert_eq!(reader.header().head_hash, current_head_hash(&repo).unwrap());
+        git(&repo, &["update-ref", "refs/remotes/origin/feature", &f2]);
+        let after_fetch = key_of(&repo);
+        assert_ne!(after_fetch, base, "remote branch moved");
 
-        let _ = std::fs::remove_dir_all(&root);
+        // A remote branch is pruned.
+        git(&repo, &["update-ref", "-d", "refs/remotes/origin/feature"]);
+        let after_prune = key_of(&repo);
+        assert_ne!(after_prune, after_fetch, "remote branch deleted");
+
+        // A tag on an existing commit (same commit set, same count).
+        git(&repo, &["tag", "v1", "HEAD~1"]);
+        let after_tag = key_of(&repo);
+        assert_ne!(after_tag, after_prune, "tag added");
+
+        // HEAD moves.
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "C"]);
+        let after_commit = key_of(&repo);
+        assert_ne!(after_commit, after_tag, "HEAD moved");
+
+        // Stash parents and sort order are walk inputs too.
+        let head = CommitHash::from(after_commit.head_hash.as_str());
+        let with_stash = CacheKey::compute(&repo, SortCommit::Chronological, &[head]).unwrap();
+        assert_ne!(with_stash, after_commit, "stash parent included");
+        let topo = CacheKey::compute(&repo, SortCommit::Topological, &[]).unwrap();
+        assert_ne!(topo, after_commit, "sort order");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Same refs, same key: a fresh clone-like copy in another directory
+    /// (or another worktree on the same HEAD) can reuse the cache.
+    #[test]
+    fn cache_key_does_not_depend_on_the_checkout_path() {
+        let (root, repo) = sample_repo("key-path");
+        let copy = root.join("copy");
+        let status = std::process::Command::new("cp")
+            .args(["-a"])
+            .arg(&repo)
+            .arg(&copy)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(key_of(&repo), key_of(&copy));
+        let _ = fs::remove_dir_all(&root);
     }
 }
