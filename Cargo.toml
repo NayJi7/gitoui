@@ -52,7 +52,7 @@ bincode = "1"
 
 [dev-dependencies]
 dircpy = "0.3.20"
-rstest = "0.26.1"
+rstest = "0.27.0"
 tempfile = "3.27.0"
 text-to-png = "0.3.0"
 
