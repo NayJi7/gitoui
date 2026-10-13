@@ -21,8 +21,9 @@ The installer:
   Release.
 - Verifies the tarball checksum.
 - Installs to `$HOME/.local/bin/gitoui` by default.
-- Adds the install directory to your shell `PATH` if it isn't already
-  there (prints the line to add if it can't edit your rc file).
+- Checks that the install directory is on your `PATH`; if it isn't, prints
+  the `export PATH=...` line to add to your shell rc file (it doesn't edit
+  the file itself).
 
 ### Tweaks
 
@@ -158,12 +159,21 @@ touching your config.
 
 ## Uninstalling
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> doesn't write anywhere except your config dir:
+Remove the binary, then the directories <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> writes to:
 
 ```sh
-rm ~/.local/bin/gitoui              # binary
-rm -rf ~/.config/gitoui             # config + cached avatars + themes
+rm ~/.local/bin/gitoui              # binary (curl install)
+rm -rf ~/.config/gitoui             # config, custom themes, recent repos (+ GitHub token on Linux)
+rm -rf ~/.cache/gitoui              # commit cache, update-check state (+ avatars on Linux)
+```
+
+On macOS, two more locations:
+
+```sh
+rm -rf ~/Library/Application\ Support/gitoui   # GitHub token
+rm -rf ~/Library/Caches/gitoui                 # avatars
 ```
 
 Installed with Homebrew? Remove the binary with `brew uninstall gitoui` instead
-of the `rm` above, then delete the config dir the same way.
+of the first `rm`. Installed with cargo? Use `cargo uninstall gitoui`. Then
+delete the directories the same way.
