@@ -123,6 +123,19 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   // Wait for fonts to load so Orbitron is ready before the type-in
   // starts (otherwise the first chars render in a fallback font and
   // re-flow mid-animation).
+  // CSS times as milliseconds. The build minifies `1400ms` to `1.4s`,
+  // so the unit has to be read, not assumed.
+  const toMs = (value: string) => {
+    const v = value.trim();
+    const n = parseFloat(v);
+    if (Number.isNaN(n)) return 0;
+    return v.endsWith("ms") ? n : v.endsWith("s") ? n * 1000 : n;
+  };
+  // Mobile intro beats: the cursor shows up just after the G lands,
+  // stays solid (a prompt waiting) for one beat, then the word types.
+  const INTRO_PAUSE_MS = 80;
+  const CURSOR_BEAT_MS = 150;
+
   const start = async () => {
     const el = document.querySelector<HTMLElement>(".hero-typed");
     if (!el) return;
@@ -133,29 +146,125 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     if (document.fonts?.ready) {
       try { await document.fonts.ready; } catch {}
     }
+    fitTagline();
+    // Pin the title to the width of the finished word while it types.
+    // The SSR text is still in place (invisible), so measure it first.
+    // Centered on mobile, the box then sits at its final spot and the
+    // letters grow left to right inside it instead of from the middle
+    // out. Released once typing ends so the title follows resizes.
+    const title = el.closest<HTMLElement>(".hero-title");
+    if (title) {
+      // Measure "word + cursor" with a stand-in cursor (same class, so
+      // same font and margin as typed.js's), so the centered unit is
+      // `gitoui▏` and its box is final before the first letter.
+      // Height too: an emptied title collapses to zero and every
+      // vertically-centered sibling (the G above all) would jump.
+      const probe = document.createElement("span");
+      probe.className = "typed-cursor";
+      probe.textContent = "▏";
+      probe.style.visibility = "hidden";
+      el.after(probe);
+      const box = title.getBoundingClientRect();
+      probe.remove();
+      title.style.width = `${box.width}px`;
+      title.style.height = `${box.height}px`;
+    }
+    // Mobile intro (`--intro-offset` is set by the narrow-screen CSS):
+    // the G shows alone at the center of the screen, then slides up to
+    // its place, and everything else starts `--intro-offset` later. The
+    // layout is final at this point (title pinned above), so the
+    // distance from the G to the screen center is measured once.
+    const hero = el.closest<HTMLElement>(".hero");
+    const mark = hero?.querySelector<HTMLElement>(".hero-mark");
+    const introOffset = hero ? toMs(getComputedStyle(hero).getPropertyValue("--intro-offset")) : 0;
+    let introMs = 0;
+    if (mark && introOffset > 0) {
+      if (window.scrollY < 50) {
+        const r = mark.getBoundingClientRect();
+        const dy = window.innerHeight / 2 - (r.top + r.height / 2);
+        mark.style.setProperty("--g-intro-dy", `${dy}px`);
+        mark.classList.add("is-intro");
+        introMs = toMs(getComputedStyle(mark).animationDuration);
+      } else {
+        // Reopened mid-page: no intro, just reveal it.
+        mark.classList.add("no-intro");
+      }
+    }
     el.innerHTML = "";
-    // Reveal in the same frame we hand off to typed.js so there's no
-    // gap between "hidden" and "typing has started".
-    el.classList.add("is-ready");
-    const typed = new Typed(el, {
-      strings: [html],
-      typeSpeed: speed,
-      startDelay,
-      showCursor: true,
-      cursorChar: "▏",
-      contentType: "html",
-      loop: false,
-      smartBackspace: false,
-    });
-    // typed.js only adds `.typed-cursor--blink` once `toggleBlinking`
-    // fires - which doesn't happen until typing pauses. Add it
-    // manually right after init so the cursor blinks during the
-    // initial startDelay too. During active typing typed.js removes
-    // the class itself, so the cursor goes solid then.
-    requestAnimationFrame(() => {
-      typed.cursor?.classList.add("typed-cursor--blink");
-    });
+    // During the intro the title (and its cursor) only shows up once
+    // the G has landed; the cursor then holds solid for one beat before
+    // the first letter (typed.js adds two keystroke delays on top,
+    // ~0.3 s, so the solid cursor shows for about 0.45 s).
+    const intro = introMs > 0;
+    const launchAt = intro ? introMs + INTRO_PAUSE_MS : 0;
+    const launch = () => {
+      // Reveal in the same frame we hand off to typed.js so there's no
+      // gap between "hidden" and "typing has started".
+      el.classList.add("is-ready");
+      const typed = new Typed(el, {
+        strings: [html],
+        typeSpeed: speed,
+        startDelay: intro ? CURSOR_BEAT_MS : startDelay,
+        showCursor: true,
+        cursorChar: "▏",
+        contentType: "html",
+        loop: false,
+        smartBackspace: false,
+        onComplete: () => {
+          if (title) {
+            title.style.width = "";
+            title.style.height = "";
+          }
+          // Cue for the rest of the copy on mobile (see the intro CSS).
+          hero?.classList.add("is-typed");
+        },
+      });
+      // typed.js only adds `.typed-cursor--blink` once `toggleBlinking`
+      // fires - which doesn't happen until typing pauses. Add it
+      // manually right after init so the cursor blinks during the
+      // initial startDelay too. During active typing typed.js removes
+      // the class itself, so the cursor goes solid then.
+      // In the intro the cursor stays solid until typing: a blink cut
+      // short by the first letter reads as a glitch.
+      if (!intro) {
+        requestAnimationFrame(() => {
+          typed.cursor?.classList.add("typed-cursor--blink");
+        });
+      }
+    };
+    if (launchAt > 0) setTimeout(launch, launchAt);
+    else launch();
   };
+  // Narrow screens: shrink the tagline box to its longest line so the
+  // block can be centered while the text stays left-aligned. Wrapped
+  // text otherwise fills the whole column and looks pushed left.
+  const fitTagline = () => {
+    const tagline = document.querySelector<HTMLElement>(".hero-tagline");
+    if (!tagline) return;
+    tagline.style.width = "";
+    if (!matchMedia("(max-width: 50rem)").matches) return;
+    const range = document.createRange();
+    range.selectNodeContents(tagline);
+    const lines = new Map<number, { left: number; right: number }>();
+    for (const r of range.getClientRects()) {
+      const key = Math.round(r.top);
+      const line = lines.get(key);
+      if (line) {
+        line.left = Math.min(line.left, r.left);
+        line.right = Math.max(line.right, r.right);
+      } else {
+        lines.set(key, { left: r.left, right: r.right });
+      }
+    }
+    const widest = Math.max(0, ...[...lines.values()].map((l) => l.right - l.left));
+    if (widest > 0) tagline.style.width = `${Math.ceil(widest) + 1}px`;
+  };
+  let fitFrame = 0;
+  window.addEventListener("resize", () => {
+    cancelAnimationFrame(fitFrame);
+    fitFrame = requestAnimationFrame(fitTagline);
+  });
+
   start();
   // Re-init on view transitions / client-side navigations.
   document.addEventListener("astro:page-load", start);
@@ -335,6 +444,12 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     visibility: visible;
   }
   .hero-title :global(.typed-cursor) {
+    /* `▏` draws a bar in the left eighth of a full-width cell. Size the
+       box to that bar so centering (`gitoui▏` on mobile) counts what is
+       visible, not ~0.8em of empty cell. */
+    display: inline-block;
+    width: 0.12em;
+    overflow: visible;
     color: var(--brand);
     font-weight: 400;
     margin-left: 0.05em;
@@ -380,7 +495,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     opacity: 0;
     /* Wait a beat after the title finishes typing, then fade up.
        Distinct visible pauses make the choreography read better. */
-    animation: hero-fade-up 700ms cubic-bezier(0.2, 0.7, 0.2, 1) calc(var(--caret-show, 1.5s) + 350ms) forwards;
+    animation: hero-fade-up 700ms cubic-bezier(0.2, 0.7, 0.2, 1) calc(var(--caret-show, 1.5s) + var(--intro-offset, 0ms) + 350ms) forwards;
   }
   @media (prefers-reduced-motion: reduce) {
     .hero-tagline { opacity: 1; animation: none; }
@@ -407,7 +522,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
        final length, a clip-path reveals it left-to-right. */
     clip-path: inset(0 100% 0 0);
     animation: hero-wipe 900ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
-    animation-delay: calc(var(--caret-show, 1.5s) + 1000ms);
+    animation-delay: calc(var(--caret-show, 1.5s) + var(--intro-offset, 0ms) + 1000ms);
   }
   @keyframes hero-wipe {
     to { clip-path: inset(0 0 0 0); }
@@ -443,9 +558,9 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   /* Buttons start AFTER the tagline + underline have fully landed
      (tagline @ +350ms + 700ms duration ≈ +1050ms; underline @ +1000ms
      + 900ms ≈ +1900ms). Stagger them with a clear gap. */
-  .cta:nth-child(1) { animation-delay: calc(var(--caret-show, 1.5s) + 1400ms); }
-  .cta:nth-child(2) { animation-delay: calc(var(--caret-show, 1.5s) + 1600ms); }
-  .cta:nth-child(3) { animation-delay: calc(var(--caret-show, 1.5s) + 1800ms); }
+  .cta:nth-child(1) { animation-delay: calc(var(--caret-show, 1.5s) + var(--intro-offset, 0ms) + 1400ms); }
+  .cta:nth-child(2) { animation-delay: calc(var(--caret-show, 1.5s) + var(--intro-offset, 0ms) + 1600ms); }
+  .cta:nth-child(3) { animation-delay: calc(var(--caret-show, 1.5s) + var(--intro-offset, 0ms) + 1800ms); }
   @media (prefers-reduced-motion: reduce) {
     .cta { opacity: 1; animation: none; }
   }
@@ -512,7 +627,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     height: auto;
     filter: drop-shadow(0 12px 40px rgba(240, 81, 51, 0.3));
     animation: hero-float 7s ease-in-out infinite;
-    animation-delay: 1.3s;
+    animation-delay: calc(1.3s + var(--intro-offset, 0ms));
   }
   @media (prefers-reduced-motion: reduce) {
     .hero-mark-img { animation: none; }
@@ -531,7 +646,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     text-decoration: none;
     opacity: 0;
     z-index: 1;
-    animation: hero-fade-in 600ms ease 1500ms forwards;
+    animation: hero-fade-in 600ms ease calc(1500ms + var(--intro-offset, 0ms)) forwards;
   }
   .hero-scroll-hint svg {
     width: 1.4rem;
@@ -649,7 +764,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding-block: calc(var(--nav-h) + 2.5rem) 0;
+      /* The header is hidden while the hero sits at the top. */
+      padding-block: 2rem 0;
     }
     .hero-inner {
       grid-template-columns: 1fr;
@@ -661,15 +777,31 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       order: -1;
     }
     .hero-mark-img {
-      width: clamp(5.5rem, 26vw, 8rem);
+      width: clamp(9rem, 48vw, 13rem);
       max-width: none;
     }
     .hero-copy {
       align-items: center;
       gap: 1.5rem;
     }
+    /* The box is centered by .hero-copy; inside it the word is laid
+       out from the left so it types left to right (see `start()`). */
     .hero-title {
       margin-bottom: 0;
+      text-align: left;
+      /* The blinking cursor adds ~0.1em on the right one beat out of
+         two. Splitting it keeps the ink within ~2px of the center in
+         both phases instead of 0 / -5px. */
+      translate: 0.05em 0;
+    }
+    /* Tagline reads left to right like on desktop (its underline starts
+       under the first word), as a centered block: `fitTagline()` sizes
+       the box to its longest line, which CSS can't do for wrapped text. */
+    .hero-tagline {
+      align-self: center;
+      text-align: left;
+      /* Tighter gap between the text and its underline than on desktop. */
+      padding-bottom: 0.6rem;
     }
     .hero-actions {
       max-width: 22rem;
@@ -690,6 +822,88 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   @media (max-width: 22rem) {
     .hero-actions {
       grid-template-columns: 1fr;
+    }
+  }
+
+  /* ── mobile intro ──────────────────────────────────────────────────
+     The G appears alone at the center of the screen, holds, then slides
+     up to its place; everything else waits `--intro-offset`. The G is
+     hidden by CSS from the first paint (no flash at its final spot),
+     `start()` adds `.is-intro` with the measured distance. If the script
+     never gets there, the G still fades in after 3 s. */
+  @media (max-width: 50rem) and (prefers-reduced-motion: no-preference) {
+    .hero {
+      --intro-offset: 900ms;
+    }
+    .hero-mark {
+      animation: hero-reveal-late 400ms ease 3s both;
+    }
+    .hero-mark.is-intro {
+      animation: hero-g-intro 1700ms both;
+    }
+    .hero-mark.no-intro {
+      animation: hero-fade-in 500ms ease both;
+    }
+    /* The rest of the copy waits for the title to finish typing
+       (`.is-typed`, set by `start()`), then follows on short relative
+       delays. Fallback: shown after 6 s if the script never gets
+       there. */
+    .hero:not(.is-typed) .hero-tagline,
+    .hero:not(.is-typed) .cta,
+    .hero:not(.is-typed) .hero-scroll-hint {
+      animation: hero-reveal-late 400ms ease 6s both;
+    }
+    /* Own keyframe name: switching to `hero-wipe` on `.is-typed` must
+       restart the wipe; keeping the same name would only change the
+       delay, the browser would count it from page load and show the
+       line at once. */
+    .hero:not(.is-typed) .hero-tagline::after {
+      animation: hero-wipe-late 900ms cubic-bezier(0.65, 0, 0.35, 1) 6s forwards;
+    }
+    .hero.is-typed .hero-tagline {
+      animation: hero-fade-up 700ms cubic-bezier(0.2, 0.7, 0.2, 1) 200ms both;
+    }
+    .hero.is-typed .hero-tagline::after {
+      animation: hero-wipe 900ms cubic-bezier(0.65, 0, 0.35, 1) 650ms forwards;
+    }
+    .hero.is-typed .cta {
+      animation: hero-fade-up 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    }
+    .hero.is-typed .cta:nth-child(1) { animation-delay: 850ms; }
+    .hero.is-typed .cta:nth-child(2) { animation-delay: 1000ms; }
+    .hero.is-typed .cta:nth-child(3) { animation-delay: 1150ms; }
+    .hero.is-typed .hero-scroll-hint {
+      animation: hero-fade-in 600ms ease 1500ms forwards;
+    }
+  }
+  @keyframes hero-wipe-late {
+    to { clip-path: inset(0 0 0 0); }
+  }
+  @keyframes hero-reveal-late {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  /* Appear (scale in) at the center, hold, then slide up on an
+     ease-in-out quint: a soft lift-off, a quick travel, a soft
+     landing. */
+  @keyframes hero-g-intro {
+    0% {
+      opacity: 0;
+      transform: translateY(var(--g-intro-dy, 0px)) scale(0.85);
+      animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+    35% {
+      opacity: 1;
+      transform: translateY(var(--g-intro-dy, 0px)) scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: translateY(var(--g-intro-dy, 0px)) scale(1);
+      animation-timing-function: cubic-bezier(0.83, 0, 0.17, 1);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
   }
 </style>
