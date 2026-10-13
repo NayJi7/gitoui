@@ -156,7 +156,7 @@ fn rename_records_move_with_from_and_to() {
     add(&dir, "old.txt");
     let _ = commit(&dir, "first");
 
-    // git rename detection needs >50% similarity — copy content verbatim.
+    // git rename detection needs >50% similarity - copy content verbatim.
     std::fs::rename(dir.path().join("old.txt"), dir.path().join("new.txt")).unwrap();
     Command::new("git")
         .args(["add", "-A"])
@@ -207,7 +207,7 @@ fn merge_commit_returns_diff_against_first_parent() {
     add(&dir, "b.txt");
     let _ = commit(&dir, "main side");
 
-    // merge feat into main — creates a 2-parent merge commit
+    // merge feat into main - creates a 2-parent merge commit
     Command::new("git")
         .args(["merge", "--no-ff", "-m", "merge feat", "feat"])
         .current_dir(dir.path())

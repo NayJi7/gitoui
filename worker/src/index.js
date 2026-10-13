@@ -20,7 +20,7 @@ export default {
         return new Response("", { status: 204 });
       }
       const current = parseInt((await env.COUNTER.get(KEY)) || "0", 10);
-      // KV writes aren't transactional — concurrent pings can lose
+      // KV writes aren't transactional - concurrent pings can lose
       // an increment. For an install counter the slop is acceptable
       // (we'd be off by a handful at most). For exact counts we'd
       // need a Durable Object, not worth the complexity here.
@@ -29,7 +29,7 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/count") {
-      // shields.io endpoint badge format — drop this URL into a
+      // shields.io endpoint badge format - drop this URL into a
       // `https://img.shields.io/endpoint?url=...` and it renders.
       const count = parseInt((await env.COUNTER.get(KEY)) || "0", 10);
       return Response.json(

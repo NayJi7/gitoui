@@ -1,5 +1,5 @@
 ---
-// Splash hero override — full-bleed, full-viewport landing with a soft
+// Splash hero override - full-bleed, full-viewport landing with a soft
 // starfield, fade-in choreography, and three CTAs. Header is hidden
 // while the hero is at the top of the page (per-page behaviour keyed
 // on `data-hero-page` on <html>).
@@ -148,7 +148,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       smartBackspace: false,
     });
     // typed.js only adds `.typed-cursor--blink` once `toggleBlinking`
-    // fires — which doesn't happen until typing pauses. Add it
+    // fires - which doesn't happen until typing pauses. Add it
     // manually right after init so the cursor blinks during the
     // initial startDelay too. During active typing typed.js removes
     // the class itself, so the cursor goes solid then.
@@ -175,7 +175,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     pointer-events: none;
   }
   /* Zero only the very first content-panel's vertical padding so the
-     hero can sit at viewport top — and ONLY there. The selector chain
+     hero can sit at viewport top - and ONLY there. The selector chain
      is tight so it doesn't widen the markdown that follows. */
   :root[data-hero-page] .content-panel:has(> .sl-container > .hero) {
     padding-block: 0;
@@ -297,7 +297,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: center;
     gap: clamp(2rem, 5vw, 4rem);
-    /* Match Starlight's normal content column width — the starfield
+    /* Match Starlight's normal content column width - the starfield
        still bleeds full width via the `.hero` wrapper, but the title +
        tagline + actions + mark stay within the same horizontal
        envelope as the rest of the doc. */
@@ -327,7 +327,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   }
   /* typed.js paints chars into `.hero-typed` one at a time and appends
      its own `.typed-cursor` span at the end. We style that cursor to
-     match the brand — solid orange block, slow blink.
+     match the brand - solid orange block, slow blink.
      The element starts INVISIBLE so the SSR text never flashes; the
      JS adds `.is-ready` right before it kicks off typed.js. */
   .hero-typed {
@@ -349,7 +349,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     animation: none !important;
   }
   .hero-title :global(.typed-cursor.typed-cursor--blink) {
-    /* Slow, deliberate blink — feels like a terminal idle cursor. */
+    /* Slow, deliberate blink - feels like a terminal idle cursor. */
     animation: hero-typed-blink 1.3s step-end infinite !important;
   }
   @keyframes hero-typed-blink {
@@ -406,7 +406,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     height: 2px;
     width: clamp(8rem, 60%, 16rem);
     background: var(--brand);
-    /* Real wipe (mask) rather than a scaleX — the bar always has its
+    /* Real wipe (mask) rather than a scaleX - the bar always has its
        final length, a clip-path reveals it left-to-right. */
     clip-path: inset(0 100% 0 0);
     animation: hero-wipe 900ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
@@ -516,7 +516,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .hero-scroll-hint {
     position: absolute;
     /* Sit above the fade-out gradient (12vh tall) so the arrow stays
-       visible — sticking it at the very bottom puts it inside the
+       visible - sticking it at the very bottom puts it inside the
        fade and it disappears against the background. */
     bottom: clamp(4rem, 9vh, 6.5rem);
     left: 50%;
@@ -623,7 +623,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     color: #111;
   }
 
-  /* The G logo's drop-shadow reads as a smudge on cream — soften it. */
+  /* The G logo's drop-shadow reads as a smudge on cream - soften it. */
   :root[data-theme="light"] .hero-mark-img {
     filter: drop-shadow(0 12px 32px rgba(240, 81, 51, 0.2));
   }

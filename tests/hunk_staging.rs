@@ -1,4 +1,4 @@
-//! Integration tests for hunk-level staging — the combined uncommitted diff
+//! Integration tests for hunk-level staging - the combined uncommitted diff
 //! loader, the per-hunk origin tagging, the patch-builder + git apply path,
 //! and round-trip stage / unstage behaviour. Each test spins up an isolated
 //! git repo in a TempDir, mutates it the way a user would, then asserts both
@@ -436,7 +436,7 @@ fn combined_loader_hunk_count_matches_separate_loaders() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Patch correctness — diff-line counts preserved
+// 5. Patch correctness - diff-line counts preserved
 // ---------------------------------------------------------------------------
 
 #[test]

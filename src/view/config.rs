@@ -262,7 +262,7 @@ impl<'a> ConfigView<'a> {
         self.github_auth_state.is_authenticated()
     }
 
-    /// Graph Style and Graph Width depend on the graph being enabled —
+    /// Graph Style and Graph Width depend on the graph being enabled -
     /// when the user has toggled it off, those rows are grayed out and
     /// don't respond to cycle / click, mirroring the Github Avatars row
     /// behaviour when GitHub auth is missing.
@@ -313,7 +313,7 @@ impl<'a> ConfigView<'a> {
                 while self.selected + 1 < CONFIG_ITEM_COUNT && self.is_item_grayed(self.selected) {
                     self.selected += 1;
                 }
-                // Hit the bottom edge on a grayed row — bounce back up
+                // Hit the bottom edge on a grayed row - bounce back up
                 // past it to the last usable row.
                 if self.is_item_grayed(self.selected) {
                     while self.selected > 0 && self.is_item_grayed(self.selected) {
@@ -329,7 +329,7 @@ impl<'a> ConfigView<'a> {
                         self.cycle_option();
                     }
                 } else if self.is_item_grayed(self.selected) {
-                    // Grayed out — no-op.
+                    // Grayed out - no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -344,7 +344,7 @@ impl<'a> ConfigView<'a> {
                         self.cycle_option();
                     }
                 } else if self.is_item_grayed(self.selected) {
-                    // Grayed out — no-op.
+                    // Grayed out - no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {
@@ -359,7 +359,7 @@ impl<'a> ConfigView<'a> {
                         self.cycle_option_prev();
                     }
                 } else if self.is_item_grayed(self.selected) {
-                    // Grayed out — no-op.
+                    // Grayed out - no-op.
                 } else if config_value_kind(self.selected) == ConfigValueKind::Input {
                     self.start_text_edit();
                 } else {

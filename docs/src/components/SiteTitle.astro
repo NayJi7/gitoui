@@ -1,5 +1,5 @@
 ---
-// Override of Starlight's default SiteTitle — same logo handling, but
+// Override of Starlight's default SiteTitle - same logo handling, but
 // the "gitoui" title splits into <git-part> + <oui-part> so the brand
 // wordmark colors (#F05133 orange / #F1ECEC cream) apply per the brand
 // book. A tiny "vX.Y.Z" pulled from the workspace Cargo.toml at build
@@ -11,7 +11,7 @@ import config from "virtual:starlight/user-config";
 import cargoToml from "../../../Cargo.toml?raw";
 
 // Starlight 0.39 moved per-route data off Astro.props onto a shared
-// locals object — see https://starlight.astro.build/manual-setup/
+// locals object - see https://starlight.astro.build/manual-setup/
 const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
 
 // Split the title at the canonical brand cleave (`git` + `oui`). For any
@@ -22,7 +22,7 @@ const front = m?.[1];
 const back = m?.[2];
 
 // Grep for the first `version = "X.Y.Z"` in the workspace Cargo.toml
-// — that's the [package] entry near the top of the file.
+// - that's the [package] entry near the top of the file.
 const versionMatch = cargoToml.match(/^\s*version\s*=\s*"([^"]+)"/m);
 const version = versionMatch?.[1];
 ---
@@ -85,7 +85,7 @@ const version = versionMatch?.[1];
     object-fit: contain;
     object-position: 0 50%;
   }
-  /* Tiny version tag to the right of the wordmark — same monospace
+  /* Tiny version tag to the right of the wordmark - same monospace
      font as the rest of the project's code text, gray, baseline-aligned
      so it sits flush with the wordmark's baseline. */
   .site-version {

@@ -2306,7 +2306,7 @@ impl App<'_> {
     /// the burst has run for `NAV_BURST_ACCEL_AT`. Non-nav events
     /// reset the burst so a key release stops the acceleration cleanly
     /// (paired with the per-cycle event drain in `run()` which makes
-    /// the actual stop instant — together they kill the "scroll keeps
+    /// the actual stop instant - together they kill the "scroll keeps
     /// going for a few seconds after I let go" complaint).
     fn apply_nav_burst_acceleration(&mut self, ewc: UserEventWithCount) -> UserEventWithCount {
         use crate::event::UserEvent;
@@ -5843,7 +5843,7 @@ impl<'a> App<'a> {
                 let _ = self.cleanup_graph_images();
             }
             // The per-row graph cache (`graph_render_state` on
-            // `CommitListState`) lives on the list view, NOT on ctx —
+            // `CommitListState`) lives on the list view, NOT on ctx -
             // make sure a graph_enabled toggle invalidates it too,
             // otherwise the next frame's cache-hit path skips re-paint
             // and the disable / re-enable transition shows blank lanes.

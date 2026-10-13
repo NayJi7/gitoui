@@ -1,6 +1,6 @@
-/* Brand fonts — two faces from the gitoui brand book:
+/* Brand fonts - two faces from the gitoui brand book:
    * Orbitron for the "gitoui" wordmark (anywhere the brand name is
-     displayed prominently — site header, hero, and inline mentions
+     displayed prominently - site header, hero, and inline mentions
      wrapped in `.gitoui-wordmark`).
    * JetBrains Mono for body headings + code + UI mono. */
 @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
@@ -14,7 +14,7 @@
   --gitoui-wordmark-font: "Orbitron", "JetBrains Mono", monospace;
 }
 
-/* Body headings use JetBrains Mono — terminal feel without screaming
+/* Body headings use JetBrains Mono - terminal feel without screaming
    "wordmark". */
 .sl-markdown-content h1,
 .sl-markdown-content h2,
@@ -40,7 +40,7 @@
    • Group labels (Getting started, Configuration, …) use a nested
      `<summary><span class="group-label"><span class="large">…`.
    Both default to white; the default :hover is also white so nothing
-   changes visually. Push hover to brand orange — but skip the entry
+   changes visually. Push hover to brand orange - but skip the entry
    that's currently the active page (Starlight gives that one its own
    inverted-text + accent-bg highlight; overriding the color would
    wash it back to orange-on-orange). */
@@ -52,7 +52,7 @@
 .sidebar-content summary:focus-visible .large {
   color: var(--sl-color-accent);
 }
-/* Same idea for the regular sub-link rows — once they're the active
+/* Same idea for the regular sub-link rows - once they're the active
    page, the white-on-orange highlight is the brand cue; suppress the
    default hover color shift. */
 .sidebar-content a:not(.large)[aria-current="page"]:hover,
@@ -73,7 +73,7 @@
   letter-spacing: 0.02em;
 }
 
-/* Brand wordmark split — `git` orange, `oui` cream — as documented in
+/* Brand wordmark split - `git` orange, `oui` cream - as documented in
    the brand book's "Wordmark" section. */
 .git-part {
   color: #f05133;
@@ -101,13 +101,13 @@ header.header a.site-title img {
 
 /* Center the search bar horizontally in the header. Starlight's default
    `.header { display: flex; justify-content: space-between; }` puts the
-   search wherever the left + right groups leave room — so when the
+   search wherever the left + right groups leave room - so when the
    right side has more content (Install / Docs / GitHub + theme toggle)
    the search visibly drifts left. Switch to a 3-column grid so the
    search always sits dead-centre regardless of side widths.
 
    The centre column uses `minmax(18rem, 30rem)` so the search keeps a
-   readable width on wide screens but can shrink on smaller layouts —
+   readable width on wide screens but can shrink on smaller layouts -
    `auto` made it collapse to the compact "Search" pill which is what
    `<site-search>` renders at its natural size. */
 @media (min-width: 50rem) {
@@ -124,7 +124,7 @@ header.header a.site-title img {
     justify-self: stretch;
     width: 100%;
   }
-  /* Site-search uses its own button element under the hood — let it
+  /* Site-search uses its own button element under the hood - let it
      fill the centre column for the wider, balanced look. */
   div.header > site-search > button {
     width: 100%;
@@ -134,7 +134,7 @@ header.header a.site-title img {
   }
 }
 
-/* Squarer corners across the whole doc — this is a TUI's site, the
+/* Squarer corners across the whole doc - this is a TUI's site, the
    rounded-pill default reads as wrong context. We don't go to 0 (full
    rectangles feel brutalist); 4px keeps elements feeling computed
    without becoming sharp. */
@@ -144,7 +144,7 @@ header.header a.site-title img {
 /* Center the content panel horizontally within its column. Starlight
    already does this at >= 72rem viewports via the same rule, but when
    the layout sits between the doc-flex breakpoint and that one, the
-   container clings to the left. Force-center across all sizes — the
+   container clings to the left. Force-center across all sizes - the
    max-width still caps the prose at 45rem so typography is unchanged. */
 main > .content-panel > .sl-container {
   margin-inline: auto !important;
@@ -165,7 +165,7 @@ button,
 /* Search button (the "Search Ctrl K" pill) lives behind a custom el. */
 site-search button { border-radius: 4px !important; }
 
-/* Brand palette — see `assets/brand/gitoui-brand-standalone.html`. */
+/* Brand palette - see `assets/brand/gitoui-brand-standalone.html`. */
 :root {
   --sl-color-accent-low: #2a0e07;
   --sl-color-accent: #f05133; /* primary */
@@ -263,7 +263,7 @@ site-search button { border-radius: 4px !important; }
 }
 .faq-item > summary::-webkit-details-marker { display: none; }
 .faq-item > summary::marker { content: ""; display: none; }
-/* Single chevron on the LEFT — a unicode ▸ that rotates 90° on open
+/* Single chevron on the LEFT - a unicode ▸ that rotates 90° on open
    (▸ → ▾). White by default, brand orange when hovered or open. */
 .faq-item > summary::before {
   content: "▸";
@@ -286,7 +286,7 @@ site-search button { border-radius: 4px !important; }
   color: var(--brand);
 }
 /* Discreet inset separator between the question (summary) and the
-   answer below — only when the item is open. Sits inside the card
+   answer below - only when the item is open. Sits inside the card
    with horizontal margin so it doesn't touch the borders. */
 .faq-item[open] > summary {
   position: relative;
@@ -304,7 +304,7 @@ site-search button { border-radius: 4px !important; }
 /* The summary contains a real markdown `## Q` heading so the question
    gets picked up by Starlight's TOC. Starlight wraps each heading in
    a `.sl-heading-wrapper.level-h2` and tacks on an anchor link with a
-   chain icon — both must be flattened/hidden to keep the summary
+   chain icon - both must be flattened/hidden to keep the summary
    visually identical to a plain text label. */
 .faq-item > summary .sl-heading-wrapper {
   display: contents;
@@ -327,7 +327,7 @@ site-search button { border-radius: 4px !important; }
 .faq-item > summary .anchor-link {
   display: none !important;
 }
-/* Body of an opened accordion item — markdown rendered children get a
+/* Body of an opened accordion item - markdown rendered children get a
    small inset and tighter top spacing so the answer reads as part of
    the card. */
 .faq-item > :not(summary) {

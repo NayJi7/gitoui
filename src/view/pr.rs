@@ -7163,7 +7163,7 @@ pub(crate) fn paint_avatars_with_diff(
 /// `false` when the function bailed early (login empty, avatars
 /// disabled, image not yet on disk and a background prefetch was
 /// fired instead). The caller uses this to decide whether to remember
-/// the slot as "painted last frame" — a slot that bailed must NOT be
+/// the slot as "painted last frame" - a slot that bailed must NOT be
 /// remembered, otherwise the next frame's diff sees the same slot
 /// in `prev` and short-circuits to "no need to repaint" while the
 /// terminal still has nothing painted there. That's the bug the user

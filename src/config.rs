@@ -575,8 +575,8 @@ pub struct UiListConfig {
     #[default = 20]
     pub name_width: u16,
     /// Whether to render the inline commit graph image (Kitty/iTerm2/Sixel)
-    /// at all. Disabling it removes the lane image pipeline entirely —
-    /// no SVG/PNG generation, no terminal-image protocol uploads — which
+    /// at all. Disabling it removes the lane image pipeline entirely -
+    /// no SVG/PNG generation, no terminal-image protocol uploads - which
     /// makes scrolling near-instant on huge repos (rust-lang/rust, linux,
     /// …) at the cost of losing the visual branch view. The `Marker`
     /// column still draws the per-commit `│` accent so the active branch

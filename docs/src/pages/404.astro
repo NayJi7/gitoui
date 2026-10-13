@@ -1,5 +1,5 @@
 ---
-// 404 — clones the home Hero (starfield, typed title, 2-col grid,
+// 404 - clones the home Hero (starfield, typed title, 2-col grid,
 // left-aligned copy, default Starlight font, brand CTA) with three
 // deliberate deltas:
 //   1. Title is "Error 404" instead of "gitoui".
@@ -67,7 +67,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
         </div>
       </div>
 
-      {/* Right column intentionally empty — preserves the 2-col grid
+      {/* Right column intentionally empty - preserves the 2-col grid
           so the copy keeps the home hero's horizontal envelope. */}
       <div class="hero-mark hero-mark-empty" aria-hidden="true"></div>
     </div>
@@ -141,7 +141,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
     margin: 0 !important;
     max-width: none !important;
   }
-  /* Hide the splash title h1, the doc footer, and the site footer —
+  /* Hide the splash title h1, the doc footer, and the site footer -
      nothing scroll-reachable should render on the 404. */
   :root:has(.hero-404) main > .content-panel:first-of-type,
   :root:has(.hero-404) main > .content-panel:last-of-type > .sl-container > footer,
@@ -151,7 +151,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
 </style>
 
 <style>
-  /* ── shape — same envelope as the home hero ──────────────────────── */
+  /* ── shape - same envelope as the home hero ──────────────────────── */
   .hero {
     --brand: #f05133;
     --cream: #f1ecec;
@@ -229,7 +229,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
     .hero-stars-drift { animation: none; }
   }
 
-  /* ── layout — identical 2-col grid to the home hero ──────────────── */
+  /* ── layout - identical 2-col grid to the home hero ──────────────── */
   .hero-inner {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -248,7 +248,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
     .nf-line { text-align: center; }
   }
 
-  /* ── copy — left-aligned, exactly like the home hero ────────────── */
+  /* ── copy - left-aligned, exactly like the home hero ────────────── */
   .hero-copy {
     display: flex;
     flex-direction: column;
@@ -287,7 +287,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
   .hero-title :global(.num-part) { color: var(--brand); }
   :root[data-theme="light"] .hero-title :global(.err-part) { color: #111; }
 
-  /* ── tagline slot holds 3 stacked lines — same font as the home
+  /* ── tagline slot holds 3 stacked lines - same font as the home
      hero tagline (default Starlight font), same size, same color
      hierarchy. Just structured as a vertical block instead of a
      single paragraph. */
@@ -363,7 +363,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
     font-size: clamp(0.95rem, 1.5vw, 1.15rem);
     max-width: 42ch;
   }
-  /* Each `.` lands one at a time after the sentence has settled —
+  /* Each `.` lands one at a time after the sentence has settled -
      gives the line a "thinking..." beat instead of a hard stop. */
   .nf-dot {
     opacity: 0;
@@ -377,7 +377,7 @@ const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
     .nf-dot { opacity: 1; animation: none; }
   }
 
-  /* ── action — real CTA button, exact home-hero styling ──────────── */
+  /* ── action - real CTA button, exact home-hero styling ──────────── */
   .hero-actions {
     display: flex;
     flex-wrap: wrap;

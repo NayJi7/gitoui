@@ -1,13 +1,13 @@
 #!/usr/bin/env sh
 # gitoui installer
 #
-# Install or update gitoui — a terminal UI git log viewer.
+# Install or update gitoui, a terminal UI git log viewer.
 #
 # Usage:
 #   curl -fsSL https://nayji7.github.io/gitoui/install.sh | sh
 #
 # Pass --ascii via `sh -s -- --ascii` (or run locally) to force the ASCII
-# banner — useful in terminals that drop image-protocol bytes or when
+# banner - useful in terminals that drop image-protocol bytes or when
 # capturing the output to plain text.
 #
 # Environment overrides:
@@ -19,7 +19,7 @@
 #                                (same as --ascii)
 #   GITOUI_NO_TRACK              skip the anonymous install ping (a single
 #                                GET to a Cloudflare Worker that only
-#                                increments a counter — no IP, no UA, no
+#                                increments a counter - no IP, no UA, no
 #                                payload)
 #   GITOUI_INSTALL_QUIET         legacy combined toggle (v0.1.6): skips
 #                                BOTH the banner AND the welcome trailer.
@@ -78,7 +78,7 @@ warn()  { printf '  %s!%s  %s\n' "${BOLD}${YELLOW}" "${RESET}" "$1"; }
 fail()  { printf '  %s✗%s  %s\n' "${BOLD}${RED}" "${RESET}" "$1" >&2; exit 1; }
 
 # ── Brand banner ──────────────────────────────────────────────────────
-# Reproduces `gitoui --help`'s splash exactly — see
+# Reproduces `gitoui --help`'s splash exactly - see
 # src/lib.rs::print_no_repo_splash. Two render paths:
 #   1. Terminal supports Kitty graphics or iTerm2 inline image protocol
 #      → emit two separate inline images (logo + wordmark) into the
@@ -95,7 +95,7 @@ fail()  { printf '  %s✗%s  %s\n' "${BOLD}${RED}" "${RESET}" "$1" >&2; exit 1; 
 #     -resize 672x320 -depth 8 -strip /tmp/wm-splash.png
 # Then `base64 -w0` each one.
 
-# Splash layout — must match the literals in print_no_repo_splash.
+# Splash layout - must match the literals in print_no_repo_splash.
 LEFT_MARGIN=2
 LOGO_COLS=8
 LOGO_ROWS=5
@@ -112,7 +112,7 @@ WM_PNG_B64="iVBORw0KGgoAAAANSUhEUgAAAqAAAAFACAYAAABjkM7aAAAfnElEQVR42u3de5hkdX3n
 
 detect_image_protocol() {
     # User asked for the ASCII path explicitly (--ascii flag or
-    # GITOUI_ASCII=1 env var) — skip detection.
+    # GITOUI_ASCII=1 env var) - skip detection.
     if [ "$ASCII_BANNER" = "1" ]; then
         echo none
         return
@@ -124,7 +124,7 @@ detect_image_protocol() {
         echo kitty
         return
     fi
-    # $TERM substring — typical values: xterm-kitty, xterm-ghostty.
+    # $TERM substring - typical values: xterm-kitty, xterm-ghostty.
     # Misses cases where the shell rc rewrites TERM to xterm-256color
     # (the GHOSTTY_RESOURCES_DIR check above covers that path).
     case "${TERM:-}" in
@@ -157,7 +157,7 @@ detect_image_protocol() {
 }
 
 # Emit one Kitty graphics command for `bytes_b64`. Chunked at 4096
-# chars to mirror kitty_encode_inner in src/protocol.rs — large PNGs
+# chars to mirror kitty_encode_inner in src/protocol.rs - large PNGs
 # (the wordmark) exceed the chunk limit and must be split.
 emit_kitty_image() {
     # $1 = base64 string, $2 = c (cell width), $3 = r (cell height),
@@ -222,7 +222,7 @@ print_banner_image() {
     printf '\033[%sC' "$WM_OFFSET"
     case "$proto" in
         kitty)
-            # No d=C prefix here — Ghostty interprets that as "delete
+            # No d=C prefix here - Ghostty interprets that as "delete
             # row" and would erase the logo (see protocol.rs comment).
             emit_kitty_image "$WM_PNG_B64" "$WM_COLS" "$WM_ROWS" 2 0
             ;;
@@ -234,11 +234,11 @@ print_banner_image() {
 }
 
 print_banner_ascii() {
-    # ASCII fallback — small G silhouette faithful to the brand book's
+    # ASCII fallback - small G silhouette faithful to the brand book's
     # 4×5 cell grid + figlet-style "gitoui" wordmark in block letters.
     # G is 5 rows × 8 cols (matching the splash logo's 8×5 cell box);
     # wordmark is figlet "Standard" (6 rows × 26 cols). The wordmark's
-    # `g` descender extends one row below the G's bottom bar — same as
+    # `g` descender extends one row below the G's bottom bar - same as
     # the brand SVG, so the bottoms line up visually.
     #
     # G grid maps src/brand.rs CELLS exactly (4 cells wide × 5 tall,
@@ -251,13 +251,13 @@ print_banner_ascii() {
     #   R5   ████████   bottom bar (all 4 cells)
     O="${ORANGE}${BOLD}"
     S="${SHADOW}${BOLD}"
-    Wg="${ORANGE}${BOLD}"   # wordmark — "git" portion
-    Wo="${CREAM}${BOLD}"    # wordmark — "oui" portion
+    Wg="${ORANGE}${BOLD}"   # wordmark - "git" portion
+    Wo="${CREAM}${BOLD}"    # wordmark - "oui" portion
     R="${RESET}"
 
     # Wordmark rows split at col 14 (between "t" and "o"). Six-row
     # figlet "Standard" rendering, placed so r0 (the `_ _` letter-tops)
-    # sits one row ABOVE the G's top bar — fits the brand wordmark's
+    # sits one row ABOVE the G's top bar - fits the brand wordmark's
     # natural ascender area without stretching the G upward.
     g0='       _ _   '   ; o0='           _ '
     g1='  __ _(_) |_ '   ; o1='___  _   _(_)'
@@ -266,29 +266,29 @@ print_banner_ascii() {
     g4=' \__, |_|\__\'   ; o4='___/ \__,_|_|'
     g5=' |___/        '  ; o5='             '
 
-    # Row 0 — wordmark letter-tops only; G zone is blank (13 cols).
+    # Row 0 - wordmark letter-tops only; G zone is blank (13 cols).
     printf '             %s%s%s%s%s%s\n' \
         "$Wg" "$g0" "$R" "$Wo" "$o0" "$R"
-    # G_R1 — top bar (8 orange) + wordmark body row 1
+    # G_R1 - top bar (8 orange) + wordmark body row 1
     printf '  %s████████%s   %s%s%s%s%s%s\n' \
         "$O" "$R" "$Wg" "$g1" "$R" "$Wo" "$o1" "$R"
-    # G_R2 — left bar (2 orange + 6 spaces) + wordmark r2
+    # G_R2 - left bar (2 orange + 6 spaces) + wordmark r2
     printf '  %s██%s         %s%s%s%s%s%s\n' \
         "$O" "$R" "$Wg" "$g2" "$R" "$Wo" "$o2" "$R"
-    # G_R3 — left + tongue (2 orange + 2 space + 4 orange) + wordmark r3
+    # G_R3 - left + tongue (2 orange + 2 space + 4 orange) + wordmark r3
     printf '  %s██%s  %s████%s   %s%s%s%s%s%s\n' \
         "$O" "$R" "$O" "$R" "$Wg" "$g3" "$R" "$Wo" "$o3" "$R"
-    # G_R4 — left + 2 shadow + right (2 orange + 4 shadow + 2 orange) + wordmark r4
+    # G_R4 - left + 2 shadow + right (2 orange + 4 shadow + 2 orange) + wordmark r4
     printf '  %s██%s%s████%s%s██%s   %s%s%s%s%s%s\n' \
         "$O" "$R" "$S" "$R" "$O" "$R" "$Wg" "$g4" "$R" "$Wo" "$o4" "$R"
-    # G_R5 — bottom bar (8 orange) + wordmark r5 (g's descender)
+    # G_R5 - bottom bar (8 orange) + wordmark r5 (g's descender)
     printf '  %s████████%s   %s%s%s%s%s%s\n' \
         "$O" "$R" "$Wg" "$g5" "$R" "$Wo" "$o5" "$R"
 }
 
 print_banner() {
     # `gitoui --update` already drew its own splash above the update
-    # prompt — skip ours so the user doesn't see two banners stacked.
+    # prompt - skip ours so the user doesn't see two banners stacked.
     # `GITOUI_INSTALL_QUIET` was the original combined toggle (v0.1.6);
     # `GITOUI_INSTALL_NO_BANNER` is the per-section successor used by
     # newer binaries to keep the welcome trailer while still skipping
@@ -323,7 +323,7 @@ track_install() {
         return 0
     fi
     # The earlier guard tried to detect an unreplaced `__INSTALL_COUNTER_URL__`
-    # placeholder via a `case` — but the same sed pass that swapped the URL
+    # placeholder via a `case` - but the same sed pass that swapped the URL
     # also rewrote the case pattern, so the guard tautologically matched the
     # real URL and the ping never fired. Trust the URL now; if it's wrong,
     # curl --max-time 2 + `|| true` swallow the noise.
@@ -338,7 +338,7 @@ track_install() {
 # the user's PATH. Two roots considered:
 #   - $HOME/.cargo/bin/gitoui     (cargo-managed install)
 #   - $INSTALL_DIR/gitoui         (binary install we write to)
-# Caller may set GITOUI_INSTALL_FORCE_BINARY=1 to skip the cargo check —
+# Caller may set GITOUI_INSTALL_FORCE_BINARY=1 to skip the cargo check -
 # `gitoui --update` does this when the running binary is NOT in
 # ~/.cargo/bin, so a leftover cargo install doesn't capture the update.
 detect_existing() {
@@ -390,7 +390,7 @@ update_via_cargo() {
     info "Found gitoui ${BOLD}${CURRENT_VERSION:-unknown}${RESET} → updating to ${BOLD}${LATEST_CRATES:-latest}${RESET}."
     info "Running ${BOLD}cargo install ${BIN_NAME} --locked --force${RESET}…"
     if ! cargo install "${BIN_NAME}" --locked --force; then
-        fail "cargo install failed — leaving the current binary in place."
+        fail "cargo install failed, leaving the current binary in place."
     fi
     ok "gitoui updated via ${BOLD}cargo${RESET}."
 }
@@ -419,7 +419,7 @@ detect_target() {
                 *) fail "Unsupported architecture: ${OS}/${ARCH}" ;;
             esac
             ;;
-        *) fail "Unsupported OS: ${OS} — gitoui ships for Linux and macOS." ;;
+        *) fail "Unsupported OS: ${OS}. gitoui ships for Linux and macOS." ;;
     esac
     info "Platform: ${BOLD}${OS} (${ARCH}) → ${TARGET}${RESET}"
 }
@@ -446,7 +446,7 @@ resolve_version() {
     info "Target version: ${BOLD}${RESOLVED_VERSION}${RESET}"
 }
 
-# ── Existing-install check — skips work when already up-to-date ────────
+# ── Existing-install check - skips work when already up-to-date ────────
 # Uses the absolute $EXISTING_PATH set by detect_existing instead of a
 # PATH lookup so we always interrogate the same binary we're about to
 # overwrite (matters when the user has multiple gitoui copies on PATH).
@@ -457,7 +457,7 @@ check_existing() {
     fi
     CURRENT_RAW="$("$EXISTING_PATH" --version 2>/dev/null || true)"
     # `--version` prints `gitoui X.Y.Z` (clap default). Grab the last
-    # whitespace-separated token of the LAST line — older binaries used
+    # whitespace-separated token of the LAST line - older binaries used
     # to print the brand splash above the version, and the captured
     # escape sequences would otherwise re-render mid-line when echoed
     # back. Fallback "unknown" keeps the update path live for unknown
@@ -474,7 +474,7 @@ check_existing() {
     UPDATE=1
 }
 
-# ── Download + extract — silent curl, clean error reporting ──────────
+# ── Download + extract - silent curl, clean error reporting ──────────
 # We swap the progress bar for `--silent --show-error` so failures
 # report on their own left-aligned line instead of trailing the bar's
 # carriage-return cursor at the right edge of the terminal.
@@ -496,7 +496,7 @@ download_archive() {
         fail "Download failed: $URL"
     fi
 
-    # Verify checksum when checksum.txt is published — non-fatal if
+    # Verify checksum when checksum.txt is published - non-fatal if
     # the file is missing (older releases may not include it).
     if curl --fail --silent --location -o "${TMP}/checksum.txt" "$CHECKSUM_URL" 2>/dev/null; then
         EXPECTED="$(grep " ${ARCHIVE}\$" "${TMP}/checksum.txt" \
@@ -513,7 +513,7 @@ download_archive() {
                 if [ "$ACTUAL" = "$EXPECTED" ]; then
                     ok "Checksum verified."
                 else
-                    fail "Checksum mismatch — refusing to install."
+                    fail "Checksum mismatch, refusing to install."
                 fi
             fi
         fi
@@ -568,17 +568,17 @@ check_path() {
         "${ORANGE}${BOLD}" "$INSTALL_DIR" "$RESET"
 }
 
-# ── Welcome message — keep it short on purpose ─────────────────────────
+# ── Welcome message - keep it short on purpose ─────────────────────────
 print_welcome() {
     # When called from `gitoui --update` in startup-prompt mode, the
     # running gitoui re-execs into the new binary right after we return
-    # — the quick-start block would just be redundant noise. Explicit
+    # so the quick-start block would just be redundant noise. Explicit
     # `gitoui --update` keeps the welcome visible since it exits after
     # install rather than re-execing into the TUI.
     [ -n "${GITOUI_INSTALL_QUIET:-}" ] && return
     [ -n "${GITOUI_INSTALL_NO_WELCOME:-}" ] && return
     printf '\n'
-    printf '  %sQuick start%s — inside any git repo:\n' "${BOLD}" "${RESET}"
+    printf '  %sQuick start%s, inside any git repo:\n' "${BOLD}" "${RESET}"
     printf '    %sgitoui%s        %sopen the commit-graph viewer%s\n' \
         "${ORANGE}${BOLD}" "$RESET" "$DIM" "$RESET"
     printf '    %sgitoui --help%s %sall flags and options%s\n' \
@@ -599,7 +599,7 @@ main() {
     detect_existing
     case "$EXISTING_METHOD" in
         cargo)
-            # cargo-managed install — defer to `cargo install`, which
+            # cargo-managed install - defer to `cargo install`, which
             # owns version resolution (talks to crates.io). update_via_cargo
             # exits 0 silently if already on the latest stable.
             update_via_cargo
@@ -607,11 +607,11 @@ main() {
             print_welcome
             ;;
         *)
-            # Binary path — GitHub Release archives.
+            # Binary path - GitHub Release archives.
             resolve_version
-            check_existing      # exits 0 here if already up-to-date — no ping
-            download_archive    # exits 1 on failure (`fail()`) — no ping
-            install_binary      # exits 1 on failure (`fail()`) — no ping
+            check_existing      # exits 0 here if already up-to-date - no ping
+            download_archive    # exits 1 on failure (`fail()`) - no ping
+            install_binary      # exits 1 on failure (`fail()`) - no ping
             track_install       # reached only on a real install or update
             check_path
             print_welcome

@@ -67,7 +67,7 @@ rename_branch = ["ctrl-r"]
 delete_branch = ["shift-d"]
 push_branch = ["shift-q"]
 # `pull` (shift-u) doubles as `pull_branch` in the BranchDetail view via
-# `UserEvent::PullBranch | UserEvent::Pull` — see `src/view/branch_detail.rs`.
+# `UserEvent::PullBranch | UserEvent::Pull` - see `src/view/branch_detail.rs`.
 # Leaving this empty keeps `U` as the single canonical pull keybind.
 pull_branch = []
 # `shift-i` used to live here, but it now opens the Issues view
@@ -88,7 +88,7 @@ copy_tag_name = ["shift-y"]
 stage = ["a"]
 stage_all = ["shift-a"]
 unstage = ["u"]
-# `pull` (shift-u) doubles as unstage_all when the active view is Uncommitted —
+# `pull` (shift-u) doubles as unstage_all when the active view is Uncommitted -
 # see the `UserEvent::UnstageAll | UserEvent::Pull` match in
 # `src/view/uncommitted.rs`. Leaving this empty avoids a global keybind clash
 # with `pull` while preserving the U-for-unstage-all UX in the Uncommitted view.
@@ -124,7 +124,7 @@ file_history = ["shift-h"]
 # View-scoped bindings.
 #
 # Anything below this point belongs to a specific view (or sub-view).
-# When a key is bound here, the view's scoped resolver hits it FIRST —
+# When a key is bound here, the view's scoped resolver hits it FIRST -
 # the global section above is the fallback. That's how we let the same
 # key (e.g. `a`) mean different things in different contexts:
 #  • `a` globally  → stage  (uncommitted view)
@@ -133,28 +133,28 @@ file_history = ["shift-h"]
 #
 # Each `[scope]` block lists action_name → key list, same syntax as
 # the global section. Nested tables like `[pr.conversation]` are
-# sub-scopes that override their parent — so a Conversation-only
+# sub-scopes that override their parent - so a Conversation-only
 # binding wins over a PR-wide one, which wins over the global one.
 # Anything not listed in a scope falls through to the parent.
 # ─────────────────────────────────────────────────────────────────────
 
-# Commit list view — scope-only actions that overlay the global key
+# Commit list view - scope-only actions that overlay the global key
 # map for the list view exclusively. `h` is `navigate_left` globally
 # (used by vim users + by tab-switching in PR / Issues / Diff), but in
 # the commit list it has no left/right semantics, so we repurpose it
-# for "scroll + select the HEAD commit" — a fast way to jump back to
+# for "scroll + select the HEAD commit" - a fast way to jump back to
 # the top of `git log --all` after scrolling far down history.
 [scope.list]
 select_head_commit = ["h"]
 
-# Commit detail view — `v` globally fires `clean_untracked` (uncommitted
+# Commit detail view - `v` globally fires `clean_untracked` (uncommitted
 # view's "remove untracked files" dialog). In the detail view there's
-# nothing to clean, so we re-scope `v` to `revert` — opens the Revert
+# nothing to clean, so we re-scope `v` to `revert` - opens the Revert
 # confirmation dialog for the focused commit.
 [scope.detail]
 revert = ["v"]
 
-# PR view — actions on the open Pull Request as a whole.
+# PR view - actions on the open Pull Request as a whole.
 [scope.pr]
 reload             = ["r"]
 approve            = ["a"]
@@ -177,7 +177,7 @@ edit_own    = ["e"]
 delete_own  = ["d"]
 react       = ["+"]
 
-# Issues view — actions on the open Issue as a whole.
+# Issues view - actions on the open Issue as a whole.
 [scope.issues]
 reload            = ["r"]
 labels_picker     = ["l"]
@@ -197,7 +197,7 @@ edit_own               = ["e"]
 delete_own             = ["d"]
 react                  = ["+"]
 
-# Rebase plan editor — single-char rebase commands.
+# Rebase plan editor - single-char rebase commands.
 [scope.rebase]
 pick           = ["p"]
 reword         = ["r"]
@@ -208,13 +208,13 @@ drop           = ["d"]
 grab           = ["space"]
 abort_previous = ["shift-a"]
 
-# Rebase resume prompt — shown when an interactive rebase is paused.
+# Rebase resume prompt - shown when an interactive rebase is paused.
 [scope.rebase.resume]
 continue_rebase = ["c", "shift-c"]
 skip_commit     = ["s", "shift-s"]
 abort           = ["a", "shift-a"]
 
-# Reword inline editor — extra word-jump shortcuts inside the text field.
+# Reword inline editor - extra word-jump shortcuts inside the text field.
 # (Named `reword_editor` to avoid colliding with the `reword` action above.)
 [scope.rebase.reword_editor]
 delete_word_left  = ["ctrl-h", "ctrl-w", "ctrl-backspace"]
@@ -232,7 +232,7 @@ next_hunk              = ["n"]
 prev_hunk              = ["p"]
 
 # Compose forms (new PR / new Issue). The submit action is the only
-# truly rebindable shortcut here — word-jump editing keys (Ctrl+H,
+# truly rebindable shortcut here - word-jump editing keys (Ctrl+H,
 # Ctrl+W, Ctrl+Backspace, Ctrl+Delete, Ctrl+Left/Right) stay hardcoded
 # because they're text-input semantics shared with every other input
 # field in the app, not view-specific actions. The mention popup is

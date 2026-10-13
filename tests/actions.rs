@@ -4,7 +4,7 @@
 //! plain `git` shell-outs to verify the expected effect occurred.
 //!
 //! These cover the actions that mutate history or refs (branch, tag, reset,
-//! stash, cherry-pick, revert, checkout) — the ones where a regression would
+//! stash, cherry-pick, revert, checkout) - the ones where a regression would
 //! silently corrupt a user's repository. Network actions (push, pull, fetch)
 //! are intentionally not exercised here; they require remote infrastructure
 //! and are better suited to manual / staging tests.
@@ -247,7 +247,7 @@ fn reset_soft_keeps_changes_staged() {
 
     assert_eq!(head_hash(dir.path()), first);
     // After --soft to the previous commit, the diff between the index and HEAD
-    // should be the changes from "second" — i.e. a.txt should be staged with v2.
+    // should be the changes from "second" - i.e. a.txt should be staged with v2.
     let staged = git_stdout(dir.path(), &["diff", "--cached", "--name-only"]);
     assert!(
         staged.contains("a.txt"),
@@ -323,13 +323,13 @@ fn drop_stash_removes_entry_without_changing_worktree() {
     actions::drop_stash(dir.path(), "stash@{0}").unwrap();
 
     assert_eq!(stash_count(dir.path()), 0);
-    // Drop should not restore the stashed content — work tree stays clean.
+    // Drop should not restore the stashed content - work tree stays clean.
     let content = fs::read_to_string(dir.path().join("a.txt")).unwrap();
     assert_eq!(content, "v1\n");
 }
 
 // ---------------------------------------------------------------------------
-// Cherry-pick / revert (clean cases — conflicts are a separate concern)
+// Cherry-pick / revert (clean cases - conflicts are a separate concern)
 // ---------------------------------------------------------------------------
 
 #[test]

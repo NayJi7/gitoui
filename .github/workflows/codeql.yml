@@ -1,4 +1,4 @@
-# CodeQL static analysis — scans Rust + Actions for known
+# CodeQL static analysis - scans Rust + Actions for known
 # vulnerability patterns and surfaces them in the Security tab.
 #
 # NOT a required status check: findings appear as alerts in the
@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Rust only supports build-mode `none` — the extractor parses
+          # Rust only supports build-mode `none` - the extractor parses
           # source directly, no cargo build needed (and `manual` is
           # rejected with a fatal error).
           - language: rust

@@ -1,4 +1,4 @@
-//! Baseline tests for `git::is_git_path` — the dir-input overlay's gate
+//! Baseline tests for `git::is_git_path` - the dir-input overlay's gate
 //! that decides whether a target path can be cd'd into. The upcoming
 //! optimisation combines the two `git rev-parse` calls into one; these
 //! tests pin down the current observable behaviour so the refactor can't
@@ -54,7 +54,7 @@ fn accepts_subfolder_of_work_tree() {
     let sub = dir.path().join("src");
     std::fs::create_dir(&sub).unwrap();
     // Since `feat: resolve repo root from any sub-directory`, is_git_path
-    // walks up to the work-tree root — any subfolder of a repo is valid.
+    // walks up to the work-tree root - any subfolder of a repo is valid.
     assert!(gitoui::git::is_git_path(&sub));
 }
 
@@ -70,7 +70,7 @@ fn accepts_nested_subfolder_of_work_tree() {
 #[test]
 fn rejects_non_git_directory() {
     let dir = TempDir::new().unwrap();
-    // No `git init` — just a plain directory.
+    // No `git init` - just a plain directory.
     assert!(!gitoui::git::is_git_path(dir.path()));
 }
 
@@ -85,7 +85,7 @@ fn rejects_missing_path() {
 fn accepts_work_tree_root_via_symlink() {
     let dir = TempDir::new().unwrap();
     init_repo(&dir);
-    // Create a symlink that points at the repo root — canonicalisation
+    // Create a symlink that points at the repo root - canonicalisation
     // should resolve it back to the toplevel so the check passes.
     let link = dir
         .path()

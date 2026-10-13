@@ -211,7 +211,7 @@ impl<'a> ListView<'a> {
                 // Horizontal scroll over the graph lanes when the native
                 // graph image is wider than the column cap (rust-lang/rust,
                 // linux, …). No-op on small repos where everything fits.
-                // Gated to the non-search branch — inside `SearchState::
+                // Gated to the non-search branch - inside `SearchState::
                 // Applied` the same keys cycle search matches (see below).
                 UserEvent::NavigateLeft => {
                     for _ in 0..count {

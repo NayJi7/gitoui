@@ -375,7 +375,7 @@ pub struct CommitListState<'a> {
     graph_render_state: Option<(usize, usize, Rect, u16)>,
     // Horizontal scroll offset (in graph cells) for the lane viewport.
     // Only matters when the native graph is wider than the column cap
-    // (40 % of panel) — the visible portion of the lanes slides via
+    // (40 % of panel) - the visible portion of the lanes slides via
     // Kitty's source-rect crop. Clamped to `0..=graph.max_pos_x` and
     // reset to 0 on filter change / data reload.
     graph_scroll_x: u16,
@@ -2224,7 +2224,7 @@ impl CommitList<'_> {
                     //
                     // Without (2), the rows whose native graph fits the cap
                     // would stay glued to scroll_x=0 while the wider rows
-                    // slide under them — the lanes desync visually.
+                    // slide under them - the lanes desync visually.
                     // Re-emitting every visible row through the crop path
                     // when scroll_x > 0 keeps the whole graph coherent.
                     let needs_crop_path = native_cells > max_graph_width || scroll_x > 0;
@@ -2278,7 +2278,7 @@ impl CommitList<'_> {
                                 return;
                             }
                         }
-                        // No crop support OR bytes unavailable — clear the
+                        // No crop support OR bytes unavailable - clear the
                         // graph zone and let the message column take over
                         // (also catches scroll-past-end on non-Kitty
                         // protocols, which is the best we can do).

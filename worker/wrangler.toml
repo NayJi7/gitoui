@@ -9,6 +9,6 @@ compatibility_date = "2025-05-01"
 binding = "COUNTER"
 id = "6cec5b70c23141f3b6ca0ca6fc265676"
 
-# Observability — keeps logs visible in the dashboard. Free.
+# Observability - keeps logs visible in the dashboard. Free.
 [observability]
 enabled = true

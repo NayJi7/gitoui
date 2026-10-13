@@ -1,5 +1,5 @@
 ---
-// Brand page — showcase the gitoui brand assets so contributors,
+// Brand page - showcase the gitoui brand assets so contributors,
 // reviewers, and downstream sites can grab the right logo / wordmark
 // at the right contrast without digging through the repo. Modeled
 // after opencode.ai/brand: short intro → asset gallery grouped by
@@ -63,7 +63,7 @@ const sections: Section[] = [
     id: "wordmark",
     title: "Wordmark",
     description:
-      "The `gitoui` wordmark. `git` always stays orange; `oui` ships in three palettes — cream (default, for dark UIs), near-black (light UIs), and orange + near-black (the `-color` variant, picked automatically by the app when the active theme has a light background, including custom user themes).",
+      "The `gitoui` wordmark. `git` always stays orange; `oui` ships in three palettes: cream (default, for dark UIs), near-black (light UIs), and orange + near-black (the `-color` variant, picked automatically by the app when the active theme has a light background, including custom user themes).",
     assets: [
       {
         src: assetUrl("wordmark-nobg.svg"),
@@ -107,7 +107,7 @@ const sections: Section[] = [
     id: "combined",
     title: "Combined mark",
     description:
-      "Logomark + wordmark together — favour this on README headers, presentation title slides, and anywhere the logo needs to introduce the name itself.",
+      "Logomark + wordmark together. Favour this on README headers, presentation title slides, and anywhere the logo needs to introduce the name itself.",
     assets: [
       {
         src: assetUrl("mixed-nobg.svg"),
@@ -150,7 +150,7 @@ const sections: Section[] = [
 ];
 
 const palette = [
-  { name: "Primary", hex: "#F05133", note: "git orange — wordmark `git`, G logomark" },
+  { name: "Primary", hex: "#F05133", note: "git orange: wordmark `git`, G logomark" },
   { name: "Shadow", hex: "#8B2A12", note: "depth on the G logomark" },
   { name: "Used", hex: "#F1ECEC", note: "off-white `oui` letters" },
   { name: "Off-White Bg", hex: "#F5F4F2", note: "light background plate" },
@@ -166,7 +166,7 @@ const palette = [
 ]}>
   <p class="brand-intro">
     Resources and assets to help you reference the <strong>gitoui</strong> brand.
-    Each asset ships as a clean SVG — hit the <strong>SVG</strong> button under
+    Each asset ships as a clean SVG: hit the <strong>SVG</strong> button under
     any variant to download it.
   </p>
 
@@ -203,7 +203,7 @@ const palette = [
       <h2 id="colors">Colors</h2>
       <p>
         The brand book lives at <code>assets/brand/gitoui-brand-standalone.html</code> in the
-        repo — these tokens are its <em>COLOR</em> section. The orange leads;
+        repo; these tokens are its <em>COLOR</em> section. The orange leads;
         everything else is supporting.
       </p>
     </header>
@@ -225,7 +225,7 @@ const palette = [
     <header class="brand-section-head">
       <h2 id="typography">Typography</h2>
       <p>
-        <strong>Orbitron</strong> for the wordmark and display headlines —
+        <strong>Orbitron</strong> for the wordmark and display headlines: it
         gives the logotype its technical, terminal-adjacent feel.
         <strong>JetBrains Mono</strong> everywhere code shows up.
       </p>
@@ -233,7 +233,7 @@ const palette = [
     <div class="brand-type">
       <div class="type-row" style="font-family: var(--gitoui-wordmark-font);">
         <span class="type-label">Orbitron</span>
-        <span class="type-sample" style="font-size: 2.5rem;">gitoui — Say <em>oui</em>.</span>
+        <span class="type-sample" style="font-size: 2.5rem;">gitoui. Say <em>oui</em>.</span>
       </div>
       <div class="type-row" style="font-family: var(--sl-font-mono, ui-monospace, 'JetBrains Mono', monospace);">
         <span class="type-label">JetBrains Mono</span>
@@ -356,7 +356,7 @@ const palette = [
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
     gap: 0.75rem;
-    /* Force every row of the grid to take the same height — keeps the
+    /* Force every row of the grid to take the same height - keeps the
        swatches pixel-perfect even when notes wrap differently. */
     grid-auto-rows: 1fr;
   }
