@@ -1,0 +1,399 @@
+---
+// Promo film on the home page, between the hero and the feature cards,
+// dressed as a gitoui pane: a title bar, the screen, and a footer that
+// uses the TUI's own `key:action │ key:action` grammar. The play button
+// is a brand-orange square with a pixel triangle, drawn in the same
+// cell language as the G logomark.
+//
+// The mp4 is the README attachment hosted by GitHub (no copy in the
+// repo). Its URL 302s to a signed S3 link that expires after a few
+// minutes, so a playback error re-requests the stable URL and resumes
+// where it stopped. No autoplay; loops once started. Poster = the
+// film's first frame, served from docs/public.
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const src = "https://github.com/user-attachments/assets/2c8f6e42-e478-4212-b3d5-7d674e455b8e";
+// Pixel play triangle on a 6x7 grid: filled width of each row.
+const rowWidths = [1, 3, 5, 6, 5, 3, 1];
+---
+
+<section class="home-film not-content" aria-label="gitoui film, 1 minute 32 seconds">
+  <div class="film" tabindex="0" data-state="idle">
+    <div class="film-bar film-bar--top">
+      <span class="film-prompt"><span class="film-caret">❯</span> gitoui_film.mp4</span>
+      <span class="film-dur">1:32</span>
+    </div>
+
+    <div class="film-screen">
+      <video
+        class="film-video"
+        src={src}
+        poster={`${base}/film-poster.jpg`}
+        preload="none"
+        loop
+        playsinline
+        width="1280"
+        height="720"
+      ></video>
+      <button class="film-big" type="button" aria-label="Play the film">
+        <span class="film-big-square" aria-hidden="true">
+          <svg viewBox="0 0 6 7" width="30" height="35" shape-rendering="crispEdges">
+            {rowWidths.map((w, y) => <rect x="0" y={y} width={w} height="1" />)}
+          </svg>
+        </span>
+      </button>
+    </div>
+
+    <div class="film-bar film-bar--bottom">
+      <button class="film-key film-opt" type="button" data-act="toggle">
+        <b>Space</b>:<span data-label="toggle">play</span>
+      </button>
+      <span class="film-sep film-opt" aria-hidden="true">│</span>
+      <div
+        class="film-progress"
+        role="slider"
+        tabindex="0"
+        aria-label="Seek"
+        aria-valuemin="0"
+        aria-valuemax="92"
+        aria-valuenow="0"
+        aria-valuetext="0:00 of 1:32"
+      >
+        <span class="film-progress-fill"></span>
+      </div>
+      <span class="film-time"><span data-now>0:00</span> / 1:32</span>
+      <span class="film-sep film-opt" aria-hidden="true">│</span>
+      <button class="film-key film-opt" type="button" data-act="mute">
+        <b>m</b>:<span data-label="mute">mute</span>
+      </button>
+      <span class="film-sep film-opt" aria-hidden="true">│</span>
+      <button class="film-key film-opt" type="button" data-act="full">
+        <b>f</b>:full
+      </button>
+    </div>
+  </div>
+</section>
+
+<script is:inline define:vars={{ src }}>
+  (function () {
+    const film = document.querySelector(".home-film .film");
+    if (!film) return;
+    const video = film.querySelector("video");
+    const big = film.querySelector(".film-big");
+    const bar = film.querySelector(".film-progress");
+    const now = film.querySelector("[data-now]");
+    const toggleLabel = film.querySelector('[data-label="toggle"]');
+    const muteLabel = film.querySelector('[data-label="mute"]');
+
+    const fmt = (s) => {
+      s = Math.max(0, Math.floor(s || 0));
+      return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    };
+    const toggle = () => (video.paused ? video.play().catch(() => {}) : video.pause());
+    const seekBy = (d) => {
+      if (!video.duration) return;
+      video.currentTime = Math.min(video.duration, Math.max(0, video.currentTime + d));
+    };
+    const full = () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (film.requestFullscreen) film.requestFullscreen().catch(() => {});
+    };
+    const mute = () => {
+      video.muted = !video.muted;
+      muteLabel.textContent = video.muted ? "unmute" : "mute";
+    };
+
+    big.addEventListener("click", toggle);
+    video.addEventListener("click", toggle);
+    film.querySelector('[data-act="toggle"]').addEventListener("click", toggle);
+    film.querySelector('[data-act="mute"]').addEventListener("click", mute);
+    film.querySelector('[data-act="full"]').addEventListener("click", full);
+
+    video.addEventListener("play", () => {
+      film.dataset.state = "playing";
+      toggleLabel.textContent = "pause";
+    });
+    video.addEventListener("pause", () => {
+      film.dataset.state = "paused";
+      toggleLabel.textContent = "play";
+    });
+    video.addEventListener("timeupdate", () => {
+      const d = video.duration || 92;
+      bar.style.setProperty("--p", (video.currentTime / d) * 100 + "%");
+      now.textContent = fmt(video.currentTime);
+      bar.setAttribute("aria-valuenow", String(Math.floor(video.currentTime)));
+      bar.setAttribute("aria-valuetext", fmt(video.currentTime) + " of 1:32");
+    });
+
+    bar.addEventListener("click", (e) => {
+      const r = bar.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      const go = () => (video.currentTime = ratio * video.duration);
+      if (video.duration) go();
+      else {
+        video.addEventListener("loadedmetadata", go, { once: true });
+        video.play().catch(() => {});
+      }
+    });
+
+    // Clicking anywhere in the pane gives it focus (the video element
+    // can't take focus itself), and the big button hides while playing,
+    // so hand its focus back to the pane instead of dropping it on the
+    // page, where Space would scroll.
+    film.addEventListener("pointerdown", (e) => {
+      if (!e.target.closest("button, [role=slider]")) film.focus({ preventScroll: true });
+    });
+    video.addEventListener("play", () => {
+      if (document.activeElement === big) film.focus({ preventScroll: true });
+    });
+    let hovered = false;
+    film.addEventListener("pointerenter", () => (hovered = true));
+    film.addEventListener("pointerleave", () => (hovered = false));
+
+    // Keys while the pane has focus or the pointer is over it; Space
+    // keeps scrolling the page everywhere else.
+    const KEYS = [" ", "k", "m", "f", "ArrowRight", "ArrowLeft"];
+    document.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!KEYS.includes(e.key)) return;
+      const t = e.target;
+      if (t.closest && t.closest("input, textarea, select, [contenteditable]")) return;
+      if (!film.contains(document.activeElement) && !hovered) return;
+      e.preventDefault();
+      if (e.repeat) return;
+      const k = e.key;
+      if (k === " " || k === "k") toggle();
+      else if (k === "m") mute();
+      else if (k === "f") full();
+      else if (k === "ArrowRight") seekBy(5);
+      else if (k === "ArrowLeft") seekBy(-5);
+    });
+    // A focused <button> also fires its click on Space keyup: swallow it
+    // so the toggle doesn't run twice.
+    film.addEventListener("keyup", (e) => {
+      if (e.key === " ") e.preventDefault();
+    });
+
+    let lastRetry = 0;
+    video.addEventListener("error", () => {
+      if (film.dataset.state === "idle") return;
+      const t = Date.now();
+      if (t - lastRetry < 10000) return;
+      lastRetry = t;
+      const at = video.currentTime;
+      const wasPlaying = film.dataset.state === "playing";
+      video.src = src;
+      video.addEventListener("loadedmetadata", () => {
+        video.currentTime = at;
+        if (wasPlaying) video.play().catch(() => {});
+      }, { once: true });
+      video.load();
+    });
+  })();
+</script>
+
+<style>
+  /* The pane stays dark in both site themes: it is a terminal, like the
+     film inside it. Hairlines, flat, no glow. */
+  .home-film {
+    margin-bottom: 3rem;
+  }
+  .film {
+    --pane: #131111;
+    --line: #2a2624;
+    --text: #f1ecec;
+    --dim: #8b7e7a;
+    --brand: #f05133;
+    --brand-shadow: #8b2a12;
+    background: var(--pane);
+    /* Same outline as the Starlight cards right below. */
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0;
+    overflow: hidden;
+    font-family: var(--sl-font-mono, ui-monospace, "JetBrains Mono", monospace);
+    font-size: 0.8rem;
+    color: var(--dim);
+    outline: none;
+  }
+  .film:focus-visible {
+    box-shadow: 0 0 0 2px var(--brand);
+  }
+
+  .film-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    height: 2.25rem;
+    padding: 0 0.9rem;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .film-bar--top {
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+  }
+  .film-bar--bottom {
+    border-top: 1px solid var(--line);
+  }
+  .film-prompt {
+    color: var(--text);
+  }
+  .film-caret {
+    color: var(--brand);
+  }
+  .film-dur {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .film-screen {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: #111111;
+  }
+  .film-video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #111111;
+    cursor: pointer;
+  }
+
+  /* Big centered square, offset rust shadow = the logomark's depth cells. */
+  .film-big {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    /* Dim the poster while stopped so the orange square reads first. */
+    background: rgba(17, 15, 15, 0.62);
+    cursor: pointer;
+    transition: background 200ms ease;
+  }
+  .film-big:hover {
+    background: rgba(17, 15, 15, 0.5);
+  }
+  .film-big-square {
+    display: grid;
+    place-items: center;
+    width: 5.5rem;
+    height: 5.5rem;
+    background: var(--brand);
+    border-radius: 0;
+    box-shadow: 0.4rem 0.4rem 0 var(--brand-shadow);
+    transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .film-big-square svg {
+    fill: var(--text);
+    margin-left: 0.3rem;
+  }
+  .film-big:hover .film-big-square {
+    transform: translate(-0.12rem, -0.12rem);
+    box-shadow: 0.52rem 0.52rem 0 var(--brand-shadow);
+  }
+  .film-big:active .film-big-square {
+    transform: translate(0.25rem, 0.25rem);
+    box-shadow: 0.15rem 0.15rem 0 var(--brand-shadow);
+  }
+  .film-big:focus-visible {
+    outline: none;
+  }
+  .film-big:focus-visible .film-big-square {
+    outline: 2px solid var(--text);
+    outline-offset: 3px;
+  }
+  .film[data-state="playing"] .film-big {
+    display: none;
+  }
+
+  /* Footer hints, styled like the TUI footer: bright key, dim action. */
+  .film-key {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font: inherit;
+    color: var(--dim);
+    cursor: pointer;
+    transition: color 120ms ease;
+  }
+  .film-key b {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .film-key:hover,
+  .film-key:hover b {
+    color: var(--brand);
+  }
+  .film-key:focus-visible {
+    outline: 1px solid var(--brand);
+    outline-offset: 2px;
+  }
+  .film-sep {
+    color: var(--line);
+    user-select: none;
+  }
+
+  /* Progress as a row of cells: dim track, orange fill clipped to --p. */
+  .film-progress {
+    --p: 0%;
+    position: relative;
+    flex: 1;
+    min-width: 3rem;
+    height: 0.6rem;
+    cursor: pointer;
+    background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 8px);
+  }
+  .film-progress-fill {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg, var(--brand) 0 6px, transparent 6px 8px);
+    clip-path: inset(0 calc(100% - var(--p)) 0 0);
+  }
+  .film-progress:focus-visible {
+    outline: 1px solid var(--brand);
+    outline-offset: 3px;
+  }
+  .film-time {
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+
+  .film:fullscreen {
+    display: flex;
+    flex-direction: column;
+    border: 0;
+    border-radius: 0;
+  }
+  .film:fullscreen .film-screen {
+    flex: 1;
+    aspect-ratio: auto;
+  }
+
+  @media (max-width: 40rem) {
+    .film-opt {
+      display: none;
+    }
+    .film-big-square {
+      width: 3.25rem;
+      height: 3.25rem;
+      box-shadow: 0.3rem 0.3rem 0 var(--brand-shadow);
+    }
+    .film-big-square svg {
+      width: 18px;
+      height: 21px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .film-big,
+    .film-big-square,
+    .film-key {
+      transition: none;
+    }
+  }
+</style>
