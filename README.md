@@ -25,7 +25,7 @@
 
 **gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie), a beautifully-rendered `git log --graph` viewer, and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.
 
-[gitoui_film](https://github.com/user-attachments/assets/1110aa1d-ada4-4a82-a293-a92641be8c71)
+[gitoui_film](https://github.com/user-attachments/assets/2c8f6e42-e478-4212-b3d5-7d674e455b8e)
 
 ## What's inside
 
