@@ -1526,11 +1526,10 @@ pub fn run() -> Result<()> {
         // iterations keep the same path and reuse the existing watcher.
         // Dropping the old debouncer first stops its thread cleanly so we
         // don't leak handles or get cross-talk events from the old path.
-        let current_git_dir = repository.path().to_path_buf();
-        let needs_rebind = watched_git_dir
-            .as_ref()
-            .map(|p| p != &current_git_dir)
-            .unwrap_or(true);
+        // The repository is always loaded as `"."`, so compare absolute
+        // paths: the raw path is still `"."` after a `cd`.
+        let current_git_dir = absolute_work_tree(repository.path());
+        let needs_rebind = watcher_needs_rebind(watched_git_dir.as_deref(), &current_git_dir);
         if needs_rebind {
             _git_watcher = None;
             // `Repository.path()` is the WORK TREE root, not the
@@ -1790,6 +1789,28 @@ pub fn run() -> Result<()> {
 /// text brand instead of emitting escape sequences the terminal would
 /// swallow (VTE terminals eat iTerm2 payloads together with whatever
 /// is printed after them).
+/// Absolute work tree of `repo_path`, resolved against the process's
+/// current directory (which a `cd` changes).
+fn absolute_work_tree(repo_path: &Path) -> std::path::PathBuf {
+    match std::env::current_dir() {
+        Ok(cwd) => work_tree_from(&cwd, repo_path),
+        Err(_) => repo_path.to_path_buf(),
+    }
+}
+
+/// Pure part of [`absolute_work_tree`], so tests don't have to change
+/// the process-wide current directory.
+fn work_tree_from(cwd: &Path, repo_path: &Path) -> std::path::PathBuf {
+    let joined = cwd.join(repo_path);
+    std::fs::canonicalize(&joined).unwrap_or(joined)
+}
+
+/// Whether the `.git` watcher must be rebuilt for `current` (an absolute
+/// work tree): on first launch, or when a `cd` moved to another repo.
+fn watcher_needs_rebind(watched: Option<&Path>, current: &Path) -> bool {
+    watched != Some(current)
+}
+
 fn print_no_repo_splash(image_protocol: Option<protocol::ImageProtocol>) {
     let mut stdout = std::io::stdout().lock();
     write_no_repo_splash(&mut stdout, image_protocol);
@@ -1976,6 +1997,29 @@ fn parse_github_repo(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watcher_rebinds_after_cd_into_another_repo() {
+        // The repository is always loaded as ".", so the raw path is the
+        // same before and after a cd. Resolved against each cwd, the work
+        // trees differ and the watcher has to follow.
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let in_a = work_tree_from(a.path(), Path::new("."));
+        let in_b = work_tree_from(b.path(), Path::new("."));
+        assert_eq!(in_a, std::fs::canonicalize(a.path()).unwrap());
+        assert_ne!(in_a, in_b);
+
+        assert!(watcher_needs_rebind(None, &in_a), "first launch");
+        assert!(
+            !watcher_needs_rebind(Some(&in_a), &in_a),
+            "config reload in the same repo"
+        );
+        assert!(
+            watcher_needs_rebind(Some(&in_a), &in_b),
+            "cd into another repo"
+        );
+    }
 
     #[test]
     fn splash_without_image_protocol_is_plain_text_brand() {
