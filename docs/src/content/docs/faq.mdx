@@ -119,12 +119,12 @@ Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder and cac
 
 </summary>
 
-The only network calls are:
+There is no telemetry, no analytics and no crash reporting. These are the network requests it makes:
 
-- **GitHub avatars**, fetched from `avatars.githubusercontent.com` and cached locally. Disable with `core.option.github_avatars = false`.
-- **GitHub API**, only when you actively browse PRs / Issues. Uses your OAuth token; respects the GitHub rate limit (5000 req/h per user).
-
-No telemetry, no crash reporting, no auto-update phone-home.
+- **Update check (on by default).** At most once every 24 hours, and only when started in an interactive terminal, gitoui sends `GET https://crates.io/api/v1/crates/gitoui` to read the latest version. Nothing else is sent. If a newer version exists and you installed with the curl script, it also checks with a `HEAD` request that the matching archive is published on GitHub Releases. Nothing is installed without your answer at the prompt, and Homebrew installs are never prompted. Turn it off with `--no-update-check` or `check_updates = false` under `[core.option]` (answering `N` at the prompt sets it for you). `gitoui --update` checks on demand.
+- **GitHub, only after you sign in.** Sign-in uses GitHub's device flow. Once signed in, gitoui calls `api.github.com` for the repository's GitHub remote: when you open the Pull Requests or Issues views, and to show author avatars in the commit list, blame, file history and commit details (it asks GitHub which account authored a commit, then downloads that avatar). Avatars are cached on disk. Set `github_avatars = false` under `[core.option]` to stop avatar requests; the ASCII renderer never loads them.
+- **git itself.** Fetch, pull and push run the `git` CLI against your remotes. gitoui also runs `git fetch --all` in the background after a commit, stash, push or tag made from the UI, and fetches a pull request's commit from GitHub when you open one that isn't available locally.
+- **install.sh (not the binary).** After a real install or update, the script sends one `GET` to an install counter that only stores a running total. Set `GITOUI_NO_TRACK=1` to skip it.
 
 </details>
 
