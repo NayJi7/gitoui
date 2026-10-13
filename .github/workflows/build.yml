@@ -8,6 +8,10 @@ on:
     branches:
       - master
 
+# Least privilege: the GITHUB_TOKEN can only read the repository.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

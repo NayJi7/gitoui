@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
 
+# Least privilege: the GITHUB_TOKEN can only read the repository. The
+# `release` job raises this to `contents: write` to publish the release.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
