@@ -109,7 +109,9 @@ jobs:
           pattern: release-*
           merge-multiple: true
       - name: Checksum
-        run: sha256sum releases/* > ./releases/checksum.txt
+        # Bare file names, so `sha256sum -c checksum.txt` works next to
+        # the downloaded archives and install.sh can match them.
+        run: cd releases && sha256sum *.tar.gz > checksum.txt
       - name: Create Release
         uses: softprops/action-gh-release@v3.0.3
         with:

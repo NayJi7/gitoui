@@ -406,9 +406,12 @@ detect_target() {
     ARCH="$(uname -m)"
     case "$OS" in
         Linux)
+            # Static musl builds: they run on every distro (Alpine, old
+            # glibc), unlike the glibc builds which need the glibc of the
+            # CI runner. Same archives as the Homebrew formula and AUR.
             case "$ARCH" in
-                x86_64|amd64)   TARGET="x86_64-unknown-linux-gnu" ;;
-                aarch64|arm64)  TARGET="aarch64-unknown-linux-gnu" ;;
+                x86_64|amd64)   TARGET="x86_64-unknown-linux-musl" ;;
+                aarch64|arm64)  TARGET="aarch64-unknown-linux-musl" ;;
                 *) fail "Unsupported architecture: ${OS}/${ARCH}" ;;
             esac
             ;;
@@ -474,6 +477,16 @@ check_existing() {
     UPDATE=1
 }
 
+# Print the sha256 listed for archive $1 in checksum file $2. Matches on
+# the file's basename, so both `<hash>  gitoui-…tar.gz` and the
+# `<hash>  releases/gitoui-…tar.gz` lines of releases up to v0.3.3 work.
+checksum_for() {
+    awk -v want="$1" '{
+        f = $2; sub(/^\*/, "", f); n = split(f, p, "/")
+        if (p[n] == want) { print $1; exit }
+    }' "$2"
+}
+
 # ── Download + extract - silent curl, clean error reporting ──────────
 # We swap the progress bar for `--silent --show-error` so failures
 # report on their own left-aligned line instead of trailing the bar's
@@ -499,23 +512,21 @@ download_archive() {
     # Verify checksum when checksum.txt is published - non-fatal if
     # the file is missing (older releases may not include it).
     if curl --fail --silent --location -o "${TMP}/checksum.txt" "$CHECKSUM_URL" 2>/dev/null; then
-        EXPECTED="$(grep " ${ARCHIVE}\$" "${TMP}/checksum.txt" \
-                    | awk '{print $1}' | head -n1 || true)"
-        if [ -n "$EXPECTED" ]; then
-            if command -v sha256sum >/dev/null 2>&1; then
-                ACTUAL="$(sha256sum "${TMP}/${ARCHIVE}" | awk '{print $1}')"
-            elif command -v shasum >/dev/null 2>&1; then
-                ACTUAL="$(shasum -a 256 "${TMP}/${ARCHIVE}" | awk '{print $1}')"
-            else
-                ACTUAL=""
-            fi
-            if [ -n "$ACTUAL" ]; then
-                if [ "$ACTUAL" = "$EXPECTED" ]; then
-                    ok "Checksum verified."
-                else
-                    fail "Checksum mismatch, refusing to install."
-                fi
-            fi
+        EXPECTED="$(checksum_for "$ARCHIVE" "${TMP}/checksum.txt")"
+        [ -n "$EXPECTED" ] || fail "No checksum listed for ${ARCHIVE}, refusing to install."
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL="$(sha256sum "${TMP}/${ARCHIVE}" | awk '{print $1}')"
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL="$(shasum -a 256 "${TMP}/${ARCHIVE}" | awk '{print $1}')"
+        else
+            ACTUAL=""
+        fi
+        if [ -z "$ACTUAL" ]; then
+            warn "No sha256sum or shasum found, checksum not verified."
+        elif [ "$ACTUAL" = "$EXPECTED" ]; then
+            ok "Checksum verified."
+        else
+            fail "Checksum mismatch, refusing to install."
         fi
     fi
 

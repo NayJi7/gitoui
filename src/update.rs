@@ -277,14 +277,14 @@ fn print_post_update_welcome() {
     println!();
 }
 
-/// Maps the Rust target triple of the running binary to the same triple
-/// used in the release archive filenames. Returns `None` on a platform
+/// Maps the running platform to the release archive install.sh downloads
+/// for it (static musl builds on Linux). Returns `None` on a platform
 /// we don't publish prebuilt binaries for.
 fn current_target_triple() -> Option<&'static str> {
     use std::env::consts::{ARCH, OS};
     Some(match (OS, ARCH) {
-        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
-        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("linux", "x86_64") => "x86_64-unknown-linux-musl",
+        ("linux", "aarch64") => "aarch64-unknown-linux-musl",
         ("macos", "x86_64") => "x86_64-apple-darwin",
         ("macos", "aarch64") => "aarch64-apple-darwin",
         _ => return None,
