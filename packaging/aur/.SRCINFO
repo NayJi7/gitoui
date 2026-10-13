@@ -18,9 +18,3 @@ pkgbase = gitoui-bin
 	sha256sums_aarch64 = 1db1e0a835b05cad06e3902ded801c9fa61d81d016ef5acd215f776b9b69db12
 
 pkgname = gitoui-bin
-  -> Compressing package...
-==> Leaving fakeroot environment.
-==> Finished making: gitoui-bin 0.3.5-1 (Tue Oct 13 10:02:48 2026)
-gitoui 0.3.5
-
-  Say oui
