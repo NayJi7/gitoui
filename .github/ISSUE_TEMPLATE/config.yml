@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/NayJi7/gitoui/discussions/categories/q-a
+    about: Ask in Discussions, it helps the next person with the same question.
+  - name: Documentation
+    url: https://nayji7.github.io/gitoui/
+    about: Installation, terminal compatibility, configuration, keybindings and FAQ.

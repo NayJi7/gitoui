@@ -1,0 +1,92 @@
+name: Bug report
+description: Something looks wrong, crashes or does not work as documented.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The keys you pressed or the commands you ran, starting from `gitoui` in a repository.
+      placeholder: |
+        1. cd into a repo with ...
+        2. run `gitoui`
+        3. press ...
+  - type: input
+    id: version
+    attributes:
+      label: gitoui version
+      description: Output of `gitoui --version`.
+      placeholder: gitoui 0.3.5
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - install.sh (curl one-liner)
+        - Homebrew
+        - cargo install
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.3, Ubuntu 24.04, Arch, ...
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and version
+      description: Most display issues depend on it.
+      placeholder: Ghostty 1.1.3, Kitty 0.40, WezTerm, iTerm2, Konsole, foot, ...
+    validations:
+      required: true
+  - type: dropdown
+    id: multiplexer
+    attributes:
+      label: Running inside a multiplexer?
+      options:
+        - "No"
+        - tmux
+        - zellij
+        - screen
+  - type: dropdown
+    id: renderer
+    attributes:
+      label: Graph renderer
+      description: The `graph_renderer` option or `--graph-renderer` flag. Leave on auto if you never changed it.
+      options:
+        - auto
+        - kitty
+        - kitty-unicode
+        - iterm
+        - sixel
+        - ascii
+  - type: input
+    id: size
+    attributes:
+      label: Repository size
+      description: Output of `git rev-list --count --all`, if the problem may depend on it.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: The last lines of `~/.config/gitoui/logs/gitoui-<date>.log` around the problem.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshot or recording
+      description: Very helpful for display issues. Drag and drop the file here.
