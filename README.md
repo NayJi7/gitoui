@@ -29,7 +29,7 @@
 
 ## What's inside
 
-The commit graph stays serie's: pre-rendered SVGs sent inline through your terminal's image protocol (Kitty, iTerm2, Ghostty, Sixel). Around it, gitoui adds the operations you do on top of `git log`:
+The commit graph stays serie's: pre-rendered images sent inline through your terminal's image protocol (Kitty graphics, iTerm2 or Sixel). Around it, gitoui adds the operations you do on top of `git log`:
 
 - Side-by-side or inline diffs with `git add -p`-style hunk staging baked into the Uncommitted view.
 - `b` to blame, `Shift+H` to follow file history across renames.

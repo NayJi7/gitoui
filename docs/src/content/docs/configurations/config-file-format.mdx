@@ -76,7 +76,7 @@ back to disk when the user flips them.
 
 | Key             | Type / default | Effect                                                                                                                                                                                          |
 |-----------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `graph_enabled` | bool / `true`  | Render the inline commit-graph image column. Set to `false` to skip all SVG/PNG generation and terminal-image uploads, for near-instant scrolling on huge repos (rust-lang/rust, linux kernel). |
+| `graph_enabled` | bool / `true`  | Render the inline commit-graph image column. Set to `false` to skip all graph image generation and terminal-image uploads, for near-instant scrolling on huge repos (rust-lang/rust, linux kernel). |
 
 When the native graph is wider than ~40% of the panel (heavy multi-branch repos), the column is capped to that 40% and the visible lane window slides with `←` / `→` from the commit list (Kitty terminals only: it uses Kitty's source-rect crop).
 
