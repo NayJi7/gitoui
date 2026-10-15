@@ -13,6 +13,7 @@
 [![curl installs](https://img.shields.io/endpoint?url=https%3A%2F%2Fgitoui-install-counter.nayji7.workers.dev%2Fcount&style=flat-square&labelColor=2a2624&logo=curl&logoColor=f1ecec)](https://github.com/NayJi7/gitoui#install)
 [![GitHub stars](https://img.shields.io/github/stars/NayJi7/gitoui?style=flat-square&label=stars&labelColor=2a2624&color=f0b04a&logo=github&logoColor=f1ecec)](https://github.com/NayJi7/gitoui/stargazers)
 [![Built with Ratatui](https://img.shields.io/badge/Built_With-Ratatui-000?logo=ratatui&logoColor=fff&labelColor=000&color=fff)](https://ratatui.rs)
+[![Buy me a coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-support-f05133?style=flat-square&labelColor=2a2624&logo=buymeacoffee&logoColor=f1ecec)](https://buymeacoffee.com/nayji7)
 
 </p>
 
