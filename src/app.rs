@@ -1077,26 +1077,40 @@ impl App<'_> {
                             Some(UserEvent::PullRequests)
                                 if !text_input_active
                                     && !matches!(self.view, View::PullRequests(_))
-                                    && !matches!(self.view, View::Issues(_))
-                                    && self.github_features_available() =>
+                                    && !matches!(self.view, View::Issues(_)) =>
                             {
                                 // Global shortcut, open the PR view from
                                 // anywhere EXCEPT when we're already inside
                                 // it OR inside the Issues view. In both of
                                 // those, `R` is reserved for the in-view
                                 // quote-reply action and must fall through
-                                // to the view's own handle_event. Gated on
-                                // (auth + github-hosted remote) so the key
-                                // is a no-op when the feature can't actually
-                                // work, matches the footer's behaviour.
-                                self.ec.send(AppEvent::OpenPullRequests);
+                                // to the view's own handle_event. Needs
+                                // (auth + github-hosted remote): the footer
+                                // hides the hint without them, so the key
+                                // says what is missing instead of failing
+                                // silently.
+                                match github_unavailable_reason(
+                                    self.ctx.github_auth_state.is_authenticated(),
+                                    self.has_github_remote,
+                                ) {
+                                    None => self.ec.send(AppEvent::OpenPullRequests),
+                                    Some(reason) => {
+                                        self.ec.send(AppEvent::NotifyWarn(reason.into()))
+                                    }
+                                }
                             }
                             Some(UserEvent::Issues)
-                                if !text_input_active
-                                    && !matches!(self.view, View::Issues(_))
-                                    && self.github_features_available() =>
+                                if !text_input_active && !matches!(self.view, View::Issues(_)) =>
                             {
-                                self.ec.send(AppEvent::OpenIssues);
+                                match github_unavailable_reason(
+                                    self.ctx.github_auth_state.is_authenticated(),
+                                    self.has_github_remote,
+                                ) {
+                                    None => self.ec.send(AppEvent::OpenIssues),
+                                    Some(reason) => {
+                                        self.ec.send(AppEvent::NotifyWarn(reason.into()))
+                                    }
+                                }
                             }
                             Some(UserEvent::Drop)
                                 if matches!(self.view, View::List(_))
@@ -7164,11 +7178,47 @@ fn build_external_command_parameters<'a>(
     })
 }
 
+/// Why the global `R` / `I` shortcuts can't open the PR / Issues views right
+/// now, or `None` when they can. Shown as a warning when the key is pressed,
+/// so the shortcut never fails silently. Not being logged in comes first: it
+/// is the usual cause, and the remote check is moot until the user connects.
+fn github_unavailable_reason(
+    is_authenticated: bool,
+    has_github_remote: bool,
+) -> Option<&'static str> {
+    if !is_authenticated {
+        Some("GitHub login required: open the config view and connect under GitHub Auth.")
+    } else if !has_github_remote {
+        Some("No GitHub remote found on this repo.")
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[test]
+    fn github_unavailable_reason_asks_for_login_first() {
+        let reason = github_unavailable_reason(false, false).unwrap();
+        assert!(reason.contains("login"), "{reason}");
+        // Same answer whether or not there is a remote: login is the blocker.
+        assert_eq!(github_unavailable_reason(false, true), Some(reason));
+    }
+
+    #[test]
+    fn github_unavailable_reason_reports_missing_remote_once_logged_in() {
+        let reason = github_unavailable_reason(true, false).unwrap();
+        assert!(reason.contains("remote"), "{reason}");
+    }
+
+    #[test]
+    fn github_unavailable_reason_is_none_when_everything_is_ready() {
+        assert_eq!(github_unavailable_reason(true, true), None);
+    }
 
     #[rustfmt::skip]
     #[rstest]
