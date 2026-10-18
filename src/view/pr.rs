@@ -42,6 +42,7 @@ use crate::{
         },
         RepoCoords,
     },
+    view::editor_wrap,
 };
 
 #[derive(Debug)]
@@ -2582,14 +2583,18 @@ impl<'a> PullRequestsView<'a> {
                     return;
                 };
                 if matches!(state.focused, ComposeField::Body) {
-                    let going_up = matches!(key.code, KeyCode::Up);
-                    let at_first = state.body[..state.cursor.min(state.body.len())]
-                        .find('\n')
-                        .is_none();
-                    let at_last = state.body[state.cursor.min(state.body.len())..]
-                        .find('\n')
-                        .is_none();
-                    (going_up && at_first) || (!going_up && at_last)
+                    let delta = if matches!(key.code, KeyCode::Up) {
+                        -1
+                    } else {
+                        1
+                    };
+                    // Leave the body only from its first / last visual row.
+                    !editor_wrap::can_move_vertically(
+                        &state.body,
+                        state.cursor,
+                        self.compose_body_width(),
+                        delta,
+                    )
                 } else {
                     true
                 }
@@ -2606,8 +2611,9 @@ impl<'a> PullRequestsView<'a> {
                 return;
             }
             // In body, navigate cursor vertically within text.
+            let width = self.compose_body_width();
             if let Some(s) = self.compose.as_mut() {
-                compose_body_cursor_vertical(s, key.code);
+                compose_body_cursor_vertical(s, key.code, width);
             }
             self.compose_body_anchor_to_cursor();
             return;
@@ -2737,6 +2743,7 @@ impl<'a> PullRequestsView<'a> {
     /// render path or from mouse-wheel scroll, so wheel scrolling
     /// stays where the user puts it.
     fn compose_body_anchor_to_cursor(&mut self) {
+        let width = self.compose_body_width();
         let Some(c) = self.compose.as_mut() else {
             return;
         };
@@ -2747,7 +2754,7 @@ impl<'a> PullRequestsView<'a> {
         if view == 0 {
             return;
         }
-        let (_, cursor_row) = cursor_screen_pos(&c.body, c.cursor);
+        let (_, cursor_row) = editor_wrap::cursor_pos(&c.body, c.cursor, width);
         if cursor_row < c.body_scroll {
             c.body_scroll = cursor_row;
         } else if cursor_row >= c.body_scroll + view {
@@ -2830,18 +2837,26 @@ impl<'a> PullRequestsView<'a> {
         // Otherwise scroll the Body viewport. Clamp against the
         // body's row count and last-rendered height so we can't
         // scroll past the end.
+        let width = self.compose_body_width();
         let Some(c) = self.compose.as_mut() else {
             return;
         };
-        let total_rows = if c.body.is_empty() {
-            1
-        } else {
-            c.body.matches('\n').count() as u16 + 1
-        };
+        let total_rows = editor_wrap::row_count(&c.body, width);
         let view = c.body_last_height.max(1);
         let max_scroll = total_rows.saturating_sub(view);
         let new = (c.body_scroll as i32 + delta).clamp(0, max_scroll as i32);
         c.body_scroll = new as u16;
+    }
+
+    /// Width in columns of the compose Body text area (the bordered
+    /// block minus its border), `0` until the first render. The soft
+    /// wrap of the Body depends on it.
+    fn compose_body_width(&self) -> u16 {
+        self.compose_field_rects
+            .iter()
+            .find(|(f, _)| matches!(f, ComposeField::Body))
+            .map(|(_, r)| r.width.saturating_sub(2))
+            .unwrap_or(0)
     }
 
     /// Snap the compose Body cursor to the byte position under a
@@ -2867,37 +2882,13 @@ impl<'a> PullRequestsView<'a> {
         let row_in_view = click_row
             .saturating_sub(inner_y)
             .min(inner_bottom.saturating_sub(inner_y).saturating_sub(1));
+        let width = self.compose_body_width();
         let Some(c) = self.compose.as_mut() else {
             return;
         };
-        let scroll = c.body_scroll as usize;
-        let logical_line = scroll + row_in_view as usize;
-        let buf = c.body.clone();
-        let mut line_start: usize = 0;
-        let mut current_line: usize = 0;
-        for (offset, ch) in buf.char_indices() {
-            if current_line == logical_line {
-                break;
-            }
-            if ch == '\n' {
-                current_line += 1;
-                line_start = offset + ch.len_utf8();
-            }
-        }
-        if current_line < logical_line {
-            c.cursor = buf.len();
-            c.focused = ComposeField::Body;
-            return;
-        }
-        let mut byte_pos = line_start;
-        for (col_walked, (offset, ch)) in buf[line_start..].char_indices().enumerate() {
-            if ch == '\n' || col_walked >= col_in_view as usize {
-                byte_pos = line_start + offset;
-                break;
-            }
-            byte_pos = line_start + offset + ch.len_utf8();
-        }
-        c.cursor = byte_pos.min(buf.len());
+        let target_row = c.body_scroll as usize + row_in_view as usize;
+        // A click below the last row drops the cursor at the end.
+        c.cursor = editor_wrap::cursor_at(&c.body, width, col_in_view as usize, target_row);
         c.focused = ComposeField::Body;
         let _ = c;
         self.compose_body_anchor_to_cursor();
@@ -3523,43 +3514,24 @@ impl<'a> PullRequestsView<'a> {
         }
     }
 
+    /// Width in columns of the comment editor text area, `0` until the
+    /// first render. The soft wrap of the buffer depends on it.
+    fn editor_body_width(&self) -> u16 {
+        self.editor_body_area.map(|r| r.width).unwrap_or(0)
+    }
+
     fn editor_cursor_up(&mut self) {
+        let width = self.editor_body_width();
         if let Some(ed) = self.comment_editor.as_mut() {
-            // Move one line up, preserving the visual column.
-            let buf = &ed.buffer;
-            let cur_line_start = buf[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            if cur_line_start == 0 {
-                ed.cursor = 0;
-                return;
-            }
-            let col = ed.cursor - cur_line_start;
-            let prev_line_end = cur_line_start - 1; // the '\n' itself
-            let prev_line_start = buf[..prev_line_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let prev_len = prev_line_end - prev_line_start;
-            ed.cursor = prev_line_start + col.min(prev_len);
+            // Move one visual row up, preserving the visual column.
+            ed.cursor = editor_wrap::move_vertical(&ed.buffer, ed.cursor, width, -1);
         }
     }
 
     fn editor_cursor_down(&mut self) {
+        let width = self.editor_body_width();
         if let Some(ed) = self.comment_editor.as_mut() {
-            let buf = &ed.buffer;
-            let cur_line_start = buf[..ed.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let col = ed.cursor - cur_line_start;
-            let cur_line_end = buf[ed.cursor..]
-                .find('\n')
-                .map(|i| ed.cursor + i)
-                .unwrap_or(buf.len());
-            if cur_line_end >= buf.len() {
-                ed.cursor = buf.len();
-                return;
-            }
-            let next_line_start = cur_line_end + 1;
-            let next_line_end = buf[next_line_start..]
-                .find('\n')
-                .map(|i| next_line_start + i)
-                .unwrap_or(buf.len());
-            let next_len = next_line_end - next_line_start;
-            ed.cursor = next_line_start + col.min(next_len);
+            ed.cursor = editor_wrap::move_vertical(&ed.buffer, ed.cursor, width, 1);
         }
     }
 
@@ -3613,35 +3585,8 @@ impl<'a> PullRequestsView<'a> {
         let row_in_body = row.saturating_sub(body.y) as usize;
         let col_in_body = col.saturating_sub(body.x) as usize;
         let target_row = ed.scroll_offset as usize + row_in_body;
-        // Walk to the start of `target_row` in the buffer, then walk
-        // along the line up to `col_in_body` chars.
-        let mut current_row = 0usize;
-        let mut line_start: usize = 0;
-        for (byte_idx, ch) in ed.buffer.char_indices() {
-            if current_row == target_row {
-                break;
-            }
-            if ch == '\n' {
-                current_row += 1;
-                line_start = byte_idx + 1;
-            }
-        }
-        if current_row < target_row {
-            // Click was below the last line, clamp to buffer end.
-            ed.cursor = ed.buffer.len();
-            return;
-        }
-        // Walk chars from line_start until we hit col_in_body or `\n`
-        // or the end of the buffer.
-        let mut byte_pos = line_start;
-        for (col_walked, (offset, ch)) in ed.buffer[line_start..].char_indices().enumerate() {
-            if ch == '\n' || col_walked >= col_in_body {
-                byte_pos = line_start + offset;
-                break;
-            }
-            byte_pos = line_start + offset + ch.len_utf8();
-        }
-        ed.cursor = byte_pos.min(ed.buffer.len());
+        // A click below the last row clamps to the buffer end.
+        ed.cursor = editor_wrap::cursor_at(&ed.buffer, body.width, col_in_body, target_row);
     }
 
     /// Push `scroll_offset` just enough to keep the cursor inside the
@@ -3650,6 +3595,7 @@ impl<'a> PullRequestsView<'a> {
     /// but unlike a render-time anchor, this leaves a previously-set
     /// manual scroll alone whenever the cursor is still visible.
     fn editor_anchor_scroll_to_cursor(&mut self) {
+        let width = self.editor_body_width();
         let Some(ed) = self.comment_editor.as_mut() else {
             return;
         };
@@ -3657,7 +3603,7 @@ impl<'a> PullRequestsView<'a> {
         if body == 0 {
             return;
         }
-        let (_, cursor_row) = cursor_screen_pos(&ed.buffer, ed.cursor);
+        let (_, cursor_row) = editor_wrap::cursor_pos(&ed.buffer, ed.cursor, width);
         if cursor_row < ed.scroll_offset {
             ed.scroll_offset = cursor_row;
         } else if cursor_row >= ed.scroll_offset + body {
@@ -3669,14 +3615,11 @@ impl<'a> PullRequestsView<'a> {
     /// cursor. The cursor's logical position stays put, the user is
     /// browsing the buffer, not navigating.
     fn editor_scroll_viewport(&mut self, delta: i32) {
+        let width = self.editor_body_width();
         let Some(ed) = self.comment_editor.as_mut() else {
             return;
         };
-        let total_rows = if ed.buffer.is_empty() {
-            1u16
-        } else {
-            ed.buffer.matches('\n').count() as u16 + 1
-        };
+        let total_rows = editor_wrap::row_count(&ed.buffer, width);
         let body = ed.last_body_height.max(1);
         let max_offset = total_rows.saturating_sub(body);
         let new_offset = (ed.scroll_offset as i32 + delta).clamp(0, max_offset as i32);
@@ -5242,11 +5185,8 @@ impl<'a> PullRequestsView<'a> {
         // render time would snap the viewport back to the cursor on
         // every frame, undoing mouse-wheel scrolls and making
         // every hover feel like it jumped to the bottom.
-        let total_rows = if state.body.is_empty() {
-            1
-        } else {
-            state.body.matches('\n').count() as u16 + 1
-        };
+        let wrapped = editor_wrap::rows(&state.body, body_inner.width);
+        let total_rows = u16::try_from(wrapped.len()).unwrap_or(u16::MAX);
         let mut scroll = state.body_scroll;
         let max_scroll = total_rows.saturating_sub(body_inner.height);
         if scroll > max_scroll {
@@ -5269,14 +5209,13 @@ impl<'a> PullRequestsView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ))]
         } else {
-            state
-                .body
-                .split('\n')
+            wrapped
+                .iter()
                 .skip(scroll as usize)
                 .take(body_inner.height as usize)
-                .map(|l| {
+                .map(|row| {
                     crate::view::issue::editor_line_with_mentions(
-                        l,
+                        &state.body[row.start..row.end],
                         base_style,
                         pr_fg,
                         issue_fg,
@@ -5382,7 +5321,8 @@ impl<'a> PullRequestsView<'a> {
                 // its visual position to the top of the body (via
                 // `saturating_sub`-style arithmetic), making it look like
                 // the scroll moved the cursor.
-                let (col, row) = cursor_screen_pos(&state.body, state.cursor);
+                let (col, row) =
+                    editor_wrap::cursor_pos(&state.body, state.cursor, body_inner.width);
                 if row >= scroll && row < scroll + body_inner.height {
                     let cx = body_inner.x + col;
                     let cy = body_inner.y + (row - scroll);
@@ -5561,15 +5501,13 @@ impl<'a> PullRequestsView<'a> {
 
         // Compute the cursor's logical (col, row) in the buffer first
         // so we can scroll the body window to keep it visible.
-        let (cursor_col, cursor_row) = cursor_screen_pos(&buffer, cursor_byte);
+        let wrapped = editor_wrap::rows(&buffer, body_area.width);
+        let (cursor_col, cursor_row) =
+            editor_wrap::cursor_pos(&buffer, cursor_byte, body_area.width);
 
-        // Total logical row count, number of `\n` in the buffer plus 1
-        // (we don't add a trailing empty line for a final `\n`).
-        let total_rows = if buffer.is_empty() {
-            1
-        } else {
-            buffer.matches('\n').count() as u16 + 1
-        };
+        // Total visual row count: the buffer soft-wrapped to the body
+        // width, one row per wrapped segment.
+        let total_rows = u16::try_from(wrapped.len()).unwrap_or(u16::MAX);
 
         // Read the scroll offset as-is, auto-anchoring lives in the
         // cursor-mutating helpers (so manual wheel/PgUp/PgDn don't get
@@ -5588,9 +5526,10 @@ impl<'a> PullRequestsView<'a> {
             ed.last_body_height = body_height;
         }
 
-        // Body: render the buffer's logical lines starting from the
-        // scroll offset, up to body_height. Wrap is OFF so screen rows
-        // map 1:1 with logical rows, keeps cursor positioning trivial.
+        // Body: render the soft-wrapped rows starting from the scroll
+        // offset, up to body_height. `editor_wrap` is the single source
+        // of truth for where text lands, so the cursor, scrolling and
+        // clicks all agree with what is drawn here.
         let value = Style::default().fg(theme.fg);
         let pr_fg = theme.list_hash_fg;
         let issue_fg = theme.list_ref_stash_fg;
@@ -5609,13 +5548,13 @@ impl<'a> PullRequestsView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ))]
         } else {
-            buffer
-                .split('\n')
+            wrapped
+                .iter()
                 .skip(scroll_offset as usize)
                 .take(body_height as usize)
-                .map(|l| {
+                .map(|row| {
                     crate::view::issue::editor_line_with_mentions(
-                        l,
+                        &buffer[row.start..row.end],
                         value,
                         pr_fg,
                         issue_fg,
@@ -8347,18 +8286,6 @@ fn split_row(
     Line::from(spans)
 }
 
-/// Compute (column, row) within the editor body for a buffer cursor at
-/// the given byte offset. Lines are split on `\n`; `col` is the
-/// visible-width count of the prefix in the current logical line.
-pub(crate) fn cursor_screen_pos(buf: &str, byte_cursor: usize) -> (u16, u16) {
-    let safe_cursor = byte_cursor.min(buf.len());
-    let prefix = &buf[..safe_cursor];
-    let row = prefix.chars().filter(|c| *c == '\n').count() as u16;
-    let last_line_start = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let col = console::measure_text_width(&prefix[last_line_start..]) as u16;
-    (col, row)
-}
-
 /// Recursively walk a parent + its replies (DFS, in render order) and
 /// return the entry at the given 1-based selection index. The PR
 /// description is index 0 (handled by the caller); top-level entries
@@ -9042,48 +8969,23 @@ fn compose_field_cursor_end(state: &mut ComposeState) {
         .unwrap_or(buf.len());
 }
 
-fn compose_body_cursor_vertical(state: &mut ComposeState, key: ratatui::crossterm::event::KeyCode) {
+/// Move the compose Body cursor one visual row up or down for a Body text
+/// area `width` columns wide (the text is soft-wrapped to that width).
+fn compose_body_cursor_vertical(
+    state: &mut ComposeState,
+    key: ratatui::crossterm::event::KeyCode,
+    width: u16,
+) {
     use ratatui::crossterm::event::KeyCode;
     if !matches!(state.focused, ComposeField::Body) {
         return;
     }
-    let cursor = state.cursor;
-    let buf = state.body.clone();
-    let line_start = buf[..cursor.min(buf.len())]
-        .rfind('\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    let col = cursor - line_start;
-    match key {
-        KeyCode::Up => {
-            if line_start == 0 {
-                state.cursor = 0;
-                return;
-            }
-            let prev_end = line_start - 1;
-            let prev_start = buf[..prev_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let prev_line_len = prev_end - prev_start;
-            state.cursor = prev_start + col.min(prev_line_len);
-        }
-        KeyCode::Down => {
-            let line_end = buf[line_start..]
-                .find('\n')
-                .map(|i| line_start + i)
-                .unwrap_or(buf.len());
-            if line_end >= buf.len() {
-                state.cursor = buf.len();
-                return;
-            }
-            let next_start = line_end + 1;
-            let next_end = buf[next_start..]
-                .find('\n')
-                .map(|i| next_start + i)
-                .unwrap_or(buf.len());
-            let next_line_len = next_end - next_start;
-            state.cursor = next_start + col.min(next_line_len);
-        }
-        _ => {}
-    }
+    let delta = match key {
+        KeyCode::Up => -1,
+        KeyCode::Down => 1,
+        _ => return,
+    };
+    state.cursor = editor_wrap::move_vertical(&state.body, state.cursor, width, delta);
 }
 
 /// Re-anchor the picker's scroll so its currently-hovered row sits

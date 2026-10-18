@@ -8,6 +8,7 @@ pub mod conflict;
 mod detail;
 pub mod dialog;
 mod diff;
+mod editor_wrap;
 pub mod file_history;
 mod graph_preview;
 mod help;
