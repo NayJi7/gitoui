@@ -1,7 +1,26 @@
 ---
 title: gitoui
-description: Say oui to the smoothest git terminal youser experience.
+description: gitoui is a fast terminal UI (TUI) for git, written in Rust. Rich commit graph, diff and blame, staging, interactive rebase, conflict editor, GitHub pull requests and issues, all in your terminal.
 template: splash
+head:
+  # Override Starlight's default "gitoui | gitoui" so the search result
+  # title says what the project is.
+  - tag: title
+    content: gitoui - a terminal UI for git with a rich commit graph
+  # Structured data so search engines know this is a piece of software.
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: >-
+      {"@context":"https://schema.org","@type":"SoftwareApplication",
+      "name":"gitoui","applicationCategory":"DeveloperApplication",
+      "operatingSystem":"Linux, macOS",
+      "description":"A terminal UI for git with a rich commit graph, diff, blame, staging, interactive rebase, conflict editor and GitHub PRs and issues.",
+      "url":"https://nayji7.github.io/gitoui/",
+      "downloadUrl":"https://nayji7.github.io/gitoui/getting-started/installation/",
+      "codeRepository":"https://github.com/NayJi7/gitoui",
+      "license":"https://opensource.org/licenses/MIT",
+      "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
 hero:
   title: '<span class="git-part">git</span><span class="oui-part">oui</span>'
   tagline: 'Say <em>oui</em> to the smoothest git terminal <em>you</em>ser experience.'

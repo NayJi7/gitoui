@@ -10,10 +10,15 @@ import starlight from "@astrojs/starlight";
 // when set explicitly (CI builds set it to "/gitoui").
 const isDev = process.argv.includes("dev");
 const base = process.env.GITOUI_DOCS_BASE ?? (isDev ? "" : "/gitoui");
+const site = "https://nayji7.github.io";
+
+// Social preview card (1200x630) shown by Google, GitHub, Slack,
+// X, etc. Crawlers need an absolute URL, so it's built from site+base.
+const ogImage = new URL(`${base}/og.png`, site).href;
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://nayji7.github.io",
+  site,
   base,
   trailingSlash: "ignore",
   integrations: [
@@ -31,6 +36,13 @@ export default defineConfig({
         replacesTitle: false,
       },
       favicon: "/favicon.svg",
+      head: [
+        { tag: "meta", attrs: { property: "og:image", content: ogImage } },
+        { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+        { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+        { tag: "meta", attrs: { property: "og:image:alt", content: "gitoui, a terminal UI for git" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: ogImage } },
+      ],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/NayJi7/gitoui" },
       ],
