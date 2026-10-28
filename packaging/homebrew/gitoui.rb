@@ -7,7 +7,7 @@
 # values from the release's checksum.txt.
 class Gitoui < Formula
   desc "Terminal Git client with an image-rendered commit graph and GitHub PRs"
-  homepage "https://nayji7.github.io/gitoui/"
+  homepage "https://gitoui.nayji7.dev/"
   license "MIT"
 
   on_macos do

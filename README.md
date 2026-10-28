@@ -25,7 +25,7 @@
   <img src="https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/demo.gif" alt="gitoui demo" width="900">
 </p>
 
-**gitoui** ([`/ʒi.tu.i/`](https://nayji7.github.io/gitoui/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie), a beautifully-rendered `git log --graph` viewer, and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.
+**gitoui** ([`/ʒi.tu.i/`](https://gitoui.nayji7.dev/faq/#how-do-i-pronounce-gitoui)) is a terminal git client. It started as a fork of [serie](https://github.com/lusingander/serie), a beautifully-rendered `git log --graph` viewer, and grew into a daily-driver TUI that covers diffs, staging, blame, history, interactive rebase, conflict resolution, and GitHub Pull Requests / Issues.
 
 [gitoui_film](https://github.com/user-attachments/assets/2c8f6e42-e478-4212-b3d5-7d674e455b8e)
 
@@ -43,14 +43,14 @@ The commit graph stays serie's: pre-rendered images sent inline through your ter
 - Two-layer keybinds: global `[keybind]` UserEvents plus per-view `[keybind.scope.<path>]` overrides.
 - Ten built-in themes (Tokyo Night, Dracula, Catppuccin, Gruvbox, Nord, Solarized, One Dark, Monokai Pro), and a `.toml` in `~/.config/gitoui/themes/` for your own.
 
-Full feature tour at [nayji7.github.io/gitoui/introduction/](https://nayji7.github.io/gitoui/introduction/).
+Full feature tour at [gitoui.nayji7.dev/introduction/](https://gitoui.nayji7.dev/introduction/).
 
 ## Install
 
 One-liner for Linux + macOS (auto-detects OS/arch, drops `gitoui` into `~/.local/bin`):
 
 ```sh
-curl -fsSL https://nayji7.github.io/gitoui/install.sh | sh
+curl -fsSL https://gitoui.nayji7.dev/install.sh | sh
 ```
 
 Or with Homebrew on macOS and Linux:
@@ -65,11 +65,11 @@ Or via Cargo from crates.io:
 cargo install gitoui
 ```
 
-For pinned versions, manual downloads, or building from source, see the [installation guide](https://nayji7.github.io/gitoui/getting-started/installation/).
+For pinned versions, manual downloads, or building from source, see the [installation guide](https://gitoui.nayji7.dev/getting-started/installation/).
 
 ### Terminals
 
-Linux and macOS. The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel). Anywhere else (Alacritty, Terminal.app, Windows Terminal, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`. Windows is not officially supported. Full matrix in [terminal compatibility](https://nayji7.github.io/gitoui/getting-started/compatibility/).
+Linux and macOS. The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel). Anywhere else (Alacritty, Terminal.app, Windows Terminal, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`. Windows is not officially supported. Full matrix in [terminal compatibility](https://gitoui.nayji7.dev/getting-started/compatibility/).
 
 ## Quick start
 
@@ -78,7 +78,7 @@ cd <your git repo>
 gitoui
 ```
 
-Press `?` for the keymap, `q` to quit. Full docs at [nayji7.github.io/gitoui](https://nayji7.github.io/gitoui/).
+Press `?` for the keymap, `q` to quit. Full docs at [gitoui.nayji7.dev](https://gitoui.nayji7.dev/).
 
 ## Contributing
 

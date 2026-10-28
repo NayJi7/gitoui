@@ -16,11 +16,18 @@ head:
       "name":"gitoui","applicationCategory":"DeveloperApplication",
       "operatingSystem":"Linux, macOS",
       "description":"A terminal UI for git with a rich commit graph, diff, blame, staging, interactive rebase, conflict editor and GitHub PRs and issues.",
-      "url":"https://nayji7.github.io/gitoui/",
-      "downloadUrl":"https://nayji7.github.io/gitoui/getting-started/installation/",
+      "url":"https://gitoui.nayji7.dev/",
+      "downloadUrl":"https://gitoui.nayji7.dev/getting-started/installation/",
       "codeRepository":"https://github.com/NayJi7/gitoui",
       "license":"https://opensource.org/licenses/MIT",
       "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
+  # Site name shown above the result in Google instead of the domain.
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: >-
+      {"@context":"https://schema.org","@type":"WebSite",
+      "name":"gitoui","url":"https://gitoui.nayji7.dev/"}
 hero:
   title: '<span class="git-part">git</span><span class="oui-part">oui</span>'
   tagline: 'Say <em>oui</em> to the smoothest git terminal <em>you</em>ser experience.'

@@ -35,8 +35,8 @@ const TYPED_SPEED_MS = 110;
 const TYPED_START_MS = 900;
 const titleDoneMs = TYPED_START_MS + titleCharCount * TYPED_SPEED_MS + 200;
 
-// Astro injects BASE_URL with a trailing slash (`/gitoui/` in prod,
-// `/` in dev). Trim it so we can safely concatenate path fragments
+// Astro injects BASE_URL with a trailing slash (`/` by default,
+// `/<sub-path>/` when GITOUI_DOCS_BASE is set). Trim it so we can safely concatenate path fragments
 // without producing `//`.
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---

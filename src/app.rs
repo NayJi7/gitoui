@@ -5615,7 +5615,7 @@ impl<'a> App<'a> {
         if !path.exists() {
             // Seed with a header so the editor opens on something
             // meaningful instead of a blank file.
-            let seed = "# gitoui config, see https://nayji7.github.io/gitoui/configurations/\n";
+            let seed = "# gitoui config, see https://gitoui.nayji7.dev/configurations/\n";
             if let Err(e) = std::fs::write(&path, seed) {
                 self.ec
                     .send(AppEvent::NotifyError(format!("create config file: {e}")));

@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 const CRATES_URL: &str = "https://crates.io/api/v1/crates/gitoui";
-const INSTALL_SH_URL: &str = "https://nayji7.github.io/gitoui/install.sh";
+const INSTALL_SH_URL: &str = "https://gitoui.nayji7.dev/install.sh";
 const GH_RELEASES_BASE: &str = "https://github.com/NayJi7/gitoui/releases/download";
 const CACHE_DIRNAME: &str = "gitoui";
 const CACHE_FILENAME: &str = "update.toml";

@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/NayJi7/gitoui/discussions/categories/q-a
     about: Ask in Discussions, it helps the next person with the same question.
   - name: Documentation
-    url: https://nayji7.github.io/gitoui/
+    url: https://gitoui.nayji7.dev/
     about: Installation, terminal compatibility, configuration, keybindings and FAQ.

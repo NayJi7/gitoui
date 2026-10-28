@@ -2,15 +2,13 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
-// Site URL = the GitHub Pages URL the workflow deploys to. `base`
-// matches the repo name so all absolute paths in the built HTML
-// resolve under /gitoui/. In `astro dev` we default the base to "" so
-// hero/sidebar links written as `/getting-started/...` resolve
-// without the prefix the deploy adds. `GITOUI_DOCS_BASE` always wins
-// when set explicitly (CI builds set it to "/gitoui").
-const isDev = process.argv.includes("dev");
-const base = process.env.GITOUI_DOCS_BASE ?? (isDev ? "" : "/gitoui");
-const site = "https://nayji7.github.io";
+// Site URL = the custom domain set in the repo's GitHub Pages
+// settings. The site is served from the domain root, so `base` is ""
+// (the old https://nayji7.github.io/gitoui/* URLs are redirected here
+// by GitHub). `GITOUI_DOCS_BASE` still wins when set explicitly, e.g.
+// to preview a build under a sub-path.
+const base = process.env.GITOUI_DOCS_BASE ?? "";
+const site = "https://gitoui.nayji7.dev";
 
 // Social preview card (1200x630) shown by Google, GitHub, Slack,
 // X, etc. Crawlers need an absolute URL, so it's built from site+base.
@@ -42,6 +40,16 @@ export default defineConfig({
         { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
         { tag: "meta", attrs: { property: "og:image:alt", content: "gitoui, a terminal UI for git" } },
         { tag: "meta", attrs: { name: "twitter:image", content: ogImage } },
+        // Raster fallback next to favicon.svg: Google Search shows the
+        // site icon from the home page and prefers a 48px-multiple PNG.
+        {
+          tag: "link",
+          attrs: { rel: "icon", type: "image/png", sizes: "96x96", href: `${base}/favicon-96.png` },
+        },
+        {
+          tag: "link",
+          attrs: { rel: "apple-touch-icon", sizes: "180x180", href: `${base}/apple-touch-icon.png` },
+        },
       ],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/NayJi7/gitoui" },

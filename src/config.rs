@@ -1136,7 +1136,7 @@ impl ConfigDiagnostic {
             details: err.to_string().lines().map(str::to_string).collect(),
             path: Some(path),
             hint: Some(
-                "Docs: https://nayji7.github.io/gitoui/configurations/config-file-format.html"
+                "Docs: https://gitoui.nayji7.dev/configurations/config-file-format.html"
                     .to_string(),
             ),
         }
@@ -1156,7 +1156,7 @@ impl ConfigDiagnostic {
             details,
             path,
             hint: Some(
-                "Docs: https://nayji7.github.io/gitoui/configurations/config-file-format.html"
+                "Docs: https://gitoui.nayji7.dev/configurations/config-file-format.html"
                     .to_string(),
             ),
         }
@@ -1185,7 +1185,7 @@ impl ConfigDiagnostic {
                 },
                 path: None,
                 hint: Some(
-                    "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+                    "Docs: https://gitoui.nayji7.dev/configurations/themes.html".to_string(),
                 ),
             },
             ThemeLoadError::BadFile { path, source } => Self {
@@ -1194,7 +1194,7 @@ impl ConfigDiagnostic {
                 details: source.to_string().lines().map(str::to_string).collect(),
                 path: Some(path),
                 hint: Some(
-                    "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+                    "Docs: https://gitoui.nayji7.dev/configurations/themes.html".to_string(),
                 ),
             },
             ThemeLoadError::UnknownBase { path, name, base } => Self {
@@ -1209,7 +1209,7 @@ impl ConfigDiagnostic {
                 },
                 path: Some(path),
                 hint: Some(
-                    "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
+                    "Docs: https://gitoui.nayji7.dev/configurations/themes.html".to_string(),
                 ),
             },
             ThemeLoadError::Io { path, source } => Self {
@@ -1238,9 +1238,7 @@ impl ConfigDiagnostic {
             summary: format!("Unknown theme: {name:?}"),
             details,
             path: None,
-            hint: Some(
-                "Docs: https://nayji7.github.io/gitoui/configurations/themes.html".to_string(),
-            ),
+            hint: Some("Docs: https://gitoui.nayji7.dev/configurations/themes.html".to_string()),
         }
     }
 
@@ -1253,7 +1251,7 @@ impl ConfigDiagnostic {
             details: Vec::new(),
             path,
             hint: Some(
-                "Docs: https://nayji7.github.io/gitoui/configurations/config-file-format.html"
+                "Docs: https://gitoui.nayji7.dev/configurations/config-file-format.html"
                     .to_string(),
             ),
         }
