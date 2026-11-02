@@ -3060,9 +3060,9 @@ impl<'a> PullRequestsView<'a> {
             "https://github.com/{}/{}/pull/{}",
             self.coords.owner, self.coords.repo, number
         );
-        // Best-effort: spawn xdg-open / open / start in a detached
-        // process. Surface the URL in a toast either way so the user
-        // can copy it manually if the launcher isn't installed.
+        // Best-effort: spawn the platform launcher (`open` on macOS,
+        // `xdg-open` elsewhere). Surface the URL in a toast either way
+        // so the user can copy it manually if the launcher is missing.
         match crate::external::open_url(&url) {
             Ok(()) => self
                 .tx

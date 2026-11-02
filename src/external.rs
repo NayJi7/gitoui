@@ -1,4 +1,7 @@
-use std::{cell::RefCell, process::Command};
+use std::{
+    cell::RefCell,
+    process::{Command, Stdio},
+};
 
 use arboard::Clipboard;
 
@@ -26,17 +29,37 @@ pub fn copy_to_clipboard(value: String, config: &ClipboardConfig) -> Result<(), 
     }
 }
 
+/// Open `url` in the browser with the platform launcher. Its output is
+/// discarded so a launcher warning can't draw over the TUI.
 pub fn open_url(url: &str) -> Result<(), String> {
-    Command::new("xdg-open")
-        .arg(url)
+    url_opener_for(std::env::consts::OS, url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to open {url}: {e}"))?;
     Ok(())
 }
 
+/// The command that opens `url` on `os` (a `std::env::consts::OS` value):
+/// `open` on macOS, the URL handler on Windows (`start` would go through
+/// cmd.exe, which misreads `&` in a URL), `xdg-open` everywhere else.
+fn url_opener_for(os: &str, url: &str) -> Command {
+    let mut command = match os {
+        "macos" => Command::new("open"),
+        "windows" => {
+            let mut c = Command::new("rundll32");
+            c.arg("url.dll,FileProtocolHandler");
+            c
+        }
+        _ => Command::new("xdg-open"),
+    };
+    command.arg(url);
+    command
+}
+
 fn copy_to_clipboard_custom(value: String, commands: &[String]) -> Result<(), String> {
     use std::io::Write;
-    use std::process::Stdio;
 
     if commands.is_empty() {
         return Err("No clipboard command specified".to_string());
@@ -172,4 +195,44 @@ fn replace_command_arg(s: &str, params: &ExternalCommandParameters) -> String {
         .replace(USER_COMMAND_TAGS_MARKER, tags)
         .replace(USER_COMMAND_AREA_WIDTH_MARKER, area_width)
         .replace(USER_COMMAND_AREA_HEIGHT_MARKER, area_height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn program_and_args(command: &Command) -> (String, Vec<String>) {
+        (
+            command.get_program().to_string_lossy().into_owned(),
+            command
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn url_opener_uses_the_launcher_of_each_platform() {
+        let url = "https://github.com/NayJi7/gitoui/pulls?q=is%3Aopen&page=2";
+        assert_eq!(
+            program_and_args(&url_opener_for("macos", url)),
+            ("open".to_string(), vec![url.to_string()])
+        );
+        assert_eq!(
+            program_and_args(&url_opener_for("windows", url)),
+            (
+                "rundll32".to_string(),
+                vec!["url.dll,FileProtocolHandler".to_string(), url.to_string()]
+            )
+        );
+        assert_eq!(
+            program_and_args(&url_opener_for("linux", url)),
+            ("xdg-open".to_string(), vec![url.to_string()])
+        );
+        // Other Unix systems (the BSDs) also use xdg-open.
+        assert_eq!(
+            program_and_args(&url_opener_for("freebsd", url)).0,
+            "xdg-open"
+        );
+    }
 }
