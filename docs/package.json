@@ -14,8 +14,8 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.5",
-    "astro": "^7.3.8",
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "^7.4.4",
     "astro-theme-toggle": "^0.8.2",
     "sharp": "^0.35.5",
     "typed.js": "^3.0.0"
