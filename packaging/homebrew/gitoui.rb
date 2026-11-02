@@ -12,23 +12,23 @@ class Gitoui < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.6/gitoui-0.3.6-aarch64-apple-darwin.tar.gz"
-      sha256 "cd56fb906c866ff50bfa7f3d504cf308a0f78740ab1db635720f1914130aab89"
+      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.7/gitoui-0.3.7-aarch64-apple-darwin.tar.gz"
+      sha256 "2a61de31d0e5f4afc8624752f547d9f609ea1c6b5828e18a8dca0c38a3c86638"
     end
     on_intel do
-      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.6/gitoui-0.3.6-x86_64-apple-darwin.tar.gz"
-      sha256 "1be43dfb882fd5436f3f3ef0368af9b272e28ec3c1f4592b4a14ba999bc6de68"
+      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.7/gitoui-0.3.7-x86_64-apple-darwin.tar.gz"
+      sha256 "123ba9c7ea36e349372f9fab66db1c8444f4db8d3b52561f7824bdbd674bfc3e"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.6/gitoui-0.3.6-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "9234d1daaeb2a70767a223adaf49ea9804b39c1f521f33fdbfcaba744fa5280d"
+      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.7/gitoui-0.3.7-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "4034b3190065e692cca6e0b10dca35da2865b7d70a3d007c339a0dcb70d2bdfc"
     end
     on_intel do
-      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.6/gitoui-0.3.6-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "b9fe6ab148ff09180245a5f8061887d6d2f13015e538c8ff80cde04912830a45"
+      url "https://github.com/NayJi7/gitoui/releases/download/v0.3.7/gitoui-0.3.7-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "a3c0cf1189d8a2650947d17803c08325e95bb4efc5e086951ff15eaec4a0ddcf"
     end
   end
 
