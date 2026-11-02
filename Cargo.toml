@@ -29,7 +29,7 @@ fuzzy-matcher = "0.3.7"
 garde = { version = "0.23.0", features = ["derive", "regex"] }
 icy_sixel = "0.5"
 image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
-resvg = { version = "0.47", default-features = false }
+resvg = { version = "0.49", default-features = false }
 laurier = "0.3.0"
 lru = "0.18"
 once_cell = "1.21.4"
@@ -44,7 +44,7 @@ smart-default = "0.7.1"
 toml = "1.1.2"
 tui-input = "0.15.3"
 tui-tree-widget = "0.24.0"
-umbra = "0.4.0"
+umbra = "0.6.0"
 two-face = { version = "0.5.1", default-features = false, features = ["syntect-fancy"] }
 notify-debouncer-mini = { version = "0.7.0", default-features = false }
 thiserror = "2"
