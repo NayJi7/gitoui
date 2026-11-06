@@ -122,7 +122,7 @@ impl<'a> View<'a> {
             View::UserCommand(view) => view.prepare_graph_uploads(),
             View::Refs(view) => view.prepare_graph_uploads(),
             View::Help(_) => {}
-            View::Config(_) => {}
+            View::Config(view) => view.prepare_graph_uploads(),
             View::Dialog(_) => {}
             View::BranchDetail(view) => view.prepare_graph_uploads(),
             View::TagDetail(view) => view.prepare_graph_uploads(),
