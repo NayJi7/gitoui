@@ -1483,15 +1483,12 @@ impl<'a> ConfigView<'a> {
         self.left_item_rows.get(row_idx).and_then(|idx| *idx)
     }
 
-    fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
+    fn ensure_graph_preview(&mut self) {
         let renderer = self.core_config.graph_renderer();
-        let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
-
         if renderer.is_ascii() {
-            self.render_ascii_graph_preview(f, right_area, style);
             return;
         }
-
+        let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
         let preview_protocol = renderer.to_image_protocol();
         let cell_width = match self.core_config.graph_width() {
             GraphWidthType::Double => crate::graph::CellWidthType::Double,
@@ -1530,6 +1527,18 @@ impl<'a> ConfigView<'a> {
                 .extend(preview.image_ids.iter().copied());
             self.graph_preview = Some(preview);
         }
+    }
+
+    fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
+        let renderer = self.core_config.graph_renderer();
+        let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
+
+        if renderer.is_ascii() {
+            self.render_ascii_graph_preview(f, right_area, style);
+            return;
+        }
+
+        self.ensure_graph_preview();
 
         let preview = match &self.graph_preview {
             Some(p) => p,
@@ -1772,6 +1781,12 @@ impl<'a> ConfigView<'a> {
                 buf_cell.set_style(bg_style);
                 buf_cell.set_skip(false);
             }
+        }
+    }
+
+    pub fn prepare_graph_uploads(&mut self) {
+        if matches!(self.selected, GRAPH_STYLE_INDEX | GRAPH_WIDTH_INDEX) {
+            self.ensure_graph_preview();
         }
     }
 
