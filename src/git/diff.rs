@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 #[derive(Debug, Clone)]
 pub struct DiffEntry {
@@ -68,16 +68,7 @@ impl DiffEntry {
         hash: &str,
         context_lines: u32,
     ) -> Result<Vec<Self>, String> {
-        let output = Command::new("git")
-            .args([
-                "diff",
-                &format!("--unified={}", context_lines),
-                &format!("{}^", hash),
-                hash,
-            ])
-            .current_dir(repo_path)
-            .output()
-            .map_err(|e| format!("Failed to run git diff: {}", e))?;
+        let output = diff_against_parent(repo_path, hash, context_lines, None)?;
 
         if !output.status.success() {
             return Err(format!(
@@ -132,18 +123,7 @@ impl DiffEntry {
         file_path: &str,
         context_lines: u32,
     ) -> Result<Self, String> {
-        let output = Command::new("git")
-            .args([
-                "diff",
-                &format!("--unified={}", context_lines),
-                &format!("{}^", hash),
-                hash,
-                "--",
-                file_path,
-            ])
-            .current_dir(repo_path)
-            .output()
-            .map_err(|e| format!("Failed to run git diff: {}", e))?;
+        let output = diff_against_parent(repo_path, hash, context_lines, Some(file_path))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries = parse_diff(&stdout)?;
@@ -335,6 +315,45 @@ impl DiffEntry {
             hunks: vec![hunk],
         })
     }
+}
+
+/// A root commit has no `<hash>^`, so it is diffed against the empty tree.
+fn diff_against_parent(
+    repo_path: &Path,
+    hash: &str,
+    context_lines: u32,
+    file_path: Option<&str>,
+) -> Result<Output, String> {
+    let diff_from = |base: &str| {
+        let mut cmd = Command::new("git");
+        cmd.args(["diff", &format!("--unified={}", context_lines), base, hash]);
+        if let Some(file_path) = file_path {
+            cmd.args(["--", file_path]);
+        }
+        cmd.current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("Failed to run git diff: {}", e))
+    };
+    let output = diff_from(&format!("{}^", hash))?;
+    if output.status.success() || !is_root_commit(repo_path, hash) {
+        return Ok(output);
+    }
+    diff_from(super::EMPTY_TREE_HASH)
+}
+
+fn is_root_commit(repo_path: &Path, hash: &str) -> bool {
+    // Prints the commit followed by its parents.
+    Command::new("git")
+        .args(["rev-list", "--parents", "-n", "1", hash])
+        .current_dir(repo_path)
+        .output()
+        .is_ok_and(|o| {
+            o.status.success()
+                && String::from_utf8_lossy(&o.stdout)
+                    .split_whitespace()
+                    .count()
+                    == 1
+        })
 }
 
 pub fn is_binary_extension(file_path: &str) -> bool {
