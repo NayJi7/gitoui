@@ -3279,6 +3279,16 @@ fn wrap_diff_line(
     lines
 }
 
+/// The change bar takes the gutter's trailing space, so a changed line's
+/// code stays in the same column as the context lines around it.
+fn gutter_text(gutter: &str, has_bar: bool) -> String {
+    if has_bar {
+        gutter.strip_suffix(' ').unwrap_or(gutter).to_string()
+    } else {
+        gutter.to_string()
+    }
+}
+
 fn wrap_diff_line_with_bar(
     content: &str,
     line_num_str: &str,
@@ -3291,12 +3301,12 @@ fn wrap_diff_line_with_bar(
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let line_num_width = 7; // "1234 │ " = 7 chars
-    let bar_width = if bar_span.is_some() { 1 } else { 0 };
-    let content_width = available_width.saturating_sub(line_num_width + bar_width) as usize;
+    let content_width = available_width.saturating_sub(line_num_width) as usize;
+    let has_bar = bar_span.is_some();
 
     if content_width == 0 {
         let mut spans = vec![Span::styled(
-            line_num_str.to_string(),
+            gutter_text(line_num_str, has_bar),
             Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
@@ -3319,7 +3329,7 @@ fn wrap_diff_line_with_bar(
 
     if remaining.is_empty() {
         let mut spans = vec![Span::styled(
-            line_num_str.to_string(),
+            gutter_text(line_num_str, has_bar),
             Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
@@ -3340,9 +3350,15 @@ fn wrap_diff_line_with_bar(
         let chunk_start = chunk.as_ptr() as usize - content.as_ptr() as usize;
 
         let num_span = if first {
-            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg))
+            Span::styled(
+                gutter_text(line_num_str, has_bar),
+                Style::default().fg(divider_fg),
+            )
         } else {
-            Span::styled("     │ ".to_string(), Style::default().fg(divider_fg))
+            Span::styled(
+                gutter_text("     │ ", has_bar),
+                Style::default().fg(divider_fg),
+            )
         };
 
         let mut spans = vec![num_span];
@@ -3546,13 +3562,13 @@ fn wrap_diff_line_with_syntax_and_bar(
     strong_bg: Color,
 ) -> Vec<Line<'static>> {
     let line_num_width = 7; // "1234 │ " = 7 chars
-    let bar_width = if bar_span.is_some() { 1 } else { 0 };
-    let content_width = available_width.saturating_sub(line_num_width + bar_width) as usize;
+    let content_width = available_width.saturating_sub(line_num_width) as usize;
+    let has_bar = bar_span.is_some();
 
     let mut lines = Vec::new();
     if content_width == 0 {
         let mut spans = vec![Span::styled(
-            line_num_str.to_string(),
+            gutter_text(line_num_str, has_bar),
             Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
@@ -3575,7 +3591,7 @@ fn wrap_diff_line_with_syntax_and_bar(
 
     if remaining.is_empty() {
         let mut spans = vec![Span::styled(
-            line_num_str.to_string(),
+            gutter_text(line_num_str, has_bar),
             Style::default().fg(divider_fg),
         )];
         if let Some(bar) = bar_span {
@@ -3596,9 +3612,15 @@ fn wrap_diff_line_with_syntax_and_bar(
         let chunk_start = chunk.as_ptr() as usize - content.as_ptr() as usize;
 
         let num_span = if first {
-            Span::styled(line_num_str.to_string(), Style::default().fg(divider_fg))
+            Span::styled(
+                gutter_text(line_num_str, has_bar),
+                Style::default().fg(divider_fg),
+            )
         } else {
-            Span::styled("     │ ".to_string(), Style::default().fg(divider_fg))
+            Span::styled(
+                gutter_text("     │ ", has_bar),
+                Style::default().fg(divider_fg),
+            )
         };
 
         let mut spans = vec![num_span];
