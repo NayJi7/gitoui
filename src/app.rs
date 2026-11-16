@@ -3455,8 +3455,6 @@ impl App<'_> {
                         let mut parts = vec![
                             g(UserEvent::Search, "search"),
                             g(UserEvent::RefList, "refs"),
-                            g(UserEvent::Push, "push"),
-                            g(UserEvent::Pull, "pull"),
                             g(UserEvent::Refresh, "fetch"),
                         ];
                         if self.github_features_available() {
@@ -3468,7 +3466,6 @@ impl App<'_> {
                         if !terminal_key.is_empty() {
                             parts.push(format!("{terminal_key}:term"));
                         }
-                        parts.push(g(UserEvent::Config, "config"));
                         parts.push(g(UserEvent::HelpToggle, "help"));
                         parts.push(g(UserEvent::Quit, "quit"));
                         format!("⌘ {}", parts.join("▕▏"))
