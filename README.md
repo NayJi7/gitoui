@@ -35,6 +35,7 @@ The commit graph stays serie's: pre-rendered images sent inline through your ter
 
 - Side-by-side or inline diffs with `git add -p`-style hunk staging baked into the Uncommitted view.
 - `b` to blame, `Shift+H` to follow file history across renames.
+- `t` opens a real terminal with your own shell in place of the graph; `Ctrl+Q` goes back, and a `cd` to another repo makes gitoui follow.
 - Mark two commits with `Space` for a cumulative diff between them.
 - Visual interactive rebase: grab + drop rows, reword in place, pause + resume modes.
 - 3-way conflict editor, pick OURS / THEIRS / BOTH per hunk, no need to drop to vimdiff.

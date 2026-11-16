@@ -48,8 +48,25 @@ jobs:
         run: cargo build --verbose
       - name: Lint
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Install shells for the terminal tests
+        run: sudo apt-get update && sudo apt-get install -y zsh fish
       - name: Run tests
         run: cargo test --verbose -- --test-threads=1
+
+  # The terminal drives real shells through a pseudo-terminal; macOS has its
+  # own zsh and bash 3.2, so the shell tests run there too.
+  terminal-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+      - name: Terminal tests
+        run: "cargo test --lib shell:: -- --test-threads=1"
 
   build:
     strategy:

@@ -283,9 +283,21 @@ Inherits from: `[keybind]` (global).
 | Action               | Default | What it does                                          |
 |----------------------|---------|-------------------------------------------------------|
 | `select_head_commit` | `h`     | Scroll to and center the HEAD commit in the viewport. |
+| `terminal`           | `t`     | Open the integrated terminal in place of the graph.    |
 
 `h` is `navigate_left` globally; in the list view it has no left/right
-semantics so the scope reuses it for "jump to HEAD".
+semantics so the scope reuses it for "jump to HEAD". `t` is `add_tag`
+globally and is only used for the terminal here.
+
+### `[keybind.scope.terminal]`, Integrated terminal
+
+Inherits from: `[keybind]` (global).
+
+| Action | Default  | What it does                                                         |
+|--------|----------|----------------------------------------------------------------------|
+| `back` | `ctrl-q` | Back to the graph. The shell keeps running until you type `exit`.   |
+
+Every other key goes to the shell, so only `back` can be rebound.
 
 ### `[keybind.scope.detail]`, Commit detail
 

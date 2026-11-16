@@ -572,10 +572,30 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                     "select_head_commit",
                     "Scroll to HEAD (centered)",
                 ),
+                ss(
+                    kb,
+                    &["list"],
+                    "terminal",
+                    "Run a shell command (command mode)",
+                ),
                 lit("", ""),
                 lit("Copy", ""),
                 sg(kb, UserEvent::FullCopy, "Copy commit message"),
                 sg(kb, UserEvent::ShortCopy, "Copy commit hash"),
+            ],
+        },
+        HelpSection {
+            title: "Terminal",
+            intro: Some(
+                "Your own shell, in place of the graph. Every key goes to it; the shell keeps running while the graph is shown.",
+            ),
+            shortcuts: vec![
+                ss(kb, &["list"], "terminal", "Open the terminal"),
+                ss(kb, &["terminal"], "back", "Back to the graph"),
+                lit("exit", "Close the shell and go back to the graph"),
+                lit("Shift+PgUp / PgDn", "Scroll the history"),
+                lit("", ""),
+                lit("A `cd` to another git repository switches gitoui to it when you go back.", ""),
             ],
         },
         HelpSection {

@@ -29,6 +29,12 @@ pub enum AppEvent {
     OpenRefs,
     CloseRefs,
     OpenHelp,
+    /// `t` on the commit list: show the integrated terminal.
+    OpenTerminal,
+    /// The shell session has new output or a new state.
+    ShellUpdated,
+    /// Leave the integrated terminal and return to the graph.
+    CloseTerminal,
     CloseHelp,
     OpenConfig,
     CloseConfig,

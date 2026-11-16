@@ -18,6 +18,7 @@ pub mod pr;
 pub mod rebase;
 mod refs;
 pub mod tag_detail;
+pub(crate) mod terminal;
 pub mod uncommitted;
 mod user_command;
 

@@ -6,12 +6,14 @@ use crate::{
     app::AppContext,
     event::{Sender, UserEventWithCount},
     git::{Commit, CommitHash, FileChange, Ref},
+    shell::session::SessionView,
     view::{
         blame::BlameView, branch_detail::BranchDetailView, compare::CompareView,
         config::ConfigView, conflict::ConflictView, detail::DetailView, dialog::DialogView,
         diff::DiffView, file_history::FileHistoryView, help::HelpView, issue::IssuesView,
         list::ListView, pr::PullRequestsView, rebase::InteractiveRebaseView, refs::RefsView,
-        tag_detail::TagDetailView, uncommitted::UncommittedView, user_command::UserCommandView,
+        tag_detail::TagDetailView, terminal::TerminalView, uncommitted::UncommittedView,
+        user_command::UserCommandView,
     },
     widget::commit_list::CommitListState,
 };
@@ -38,6 +40,7 @@ pub enum View<'a> {
     InteractiveRebase(Box<InteractiveRebaseView<'a>>),
     PullRequests(Box<PullRequestsView<'a>>),
     Issues(Box<IssuesView<'a>>),
+    Terminal(Box<TerminalView<'a>>),
 }
 
 impl<'a> View<'a> {
@@ -62,6 +65,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.handle_event(event_with_count, key_event),
             View::PullRequests(view) => view.handle_event(event_with_count, key_event),
             View::Issues(view) => view.handle_event(event_with_count, key_event),
+            View::Terminal(view) => view.handle_event(event_with_count, key_event),
         }
     }
 
@@ -86,6 +90,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.render(f, area),
             View::PullRequests(view) => view.render(f, area),
             View::Issues(view) => view.render(f, area),
+            View::Terminal(view) => view.render(f, area),
         }
     }
 
@@ -110,6 +115,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.update_layout(area),
             View::PullRequests(view) => view.update_layout(area),
             View::Issues(view) => view.update_layout(area),
+            View::Terminal(_) => {}
         }
     }
 
@@ -134,6 +140,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.prepare_graph_uploads(),
             View::PullRequests(view) => view.prepare_graph_uploads(),
             View::Issues(view) => view.prepare_graph_uploads(),
+            View::Terminal(_) => {}
         }
     }
 
@@ -154,6 +161,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.clear_graph_images(),
             View::PullRequests(view) => view.clear_graph_images(),
             View::Issues(view) => view.clear_graph_images(),
+            View::Terminal(view) => view.clear_graph_images(),
             _ => {}
         }
     }
@@ -195,6 +203,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.drain_pending_graph_uploads(),
             View::PullRequests(view) => view.drain_pending_graph_uploads(),
             View::Issues(view) => view.drain_pending_graph_uploads(),
+            View::Terminal(_) => Vec::new(),
         }
     }
 
@@ -219,6 +228,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.graph_image_ids_sorted(),
             View::PullRequests(view) => view.graph_image_ids_sorted(),
             View::Issues(view) => view.graph_image_ids_sorted(),
+            View::Terminal(view) => view.graph_image_ids_sorted(),
         }
     }
 
@@ -245,6 +255,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(_) => false,
             View::PullRequests(_) => false,
             View::Issues(_) => false,
+            View::Terminal(_) => false,
         }
     }
 
@@ -271,6 +282,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(_) => false,
             View::PullRequests(_) => false,
             View::Issues(_) => false,
+            View::Terminal(_) => false,
         }
     }
 
@@ -300,6 +312,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(_) => None,
             View::PullRequests(_) => None,
             View::Issues(_) => None,
+            View::Terminal(_) => None,
         }
     }
 
@@ -476,6 +489,17 @@ impl<'a> View<'a> {
         View::Help(Box::new(HelpView::new(before, ctx, tx)))
     }
 
+    /// The command output, shown in place of the commit list while a command
+    /// runs or has finished.
+    pub fn of_terminal(
+        before: View<'a>,
+        session: SessionView,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Terminal(Box::new(TerminalView::new(before, session, ctx, tx)))
+    }
+
     pub fn of_config(before: View<'a>, ctx: Rc<AppContext>, tx: Sender) -> Self {
         View::Config(Box::new(ConfigView::new(before, ctx, tx)))
     }
@@ -603,6 +627,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(view) => view.refresh(),
             View::PullRequests(view) => view.refresh(),
             View::Issues(view) => view.refresh(),
+            View::Terminal(_) => {}
         }
     }
 
@@ -642,6 +667,7 @@ impl<'a> View<'a> {
             View::InteractiveRebase(v) => v.update_color_theme(theme),
             View::PullRequests(v) => v.update_color_theme(theme),
             View::Issues(v) => v.update_color_theme(theme),
+            View::Terminal(v) => v.update_color_theme(theme),
         }
     }
 

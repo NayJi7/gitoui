@@ -57,9 +57,16 @@ impl<'a> ListView<'a> {
             // meaning. Currently `select_head_commit` (default `h`,
             // taking precedence over the global `navigate_left` which
             // is a no-op in this vertical list).
-            if let Some("select_head_commit") = self.ctx.keybind.resolve_scoped(&["list"], key) {
-                self.as_mut_list_state().select_head_commit();
-                return;
+            match self.ctx.keybind.resolve_scoped(&["list"], key) {
+                Some("select_head_commit") => {
+                    self.as_mut_list_state().select_head_commit();
+                    return;
+                }
+                Some("terminal") => {
+                    self.tx.send(AppEvent::OpenTerminal);
+                    return;
+                }
+                _ => {}
             }
             // Hard cap on the repeat count so an absurd numeric
             // prefix (the user typed `5000000000000` and pressed an

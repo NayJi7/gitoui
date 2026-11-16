@@ -1,0 +1,61 @@
+---
+title: Terminal
+description: Your own shell inside gitoui, in place of the commit graph.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Press `t` on the commit list and the graph is replaced by a real terminal
+running your own shell (bash, zsh or fish). Type in it, run as many commands
+as you like, and come back to the graph when you are done.
+
+## What you get
+
+- **Your shell, as it is.** Your prompt, aliases, plugins, `PATH` and history
+  all work. The shell starts in the repository root and its banner is shown,
+  like in any terminal.
+- **Everything works**: `sudo` passwords, `git add -p`, editors like `vim`,
+  pagers, colors, progress bars. The terminal follows your window size.
+- **History.** Scroll back with the mouse wheel or `Shift+PgUp` / `Shift+PgDn`;
+  typing brings you back to the live screen.
+
+## Leaving
+
+| Key / command | What it does                                                              |
+|---------------|---------------------------------------------------------------------------|
+| `Ctrl+Q`      | Back to the graph. The shell **keeps running**: `t` gives it back to you. |
+| `exit`        | Closes the shell and goes back to the graph. The next `t` starts a new one. |
+
+Every other key, including `Esc`, `q` and `Ctrl+C`, goes to the shell.
+
+Going back refreshes the graph, since your commands may have changed the
+repository.
+
+## `cd` follows you
+
+gitoui knows which directory your shell is in. When you leave the terminal
+after a `cd` into **another git repository**, gitoui switches to it, like the
+`d` shortcut does. If the directory is not a git repository, gitoui stays
+where it was and tells you.
+
+<Aside type="note" title="The other direction">
+When you quit gitoui, the terminal it was started from stays in its own
+directory: a program cannot change its parent's directory. That needs a small
+shell function and is not part of gitoui yet.
+</Aside>
+
+## Good to know
+
+- Shells other than bash, zsh and fish are started as they are: they work, but
+  gitoui cannot follow their `cd`.
+- If your `$SHELL` cannot be started, gitoui falls back to `/bin/sh`.
+- Windows is not supported yet.
+
+## Keys
+
+| Action     | Default  | Scope      |
+|------------|----------|------------|
+| `terminal` | `t`      | `list`     |
+| `back`     | `ctrl-q` | `terminal` |
+
+See [Custom keybindings](/keybindings/custom/) to change them.

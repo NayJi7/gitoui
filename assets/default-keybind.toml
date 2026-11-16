@@ -146,6 +146,12 @@ file_history = ["shift-h"]
 # the top of `git log --all` after scrolling far down history.
 [scope.list]
 select_head_commit = ["h"]
+terminal = ["t"]
+
+# Integrated terminal (`t` on the commit list). Every key goes to the shell,
+# except `back` which returns to the graph and leaves the shell running.
+[scope.terminal]
+back = ["ctrl-q"]
 
 # Commit detail view - `v` globally fires `clean_untracked` (uncommitted
 # view's "remove untracked files" dialog). In the detail view there's

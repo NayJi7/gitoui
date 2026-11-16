@@ -19,6 +19,7 @@ mod external;
 mod keybind;
 mod panic_guard;
 mod recents;
+mod shell;
 mod update;
 mod view;
 mod watcher;
@@ -374,6 +375,8 @@ pub fn run() -> Result<()> {
     // otherwise the old watcher keeps firing for the *previous* repo and
     // gitoui takes those phantom events as a reason to full-refresh.
     let mut _git_watcher: Option<_> = None;
+    // The command-mode shell session outlives every refresh of the app.
+    let mut shell_host = shell::host::ShellHost::new(ec.sender());
     let mut watched_git_dir: Option<std::path::PathBuf> = None;
     // Identity of the bg stream we last spawned. Compared against
     // the current iteration's identity, equal -> already streamed,
@@ -1734,6 +1737,7 @@ pub fn run() -> Result<()> {
             &ec,
             refresh_view_context,
             bg_generation,
+            &mut shell_host,
         );
 
         match app.run(terminal.as_mut().unwrap()) {

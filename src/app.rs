@@ -327,6 +327,9 @@ pub struct App<'a> {
     /// tries to commit a non-git target. Auto-clears once `Instant::elapsed`
     /// passes the 2 s threshold.
     dir_error_message: Option<(String, std::time::Instant)>,
+    /// Shell session of the integrated terminal (`t`), owned by `run()` so it
+    /// survives refreshes.
+    shell: &'a mut crate::shell::host::ShellHost,
     /// Navigation stack for PR-originated drilldowns. Each entry
     /// describes the view to rebuild when the current sub-page
     /// closes, so `Esc` walks back through the chain
@@ -403,6 +406,7 @@ impl<'a> App<'a> {
         ec: &'a EventController,
         refresh_view_context: Option<RefreshViewContext>,
         bg_generation: u64,
+        shell: &'a mut crate::shell::host::ShellHost,
     ) -> Self {
         // The manager owns the freshly-computed Graph; borrow it here
         // for the per-commit setup loops. `graph_image_manager` is
@@ -632,6 +636,7 @@ impl<'a> App<'a> {
             dir_input_cursor_anchor: None,
             pending_refresh: None,
             dir_error_message: None,
+            shell,
             pr_nav_stack: Vec::new(),
             dir_recents: {
                 // On startup: load the saved list and surface the current
@@ -712,7 +717,8 @@ impl App<'_> {
             if self.deferred_auto_refresh {
                 let is_dialog = matches!(self.view, View::Dialog(_));
                 let is_input = matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
-                let is_view_input = self.view.is_input_active();
+                let is_view_input =
+                    self.view.is_input_active() || matches!(self.view, View::Terminal(_));
                 let throttled = self
                     .app_status
                     .last_auto_refresh
@@ -927,6 +933,11 @@ impl App<'_> {
             'dispatch: loop {
                 match current_event {
                     AppEvent::Key(key) => {
+                        // In the integrated terminal every key belongs to the
+                        // shell, except the one that leaves it.
+                        if self.handle_terminal_key(key) {
+                            continue 'main_loop;
+                        }
                         // The change-directory overlay hijacks every key while
                         // open, typing extends the input, Esc cancels, Enter
                         // commits. Handled before the keybind dispatch so the
@@ -1318,6 +1329,23 @@ impl App<'_> {
                         self.clear_image(Some(terminal))?;
                         self.clear_terminal(terminal)?;
                     }
+                    AppEvent::OpenTerminal => {
+                        self.open_terminal(terminal)?;
+                    }
+                    AppEvent::ShellUpdated => {
+                        self.shell.acknowledge_wake();
+                        // The shell ended (`exit`): leave the terminal.
+                        if let View::Terminal(t) = &self.view {
+                            if t.session().status() != crate::shell::session::Status::Running {
+                                self.ec.send(AppEvent::CloseTerminal);
+                            }
+                        }
+                    }
+                    AppEvent::CloseTerminal => {
+                        if let Some(ret) = self.close_terminal(terminal)? {
+                            return Ok(ret);
+                        }
+                    }
                     AppEvent::OpenConfig => {
                         self.clear_image(Some(terminal))?;
                         self.open_config();
@@ -1411,7 +1439,8 @@ impl App<'_> {
                         let is_dialog = matches!(self.view, View::Dialog(_));
                         let is_input =
                             matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
-                        let is_view_input = self.view.is_input_active();
+                        let is_view_input =
+                            self.view.is_input_active() || matches!(self.view, View::Terminal(_));
                         let throttled = self
                             .app_status
                             .last_auto_refresh
@@ -2164,6 +2193,11 @@ impl App<'_> {
         let area: Rect = terminal.size()?.into();
         let [_, view_area, _, _] = split_app_areas_with_header(area);
         self.update_state(view_area);
+        if matches!(self.view, View::Terminal(_)) {
+            if let Some(session) = self.shell.session() {
+                session.resize(view_area.height, view_area.width);
+            }
+        }
         self.view.update_layout(view_area);
         // Skip graph image generation while the cd popup is open.
         // Kitty's persistent placements sit on top of buffer cells,
@@ -3205,13 +3239,36 @@ impl App<'_> {
         // keep it when the left side is empty (`StatusLine::None`),
         // otherwise a long notification ("Opened https://…") collides
         // with the bar and the user sees both layers mashed together.
+        // Integrated terminal: the footer reports the shell instead.
+        let terminal_footer = match &self.view {
+            View::Terminal(t) if !self.dir_input.active => {
+                let kb = &self.ctx.keybind;
+                Some(crate::view::terminal::terminal_footer(
+                    &t.session().status(),
+                    &crate::view::terminal::FooterKeys {
+                        back: kb.primary_scoped_key(&["terminal"], "back"),
+                    },
+                ))
+            }
+            _ => None,
+        };
         let show_enhanced = matches!(&self.app_status.status_line, StatusLine::None)
             && !is_search_active
             && !is_config_active
             && compare_pending.is_none()
-            && !self.dir_input.active;
+            && !self.dir_input.active
+            && terminal_footer.is_none();
 
-        let mut spans = if self.dir_input.active {
+        let mut spans = if let Some((left, tone, _)) = &terminal_footer {
+            let color = match tone {
+                crate::view::terminal::FooterTone::Info => self.ctx.color_theme.status_info_fg,
+                crate::view::terminal::FooterTone::Error => self.ctx.color_theme.status_error_fg,
+            };
+            vec![Span::styled(
+                left.clone(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )]
+        } else if self.dir_input.active {
             // Transient validation error (e.g. "not a git repository") wins
             // over the regular "Changing directory…" idle text for ~2 s.
             // After that we fall back to the spinner without closing the
@@ -3338,8 +3395,10 @@ impl App<'_> {
             || is_config_active;
         let _is_diff = matches!(&self.view, View::Diff(_));
 
-        let status_area = if show_shortcuts || self.dir_input.active {
-            let shortcut_text: String = if self.dir_input.active {
+        let status_area = if show_shortcuts || self.dir_input.active || terminal_footer.is_some() {
+            let shortcut_text: String = if let Some((_, _, right)) = &terminal_footer {
+                right.clone()
+            } else if self.dir_input.active {
                 // Dedicated cd-mode hints, only the keys that actually do
                 // something while the overlay is open. The animated label
                 // lives on the LEFT side (see the spans build above).
@@ -3405,6 +3464,10 @@ impl App<'_> {
                             parts.push(g(UserEvent::Issues, "Issues"));
                         }
                         parts.push(g(UserEvent::Drop, "cd"));
+                        let terminal_key = kb.primary_scoped_key(&["list"], "terminal");
+                        if !terminal_key.is_empty() {
+                            parts.push(format!("{terminal_key}:term"));
+                        }
                         parts.push(g(UserEvent::Config, "config"));
                         parts.push(g(UserEvent::HelpToggle, "help"));
                         parts.push(g(UserEvent::Quit, "quit"));
@@ -3693,6 +3756,186 @@ impl App<'_> {
                 }
             }
         }
+    }
+}
+
+impl<'a> App<'a> {
+    /// `t`: show the integrated terminal in place of the graph. The shell
+    /// starts the first time and keeps running when the terminal is hidden.
+    fn open_terminal(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
+        if matches!(self.view, View::Terminal(_)) {
+            return Ok(());
+        }
+        let area = self.app_status.view_area;
+        let (rows, cols) = (area.height.max(1), area.width.max(1));
+        let session_view = match self.shell.ensure_started(rows, cols) {
+            Ok(session) => {
+                session.resize(rows, cols);
+                session.view()
+            }
+            Err(e) => {
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "Could not start the shell: {e}"
+                )));
+                return Ok(());
+            }
+        };
+        self.clear_image(Some(terminal))?;
+        self.clear_terminal(terminal)?;
+        self.app_status.numeric_prefix.clear();
+        let before = std::mem::take(&mut self.view);
+        self.view = View::of_terminal(before, session_view, self.ctx.clone(), self.ec.sender());
+        Ok(())
+    }
+
+    /// Back to the graph. If the shell moved to another git repository,
+    /// gitoui follows it, like after a `d`.
+    fn close_terminal(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+    ) -> Result<Option<Ret>, std::io::Error> {
+        let View::Terminal(ref mut t) = self.view else {
+            return Ok(None);
+        };
+        let session = t.session().clone();
+        let before = t.take_before_view();
+        self.view = before;
+        self.view.clear_graph_images();
+        self.clear_terminal(terminal)?;
+
+        let ended = session.status() != crate::shell::session::Status::Running;
+        if ended
+            && session
+                .lived()
+                .is_some_and(|d| d < std::time::Duration::from_secs(2))
+        {
+            self.ec.send(AppEvent::NotifyWarn(
+                "The shell exited right away, check your $SHELL".into(),
+            ));
+        }
+
+        let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let here = std::env::current_dir().ok().map(|p| canonical(&p));
+        if let Some(target) = session.cwd().filter(|t| t.exists()) {
+            if here.as_deref() != Some(canonical(&target).as_path()) {
+                match crate::git::find_repo_root(&target) {
+                    Some(root) if here.as_deref() != Some(canonical(&root).as_path()) => {
+                        if let Err(e) = std::env::set_current_dir(&root) {
+                            self.ec
+                                .send(AppEvent::NotifyError(format!("cd failed: {e}")));
+                        } else {
+                            self.dir_recents = crate::recents::push(&root, &self.dir_recents);
+                            self.cleanup_graph_images()?;
+                            return Ok(Some(Ret::Refresh(RefreshRequest {
+                                context: crate::view::RefreshViewContext::List {
+                                    list_context: crate::view::ListRefreshViewContext {
+                                        commit_hash: String::new(),
+                                        selected: 0,
+                                        height: 20,
+                                        scroll_to_top: true,
+                                    },
+                                    pending_notification: Some(format!(
+                                        "Switched to {}",
+                                        root.display()
+                                    )),
+                                },
+                            })));
+                        }
+                    }
+                    Some(_) => {}
+                    None => self.ec.send(AppEvent::NotifyWarn(format!(
+                        "{} is not a git directory, staying in the current repository",
+                        target.display()
+                    ))),
+                }
+            }
+        }
+        // The shell may have changed the repository.
+        self.view.refresh();
+        Ok(None)
+    }
+
+    /// Every key goes to the shell, except the one bound to `back`.
+    fn handle_terminal_key(&mut self, key: KeyEvent) -> bool {
+        let View::Terminal(t) = &mut self.view else {
+            return false;
+        };
+        if self.ctx.keybind.resolve_scoped(&["terminal"], key) == Some("back") {
+            self.ec.send(AppEvent::CloseTerminal);
+            return true;
+        }
+        // Shift+PageUp / PageDown / Home / End browse the history, like in
+        // most terminal emulators.
+        if key
+            .modifiers
+            .contains(ratatui::crossterm::event::KeyModifiers::SHIFT)
+        {
+            use ratatui::crossterm::event::KeyCode;
+            let page = self.app_status.view_area.height.saturating_sub(1).max(1) as isize;
+            match key.code {
+                KeyCode::PageUp => {
+                    t.scroll_by(page);
+                    return true;
+                }
+                KeyCode::PageDown => {
+                    t.scroll_by(-page);
+                    return true;
+                }
+                KeyCode::Home => {
+                    t.scroll_to_top();
+                    return true;
+                }
+                KeyCode::End => {
+                    t.snap_to_bottom();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        t.snap_to_bottom();
+        if let Some(bytes) = crate::shell::keys::encode_key(key, t.session().application_cursor()) {
+            if let Some(session) = self.shell.session() {
+                session.send_input(&bytes);
+            }
+        }
+        true
+    }
+
+    /// Mouse over the terminal: forwarded to programs that asked for it,
+    /// otherwise the wheel scrolls the history.
+    fn handle_terminal_mouse(&mut self, mouse: ratatui::crossterm::event::MouseEvent) -> bool {
+        use ratatui::crossterm::event::MouseEventKind;
+        let View::Terminal(t) = &mut self.view else {
+            return false;
+        };
+        let zone = self.app_status.view_area;
+        let inside = mouse.column >= zone.x
+            && mouse.column < zone.x + zone.width
+            && mouse.row >= zone.y
+            && mouse.row < zone.y + zone.height;
+        if let Some((mode, encoding)) = t.session().mouse_protocol() {
+            if inside {
+                if let Some(bytes) = crate::shell::keys::encode_mouse(
+                    mouse.kind,
+                    mouse.modifiers,
+                    mouse.column - zone.x,
+                    mouse.row - zone.y,
+                    mode,
+                    encoding,
+                ) {
+                    if let Some(session) = self.shell.session() {
+                        session.send_input(&bytes);
+                    }
+                }
+            }
+            return true;
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollUp => t.scroll_by(3),
+            MouseEventKind::ScrollDown => t.scroll_by(-3),
+            _ => {}
+        }
+        true
     }
 }
 
@@ -6049,6 +6292,10 @@ impl<'a> App<'a> {
         terminal: &mut DefaultTerminal,
     ) -> Result<bool, std::io::Error> {
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+
+        if matches!(self.view, View::Terminal(_)) {
+            return Ok(self.handle_terminal_mouse(mouse));
+        }
 
         let needs_draw = match mouse.kind {
             MouseEventKind::ScrollUp => {
