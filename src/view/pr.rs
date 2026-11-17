@@ -4196,25 +4196,32 @@ impl<'a> PullRequestsView<'a> {
         let mut occluders: Vec<Rect> = Vec::new();
         if let Some(p) = self.mention_popup.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         if let Some(p) = self.reaction_picker.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         if let Some(p) = self.branch_picker.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         let pending: Vec<(PaintedAvatar, Color)> = pending
             .into_iter()
             .filter(|(pa, _)| {
-                !occluders
-                    .iter()
-                    .any(|r| rect_contains(Some(*r), pa.screen_x, pa.screen_y))
+                !occluders.iter().any(|r| {
+                    rect_contains(Some(*r), pa.screen_x, pa.screen_y)
+                        || rect_contains(Some(*r), pa.screen_x + 1, pa.screen_y)
+                })
             })
             .collect();
         self.prev_painted_avatars = paint_avatars_with_diff(f, &self.ctx, &prev, pending);
@@ -4880,10 +4887,10 @@ impl<'a> PullRequestsView<'a> {
         let y = area.y + (area.height.saturating_sub(height)) / 2;
         let rect = Rect::new(x, y, width, height);
         picker.overlay_rect = Some(rect);
-        f.render_widget(ratatui::widgets::Clear, rect);
+        crate::popup::clear_with_margin(f, rect, area, theme);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.list_head_fg))
+            .border_style(crate::popup::border_style(theme))
             .title(Line::from(Span::styled(
                 " React ".to_string(),
                 Style::default()
@@ -4959,8 +4966,9 @@ impl<'a> PullRequestsView<'a> {
         let rect = Rect::new(x, y, width, height);
         picker.overlay_rect = Some(rect);
 
-        // Wipe the area underneath so the form text doesn't bleed.
-        f.render_widget(ratatui::widgets::Clear, rect);
+        // Wipe the area underneath (and a margin around it) so the form text
+        // doesn't bleed.
+        crate::popup::clear_with_margin(f, rect, area, theme);
 
         let title_text = match picker.target_field {
             ComposeField::Head => " Choose head branch ",
@@ -4969,7 +4977,7 @@ impl<'a> PullRequestsView<'a> {
         };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.divider_fg))
+            .border_style(crate::popup::border_style(theme))
             .title(Line::from(Span::styled(
                 title_text.to_string(),
                 Style::default()

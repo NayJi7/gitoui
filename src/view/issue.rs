@@ -3547,20 +3547,25 @@ impl<'a> IssuesView<'a> {
         let mut occluders: Vec<Rect> = Vec::new();
         if let Some(p) = self.mention_popup.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         if let Some(p) = self.reaction_picker.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         let pending: Vec<(crate::view::pr::PaintedAvatar, Color)> = pending
             .into_iter()
             .filter(|(pa, _)| {
-                !occluders
-                    .iter()
-                    .any(|r| rect_contains(Some(*r), pa.screen_x, pa.screen_y))
+                !occluders.iter().any(|r| {
+                    rect_contains(Some(*r), pa.screen_x, pa.screen_y)
+                        || rect_contains(Some(*r), pa.screen_x + 1, pa.screen_y)
+                })
             })
             .collect();
         self.prev_painted_avatars =
@@ -4857,10 +4862,10 @@ impl<'a> IssuesView<'a> {
         let y = area.y + (area.height.saturating_sub(height)) / 2;
         let rect = Rect::new(x, y, width, height);
         picker.overlay_rect = Some(rect);
-        f.render_widget(ratatui::widgets::Clear, rect);
+        crate::popup::clear_with_margin(f, rect, area, theme);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.list_head_fg))
+            .border_style(crate::popup::border_style(theme))
             .title(Line::from(Span::styled(
                 " React ".to_string(),
                 Style::default()
@@ -5782,19 +5787,10 @@ pub(crate) fn paint_mention_popup(
         (editor_rect.y + editor_rect.height).min(area.y + area.height.saturating_sub(height))
     };
     let rect = Rect::new(x, y, width, height);
-    // Clear ONE extra column to the left of the popup before
-    // drawing it: wide emojis (👍 👎 😀 …) painted on the card
-    // underneath can have their anchor cell sitting at `x - 1`
-    // with their continuation cell at `x`. `Clear` on the popup's
-    // own rect wipes the continuation marker but leaves the
-    // anchor, so the terminal still draws 2 visual cells for the
-    // emoji, its 2nd cell bleeds into the popup's left border.
-    // Extending the clear by 1 col wipes the anchor too.
-    if x > 0 {
-        let pre_rect = Rect::new(x - 1, y, 1, height);
-        f.render_widget(ratatui::widgets::Clear, pre_rect);
-    }
-    f.render_widget(ratatui::widgets::Clear, rect);
+    // The empty margin also wipes the continuation cell and the anchor of a
+    // wide emoji (👍 👎 😀 …) painted on the card underneath, so none of it
+    // bleeds into the popup's border.
+    crate::popup::clear_with_margin(f, rect, area, theme);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.list_head_fg))

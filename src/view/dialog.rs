@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
 use std::rc::Rc;
@@ -782,11 +782,10 @@ impl<'a> DialogView<'a> {
         let dialog_area = centered_rect_exact(width, height, area);
         self.dialog_area = dialog_area;
 
-        f.render_widget(Clear, dialog_area);
-
         let theme = &self.ctx.color_theme;
-        let border_color = theme.divider_fg;
-        let title_color = theme.fg;
+        crate::popup::clear_with_margin(f, dialog_area, area, theme);
+        let border_color = crate::popup::accent(theme);
+        let title_color = crate::popup::accent(theme);
 
         let title = self.title();
         let block = Block::default()

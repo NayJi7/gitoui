@@ -18,6 +18,7 @@ mod event;
 mod external;
 mod keybind;
 mod panic_guard;
+mod popup;
 mod recents;
 mod shell;
 mod text_edit;

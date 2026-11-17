@@ -2857,8 +2857,13 @@ impl App<'_> {
         let max_height = ((crate::dir_input::MAX_VISIBLE + 2) as u16).min(view_area.height);
         let clear_height = max_height.max(area.height);
         let popup_bg = theme.bg;
-        for y in area.y..area.y + clear_height {
-            for x in area.x..area.x + width {
+        // One more column on the right and one more row below stay empty, like
+        // the margin of every popup (the top and left sides touch the edge of
+        // the view).
+        let clear_bottom = (area.y + clear_height + 1).min(view_area.y + view_area.height);
+        let clear_right = (area.x + width + 1).min(view_area.x + view_area.width);
+        for y in area.y..clear_bottom {
+            for x in area.x..clear_right {
                 let cell = &mut f.buffer_mut()[(x, y)];
                 cell.reset();
                 cell.set_style(Style::default().bg(popup_bg));
