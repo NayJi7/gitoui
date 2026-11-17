@@ -68,6 +68,13 @@ pub struct PullRequestsView<'a> {
     filter_tab_rects: Vec<(PrListFilter, Rect)>,
     /// Filter tab currently under the mouse (visual feedback only).
     hovered_filter: Option<PrListFilter>,
+    /// The list is being fetched: the page is already there and says so.
+    list_loading: bool,
+    /// Number of the request whose answer is waited for.
+    list_gen: u64,
+    /// The first answer arrived (a reload keeps the open PR, the first load
+    /// does not drop one that was asked for by number).
+    list_loaded_once: bool,
     /// Per-PR detail cache. First open of a PR spawns a background fetch;
     /// subsequent visits hit this cache and render instantly.
     detail_cache: FxHashMap<u64, PullRequestDetail>,
@@ -691,7 +698,6 @@ impl<'a> PullRequestsView<'a> {
         commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
         coords: RepoCoords,
         token: String,
-        items: Vec<PullRequest>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -700,15 +706,18 @@ impl<'a> PullRequestsView<'a> {
             .login
             .clone()
             .filter(|s| !s.is_empty());
-        let view = Self {
+        let mut view = Self {
             commit_list_state,
             coords,
             token,
             me_login,
-            items,
+            items: Vec::new(),
             list_filter: PrListFilter::Open,
             filter_tab_rects: Vec::new(),
             hovered_filter: None,
+            list_loading: false,
+            list_gen: 0,
+            list_loaded_once: false,
             detail_cache: FxHashMap::default(),
             loading_for: None,
             hovered: 0,
@@ -763,9 +772,75 @@ impl<'a> PullRequestsView<'a> {
             tx,
         };
         // Do NOT auto-fetch detail on open, the user has to click or
-        // press Enter on a row to load it. Keeps the initial open snappy
-        // and avoids burning a request the user doesn't want.
+        // press Enter on a row to load it. The list itself loads in the
+        // background: the page is on screen at once, with "Loading".
+        view.fetch_list();
         view
+    }
+
+    /// Loads the list of pull requests in a thread and answers with
+    /// `PullRequestsListFetched`.
+    fn fetch_list(&mut self) {
+        self.list_gen = crate::github::next_generation();
+        self.list_loading = true;
+        let generation = self.list_gen;
+        let (token, coords, tx) = (self.token.clone(), self.coords.clone(), self.tx.clone());
+        crate::panic_guard::spawn_protected("pr-list", move || {
+            let result = crate::github::pr::list_pull_requests(&token, &coords);
+            tx.send(AppEvent::PullRequestsListFetched { generation, result });
+        });
+    }
+
+    pub fn on_list_fetched(&mut self, generation: u64, result: Result<Vec<PullRequest>, String>) {
+        if generation != self.list_gen {
+            return;
+        }
+        self.list_loading = false;
+        let first = !self.list_loaded_once;
+        match result {
+            Ok(items) => {
+                self.list_loaded_once = true;
+                let prev_number = self.opened_pr_number;
+                self.items = items;
+                if first {
+                    // A PR asked for by number before the list came keeps
+                    // the cursor on its row.
+                    // `hovered` is a row of the FILTERED list, not of all items.
+                    if let Some(idx) = prev_number.and_then(|n| {
+                        self.filtered_indices()
+                            .iter()
+                            .position(|&i| self.items[i].number == n)
+                    }) {
+                        self.hovered = idx;
+                    }
+                    self.clamp_hovered();
+                    self.last_error = None;
+                    return;
+                }
+                // Keep the opened PR by NUMBER, survives filter changes
+                // and list re-orders. If the PR no longer exists, clear.
+                self.opened_pr_number =
+                    prev_number.filter(|n| self.items.iter().any(|p| p.number == *n));
+                self.clamp_hovered();
+                self.detail_cache.clear();
+                self.loading_for = None;
+                // Detail mode: re-fetch the opened PR's payload. If the
+                // PR no longer exists (merged / closed by someone else),
+                // bounce back to the list.
+                if matches!(self.mode, Mode::Detail) {
+                    if let Some(number) = self.opened_number() {
+                        self.spawn_detail_fetch(number);
+                    } else {
+                        self.mode = Mode::List;
+                    }
+                }
+                self.last_error = None;
+            }
+            Err(e) => {
+                let what = if first { "List PRs" } else { "Reload PRs" };
+                self.last_error = Some(format!("{what}: {e}"));
+            }
+        }
     }
 
     /// Receive a background fetch result and update the cache. The view's
@@ -808,7 +883,12 @@ impl<'a> PullRequestsView<'a> {
     /// Also re-anchors the list cursor so returning with Esc lands
     /// the user on the row they navigated through.
     pub fn open_by_number(&mut self, pr_number: u64) {
-        if let Some(idx) = self.items.iter().position(|p| p.number == pr_number) {
+        // `hovered` is a row of the FILTERED list, not of all items.
+        if let Some(idx) = self
+            .filtered_indices()
+            .iter()
+            .position(|&i| self.items[i].number == pr_number)
+        {
             self.hovered = idx;
         }
         self.opened_pr_number = Some(pr_number);
@@ -1397,33 +1477,7 @@ impl<'a> PullRequestsView<'a> {
     /// NUMBER (not by list index, which may have shifted) so the view
     /// stays anchored on the same PR after the list re-orders.
     fn reload(&mut self) {
-        let prev_number = self.opened_number();
-        match crate::github::pr::list_pull_requests(&self.token, &self.coords) {
-            Ok(items) => {
-                self.items = items;
-                // Keep the opened PR by NUMBER, survives filter changes
-                // and list re-orders. If the PR no longer exists, clear.
-                self.opened_pr_number =
-                    prev_number.filter(|n| self.items.iter().any(|p| p.number == *n));
-                self.clamp_hovered();
-                self.detail_cache.clear();
-                self.loading_for = None;
-                // Detail mode: re-fetch the opened PR's payload. If the
-                // PR no longer exists (merged / closed by someone else),
-                // bounce back to the list.
-                if matches!(self.mode, Mode::Detail) {
-                    if let Some(number) = self.opened_number() {
-                        self.spawn_detail_fetch(number);
-                    } else {
-                        self.mode = Mode::List;
-                    }
-                }
-                self.last_error = None;
-            }
-            Err(e) => {
-                self.last_error = Some(format!("Reload PRs: {}", e));
-            }
-        }
+        self.fetch_list();
     }
 
     // ---------- events ----------
@@ -4226,7 +4280,14 @@ impl<'a> PullRequestsView<'a> {
             ),
             Span::raw("  "),
             Span::styled(
-                format!("{} open", self.items.len()),
+                if self.list_loading && !self.list_loaded_once {
+                    "loading…".to_string()
+                } else if self.list_loading {
+                    // `r` pressed: the list stays, the page says it reloads.
+                    format!("{} open  loading…", self.items.len())
+                } else {
+                    format!("{} open", self.items.len())
+                },
                 Style::default().fg(theme.detail_label_fg),
             ),
         ];
@@ -4317,11 +4378,15 @@ impl<'a> PullRequestsView<'a> {
 
         if filtered.is_empty() {
             self.list_scroll_offset = 0;
-            let msg = match self.list_filter {
-                PrListFilter::Open => "No open pull requests.",
-                PrListFilter::Merged => "No merged pull requests.",
-                PrListFilter::Closed => "No closed pull requests.",
-                PrListFilter::All => "No pull requests in this repo.",
+            let msg = if self.list_loading && !self.list_loaded_once {
+                "Loading pull requests…"
+            } else {
+                match self.list_filter {
+                    PrListFilter::Open => "No open pull requests.",
+                    PrListFilter::Merged => "No merged pull requests.",
+                    PrListFilter::Closed => "No closed pull requests.",
+                    PrListFilter::All => "No pull requests in this repo.",
+                }
             };
             let empty = Paragraph::new(Span::styled(
                 msg,
@@ -4447,7 +4512,12 @@ impl<'a> PullRequestsView<'a> {
         for (i, filter) in PrListFilter::all().iter().enumerate() {
             let is_active = *filter == self.list_filter;
             let is_hovered = self.hovered_filter == Some(*filter) && !is_active;
-            let label = format!("{} {}", filter.label(), counts[i]);
+            // No count until the list has arrived: "0" would be a lie.
+            let label = if self.list_loading && !self.list_loaded_once {
+                filter.label().to_string()
+            } else {
+                format!("{} {}", filter.label(), counts[i])
+            };
             let fg = if is_active {
                 theme.list_head_fg
             } else if is_hovered {

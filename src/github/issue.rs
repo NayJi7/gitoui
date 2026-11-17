@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::pr::{ConversationEntry, ConversationKind, Label, ReactionCounts};
-use super::{http_client, RepoCoords};
+use super::{http_client, RepoCoords, SendRetrying};
 
 /// Compact issue summary, populates the list panel.
 #[derive(Debug, Clone)]
@@ -87,7 +87,7 @@ pub fn list_issues(token: &str, coords: &RepoCoords) -> Result<Vec<Issue>, Strin
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /issues: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -125,7 +125,7 @@ pub fn fetch_issue_detail(
         .get(&issue_url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /issues/{}: {}", number, e))?;
     if !issue_resp.status().is_success() {
         let status = issue_resp.status();
@@ -154,7 +154,7 @@ pub fn fetch_issue_detail(
         .get(&comments_url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("Issue comments: {}", e))?;
     let api_comments: Vec<ApiIssueComment> = if comments_resp.status().is_success() {
         let s = comments_resp
@@ -405,7 +405,7 @@ fn request_json<T: Serialize>(
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json")
         .body(payload)
-        .send()
+        .send_retrying()
         .map_err(|e| format!("{}: {}", label, e))
 }
 
@@ -463,7 +463,7 @@ pub fn delete_issue_comment(
         .delete(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("Delete comment: {}", e))?;
     expect_success(resp, "Delete comment")
 }
@@ -657,6 +657,9 @@ pub fn create_issue(
 /// List repo labels, drives the labels picker. Same response shape
 /// as the PR module's equivalent call but kept local so issue.rs can
 /// be lifted out independently.
+// The three `list_repo_*` below are called on the thread of the interface (the
+// compose form opens with them): no new attempts there, a lossy network would
+// freeze the screen for the whole of them. They keep a 15 s limit each.
 pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, String> {
     let client = http_client()?;
     let url = format!(
@@ -667,6 +670,7 @@ pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, 
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(15))
         .send()
         .map_err(|e| format!("List labels: {}", e))?;
     if !resp.status().is_success() {
@@ -689,6 +693,7 @@ pub fn list_repo_assignees(token: &str, coords: &RepoCoords) -> Result<Vec<Strin
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(15))
         .send()
         .map_err(|e| format!("List assignees: {}", e))?;
     if !resp.status().is_success() {
@@ -712,6 +717,7 @@ pub fn list_repo_milestones(token: &str, coords: &RepoCoords) -> Result<Vec<Mile
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(15))
         .send()
         .map_err(|e| format!("List milestones: {}", e))?;
     if !resp.status().is_success() {
@@ -750,7 +756,7 @@ pub fn list_issue_timeline(
         // Timeline preview was elevated to GA but the modern accept
         // still works (and unlocks all event kinds).
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("Timeline: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("Timeline HTTP {}", resp.status()));
@@ -776,7 +782,7 @@ pub fn list_linked_prs(
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
         .query(&[("q", q.as_str()), ("per_page", "50")])
-        .send()
+        .send_retrying()
         .map_err(|e| format!("Linked PRs: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("Linked PRs HTTP {}", resp.status()));

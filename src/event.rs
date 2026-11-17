@@ -344,6 +344,17 @@ pub enum AppEvent {
     /// Background fetch of a PR's full detail completed, pushed by the
     /// worker thread the PR view spawned. The view updates its cache and
     /// re-renders.
+    /// The list of pull requests, loaded in the background after the page
+    /// is already on screen.
+    PullRequestsListFetched {
+        generation: u64,
+        result: Result<Vec<crate::github::pr::PullRequest>, String>,
+    },
+    /// The list of issues, loaded in the background.
+    IssuesListFetched {
+        generation: u64,
+        result: Result<Vec<crate::github::issue::Issue>, String>,
+    },
     PullRequestDetailFetched {
         number: u64,
         result: Result<crate::github::pr::PullRequestDetail, String>,

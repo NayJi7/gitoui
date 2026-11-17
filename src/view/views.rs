@@ -760,7 +760,6 @@ impl<'a> View<'a> {
         commit_list_state: Option<CommitListState<'a>>,
         coords: crate::github::RepoCoords,
         token: String,
-        items: Vec<crate::github::pr::PullRequest>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -768,7 +767,6 @@ impl<'a> View<'a> {
             commit_list_state,
             coords,
             token,
-            items,
             ctx,
             tx,
         )))
@@ -785,7 +783,6 @@ impl<'a> View<'a> {
         commit_list_state: Option<CommitListState<'a>>,
         coords: crate::github::RepoCoords,
         token: String,
-        items: Vec<crate::github::issue::Issue>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -793,7 +790,6 @@ impl<'a> View<'a> {
             commit_list_state,
             coords,
             token,
-            items,
             ctx,
             tx,
         )))

@@ -2824,6 +2824,12 @@ impl<'a> DialogView<'a> {
         self.before.update_color_theme(theme);
     }
 
+    /// The view the dialog was opened over (it keeps receiving the answers of
+    /// what it asked for while the dialog is open).
+    pub fn before_mut(&mut self) -> &mut View<'a> {
+        &mut self.before
+    }
+
     pub fn take_before_view(&mut self) -> View<'a> {
         std::mem::take(&mut self.before)
     }

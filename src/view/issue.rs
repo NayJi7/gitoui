@@ -47,6 +47,12 @@ pub struct IssuesView<'a> {
     list_filter: IssueListFilter,
     filter_tab_rects: Vec<(IssueListFilter, Rect)>,
     hovered_filter: Option<IssueListFilter>,
+    /// The list is being fetched: the page is already there and says so.
+    list_loading: bool,
+    /// Number of the request whose answer is waited for.
+    list_gen: u64,
+    /// The first answer arrived.
+    list_loaded_once: bool,
     detail_cache: FxHashMap<u64, IssueDetail>,
     timeline_cache: FxHashMap<u64, Vec<TimelineEvent>>,
     linked_cache: FxHashMap<u64, Vec<LinkedPr>>,
@@ -400,7 +406,6 @@ impl<'a> IssuesView<'a> {
         commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
         coords: RepoCoords,
         token: String,
-        items: Vec<Issue>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -409,15 +414,18 @@ impl<'a> IssuesView<'a> {
             .login
             .clone()
             .filter(|s| !s.is_empty());
-        Self {
+        let mut view = Self {
             commit_list_state,
             coords,
             token,
             me_login,
-            items,
+            items: Vec::new(),
             list_filter: IssueListFilter::Open,
             filter_tab_rects: Vec::new(),
             hovered_filter: None,
+            list_loading: false,
+            list_gen: 0,
+            list_loaded_once: false,
             detail_cache: FxHashMap::default(),
             timeline_cache: FxHashMap::default(),
             linked_cache: FxHashMap::default(),
@@ -463,7 +471,11 @@ impl<'a> IssuesView<'a> {
             list_scroll_offset: 0,
             ctx,
             tx,
-        }
+        };
+        // The list loads in the background: the page is on screen at once,
+        // with "Loading".
+        view.fetch_list();
+        view
     }
 
     pub fn take_list_state(&mut self) -> Option<crate::widget::commit_list::CommitListState<'a>> {
@@ -540,12 +552,59 @@ impl<'a> IssuesView<'a> {
                     }
                 }
                 // Re-list so the list view reflects the new state.
-                if let Ok(v) = crate::github::issue::list_issues(&self.token, &self.coords) {
-                    self.items = v;
-                }
+                self.fetch_list();
             }
             Err(e) => {
                 self.last_error = Some(format!("{}: {}", action, e));
+            }
+        }
+    }
+
+    /// Loads the list of issues in a thread and answers with
+    /// `IssuesListFetched`.
+    fn fetch_list(&mut self) {
+        self.list_gen = crate::github::next_generation();
+        self.list_loading = true;
+        let generation = self.list_gen;
+        let (token, coords, tx) = (self.token.clone(), self.coords.clone(), self.tx.clone());
+        crate::panic_guard::spawn_protected("issues-list", move || {
+            let result = crate::github::issue::list_issues(&token, &coords);
+            tx.send(AppEvent::IssuesListFetched { generation, result });
+        });
+    }
+
+    pub fn on_list_fetched(&mut self, generation: u64, result: Result<Vec<Issue>, String>) {
+        if generation != self.list_gen {
+            return;
+        }
+        self.list_loading = false;
+        let first = !self.list_loaded_once;
+        match result {
+            Ok(items) => {
+                self.list_loaded_once = true;
+                self.items = items;
+                // An issue asked for by number before the list came keeps
+                // the cursor on its row.
+                if first {
+                    if let Some(idx) = self.opened_issue_number.and_then(|n| {
+                        self.filtered_indices()
+                            .iter()
+                            .position(|i| self.items[*i].number == n)
+                    }) {
+                        self.hovered = idx;
+                    }
+                }
+                let len = self.filtered_indices().len();
+                self.hovered = self.hovered.min(len.saturating_sub(1));
+                self.last_error = None;
+            }
+            Err(e) => {
+                let what = if first {
+                    "List issues"
+                } else {
+                    "Reload issues"
+                };
+                self.last_error = Some(format!("{what}: {e}"));
             }
         }
     }
@@ -562,9 +621,7 @@ impl<'a> IssuesView<'a> {
         self.conversation_selected = 0;
         self.timeline_scroll = 0;
         // Refresh the index and load the new issue's detail.
-        if let Ok(v) = crate::github::issue::list_issues(&self.token, &self.coords) {
-            self.items = v;
-        }
+        self.fetch_list();
         self.spawn_detail_fetch(number);
     }
 
@@ -655,15 +712,7 @@ impl<'a> IssuesView<'a> {
         Vec::new()
     }
     pub fn refresh(&mut self) {
-        match crate::github::issue::list_issues(&self.token, &self.coords) {
-            Ok(v) => {
-                self.items = v;
-                self.last_error = None;
-            }
-            Err(e) => {
-                self.last_error = Some(format!("List issues: {}", e));
-            }
-        }
+        self.fetch_list();
         if let Some(n) = self.opened_issue_number {
             self.detail_cache.remove(&n);
             self.spawn_detail_fetch(n);
@@ -3585,7 +3634,14 @@ impl<'a> IssuesView<'a> {
             ),
             Span::raw("  "),
             Span::styled(
-                format!("{} open", open_count),
+                if self.list_loading && !self.list_loaded_once {
+                    "loading…".to_string()
+                } else if self.list_loading {
+                    // `r` pressed: the list stays, the page says it reloads.
+                    format!("{} open  loading…", open_count)
+                } else {
+                    format!("{} open", open_count)
+                },
                 Style::default().fg(theme.detail_label_fg),
             ),
         ];
@@ -3660,7 +3716,12 @@ impl<'a> IssuesView<'a> {
         for (i, filter) in filters.iter().enumerate() {
             let is_active = *filter == self.list_filter;
             let is_hovered = self.hovered_filter == Some(*filter) && !is_active;
-            let label = format!("{} {}", filter.label(), counts[i]);
+            // No count until the list has arrived: "0" would be a lie.
+            let label = if self.list_loading && !self.list_loaded_once {
+                filter.label().to_string()
+            } else {
+                format!("{} {}", filter.label(), counts[i])
+            };
             let fg = if is_active {
                 theme.list_head_fg
             } else if is_hovered {
@@ -3715,10 +3776,14 @@ impl<'a> IssuesView<'a> {
 
         if filtered.is_empty() {
             self.list_scroll_offset = 0;
-            let msg = match self.list_filter {
-                IssueListFilter::Open => "No open issues.",
-                IssueListFilter::Closed => "No closed issues.",
-                IssueListFilter::All => "No issues in this repo.",
+            let msg = if self.list_loading && !self.list_loaded_once {
+                "Loading issues…"
+            } else {
+                match self.list_filter {
+                    IssueListFilter::Open => "No open issues.",
+                    IssueListFilter::Closed => "No closed issues.",
+                    IssueListFilter::All => "No issues in this repo.",
+                }
             };
             f.render_widget(
                 Paragraph::new(Span::styled(

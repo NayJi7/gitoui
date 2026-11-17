@@ -1776,6 +1776,16 @@ impl App<'_> {
                         self.clear_terminal(terminal)?;
                         self.close_issues();
                     }
+                    AppEvent::PullRequestsListFetched { generation, result } => {
+                        if let Some(view) = self.pull_requests_view() {
+                            view.on_list_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::IssuesListFetched { generation, result } => {
+                        if let Some(view) = self.issues_view() {
+                            view.on_list_fetched(generation, result);
+                        }
+                    }
                     AppEvent::IssueDetailFetched { number, result } => {
                         if let View::Issues(ref mut view) = self.view {
                             view.on_detail_fetched(number, result);
@@ -4716,13 +4726,10 @@ impl<'a> App<'a> {
                 let Some(coords) = coords else {
                     return false;
                 };
-                let items =
-                    crate::github::pr::list_pull_requests(&token, &coords).unwrap_or_default();
                 self.view = View::of_pull_requests(
                     commit_list_state,
                     coords,
                     token,
-                    items,
                     self.ctx.clone(),
                     self.ec.sender(),
                 );
@@ -5120,25 +5127,17 @@ impl<'a> App<'a> {
                 return;
             }
         };
-        let items = match crate::github::pr::list_pull_requests(&token, &coords) {
-            Ok(v) => v,
-            Err(e) => {
-                self.ec
-                    .send(AppEvent::NotifyError(format!("List PRs: {}", e)));
-                return;
-            }
-        };
         let commit_list_state = match self.view {
             View::List(ref mut view) => Some(view.take_list_state()),
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::Refs(ref mut view) => Some(view.take_list_state()),
             _ => None,
         };
+        // The page is on screen at once; its list loads in the background.
         self.view = View::of_pull_requests(
             commit_list_state,
             coords,
             token,
-            items,
             self.ctx.clone(),
             self.ec.sender(),
         );
@@ -5184,28 +5183,44 @@ impl<'a> App<'a> {
                 return;
             }
         };
-        let items = match crate::github::issue::list_issues(&token, &coords) {
-            Ok(v) => v,
-            Err(e) => {
-                self.ec
-                    .send(AppEvent::NotifyError(format!("List issues: {}", e)));
-                return;
-            }
-        };
         let commit_list_state = match self.view {
             View::List(ref mut view) => Some(view.take_list_state()),
             View::Detail(ref mut view) => Some(view.take_list_state()),
             View::Refs(ref mut view) => Some(view.take_list_state()),
             _ => None,
         };
+        // The page is on screen at once; its list loads in the background.
         self.view = View::of_issues(
             commit_list_state,
             coords,
             token,
-            items,
             self.ctx.clone(),
             self.ec.sender(),
         );
+    }
+
+    /// The pull requests page, also while a dialog is open over it.
+    fn pull_requests_view(&mut self) -> Option<&mut crate::view::pr::PullRequestsView<'a>> {
+        match &mut self.view {
+            View::PullRequests(view) => Some(view),
+            View::Dialog(dialog) => match dialog.before_mut() {
+                View::PullRequests(view) => Some(view),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The issues page, also while a dialog is open over it.
+    fn issues_view(&mut self) -> Option<&mut crate::view::issue::IssuesView<'a>> {
+        match &mut self.view {
+            View::Issues(view) => Some(view),
+            View::Dialog(dialog) => match dialog.before_mut() {
+                View::Issues(view) => Some(view),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     fn close_issues(&mut self) {
