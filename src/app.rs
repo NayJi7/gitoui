@@ -938,6 +938,17 @@ impl App<'_> {
                         if self.handle_terminal_key(key) {
                             continue 'main_loop;
                         }
+                        // Wherever there is typing the editing shortcuts are
+                        // the same (Ctrl+A/E, Alt+B/F, Ctrl+W…): map them to
+                        // the keys every text field already understands.
+                        let key = if self.dir_input.active
+                            || self.view.is_input_active()
+                            || matches!(self.app_status.status_line, StatusLine::Input(_, _, _))
+                        {
+                            crate::text_edit::normalize_edit_key(key)
+                        } else {
+                            key
+                        };
                         // The change-directory overlay hijacks every key while
                         // open, typing extends the input, Esc cancels, Enter
                         // commits. Handled before the keybind dispatch so the

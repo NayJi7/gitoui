@@ -472,6 +472,65 @@ impl<'a> DiffView<'a> {
                     self.update_search_status_bar();
                     return;
                 }
+                _ if crate::text_edit::is_delete_word_left(&key) => {
+                    self.search_cursor = crate::text_edit::delete_word_left(
+                        &mut self.search_query,
+                        self.search_cursor,
+                    );
+                    self.update_search_matches();
+                    if !self.search_matches.is_empty() {
+                        self.search_current = 0;
+                        self.scroll_to_match(self.search_current);
+                    }
+                    self.update_search_status_bar();
+                    return;
+                }
+                KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End => {
+                    let word = key.modifiers.contains(KeyModifiers::CONTROL);
+                    let q = &self.search_query;
+                    let at = self.search_cursor.min(q.len());
+                    self.search_cursor = match key.code {
+                        KeyCode::Home => 0,
+                        KeyCode::End => q.len(),
+                        KeyCode::Left if word => crate::text_edit::word_left(q, at),
+                        KeyCode::Right if word => crate::text_edit::word_right(q, at),
+                        KeyCode::Left => q[..at].char_indices().next_back().map_or(0, |(i, _)| i),
+                        _ => q[at..].chars().next().map_or(at, |c| at + c.len_utf8()),
+                    };
+                    return;
+                }
+                KeyCode::Delete if !crate::text_edit::is_delete_word_right(&key) => {
+                    if self.search_cursor < self.search_query.len() {
+                        self.search_query.remove(self.search_cursor);
+                        self.update_search_matches();
+                        if !self.search_matches.is_empty() {
+                            self.search_current = 0;
+                            self.scroll_to_match(self.search_current);
+                        }
+                    }
+                    self.update_search_status_bar();
+                    return;
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.search_query
+                        .drain(..self.search_cursor.min(self.search_query.len()));
+                    self.search_cursor = 0;
+                    self.update_search_matches();
+                    self.update_search_status_bar();
+                    return;
+                }
+                KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.search_query.truncate(self.search_cursor);
+                    self.update_search_matches();
+                    self.update_search_status_bar();
+                    return;
+                }
+                _ if crate::text_edit::is_delete_word_right(&key) => {
+                    crate::text_edit::delete_word_right(&mut self.search_query, self.search_cursor);
+                    self.update_search_matches();
+                    self.update_search_status_bar();
+                    return;
+                }
                 KeyCode::Backspace => {
                     if self.search_cursor > 0 {
                         let before = &self.search_query[..self.search_cursor];

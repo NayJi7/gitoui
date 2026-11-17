@@ -20,6 +20,7 @@ mod keybind;
 mod panic_guard;
 mod recents;
 mod shell;
+mod text_edit;
 mod update;
 mod view;
 mod watcher;

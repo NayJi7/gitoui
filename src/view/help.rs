@@ -1056,6 +1056,13 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("Esc", "Cancel edit"),
                 lit("Ctrl+Backspace", "Delete word to the left"),
                 lit("Backspace", "Delete char to the left"),
+                lit("", ""),
+                lit("Anywhere you type", "Same keys in every text field"),
+                lit("Home / End", "Start / end of the line (Ctrl+A / Ctrl+E)"),
+                lit("← / →", "One character (Ctrl+B / Ctrl+F)"),
+                lit("Ctrl+← / Ctrl+→", "One word (Alt+B / Alt+F, Alt+← / Alt+→)"),
+                lit("Ctrl+Backspace", "Delete the word on the left (Ctrl+W, Alt+Backspace)"),
+                lit("Ctrl+Delete", "Delete the word on the right (Alt+D)"),
             ],
         },
         HelpSection {
