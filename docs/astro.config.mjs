@@ -110,6 +110,7 @@ export default defineConfig({
             { label: "Conflict editor", link: "/features/conflict-editor/" },
             { label: "Pull requests", link: "/features/pull-requests/" },
             { label: "Issues", link: "/features/issues/" },
+            { label: "GitHub Actions", link: "/features/actions/" },
           ],
         },
         {

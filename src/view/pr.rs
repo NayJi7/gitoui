@@ -4301,20 +4301,25 @@ impl<'a> PullRequestsView<'a> {
         // Right-aligned ` GitHub` mark, only when the user has opted
         // in to Nerd Font glyphs (no reliable runtime detection exists,
         // so it's an explicit config flag).
-        if self.ctx.ui_config.common.nerd_font {
-            const GH_TAG: &str = "\u{f09b} GitHub";
+        {
+            // The glyph needs a Nerd Font; without it the word stands alone.
+            let gh_tag: &str = if self.ctx.ui_config.common.nerd_font {
+                "\u{f09b} GitHub"
+            } else {
+                "GitHub"
+            };
             const RIGHT_PAD: usize = 2;
             let left_w: usize = left
                 .iter()
                 .map(|s| console::measure_text_width(s.content.as_ref()))
                 .sum();
-            let tag_w = console::measure_text_width(GH_TAG);
+            let tag_w = console::measure_text_width(gh_tag);
             let total_w = area.width as usize;
             if total_w > left_w + tag_w + RIGHT_PAD {
                 let fill = total_w - left_w - tag_w - RIGHT_PAD;
                 left.push(Span::raw(" ".repeat(fill)));
                 left.push(Span::styled(
-                    GH_TAG.to_string(),
+                    gh_tag.to_string(),
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
                 ));
             }

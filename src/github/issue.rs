@@ -236,7 +236,7 @@ fn parse_state_reason(s: &str) -> Option<IssueStateReason> {
 
 /// Compact relative time formatter, reused from the PR view's
 /// `short_relative` so PR and Issue cards format the same.
-fn short_relative(iso: &str) -> String {
+pub(crate) fn short_relative(iso: &str) -> String {
     use chrono::DateTime;
     let Ok(dt) = DateTime::parse_from_rfc3339(iso) else {
         return iso.to_string();

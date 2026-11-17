@@ -66,6 +66,10 @@ impl<'a> ListView<'a> {
                     self.tx.send(AppEvent::OpenTerminal);
                     return;
                 }
+                Some("actions") => {
+                    self.tx.send(AppEvent::OpenActions { run: None });
+                    return;
+                }
                 _ => {}
             }
             // Hard cap on the repeat count so an absurd numeric
@@ -188,6 +192,8 @@ impl<'a> ListView<'a> {
                 }
                 UserEvent::Refresh => {
                     self.refresh();
+                    // `r` is also the way to ask "has CI started?".
+                    self.tx.send(AppEvent::CiPoke);
                 }
                 UserEvent::Push => {
                     self.tx.send(AppEvent::PushCurrentBranch);

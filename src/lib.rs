@@ -13,6 +13,7 @@ pub mod themes;
 mod app;
 mod brand;
 mod check;
+mod ci_monitor;
 mod dir_input;
 mod event;
 mod external;
@@ -377,8 +378,10 @@ pub fn run() -> Result<()> {
     // otherwise the old watcher keeps firing for the *previous* repo and
     // gitoui takes those phantom events as a reason to full-refresh.
     let mut _git_watcher: Option<_> = None;
-    // The command-mode shell session outlives every refresh of the app.
+    // The integrated terminal session outlives every refresh of the app.
     let mut shell_host = shell::host::ShellHost::new(ec.sender());
+    // Watches the CI of the current branch for the dot in the header.
+    let ci_monitor = ci_monitor::CiMonitor::new(ec.sender());
     let mut watched_git_dir: Option<std::path::PathBuf> = None;
     // Identity of the bg stream we last spawned. Compared against
     // the current iteration's identity, equal -> already streamed,
@@ -1740,6 +1743,7 @@ pub fn run() -> Result<()> {
             refresh_view_context,
             bg_generation,
             &mut shell_host,
+            &ci_monitor,
         );
 
         match app.run(terminal.as_mut().unwrap()) {

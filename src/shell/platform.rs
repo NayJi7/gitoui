@@ -1,4 +1,4 @@
-//! The only module with operating-system specific code for command mode.
+//! The only module with operating-system specific code for the integrated terminal.
 
 use std::io;
 use std::path::{Path, PathBuf};

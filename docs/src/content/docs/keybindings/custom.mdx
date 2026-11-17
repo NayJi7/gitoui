@@ -284,10 +284,31 @@ Inherits from: `[keybind]` (global).
 |----------------------|---------|-------------------------------------------------------|
 | `select_head_commit` | `h`     | Scroll to and center the HEAD commit in the viewport. |
 | `terminal`           | `t`     | Open the integrated terminal in place of the graph.    |
+| `actions`            | `A`     | Open the GitHub Actions page.                          |
 
 `h` is `navigate_left` globally; in the list view it has no left/right
 semantics so the scope reuses it for "jump to HEAD". `t` is `add_tag`
 globally and is only used for the terminal here.
+
+### `[keybind.scope.actions]`, GitHub Actions page
+
+Inherits from: `[keybind]` (global). The list of runs and the page of a run
+share one scope. The arrows and `Enter` are the generic navigation keys.
+
+| Action           | Default   | What it does                                          |
+|------------------|-----------|-------------------------------------------------------|
+| `reload`         | `r`       | Reload what is shown.                                 |
+| `open_web`       | `o`       | Open the selected run or job on GitHub.               |
+| `rerun`          | `shift-r` | Re-run all jobs (confirmation).                       |
+| `rerun_failed`   | `shift-f` | Re-run the failed jobs (confirmation).                |
+| `cancel`         | `x`       | Cancel a running run (confirmation).                  |
+| `current_branch` | `b`       | Only the runs of the current branch.                  |
+| `search`         | `f`       | Search the runs of the list.                          |
+| `switch`         | `tab`     | Workflow picker (list), jobs list (run page).         |
+| `timestamps`     | `t`       | Show or hide the log timestamps.                      |
+| `copy`           | `c`       | Copy the selected log line, step name or annotation.  |
+| `next_error`     | `n`       | Jump to the next error in the logs.                   |
+| `prev_error`     | `shift-n` | Jump to the previous error in the logs.               |
 
 ### `[keybind.scope.terminal]`, Integrated terminal
 

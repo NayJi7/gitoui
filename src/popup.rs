@@ -4,7 +4,7 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     widgets::{Block, Clear},
     Frame,
 };
@@ -50,6 +50,12 @@ pub fn accent(theme: &ColorTheme) -> Color {
 
 pub fn border_style(theme: &ColorTheme) -> Style {
     Style::default().fg(accent(theme))
+}
+
+pub fn title_style(theme: &ColorTheme) -> Style {
+    Style::default()
+        .fg(accent(theme))
+        .add_modifier(Modifier::BOLD)
 }
 
 #[cfg(test)]

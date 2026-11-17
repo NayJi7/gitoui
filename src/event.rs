@@ -29,6 +29,60 @@ pub enum AppEvent {
     OpenRefs,
     CloseRefs,
     OpenHelp,
+    /// `A` on the commit list (or a click on the CI dot): the Actions page,
+    /// straight on `run` when one is given.
+    OpenActions {
+        run: Option<crate::github::actions::Run>,
+    },
+    CloseActions,
+    ActionsRunsFetched {
+        generation: u64,
+        result: Result<Vec<crate::github::actions::Run>, String>,
+    },
+    /// A later page of the runs, asked for when the list scrolled to its end.
+    ActionsMoreRunsFetched {
+        generation: u64,
+        result: Result<Vec<crate::github::actions::Run>, String>,
+    },
+    ActionsWorkflowsFetched {
+        generation: u64,
+        result: Result<Vec<crate::github::actions::Workflow>, String>,
+    },
+    /// One run, to refresh the header of its page.
+    ActionsRunFetched {
+        generation: u64,
+        result: Result<crate::github::actions::Run, String>,
+    },
+    ActionsAnnotationsFetched {
+        generation: u64,
+        run_id: u64,
+        annotations: Vec<crate::github::actions::Annotation>,
+    },
+    ActionsJobsFetched {
+        generation: u64,
+        run_id: u64,
+        result: Result<Vec<crate::github::actions::Job>, String>,
+    },
+    ActionsLogsFetched {
+        generation: u64,
+        job_id: u64,
+        result: Result<crate::github::actions::JobLog, String>,
+    },
+    /// The user validated the confirmation of a re-run or a cancel.
+    ActionsRunConfirmed {
+        run_id: u64,
+        kind: ActionsRunKind,
+    },
+    /// A re-run / cancel request ended.
+    ActionsActionDone {
+        label: String,
+        run_id: u64,
+        result: Result<(), String>,
+    },
+    /// The CI monitor has a new state for the header dot.
+    CiStatusUpdated,
+    /// Something that starts CI runs just happened (a push): poll soon.
+    CiPoke,
     /// `t` on the commit list: show the integrated terminal.
     OpenTerminal,
     /// The shell session has new output or a new state.
@@ -707,6 +761,22 @@ pub enum DialogKind {
         name: String,
         url: String,
     },
+    /// Confirm a re-run or a cancel of a workflow run (Actions page).
+    ConfirmActionsRun {
+        run_id: u64,
+        workflow: String,
+        number: u64,
+        title: String,
+        kind: ActionsRunKind,
+    },
+}
+
+/// What a confirmation on the Actions page asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionsRunKind {
+    Rerun,
+    RerunFailed,
+    Cancel,
 }
 
 #[derive(Debug, Clone)]

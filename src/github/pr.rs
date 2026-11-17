@@ -2208,7 +2208,7 @@ pub fn remove_pull_request_reviewers(
 /// the actual validation reason. We pattern-match on the canonical
 /// strings documented in GitHub's REST API reference and fall back to
 /// status-code-specific phrasing when the message is unknown.
-fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
+pub(crate) fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
     let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
     let top_message = parsed
         .get("message")

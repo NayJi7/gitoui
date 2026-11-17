@@ -1,0 +1,104 @@
+---
+title: GitHub Actions
+description: Workflow runs, their jobs and their logs, inside gitoui.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Press `A` on the commit list to open the Actions page of the repository. It
+needs the same thing as the PR and Issues pages: you are connected to GitHub
+(config view, `p`) and the repo has a GitHub remote.
+
+The page follows github.com: a list of runs, then the page of one run.
+
+## The list of runs
+
+One line per run: status, title (the commit message or the PR title), then,
+as the terminal width allows, the workflow and its number, the branch and the
+date. The latest 50 runs are loaded. When you reach the last line, a `…` shows at the bottom and the next 50 load (nothing is loaded ahead in the background), until all are there; the header then reads `100+ runs`, `150+ runs`…
+
+- `←` / `→` change the status tab on the top border: **All**, **Running**,
+  **Failed**, **Succeeded**.
+- `Tab` opens the workflow picker (All, Build, CodeQL…). The list is filtered as
+  you move in the picker, no need to press `Enter`: `Enter` or `Tab` keep the
+  filter, `Esc` puts the previous one back.
+- `f` searches the loaded runs (title, workflow, branch, author, number). The
+  search is typed in the footer, like the search of the commit list: `Enter`
+  keeps the filter (the footer shows how many runs match), `Esc` clears it.
+- `b` limits the list to the current branch.
+- `Enter` opens the run.
+
+## The page of a run
+
+On the left, **Summary** and the jobs of the run. On the right, either:
+
+- **Summary**: what triggered the run, its branch, commit and workflow file,
+  its status and duration, and the **annotations** of all its jobs (notices,
+  warnings, errors), which fold with `Enter`.
+- **A job**: its steps. The steps are an accordion: `Enter` unfolds a step and
+  shows its log, numbered like on GitHub. A long line wraps to the width of the window: the number is only on its first row and the whole line is highlighted, so it reads as one line. The `##[group]` sections of a log
+  are folded inside it and unfold with `Enter` too. The failed and running
+  steps open by themselves.
+
+`↑` / `↓` choose Summary or a job on the left, `→` (or `Enter`) goes to the
+right panel, `←` or `Tab` comes back. On a narrow terminal (under 90 columns)
+the jobs become one line above the panel (`‹ cargo-deny  2/3 ›`) and `←` / `→`
+change job. `Esc` goes back to the list.
+
+## Keys
+
+| Key       | What it does                                                    |
+|-----------|-----------------------------------------------------------------|
+| `Enter`   | Open the run; fold or unfold a step, a group or the annotations |
+| `←` / `→` | Status tab (list); panes or jobs (run)                          |
+| `Tab`     | Workflow picker (list); jobs list (run)                         |
+| `f`       | Search the runs                                                 |
+| `b`       | Only the current branch                                         |
+| `R`       | Re-run all jobs (asks for confirmation)                         |
+| `F`       | Re-run only the failed jobs (asks for confirmation)             |
+| `x`       | Cancel a running run (asks for confirmation)                    |
+| `o`       | Open the run or the job on GitHub                               |
+| `r`       | Reload                                                          |
+| `c`       | Copy the selected log line (or step name, or annotation)        |
+| `n` / `N` | Next / previous error in the logs                               |
+| `t`       | Show or hide the log timestamps                                 |
+| `Esc`     | Back (run to list, list to commits)                             |
+
+Re-running is only possible on a finished run and cancelling on a running one;
+gitoui tells you otherwise without calling GitHub. `R`, `F` and `x` ask for a
+confirmation in the same dialog as the rest of the app (Validate / Cancel).
+Everything can be rebound, see [Custom keybindings](/keybindings/custom/).
+
+After a re-run the line turns to "queued" at once and gitoui looks at the run
+again a few times (after 1, 2, 3, 5, 8 and 12 seconds), until GitHub shows it.
+While a run is in progress the page refreshes every 10 seconds. A network hiccup
+never empties what is already shown.
+
+<Aside type="note" title="Logs of a running job">
+GitHub's API only gives the log of a job once it is finished (it answers 404
+before). A running job says so, and its log appears by itself the moment the job
+ends. To follow a job live, press `o` to open it in the browser.
+</Aside>
+
+## The CI dot
+
+While a workflow is running on your current branch, a small orange dot turns
+next to the repository path, in the header of every view, followed by the
+name of the workflow in a dark, discreet color. The Actions page shows running
+runs, jobs and steps with the same turning dot. When the run ends it becomes
+green (success) or red (failure) and stays 5 seconds, then disappears. **Click
+it** (or the name) to open the Actions page straight on that run (from the
+views where that loses nothing: not from an editor, a rebase or a dialog).
+
+gitoui checks every 15 seconds (every 8 seconds while something runs, and
+right after a push, after `r` on the commit list, and when you come back from
+the Actions page). The checks ask GitHub "has anything changed?": when nothing
+did, the answer is free and does not count against your API rate limit. It
+watches the branch you are on and nothing else. If the
+terminal is narrow, the path is shortened in the middle (`~/…/my-repo`) to
+keep the dot visible.
+
+<Aside type="note" title="Not in this version">
+Starting a workflow by hand (`workflow_dispatch`), downloading artifacts and
+managing secrets. 
+</Aside>

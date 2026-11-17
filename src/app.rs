@@ -330,6 +330,13 @@ pub struct App<'a> {
     /// Shell session of the integrated terminal (`t`), owned by `run()` so it
     /// survives refreshes.
     shell: &'a mut crate::shell::host::ShellHost,
+    /// CI watcher behind the dot in the header, owned by `run()`.
+    ci: &'a crate::ci_monitor::CiMonitor,
+    /// Where the CI dot was drawn last frame, and the run a click opens.
+    ci_dot_rect: Option<ratatui::layout::Rect>,
+    /// The mouse is over the CI dot and its name.
+    ci_dot_hovered: bool,
+    ci_dot_run: Option<crate::github::actions::Run>,
     /// Navigation stack for PR-originated drilldowns. Each entry
     /// describes the view to rebuild when the current sub-page
     /// closes, so `Esc` walks back through the chain
@@ -407,6 +414,7 @@ impl<'a> App<'a> {
         refresh_view_context: Option<RefreshViewContext>,
         bg_generation: u64,
         shell: &'a mut crate::shell::host::ShellHost,
+        ci: &'a crate::ci_monitor::CiMonitor,
     ) -> Self {
         // The manager owns the freshly-computed Graph; borrow it here
         // for the per-commit setup loops. `graph_image_manager` is
@@ -637,6 +645,10 @@ impl<'a> App<'a> {
             pending_refresh: None,
             dir_error_message: None,
             shell,
+            ci,
+            ci_dot_rect: None,
+            ci_dot_hovered: false,
+            ci_dot_run: None,
             pr_nav_stack: Vec::new(),
             dir_recents: {
                 // On startup: load the saved list and surface the current
@@ -675,6 +687,7 @@ impl<'a> App<'a> {
 
 impl App<'_> {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<Ret, std::io::Error> {
+        self.configure_ci();
         // No proactive `clear_image` / `clear_terminal` here. Those
         // emitted Kitty delete-all escapes and full-screen blanks
         // at EVERY entry into the App, including the silent swap
@@ -714,6 +727,9 @@ impl App<'_> {
             // FilesystemChanged that arrived inside the throttle
             // window / during a dialog / during text input. Once the
             // window expires and no input is blocking, fire it.
+            if let View::Actions(view) = &mut self.view {
+                view.tick(std::time::Instant::now());
+            }
             if self.deferred_auto_refresh {
                 let is_dialog = matches!(self.view, View::Dialog(_));
                 let is_input = matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
@@ -821,7 +837,7 @@ impl App<'_> {
             // Also tick spinner_frame while the cd popup is open so
             // the footer braille spinner animates (it reads the same
             // counter as the header G-logo animation).
-            if self.spinner_should_show() || self.dir_input.active {
+            if self.spinner_should_show() || self.dir_input.active || self.ci_dot().is_some() {
                 const FRAME_INTERVAL_MS: u128 = 50;
                 let should_tick = self
                     .app_status
@@ -851,11 +867,13 @@ impl App<'_> {
                 || self.app_status.notification_timestamp.is_some()
                 || !self.file_stream.is_empty()
                 || self.dir_input.active
+                || self.ci_dot().is_some()
                 // Uncommitted view polls `git status --porcelain`
                 // periodically to pick up working-tree edits the
                 // `.git/` watcher can't see; we need the timeout-based
                 // recv to wake us up on cadence even with no events.
                 || matches!(self.view, View::Uncommitted(_))
+                || matches!(&self.view, View::Actions(v) if v.wants_ticks())
                 // Deferred auto-refresh waiting for its throttle
                 // window to expire needs the loop to tick so the
                 // drain check at the top runs.
@@ -1099,7 +1117,8 @@ impl App<'_> {
                             Some(UserEvent::PullRequests)
                                 if !text_input_active
                                     && !matches!(self.view, View::PullRequests(_))
-                                    && !matches!(self.view, View::Issues(_)) =>
+                                    && !matches!(self.view, View::Issues(_))
+                                    && !matches!(self.view, View::Actions(_)) =>
                             {
                                 // Global shortcut, open the PR view from
                                 // anywhere EXCEPT when we're already inside
@@ -1122,7 +1141,9 @@ impl App<'_> {
                                 }
                             }
                             Some(UserEvent::Issues)
-                                if !text_input_active && !matches!(self.view, View::Issues(_)) =>
+                                if !text_input_active
+                                    && !matches!(self.view, View::Issues(_))
+                                    && !matches!(self.view, View::Actions(_)) =>
                             {
                                 match github_unavailable_reason(
                                     self.ctx.github_auth_state.is_authenticated(),
@@ -1340,6 +1361,90 @@ impl App<'_> {
                         self.clear_image(Some(terminal))?;
                         self.clear_terminal(terminal)?;
                     }
+                    AppEvent::OpenActions { run } => {
+                        match github_unavailable_reason(
+                            self.ctx.github_auth_state.is_authenticated(),
+                            self.has_github_remote,
+                        ) {
+                            None => {
+                                self.clear_image(Some(terminal))?;
+                                self.clear_terminal(terminal)?;
+                                self.open_actions(run);
+                            }
+                            Some(reason) => self.ec.send(AppEvent::NotifyWarn(reason.into())),
+                        }
+                    }
+                    AppEvent::CloseActions => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.close_actions();
+                    }
+                    AppEvent::ActionsRunsFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_runs_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsMoreRunsFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_more_runs_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsWorkflowsFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_workflows_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsRunFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_run_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsAnnotationsFetched {
+                        generation,
+                        run_id,
+                        annotations,
+                    } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_annotations_fetched(generation, run_id, annotations);
+                        }
+                    }
+                    AppEvent::ActionsJobsFetched {
+                        generation,
+                        run_id,
+                        result,
+                    } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_jobs_fetched(generation, run_id, result);
+                        }
+                    }
+                    AppEvent::ActionsLogsFetched {
+                        generation,
+                        job_id,
+                        result,
+                    } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_logs_fetched(generation, job_id, result);
+                        }
+                    }
+                    AppEvent::ActionsRunConfirmed { run_id, kind } => {
+                        if let Some(view) = self.actions_view() {
+                            view.perform_confirmed(run_id, kind);
+                        }
+                    }
+                    AppEvent::ActionsActionDone {
+                        label,
+                        run_id,
+                        result,
+                    } => {
+                        if result.is_ok() {
+                            self.ci.poke();
+                        }
+                        if let Some(view) = self.actions_view() {
+                            view.on_action_done(label, run_id, result);
+                        }
+                    }
+                    AppEvent::CiStatusUpdated => {}
+                    AppEvent::CiPoke => self.ci.poke(),
                     AppEvent::OpenTerminal => {
                         self.open_terminal(terminal)?;
                     }
@@ -1606,9 +1711,21 @@ impl App<'_> {
                     }
                     // Phase 2 - Git Actions
                     AppEvent::OpenDialog(kind) => self.open_dialog(kind),
-                    AppEvent::CloseDialog => self.close_dialog(),
+                    AppEvent::CloseDialog | AppEvent::DialogCancel => {
+                        // Over the Actions page the dialog leaves stale cells
+                        // behind (the page repaints only what it changed):
+                        // repaint the whole screen, like on a view change.
+                        let over_actions = match &mut self.view {
+                            View::Dialog(d) => matches!(d.before_mut(), View::Actions(_)),
+                            _ => false,
+                        };
+                        self.close_dialog();
+                        if over_actions {
+                            self.clear_image(Some(terminal))?;
+                            self.clear_terminal(terminal)?;
+                        }
+                    }
                     AppEvent::DialogConfirm => self.dialog_confirm(),
-                    AppEvent::DialogCancel => self.close_dialog(),
                     AppEvent::DialogInput(_input) => {}
                     AppEvent::ExecuteGitAction { target, action } => {
                         self.execute_git_action(target, action);
@@ -1678,7 +1795,9 @@ impl App<'_> {
                                 (self.app_status.spinner_frame + 1) % total;
                             needs_draw = true;
                         } else {
-                            needs_draw = notif_expiring || streaming;
+                            needs_draw = notif_expiring
+                                || streaming
+                                || matches!(&self.view, View::Actions(v) if v.is_animating());
                         }
                     }
                     AppEvent::OpenUncommittedDiff {
@@ -2953,6 +3072,8 @@ impl App<'_> {
     }
 
     fn render_header(&mut self, f: &mut Frame, area: Rect) {
+        self.ci_dot_rect = None;
+        self.ci_dot_run = None;
         use ratatui::{
             text::{Line, Span},
             widgets::Paragraph,
@@ -3000,10 +3121,6 @@ impl App<'_> {
             // <digits> + " │ " (3 cells: space, bar, space)
             prefix_str.chars().count() as u16 + 3
         };
-        let path_width = area
-            .width
-            .saturating_sub(icon_cell_width + 2 + prefix_block_width);
-
         let [content_row, separator_row] = ratatui::layout::Layout::vertical([
             ratatui::layout::Constraint::Length(1),
             ratatui::layout::Constraint::Length(1),
@@ -3057,31 +3174,67 @@ impl App<'_> {
             // place the cursor as the very last thing it does.
             self.dir_input_cursor_anchor = Some((left_area.x, left_area.y));
         } else {
-            // Path: dim prefix + bold repo name.
-            let mut path_spans = vec![];
-            if !path_prefix.is_empty() {
-                let prefix_truncated = if path_prefix.chars().count() > path_width as usize {
-                    let skip = path_prefix
-                        .chars()
-                        .count()
-                        .saturating_sub(path_width as usize - 1);
-                    format!("…{}", path_prefix.chars().skip(skip).collect::<String>())
-                } else {
-                    path_prefix.clone()
-                };
-                path_spans.push(Span::styled(
-                    format!(" {}", prefix_truncated),
-                    ratatui::style::Style::default().fg(path_prefix_fg),
-                ));
-            } else {
-                path_spans.push(Span::raw(" "));
-            }
+            // Path: dim prefix + bold repo name. The prefix is cut by its
+            // middle when the CI dot (3 cells) or a narrow terminal need the
+            // room, so the repo name always stays whole.
+            let ci = self.ci_dot();
+            let layout = header_path_layout(
+                &path_prefix,
+                &repo_name,
+                left_area.width as usize,
+                ci.is_some(),
+            );
+            let mut path_spans = vec![Span::styled(
+                format!(" {}", layout.prefix),
+                ratatui::style::Style::default().fg(path_prefix_fg),
+            )];
             path_spans.push(Span::styled(
                 repo_name,
                 ratatui::style::Style::default()
                     .fg(path_fg)
                     .add_modifier(ratatui::style::Modifier::BOLD),
             ));
+            if let (Some((glyph, color, run)), Some(offset)) = (ci, layout.dot_offset) {
+                // A small dot between the path and what runs: ` · ` fills the
+                // whole gap.
+                path_spans.push(Span::styled(
+                    " · ",
+                    ratatui::style::Style::default().fg(path_prefix_fg),
+                ));
+                path_spans.push(Span::styled(
+                    glyph,
+                    ratatui::style::Style::default()
+                        .fg(color)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+                // The name of the workflow that runs, dark and discreet,
+                // when there is room for it.
+                let label = ci_label(&run.workflow, offset, left_area.width as usize);
+                let mut click_width = 3u16;
+                if let Some(text) = label {
+                    click_width += 1 + console::measure_text_width(&text) as u16;
+                    // Light when the mouse is over it: it can be clicked.
+                    let label_fg = if self.ci_dot_hovered {
+                        self.ctx.color_theme.fg
+                    } else {
+                        path_prefix_fg
+                    };
+                    path_spans.push(Span::styled(
+                        format!(" {text}"),
+                        ratatui::style::Style::default().fg(label_fg),
+                    ));
+                }
+                if self.ci_dot_clickable() {
+                    let dot_x = left_area.x + offset as u16;
+                    self.ci_dot_rect = Some(Rect::new(
+                        dot_x.saturating_sub(1),
+                        left_area.y,
+                        click_width,
+                        1,
+                    ));
+                    self.ci_dot_run = Some(run);
+                }
+            }
 
             f.render_widget(Paragraph::new(Line::from(path_spans)), left_area);
         }
@@ -3483,10 +3636,6 @@ impl App<'_> {
                             g(UserEvent::RefList, "refs"),
                             g(UserEvent::Refresh, "fetch"),
                         ];
-                        if self.github_features_available() {
-                            parts.push(g(UserEvent::PullRequests, "PRs"));
-                            parts.push(g(UserEvent::Issues, "Issues"));
-                        }
                         parts.push(g(UserEvent::Drop, "cd"));
                         let terminal_key = kb.primary_scoped_key(&["list"], "terminal");
                         if !terminal_key.is_empty() {
@@ -3554,6 +3703,7 @@ impl App<'_> {
                         .view
                         .pull_requests_footer_hint()
                         .unwrap_or_else(|| "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏Esc:close".into()),
+                    View::Actions(_) => self.view.actions_footer_hint().unwrap_or_default(),
                     View::Issues(_) => self
                         .view
                         .issues_footer_hint()
@@ -3658,6 +3808,20 @@ impl App<'_> {
                     .add_modifier(Modifier::BOLD),
             ));
         } else if show_enhanced {
+            // The GitHub mark, far left, tells that gitoui is connected.
+            if self.ctx.github_auth_state.is_authenticated() {
+                let mark = if self.ctx.ui_config.common.nerd_font {
+                    "\u{f09b} "
+                } else {
+                    "GH "
+                };
+                spans.push(Span::styled(
+                    mark,
+                    Style::default()
+                        .fg(self.ctx.color_theme.fg)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
             match self.repository.head() {
                 Head::Branch { name } => {
                     let branch_color = self
@@ -3963,6 +4127,73 @@ impl<'a> App<'a> {
 }
 
 const HEADER_HEIGHT: u16 = 2;
+
+/// Where the path text and the CI dot go in the left part of the header.
+#[derive(Debug, PartialEq, Eq)]
+struct PathLayout {
+    /// The directory part, shortened by its middle when the room is short.
+    prefix: String,
+    /// Column of the dot from the left edge, `None` when it does not fit
+    /// (or is not shown).
+    dot_offset: Option<usize>,
+}
+
+/// Cells between the repo name and the CI dot (filled by ` · `).
+const CI_GAP: usize = 3;
+
+/// ` <prefix><repo>   <dot>`: the repo name always stays whole, the dot sits
+/// after the path (a gap, the dot, and a margin are reserved).
+fn header_path_layout(
+    path_prefix: &str,
+    repo_name: &str,
+    left_width: usize,
+    with_dot: bool,
+) -> PathLayout {
+    let reserve = if with_dot { CI_GAP + 2 } else { 0 };
+    let available = left_width.saturating_sub(1 + reserve);
+    let repo_width = console::measure_text_width(repo_name);
+    let prefix = shorten_path_prefix(path_prefix, available.saturating_sub(repo_width));
+    let text_width = 1 + console::measure_text_width(&prefix) + repo_width;
+    let dot_offset =
+        (with_dot && text_width + CI_GAP + 2 <= left_width).then_some(text_width + CI_GAP);
+    PathLayout { prefix, dot_offset }
+}
+
+/// The workflow name shown after the CI dot: cut with an ellipsis to the room
+/// left in the header, or `None` when there is hardly any (the dot alone is
+/// enough then).
+fn ci_label(name: &str, dot_offset: usize, left_width: usize) -> Option<String> {
+    // After the dot: a space, the name, and one cell of margin.
+    let room = left_width.saturating_sub(dot_offset + 2 + 1);
+    let name = name.trim();
+    if name.is_empty() || room < 4 {
+        return None;
+    }
+    let text = crate::view::actions::logic::fit_text(name, room);
+    Some(text.trim_end().to_string())
+}
+
+/// Shortens the directory part of the path by its middle so that it fits
+/// `max` cells: `~/work/clients/` becomes `~/…/`. The start and the repo name
+/// (not part of this prefix) stay readable.
+fn shorten_path_prefix(prefix: &str, max: usize) -> String {
+    if console::measure_text_width(prefix) <= max {
+        return prefix.to_string();
+    }
+    let skip = usize::from(prefix.starts_with('/'));
+    let first_len = prefix[skip..]
+        .find('/')
+        .map_or(prefix.len(), |i| skip + i + 1);
+    let first = &prefix[..first_len];
+    let candidate = format!("{first}…/");
+    if console::measure_text_width(&candidate) <= max {
+        candidate
+    } else if max >= 2 {
+        "…/".to_string()
+    } else {
+        String::new()
+    }
+}
 
 fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
     let [header, rest] =
@@ -5215,6 +5446,100 @@ impl<'a> App<'a> {
         );
     }
 
+    /// Tells the CI monitor what to watch: the current branch, when GitHub
+    /// is available.
+    fn configure_ci(&self) {
+        let target = if self.github_features_available() {
+            match (
+                self.ctx.github_auth_state.token.clone(),
+                crate::github::RepoCoords::from_repo(self.repository.path()),
+                self.repository.head(),
+            ) {
+                (Some(token), Some(coords), Head::Branch { name }) => {
+                    Some(crate::ci_monitor::CiTarget {
+                        token,
+                        coords,
+                        branch: name.clone(),
+                    })
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        self.ci.configure(target);
+    }
+
+    /// The dot of the header: its glyph, color and the run a click opens.
+    /// It is shown in every view.
+    fn ci_dot(&self) -> Option<(&'static str, Color, crate::github::actions::Run)> {
+        if self.dir_input.active {
+            return None;
+        }
+        let theme = &self.ctx.color_theme;
+        match self.ci.state(std::time::Instant::now()) {
+            crate::ci_monitor::CiState::None => None,
+            crate::ci_monitor::CiState::Running(run) => Some((
+                crate::ci_monitor::spinner_frame(
+                    self.app_status.spinner_frame,
+                    self.ctx.ui_config.common.nerd_font,
+                ),
+                theme.list_hash_fg,
+                run,
+            )),
+            crate::ci_monitor::CiState::Finished { run, ok, .. } => Some((
+                "●",
+                if ok {
+                    theme.status_success_fg
+                } else {
+                    theme.status_error_fg
+                },
+                run,
+            )),
+        }
+    }
+
+    /// A click on the indicator opens the run, but only from views that lose
+    /// nothing by it: the ones that hold unsaved work (an editor, a rebase, a
+    /// conflict, a dialog) just show it.
+    fn ci_dot_clickable(&self) -> bool {
+        matches!(
+            self.view,
+            View::List(_) | View::Detail(_) | View::Refs(_) | View::Actions(_)
+        )
+    }
+
+    fn open_actions(&mut self, open_run: Option<crate::github::actions::Run>) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => return,
+        };
+        let Some(coords) = crate::github::RepoCoords::from_repo(self.repository.path()) else {
+            return;
+        };
+        let branch = match self.repository.head() {
+            crate::git::Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            // Already on the page: keep the list it will go back to.
+            View::Actions(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        self.view = View::of_actions(
+            commit_list_state,
+            coords,
+            token,
+            branch,
+            open_run,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
     /// The pull requests page, also while a dialog is open over it.
     fn pull_requests_view(&mut self) -> Option<&mut crate::view::pr::PullRequestsView<'a>> {
         match &mut self.view {
@@ -5236,6 +5561,41 @@ impl<'a> App<'a> {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    /// The Actions page, also while a dialog is open over it: the answers to
+    /// its requests must not get lost behind the dialog.
+    fn actions_view(&mut self) -> Option<&mut crate::view::actions::ActionsView<'a>> {
+        match &mut self.view {
+            View::Actions(view) => Some(view),
+            View::Dialog(dialog) => match dialog.before_mut() {
+                View::Actions(view) => Some(view),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn close_actions(&mut self) {
+        // Back on the commit list: look at CI right away.
+        self.ci.poke();
+        if let View::Actions(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            if let Some(state) = list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            } else {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    }));
+            }
         }
     }
 
@@ -6361,6 +6721,16 @@ impl<'a> App<'a> {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 use ratatui::crossterm::event::KeyModifiers;
+                // The CI dot of the header opens the Actions page on its run.
+                if let (Some(rect), Some(run)) = (self.ci_dot_rect, self.ci_dot_run.clone()) {
+                    if mouse.column >= rect.x
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row == rect.y
+                    {
+                        self.ec.send(AppEvent::OpenActions { run: Some(run) });
+                        return Ok(true);
+                    }
+                }
                 // When the dir-input overlay is open it owns every mouse
                 // event, a click inside the dropdown completes the entry
                 // into the input (same as Tab) so the user can keep refining
@@ -6482,7 +6852,13 @@ impl<'a> App<'a> {
                     }
                     return Ok(true);
                 }
-                self.view.handle_mouse_move(mouse.column, mouse.row)
+                let over_dot = self.ci_dot_rect.is_some_and(|r| {
+                    mouse.column >= r.x && mouse.column < r.x + r.width && mouse.row == r.y
+                });
+                let dot_changed = over_dot != self.ci_dot_hovered;
+                self.ci_dot_hovered = over_dot;
+                let view_changed = self.view.handle_mouse_move(mouse.column, mouse.row);
+                dot_changed || view_changed
             }
             _ => false,
         };
@@ -6679,6 +7055,7 @@ impl<'a> App<'a> {
                         msg
                     };
                     tx.send(AppEvent::NotifySuccess(msg));
+                    tx.send(AppEvent::CiPoke);
                 }
                 Err(msg) => {
                     tx.send(AppEvent::NotifyError(msg));
@@ -6741,6 +7118,7 @@ impl<'a> App<'a> {
         );
         let should_checkout_worktree =
             matches!(&action, GitAction::AddWorktree { checkout: true, .. });
+        let pushed_new_branch = matches!(&action, GitAction::PushSetUpstream { .. });
         // Pre-compute the auto-generated worktree path before `action` is consumed.
         let worktree_raw_path = if let GitAction::AddWorktree { name, .. } = &action {
             worktree_path_for_branch(repo_path, name)
@@ -7024,6 +7402,9 @@ impl<'a> App<'a> {
 
         match result {
             Ok(_) => {
+                if pushed_new_branch {
+                    self.ci.poke();
+                }
                 self.close_dialog();
                 if is_refs_action {
                     if let Some(label) = success_label {
@@ -7513,5 +7894,89 @@ mod tests {
         let dummy_key_event = KeyEvent::from(KeyCode::Enter); // KeyEvent is not used in the logic
         let actual = process_numeric_prefix(numeric_prefix, user_event, dummy_key_event);
         assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod header_path_tests {
+    use super::{ci_label, header_path_layout, shorten_path_prefix, PathLayout, CI_GAP};
+
+    #[test]
+    fn the_running_workflow_is_named_after_the_dot_when_there_is_room() {
+        assert_eq!(
+            ci_label("gitoui demo", 20, 80).as_deref(),
+            Some("gitoui demo")
+        );
+        // Cut with an ellipsis rather than overflowing.
+        let cut = ci_label("Dependabot Updates", 20, 30).unwrap();
+        assert!(
+            cut.ends_with('…') && console::measure_text_width(&cut) <= 30 - 20 - 3,
+            "{cut}"
+        );
+        // No room, or nothing to say: the dot stands alone.
+        assert_eq!(ci_label("gitoui demo", 20, 24), None);
+        assert_eq!(ci_label("  ", 20, 80), None);
+        assert_eq!(ci_label("x", 79, 80), None, "offset past the width");
+    }
+
+    #[test]
+    fn the_dot_sits_right_after_the_path() {
+        let l = header_path_layout("~/gitstore/", "gitoui", 60, true);
+        assert_eq!(
+            l,
+            PathLayout {
+                prefix: "~/gitstore/".into(),
+                dot_offset: Some(1 + 11 + 6 + CI_GAP)
+            }
+        );
+        let none = header_path_layout("~/gitstore/", "gitoui", 60, false);
+        assert_eq!(none.dot_offset, None);
+    }
+
+    #[test]
+    fn the_path_is_cut_by_the_middle_to_make_room_for_the_dot() {
+        // 1 + 11 + 6 = 18 for the path alone, + 5 for the gap and the dot: 23 > 20.
+        let l = header_path_layout("~/gitstore/", "gitoui", 20, true);
+        assert_eq!(l.prefix, "~/…/");
+        assert_eq!(l.dot_offset, Some(1 + 4 + 6 + CI_GAP));
+    }
+
+    #[test]
+    fn nothing_overlaps_the_right_side_whatever_the_width() {
+        for width in 0..80usize {
+            for with_dot in [false, true] {
+                let l =
+                    header_path_layout("/home/aterrak/work/clients/", "monrepo", width, with_dot);
+                if let Some(dot) = l.dot_offset {
+                    assert!(dot + 2 <= width, "width {width}: dot at {dot}");
+                    let text = 1 + console::measure_text_width(&l.prefix) + 7;
+                    assert!(text < dot, "width {width}: text {text} dot {dot}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_prefix_that_fits_is_kept() {
+        assert_eq!(shorten_path_prefix("~/gitstore/", 20), "~/gitstore/");
+        assert_eq!(shorten_path_prefix("", 5), "");
+    }
+
+    #[test]
+    fn a_long_prefix_is_cut_by_the_middle() {
+        assert_eq!(shorten_path_prefix("~/work/clients/", 10), "~/…/");
+        assert_eq!(
+            shorten_path_prefix("/home/aterrak/gitstore/", 10),
+            "/home/…/"
+        );
+        assert_eq!(shorten_path_prefix("~/work/clients/", 4), "~/…/");
+    }
+
+    #[test]
+    fn very_little_room_keeps_only_the_ellipsis_or_nothing() {
+        assert_eq!(shorten_path_prefix("~/work/clients/", 3), "…/");
+        assert_eq!(shorten_path_prefix("~/work/clients/", 2), "…/");
+        assert_eq!(shorten_path_prefix("~/work/clients/", 1), "");
+        assert_eq!(shorten_path_prefix("~/work/clients/", 0), "");
     }
 }

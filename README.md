@@ -35,6 +35,7 @@ The commit graph stays serie's: pre-rendered images sent inline through your ter
 
 - Side-by-side or inline diffs with `git add -p`-style hunk staging baked into the Uncommitted view.
 - `b` to blame, `Shift+H` to follow file history across renames.
+- `A` opens the GitHub Actions page: runs, jobs and readable logs, re-run and cancel. A dot next to the repo path shows the CI of your branch; click it to jump to the run.
 - `t` opens a real terminal with your own shell in place of the graph; `Ctrl+Q` goes back, and a `cd` to another repo makes gitoui follow.
 - Mark two commits with `Space` for a cumulative diff between them.
 - Visual interactive rebase: grab + drop rows, reword in place, pause + resume modes.

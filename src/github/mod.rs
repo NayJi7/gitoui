@@ -6,6 +6,7 @@
 //! mutating actions (approve / merge / comment) live in dedicated
 //! follow-up modules.
 
+pub mod actions;
 pub mod issue;
 pub mod pr;
 
@@ -34,6 +35,22 @@ pub(crate) fn http_client() -> Result<reqwest::blocking::Client, String> {
         .build()
         .map_err(|e| format!("http client init: {}", e))?;
     Ok(CLIENT.get_or_init(|| built).clone())
+}
+
+/// Runs `attempt` up to `times` times while the error is retryable.
+pub(crate) fn retry<T, E>(
+    times: usize,
+    retryable: impl Fn(&E) -> bool,
+    mut attempt: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut last = attempt();
+    for _ in 1..times {
+        match &last {
+            Err(e) if retryable(e) => last = attempt(),
+            _ => break,
+        }
+    }
+    last
 }
 
 /// The request never reached GitHub: safe to try again, even for a POST.
@@ -169,6 +186,23 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "refusals are fast"
+        );
+    }
+
+    #[test]
+    fn retry_only_repeats_what_is_retryable() {
+        let mut calls = 0;
+        let r: Result<u8, &str> = retry(
+            5,
+            |e: &&str| *e == "connect",
+            || {
+                calls += 1;
+                Err("other")
+            },
+        );
+        assert!(
+            r.is_err() && calls == 1,
+            "a request that went out is not repeated"
         );
     }
 }
