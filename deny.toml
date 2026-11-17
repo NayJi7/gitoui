@@ -34,4 +34,14 @@ yanked = "warn"
 ignore = [
     "RUSTSEC-2025-0141", # bincode - unmaintained; pulled in via syntect
     "RUSTSEC-2024-0320", # yaml-rust - unmaintained; via syntect (no upgrade)
+    # chrono is NOT vulnerable: its maintainer soft-deprecated it
+    # (https://github.com/chronotope/chrono/issues/1768) and recommends jiff,
+    # and the advisory only says "unmaintained, all versions affected". It is
+    # a DIRECT dependency (the date of every commit, the bincode commit cache,
+    # the graph snapshot tests), so leaving it is a dedicated migration to
+    # jiff (1.0 shipped on 2026-11-15) with a cache format bump, not a quick
+    # swap. The id is ignored, not the crate: a real vulnerability in chrono
+    # would carry another id and still fail the check. Revisit when the jiff
+    # migration lands, then delete this line.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is soft-deprecated, not vulnerable; migrating to jiff is a dedicated refactor" },
 ]
