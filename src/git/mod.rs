@@ -1427,11 +1427,13 @@ pub fn get_diff_summary(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange
     changes
 }
 
+pub(crate) const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 pub fn get_initial_commit_additions(path: &Path, commit_hash: &CommitHash) -> Vec<FileChange> {
     let mut cmd = Command::new("git")
         .arg("diff")
         .arg("--numstat")
-        .arg("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+        .arg(EMPTY_TREE_HASH)
         .arg(&commit_hash.0)
         .current_dir(path)
         .stdout(Stdio::piped())
