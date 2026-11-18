@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{http_client, RepoCoords};
+use super::{http_client, RepoCoords, SendRetrying};
 
 /// Compact PR summary, populates the list panel.
 #[derive(Debug, Clone)]
@@ -664,7 +664,7 @@ pub fn list_pull_requests(token: &str, coords: &RepoCoords) -> Result<Vec<PullRe
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /pulls: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -706,7 +706,7 @@ pub fn fetch_pull_request_detail(
         .get(&base)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub PR detail: {}", e))?;
     if !pr_resp.status().is_success() {
         return Err(format!("PR detail HTTP {}", pr_resp.status()));
@@ -964,7 +964,7 @@ fn fetch_reviews(client: &reqwest::blocking::Client, token: &str, url: &str) -> 
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return summary,
@@ -991,7 +991,7 @@ fn fetch_files(client: &reqwest::blocking::Client, token: &str, url: &str) -> Ve
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -1016,7 +1016,7 @@ fn fetch_review_entries(
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -1037,7 +1037,7 @@ fn fetch_pull_commits(
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -1076,7 +1076,7 @@ fn fetch_issue_comments(
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -1097,7 +1097,7 @@ fn fetch_review_comments(
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -1134,7 +1134,7 @@ fn fetch_check_runs_detail(
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -1207,7 +1207,7 @@ fn fetch_visible_workflows(
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
     {
         Ok(r) => r,
         Err(_) => return HashMap::new(),
@@ -1593,7 +1593,7 @@ fn write_json_returning_body<T: Serialize>(
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json")
         .body(json)
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub write: {}", e))?;
     if resp.status().is_success() {
         Ok(resp.text().unwrap_or_default())
@@ -1661,7 +1661,7 @@ fn list_my_reactions_at(
         .get(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /reactions: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1785,7 +1785,7 @@ fn delete_request(token: &str, url: &str) -> Result<(), String> {
         .delete(url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub delete: {}", e))?;
     if resp.status().is_success() {
         Ok(())
@@ -1813,7 +1813,7 @@ pub fn fetch_commit_detail(
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /commits: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1979,7 +1979,7 @@ pub fn create_pull_request(
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json")
         .body(json)
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub create PR: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -2047,7 +2047,7 @@ pub fn set_pull_request_draft(token: &str, node_id: &str, draft: bool) -> Result
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json")
         .body(body_json)
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub GraphQL: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -2082,7 +2082,7 @@ pub fn list_repo_labels(token: &str, coords: &RepoCoords) -> Result<Vec<Label>, 
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /labels: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -2127,7 +2127,7 @@ pub fn list_repo_assignees(token: &str, coords: &RepoCoords) -> Result<Vec<Strin
         .get(&url)
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub /assignees: {}", e))?;
     if !resp.status().is_success() {
         let status = resp.status();
@@ -2189,7 +2189,7 @@ pub fn remove_pull_request_reviewers(
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json")
         .body(body_json)
-        .send()
+        .send_retrying()
         .map_err(|e| format!("GitHub delete reviewers: {}", e))?;
     if resp.status().is_success() {
         Ok(())
@@ -2208,7 +2208,7 @@ pub fn remove_pull_request_reviewers(
 /// the actual validation reason. We pattern-match on the canonical
 /// strings documented in GitHub's REST API reference and fall back to
 /// status-code-specific phrasing when the message is unknown.
-fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
+pub(crate) fn humanize_github_error(status: reqwest::StatusCode, body: &str) -> String {
     let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
     let top_message = parsed
         .get("message")

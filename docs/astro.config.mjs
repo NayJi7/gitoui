@@ -105,10 +105,12 @@ export default defineConfig({
             { label: "Commit graph", link: "/features/commit-graph/" },
             { label: "Diff, blame & history", link: "/features/diff-blame/" },
             { label: "Uncommitted & staging", link: "/features/uncommitted/" },
+            { label: "Terminal", link: "/features/terminal/" },
             { label: "Interactive rebase", link: "/features/interactive-rebase/" },
             { label: "Conflict editor", link: "/features/conflict-editor/" },
             { label: "Pull requests", link: "/features/pull-requests/" },
             { label: "Issues", link: "/features/issues/" },
+            { label: "GitHub Actions", link: "/features/actions/" },
           ],
         },
         {

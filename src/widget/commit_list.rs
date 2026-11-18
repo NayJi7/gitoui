@@ -20,7 +20,7 @@ use laurier::highlight::highlight_matched_text;
 use once_cell::sync::Lazy;
 use ratatui::{
     buffer::Buffer,
-    crossterm::event::{Event, KeyEvent},
+    crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
@@ -28,7 +28,7 @@ use ratatui::{
 };
 use regex::RegexBuilder;
 use rustc_hash::{FxHashMap, FxHashSet};
-use tui_input::{backend::crossterm::EventHandler, Input};
+use tui_input::Input;
 
 use crate::{
     app::AppContext,
@@ -1443,7 +1443,9 @@ impl<'a> CommitListState<'a> {
             ..
         } = self.search_state
         {
-            self.search_input.handle_event(&Event::Key(key));
+            // Ctrl+Backspace (and its aliases) delete a word: the library
+            // reads Ctrl+H as a single backspace and ignores the rest.
+            crate::text_edit::edit_input(&mut self.search_input, &key);
             self.update_search_matches(ignore_case, fuzzy, regex);
             self.select_current_or_next_match_index(start_index);
         }

@@ -6,21 +6,78 @@
 //! mutating actions (approve / merge / comment) live in dedicated
 //! follow-up modules.
 
+pub mod actions;
 pub mod issue;
 pub mod pr;
 
 use std::time::Duration;
 
-/// Build a `reqwest::blocking::Client` configured the way GitHub's API
-/// expects: short timeout (we surface a notification on failure rather
-/// than block the UI for minutes), a real User-Agent (GitHub rejects
-/// requests without one), and HTTP/2 enabled.
+/// How long to wait for a connection to open before trying again: on a network
+/// that drops packets, a fresh attempt succeeds where waiting does not.
+pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+/// Attempts to open a connection before giving up.
+pub(crate) const CONNECT_ATTEMPTS: usize = 5;
+
+/// The client of the GitHub API, shared by every call (so connections are
+/// reused instead of being opened, with their DNS and TLS, for each request):
+/// a real User-Agent (GitHub rejects requests without one), a short time to
+/// connect, and a timeout that surfaces a notification on failure rather than
+/// blocking the UI for minutes.
 pub(crate) fn http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+    static CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let built = reqwest::blocking::Client::builder()
         .user_agent("gitoui")
-        .timeout(Duration::from_secs(15))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|e| format!("http client init: {}", e))
+        .map_err(|e| format!("http client init: {}", e))?;
+    Ok(CLIENT.get_or_init(|| built).clone())
+}
+
+/// Runs `attempt` up to `times` times while the error is retryable.
+pub(crate) fn retry<T, E>(
+    times: usize,
+    retryable: impl Fn(&E) -> bool,
+    mut attempt: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut last = attempt();
+    for _ in 1..times {
+        match &last {
+            Err(e) if retryable(e) => last = attempt(),
+            _ => break,
+        }
+    }
+    last
+}
+
+/// The request never reached GitHub: safe to try again, even for a POST.
+pub(crate) fn connection_failed(e: &reqwest::Error) -> bool {
+    e.is_connect()
+}
+
+/// `send()` that opens the connection again when it could not be opened.
+/// Only that case is retried: a request that went out is never repeated.
+pub(crate) trait SendRetrying {
+    fn send_retrying(self) -> reqwest::Result<reqwest::blocking::Response>;
+}
+
+impl SendRetrying for reqwest::blocking::RequestBuilder {
+    fn send_retrying(self) -> reqwest::Result<reqwest::blocking::Response> {
+        for _ in 1..CONNECT_ATTEMPTS {
+            // A body that cannot be cloned (a stream) is sent once.
+            let Some(attempt) = self.try_clone() else {
+                return self.send();
+            };
+            match attempt.send() {
+                Err(e) if connection_failed(&e) => continue,
+                other => return other,
+            }
+        }
+        self.send()
+    }
 }
 
 /// Owner+repo extracted from the active remote, e.g. `("NayJi7", "gitoui")`.
@@ -85,6 +142,14 @@ impl RepoCoords {
     }
 }
 
+/// A number nobody used before. A request carries it and its answer brings it
+/// back, so an answer that comes late (from a page that was closed, or from an
+/// older request) never replaces a newer one.
+pub fn next_generation() -> u64 {
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +167,42 @@ mod tests {
         let c = RepoCoords::parse_remote("git@github.com:owner/repo.git").unwrap();
         assert_eq!(c.owner, "owner");
         assert_eq!(c.repo, "repo");
+    }
+
+    #[test]
+    fn a_refused_connection_is_tried_again_then_reported() {
+        // Nothing listens here: the connection is refused at once, which is
+        // exactly the kind of failure that is retried.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let start = std::time::Instant::now();
+        let err = http_client()
+            .unwrap()
+            .get(format!("http://127.0.0.1:{port}/"))
+            .send_retrying()
+            .unwrap_err();
+        assert!(connection_failed(&err), "{err}");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "refusals are fast"
+        );
+    }
+
+    #[test]
+    fn retry_only_repeats_what_is_retryable() {
+        let mut calls = 0;
+        let r: Result<u8, &str> = retry(
+            5,
+            |e: &&str| *e == "connect",
+            || {
+                calls += 1;
+                Err("other")
+            },
+        );
+        assert!(
+            r.is_err() && calls == 1,
+            "a request that went out is not repeated"
+        );
     }
 }

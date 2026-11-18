@@ -872,6 +872,8 @@ mod tests {
             "issues",
             "issues.list",
             "issues.detail",
+            "actions",
+            "terminal",
             "rebase",
             "rebase.resume",
             "rebase.reword_editor",
@@ -883,6 +885,36 @@ mod tests {
                 "default-keybind.toml lost scope {scope}"
             );
         }
+        // The Actions page has a single key scope.
+        let key = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        assert_eq!(
+            kb.resolve_scoped(&["actions"], key('b')),
+            Some("current_branch")
+        );
+        assert_eq!(
+            kb.resolve_scoped(&["actions"], key('t')),
+            Some("timestamps")
+        );
+        assert_eq!(kb.resolve_scoped(&["actions"], key('f')), Some("search"));
+        assert_eq!(
+            kb.resolve_scoped(&["actions"], key(']')),
+            None,
+            "the arrows change the status filter, not [ and ]"
+        );
+        assert_eq!(
+            kb.resolve_scoped(
+                &["actions"],
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::empty())
+            ),
+            Some("switch")
+        );
+        assert_eq!(
+            kb.resolve_scoped(
+                &["actions"],
+                KeyEvent::new(KeyCode::Char('R'), KeyModifiers::SHIFT)
+            ),
+            Some("rerun")
+        );
         // Spot-check one binding per scope to confirm action names
         // round-trip the way the views expect them.
         let a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty());

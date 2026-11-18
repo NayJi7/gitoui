@@ -516,7 +516,7 @@ pub struct UiCommonConfig {
     ///
     /// ```toml
     /// [ui.common]
-    /// nerd-font = false
+    /// nerd_font = false
     /// ```
     #[default = true]
     pub nerd_font: bool,

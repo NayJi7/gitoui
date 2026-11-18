@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
 use std::rc::Rc;
@@ -83,6 +83,7 @@ impl<'a> DialogView<'a> {
             DialogKind::CommitWithMessage => (vec![false], 0),
             DialogKind::CleanUntracked => (vec![], 0),
             DialogKind::OpenCheckOnGitHub { .. } => (vec![false], 0),
+            DialogKind::ConfirmActionsRun { .. } => (vec![], 0),
             DialogKind::ConfirmPopStash { .. } => (vec![], 0),
             DialogKind::ConfirmDropStash { .. } => (vec![], 0),
             DialogKind::ConfirmDeleteComment { .. } => (vec![], 0),
@@ -782,11 +783,10 @@ impl<'a> DialogView<'a> {
         let dialog_area = centered_rect_exact(width, height, area);
         self.dialog_area = dialog_area;
 
-        f.render_widget(Clear, dialog_area);
-
         let theme = &self.ctx.color_theme;
-        let border_color = theme.divider_fg;
-        let title_color = theme.fg;
+        crate::popup::clear_with_margin(f, dialog_area, area, theme);
+        let border_color = crate::popup::accent(theme);
+        let title_color = crate::popup::accent(theme);
 
         let title = self.title();
         let block = Block::default()
@@ -1790,6 +1790,47 @@ impl<'a> DialogView<'a> {
                     ),
                 ]));
             }
+            DialogKind::ConfirmActionsRun {
+                workflow,
+                number,
+                title,
+                kind,
+                ..
+            } => {
+                lines.push(Line::from(vec![
+                    Span::raw("  ".to_string()),
+                    Span::styled(
+                        format!("{workflow} #{number}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.list_hash_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " · ",
+                        Style::default().fg(self.ctx.color_theme.detail_label_fg),
+                    ),
+                    Span::styled(
+                        title.clone(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.fg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                lines.push(Line::from(""));
+                let msg = match kind {
+                    crate::event::ActionsRunKind::Rerun => "Re-run all the jobs of this run?",
+                    crate::event::ActionsRunKind::RerunFailed => {
+                        "Re-run only the failed jobs of this run?"
+                    }
+                    crate::event::ActionsRunKind::Cancel => {
+                        "Cancel this run? Jobs in progress are stopped."
+                    }
+                };
+                lines.push(Line::from(Span::styled(
+                    msg.to_string(),
+                    Style::default().fg(fg),
+                )));
+            }
             DialogKind::OpenCheckOnGitHub { name, url } => {
                 lines.push(Line::from(vec![
                     Span::styled("Check: ", Style::default().fg(dim_fg)),
@@ -1935,6 +1976,11 @@ impl<'a> DialogView<'a> {
                 }
             }
             DialogKind::OpenCheckOnGitHub { .. } => " Open Check on GitHub ",
+            DialogKind::ConfirmActionsRun { kind, .. } => match kind {
+                crate::event::ActionsRunKind::Rerun => " Re-run All Jobs ",
+                crate::event::ActionsRunKind::RerunFailed => " Re-run Failed Jobs ",
+                crate::event::ActionsRunKind::Cancel => " Cancel Workflow Run ",
+            },
         }
         .to_string()
     }
@@ -2285,6 +2331,13 @@ impl<'a> DialogView<'a> {
         // Check on GitHub, Validate opens the run's html_url. Like
         // OrphanedPrCommit, no GitAction to run since the data lives on
         // GitHub Actions, not in the local repo.
+        // Re-run or cancel a workflow run: the Actions page does the call.
+        if let DialogKind::ConfirmActionsRun { run_id, kind, .. } = &self.kind {
+            let (run_id, kind) = (*run_id, *kind);
+            self.tx.send(AppEvent::CloseDialog);
+            self.tx.send(AppEvent::ActionsRunConfirmed { run_id, kind });
+            return;
+        }
         if let DialogKind::OpenCheckOnGitHub { url, .. } = &self.kind {
             let url = url.clone();
             self.tx.send(AppEvent::CloseDialog);
@@ -2797,7 +2850,8 @@ impl<'a> DialogView<'a> {
             | DialogKind::ConfirmReopenIssue { .. }
             | DialogKind::ConfirmDeleteIssueComment { .. }
             | DialogKind::OrphanedPrCommit { .. }
-            | DialogKind::OpenCheckOnGitHub { .. } => unreachable!(),
+            | DialogKind::OpenCheckOnGitHub { .. }
+            | DialogKind::ConfirmActionsRun { .. } => unreachable!(),
         };
         self.tx.send(AppEvent::ExecuteGitAction { target, action });
     }
@@ -2822,6 +2876,12 @@ impl<'a> DialogView<'a> {
     pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
         std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme.clone();
         self.before.update_color_theme(theme);
+    }
+
+    /// The view the dialog was opened over (it keeps receiving the answers of
+    /// what it asked for while the dialog is open).
+    pub fn before_mut(&mut self) -> &mut View<'a> {
+        &mut self.before
     }
 
     pub fn take_before_view(&mut self) -> View<'a> {

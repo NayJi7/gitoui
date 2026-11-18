@@ -47,6 +47,12 @@ pub struct IssuesView<'a> {
     list_filter: IssueListFilter,
     filter_tab_rects: Vec<(IssueListFilter, Rect)>,
     hovered_filter: Option<IssueListFilter>,
+    /// The list is being fetched: the page is already there and says so.
+    list_loading: bool,
+    /// Number of the request whose answer is waited for.
+    list_gen: u64,
+    /// The first answer arrived.
+    list_loaded_once: bool,
     detail_cache: FxHashMap<u64, IssueDetail>,
     timeline_cache: FxHashMap<u64, Vec<TimelineEvent>>,
     linked_cache: FxHashMap<u64, Vec<LinkedPr>>,
@@ -400,7 +406,6 @@ impl<'a> IssuesView<'a> {
         commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
         coords: RepoCoords,
         token: String,
-        items: Vec<Issue>,
         ctx: Rc<AppContext>,
         tx: Sender,
     ) -> Self {
@@ -409,15 +414,18 @@ impl<'a> IssuesView<'a> {
             .login
             .clone()
             .filter(|s| !s.is_empty());
-        Self {
+        let mut view = Self {
             commit_list_state,
             coords,
             token,
             me_login,
-            items,
+            items: Vec::new(),
             list_filter: IssueListFilter::Open,
             filter_tab_rects: Vec::new(),
             hovered_filter: None,
+            list_loading: false,
+            list_gen: 0,
+            list_loaded_once: false,
             detail_cache: FxHashMap::default(),
             timeline_cache: FxHashMap::default(),
             linked_cache: FxHashMap::default(),
@@ -463,7 +471,11 @@ impl<'a> IssuesView<'a> {
             list_scroll_offset: 0,
             ctx,
             tx,
-        }
+        };
+        // The list loads in the background: the page is on screen at once,
+        // with "Loading".
+        view.fetch_list();
+        view
     }
 
     pub fn take_list_state(&mut self) -> Option<crate::widget::commit_list::CommitListState<'a>> {
@@ -540,12 +552,59 @@ impl<'a> IssuesView<'a> {
                     }
                 }
                 // Re-list so the list view reflects the new state.
-                if let Ok(v) = crate::github::issue::list_issues(&self.token, &self.coords) {
-                    self.items = v;
-                }
+                self.fetch_list();
             }
             Err(e) => {
                 self.last_error = Some(format!("{}: {}", action, e));
+            }
+        }
+    }
+
+    /// Loads the list of issues in a thread and answers with
+    /// `IssuesListFetched`.
+    fn fetch_list(&mut self) {
+        self.list_gen = crate::github::next_generation();
+        self.list_loading = true;
+        let generation = self.list_gen;
+        let (token, coords, tx) = (self.token.clone(), self.coords.clone(), self.tx.clone());
+        crate::panic_guard::spawn_protected("issues-list", move || {
+            let result = crate::github::issue::list_issues(&token, &coords);
+            tx.send(AppEvent::IssuesListFetched { generation, result });
+        });
+    }
+
+    pub fn on_list_fetched(&mut self, generation: u64, result: Result<Vec<Issue>, String>) {
+        if generation != self.list_gen {
+            return;
+        }
+        self.list_loading = false;
+        let first = !self.list_loaded_once;
+        match result {
+            Ok(items) => {
+                self.list_loaded_once = true;
+                self.items = items;
+                // An issue asked for by number before the list came keeps
+                // the cursor on its row.
+                if first {
+                    if let Some(idx) = self.opened_issue_number.and_then(|n| {
+                        self.filtered_indices()
+                            .iter()
+                            .position(|i| self.items[*i].number == n)
+                    }) {
+                        self.hovered = idx;
+                    }
+                }
+                let len = self.filtered_indices().len();
+                self.hovered = self.hovered.min(len.saturating_sub(1));
+                self.last_error = None;
+            }
+            Err(e) => {
+                let what = if first {
+                    "List issues"
+                } else {
+                    "Reload issues"
+                };
+                self.last_error = Some(format!("{what}: {e}"));
             }
         }
     }
@@ -562,9 +621,7 @@ impl<'a> IssuesView<'a> {
         self.conversation_selected = 0;
         self.timeline_scroll = 0;
         // Refresh the index and load the new issue's detail.
-        if let Ok(v) = crate::github::issue::list_issues(&self.token, &self.coords) {
-            self.items = v;
-        }
+        self.fetch_list();
         self.spawn_detail_fetch(number);
     }
 
@@ -655,15 +712,7 @@ impl<'a> IssuesView<'a> {
         Vec::new()
     }
     pub fn refresh(&mut self) {
-        match crate::github::issue::list_issues(&self.token, &self.coords) {
-            Ok(v) => {
-                self.items = v;
-                self.last_error = None;
-            }
-            Err(e) => {
-                self.last_error = Some(format!("List issues: {}", e));
-            }
-        }
+        self.fetch_list();
         if let Some(n) = self.opened_issue_number {
             self.detail_cache.remove(&n);
             self.spawn_detail_fetch(n);
@@ -3498,20 +3547,25 @@ impl<'a> IssuesView<'a> {
         let mut occluders: Vec<Rect> = Vec::new();
         if let Some(p) = self.mention_popup.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         if let Some(p) = self.reaction_picker.as_ref() {
             if let Some(r) = p.overlay_rect {
-                occluders.push(r);
+                // The empty margin of the popup is cleared too: an avatar
+                // must not be painted back over it.
+                occluders.push(crate::popup::with_margin(r, f.area()));
             }
         }
         let pending: Vec<(crate::view::pr::PaintedAvatar, Color)> = pending
             .into_iter()
             .filter(|(pa, _)| {
-                !occluders
-                    .iter()
-                    .any(|r| rect_contains(Some(*r), pa.screen_x, pa.screen_y))
+                !occluders.iter().any(|r| {
+                    rect_contains(Some(*r), pa.screen_x, pa.screen_y)
+                        || rect_contains(Some(*r), pa.screen_x + 1, pa.screen_y)
+                })
             })
             .collect();
         self.prev_painted_avatars =
@@ -3585,25 +3639,37 @@ impl<'a> IssuesView<'a> {
             ),
             Span::raw("  "),
             Span::styled(
-                format!("{} open", open_count),
+                if self.list_loading && !self.list_loaded_once {
+                    "loading…".to_string()
+                } else if self.list_loading {
+                    // `r` pressed: the list stays, the page says it reloads.
+                    format!("{} open  loading…", open_count)
+                } else {
+                    format!("{} open", open_count)
+                },
                 Style::default().fg(theme.detail_label_fg),
             ),
         ];
         // Right-aligned ` GitHub` mark, same gate as the PR header.
-        if self.ctx.ui_config.common.nerd_font {
-            const GH_TAG: &str = "\u{f09b} GitHub";
+        {
+            // The glyph needs a Nerd Font; without it the word stands alone.
+            let gh_tag: &str = if self.ctx.ui_config.common.nerd_font {
+                "\u{f09b} GitHub"
+            } else {
+                "GitHub"
+            };
             const RIGHT_PAD: usize = 2;
             let left_w: usize = left
                 .iter()
                 .map(|s| console::measure_text_width(s.content.as_ref()))
                 .sum();
-            let tag_w = console::measure_text_width(GH_TAG);
+            let tag_w = console::measure_text_width(gh_tag);
             let total_w = area.width as usize;
             if total_w > left_w + tag_w + RIGHT_PAD {
                 let fill = total_w - left_w - tag_w - RIGHT_PAD;
                 left.push(Span::raw(" ".repeat(fill)));
                 left.push(Span::styled(
-                    GH_TAG.to_string(),
+                    gh_tag.to_string(),
                     Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
                 ));
             }
@@ -3660,7 +3726,12 @@ impl<'a> IssuesView<'a> {
         for (i, filter) in filters.iter().enumerate() {
             let is_active = *filter == self.list_filter;
             let is_hovered = self.hovered_filter == Some(*filter) && !is_active;
-            let label = format!("{} {}", filter.label(), counts[i]);
+            // No count until the list has arrived: "0" would be a lie.
+            let label = if self.list_loading && !self.list_loaded_once {
+                filter.label().to_string()
+            } else {
+                format!("{} {}", filter.label(), counts[i])
+            };
             let fg = if is_active {
                 theme.list_head_fg
             } else if is_hovered {
@@ -3715,10 +3786,14 @@ impl<'a> IssuesView<'a> {
 
         if filtered.is_empty() {
             self.list_scroll_offset = 0;
-            let msg = match self.list_filter {
-                IssueListFilter::Open => "No open issues.",
-                IssueListFilter::Closed => "No closed issues.",
-                IssueListFilter::All => "No issues in this repo.",
+            let msg = if self.list_loading && !self.list_loaded_once {
+                "Loading issues…"
+            } else {
+                match self.list_filter {
+                    IssueListFilter::Open => "No open issues.",
+                    IssueListFilter::Closed => "No closed issues.",
+                    IssueListFilter::All => "No issues in this repo.",
+                }
             };
             f.render_widget(
                 Paragraph::new(Span::styled(
@@ -4792,10 +4867,10 @@ impl<'a> IssuesView<'a> {
         let y = area.y + (area.height.saturating_sub(height)) / 2;
         let rect = Rect::new(x, y, width, height);
         picker.overlay_rect = Some(rect);
-        f.render_widget(ratatui::widgets::Clear, rect);
+        crate::popup::clear_with_margin(f, rect, area, theme);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.list_head_fg))
+            .border_style(crate::popup::border_style(theme))
             .title(Line::from(Span::styled(
                 " React ".to_string(),
                 Style::default()
@@ -5717,19 +5792,10 @@ pub(crate) fn paint_mention_popup(
         (editor_rect.y + editor_rect.height).min(area.y + area.height.saturating_sub(height))
     };
     let rect = Rect::new(x, y, width, height);
-    // Clear ONE extra column to the left of the popup before
-    // drawing it: wide emojis (👍 👎 😀 …) painted on the card
-    // underneath can have their anchor cell sitting at `x - 1`
-    // with their continuation cell at `x`. `Clear` on the popup's
-    // own rect wipes the continuation marker but leaves the
-    // anchor, so the terminal still draws 2 visual cells for the
-    // emoji, its 2nd cell bleeds into the popup's left border.
-    // Extending the clear by 1 col wipes the anchor too.
-    if x > 0 {
-        let pre_rect = Rect::new(x - 1, y, 1, height);
-        f.render_widget(ratatui::widgets::Clear, pre_rect);
-    }
-    f.render_widget(ratatui::widgets::Clear, rect);
+    // The empty margin also wipes the continuation cell and the anchor of a
+    // wide emoji (👍 👎 😀 …) painted on the card underneath, so none of it
+    // bleeds into the popup's border.
+    crate::popup::clear_with_margin(f, rect, area, theme);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.list_head_fg))
