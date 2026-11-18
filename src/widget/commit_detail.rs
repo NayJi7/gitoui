@@ -261,7 +261,7 @@ impl StatefulWidget for CommitDetail<'_> {
         Paragraph::new(underline_line).render(content_underline_area, buf);
 
         let [labels_area, value_area] =
-            Layout::horizontal([Constraint::Length(12), Constraint::Min(0)])
+            Layout::horizontal([Constraint::Length(LABEL_WIDTH), Constraint::Min(0)])
                 .areas(content_scroll_area);
 
         let (mut label_lines, mut value_lines, changes_start) = self.contents(value_area.width);
@@ -300,7 +300,25 @@ impl StatefulWidget for CommitDetail<'_> {
     }
 }
 
+/// Width of the column of labels (`Author:`, `Message:`…).
+const LABEL_WIDTH: u16 = 12;
+use crate::text_fit::{wrap_line, VALUE_PADDING};
+
+/// Width of the value column when the panel is drawn in `area`. The detail
+/// view needs it to find the rows of the file list for the mouse.
+pub fn value_column_width(area: Rect) -> u16 {
+    let [content_area, _] =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(area);
+    content_area.width.saturating_sub(LABEL_WIDTH)
+}
+
 impl CommitDetail<'_> {
+    /// The row of the value column where the list of changed files starts,
+    /// for a panel drawn in `area` (the mouse maps a click to a file with it).
+    pub fn changes_start_in(&self, area: Rect) -> usize {
+        self.contents(value_column_width(area)).2
+    }
+
     fn render_labels_paragraph(&self, lines: Vec<Line>, area: Rect, buf: &mut Buffer) {
         let paragraph = Paragraph::new(lines)
             .style(Style::default().fg(self.ctx.color_theme.fg))
@@ -447,7 +465,11 @@ impl CommitDetail<'_> {
             if !key.is_empty() {
                 spans.push(Span::styled(format!(" ({})", key), key_style));
             }
-            lines.push(Line::from(spans));
+            // One row per action: a label too long for the panel ends with `…`.
+            lines.push(Line::from(crate::text_fit::ellipsize_spans(
+                spans,
+                action_inner.width as usize,
+            )));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));
@@ -462,28 +484,38 @@ impl CommitDetail<'_> {
     fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>, usize) {
         let mut label_lines: Vec<Line> = Vec::new();
         let mut value_lines: Vec<Line> = Vec::new();
+        // What the value paragraph can really draw: every value that is
+        // longer goes on the next rows instead of running off the panel.
+        let vw = (width as usize).saturating_sub(VALUE_PADDING).max(1);
+        let label_fg = self.ctx.color_theme.detail_label_fg;
+
+        // One labelled value: the label on its first row, blank under it for
+        // the rows the value wraps onto, so both columns stay aligned.
+        let mut add = |label: &'static str, value: Line<'_>| {
+            let rows = wrap_line(value, vw);
+            label_lines.push(Line::from(label).fg(label_fg));
+            for _ in 1..rows.len() {
+                label_lines.push(Line::from(""));
+            }
+            value_lines.extend(rows);
+        };
 
         // Reserve 3 chars before the author name when avatars are on (2 cells avatar + 1 gap)
         let avatar_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let author_prefix: &'static str = if avatar_enabled { "   " } else { "" };
 
-        label_lines.push(Line::from("   Author: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(self.author_line(author_prefix));
-        label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(self.author_date_line());
+        add("   Author: ", self.author_line(author_prefix));
+        add("     Date: ", self.author_date_line());
 
         if self.commit.author_name != self.commit.committer_name
             || self.commit.author_email != self.commit.committer_email
             || self.commit.author_date != self.commit.committer_date
         {
-            label_lines.push(Line::from("Committer: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(self.committer_line());
-            label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(self.committer_date_line());
+            add("Committer: ", self.committer_line());
+            add("     Date: ", self.committer_date_line());
         }
 
-        label_lines.push(Line::from("      SHA: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(self.sha_line());
+        add("      SHA: ", self.sha_line());
 
         if has_parent(self.commit) {
             let parent_label = if self.commit.parent_commit_hashes.len() == 1 {
@@ -491,37 +523,38 @@ impl CommitDetail<'_> {
             } else {
                 "  Parents: "
             };
-            label_lines.push(Line::from(parent_label).fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(self.parents_line());
+            add(parent_label, self.parents_line());
         }
 
         if has_refs(self.refs) {
-            label_lines.push(Line::from("     Refs: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(self.refs_line());
+            add("     Refs: ", self.refs_line());
         }
 
         // Divider before message
         label_lines.push(Line::from(""));
         value_lines.push(self.divider_line(width as usize));
 
-        label_lines.push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
-        let msg_lines = self.commit_message_lines();
-        let msg_len = msg_lines.len();
-        value_lines.extend(msg_lines);
-        // Mirror the body lines in the left column: "Body:" on the first body
-        // row, then empty labels for continuation rows so the divider below
-        // stays aligned in both columns.
-        if msg_len > 1 {
-            label_lines.push(Line::from("     Body: ").fg(self.ctx.color_theme.detail_label_fg));
-            for _ in 2..msg_len {
+        // The subject, then the body (kept as written: its indentation and
+        // blank lines survive, long lines wrap).
+        let subject = wrap_line(Line::from(self.commit.commit_message.as_str().bold()), vw);
+        label_lines.push(Line::from("  Message: ").fg(label_fg));
+        for _ in 1..subject.len() {
+            label_lines.push(Line::from(""));
+        }
+        value_lines.extend(subject);
+        if !self.commit.body.is_empty() {
+            let body = crate::text_fit::wrap_plain(&self.commit.body, vw);
+            label_lines.push(Line::from("     Body: ").fg(label_fg));
+            for _ in 1..body.len() {
                 label_lines.push(Line::from(""));
             }
+            value_lines.extend(body.into_iter().map(Line::from));
         }
 
         // Divider before changes
         label_lines.push(Line::from(""));
         value_lines.push(self.divider_line(width as usize));
-        value_lines.extend(self.changes_lines());
+        value_lines.extend(self.changes_lines(vw));
 
         let changes_start = value_lines.len() - self.changes.len();
 
@@ -723,16 +756,7 @@ impl CommitDetail<'_> {
         Line::from(spans)
     }
 
-    fn commit_message_lines(&self) -> Vec<Line<'_>> {
-        let commit_message_line = Line::from(self.commit.commit_message.as_str().bold());
-        let mut lines = vec![commit_message_line];
-        if !self.commit.body.is_empty() {
-            lines.extend(self.commit.body.lines().map(Line::raw));
-        }
-        lines
-    }
-
-    fn changes_lines(&self) -> Vec<Line<'_>> {
+    fn changes_lines(&self, width: usize) -> Vec<Line<'_>> {
         self.changes
             .iter()
             .map(|c| {
@@ -769,6 +793,13 @@ impl CommitDetail<'_> {
                     "D" => self.ctx.color_theme.detail_file_change_delete_fg,
                     _ => self.ctx.color_theme.detail_file_change_move_fg,
                 };
+                // One row per file: the stats stay, the path loses its middle.
+                let room = width
+                    .saturating_sub(2)
+                    .saturating_sub(crate::text_fit::width(&add_str))
+                    .saturating_sub(crate::text_fit::width(&del_str))
+                    .max(1);
+                let path = crate::text_fit::ellipsize_path(path, room);
                 let is_deleted = matches!(c, FileChange::Delete { .. });
                 let path_style = if is_deleted {
                     Style::default()
@@ -878,5 +909,53 @@ mod tests {
 
         let (label_lines, _, _) = detail.contents(80);
         assert_eq!(line_text(&label_lines[0]).trim(), "Author:");
+    }
+
+    #[test]
+    fn long_values_wrap_and_the_two_columns_stay_aligned() {
+        let mut commit = test_commit();
+        commit.commit_message =
+            "fix(diff): a subject that is quite a bit longer than the panel".into();
+        commit.body = "The file diff and the whole-commit diff both ran `git diff <hash>^ <hash>`.\n\n    indented line that also needs to wrap around the edge".into();
+        commit.parent_commit_hashes = vec![
+            "bf609851a2b3c4d5e6f708192a3b4c5d6e7f8091".into(),
+            "1f8bd9c0a1b2c3d4e5f60718293a4b5c6d7e8f90".into(),
+        ];
+        let changes = vec![crate::git::FileChange::Modify {
+            path: "src/view/actions/a_very_long_directory_name/and_a_long_file_name.rs".into(),
+            additions: 42,
+            deletions: 7,
+        }];
+        let refs = Vec::new();
+        let ctx = Rc::new(AppContext::default());
+        let detail = CommitDetail::new(&commit, &changes, &refs, ctx, None, false);
+
+        let (labels, values, changes_start) = detail.contents(40);
+        // Every row fits the 37 columns the value paragraph can draw, and the
+        // column of labels has exactly one row for each row of values above the files.
+        // (the file rows below have no label)
+        assert_eq!(labels.len(), changes_start);
+        for row in values.iter().filter(|r| !line_text(r).starts_with('─')) {
+            assert!(
+                crate::text_fit::width(&line_text(row)) <= 37,
+                "{:?}",
+                line_text(row)
+            );
+        }
+        // The file row keeps its stats and its file name: one row, middle cut.
+        let file_row = line_text(&values[changes_start]);
+        assert!(
+            file_row.contains("+42") && file_row.contains("-7"),
+            "{file_row}"
+        );
+        assert!(
+            file_row.contains("and_a_long_file_name.rs") || file_row.contains('…'),
+            "{file_row}"
+        );
+        assert_eq!(values.len() - changes_start, 1);
+        // The body lost nothing in the wrap.
+        let all = values.iter().map(line_text).collect::<Vec<_>>().join(" ");
+        assert!(all.contains("whole-commit"));
+        assert!(all.contains("edge"));
     }
 }

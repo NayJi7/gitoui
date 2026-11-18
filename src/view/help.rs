@@ -322,7 +322,14 @@ impl HelpView<'_> {
                 bg_style
             };
             let marker = if is_selected { "▶ " } else { "  " };
-            let title_with_pad = format!("{} ", sec.title);
+            // One row: a title wider than the column ends with `…`.
+            let title_with_pad = format!(
+                "{} ",
+                crate::text_fit::ellipsize_end(
+                    sec.title,
+                    (left_area.width as usize).saturating_sub(3)
+                )
+            );
             left_lines.push(Line::from(vec![
                 Span::styled(marker, marker_style),
                 Span::styled(title_with_pad, bg_style),
@@ -353,10 +360,9 @@ impl HelpView<'_> {
 
         if let Some(intro) = section.intro {
             for line in intro.lines() {
-                right_lines.push(Line::from(Span::styled(
-                    line.to_string(),
-                    Style::default().fg(theme.fg),
-                )));
+                for row in crate::text_fit::wrap_plain(line, right_area.width as usize) {
+                    right_lines.push(Line::from(Span::styled(row, Style::default().fg(theme.fg))));
+                }
             }
             right_lines.push(Line::from(""));
         }
@@ -369,7 +375,8 @@ impl HelpView<'_> {
             .map(|s| s.key.chars().count())
             .max()
             .unwrap_or(0)
-            .max(4);
+            // At least 4, and a long key never squeezes the description out.
+            .clamp(4, 18);
 
         for sh in &section.shortcuts {
             if sh.key.is_empty() && sh.action.is_empty() {
@@ -398,15 +405,49 @@ impl HelpView<'_> {
             // they pop against the section header's primary accent
             // without falling into the "warn-yellow" trap of help_key_fg.
             let key_label = format!("  {:<width$}", sh.key, width = key_col_width);
-            right_lines.push(Line::from(vec![
-                Span::styled(
-                    key_label,
+            // The description wraps under itself, not under the key.
+            let indent = 2 + key_col_width + 2;
+            let action_width = (right_area.width as usize).saturating_sub(indent).max(8);
+            // Too narrow for two columns: the description goes under the key.
+            if (right_area.width as usize).saturating_sub(indent) < 20 {
+                right_lines.push(Line::from(Span::styled(
+                    format!("  {}", sh.key),
                     Style::default()
                         .fg(theme.status_info_fg)
                         .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("  {}", sh.action), Style::default().fg(theme.fg)),
-            ]));
+                )));
+                for row in crate::text_fit::wrap_plain(
+                    sh.action,
+                    (right_area.width as usize).saturating_sub(4).max(8),
+                ) {
+                    right_lines.push(Line::from(Span::styled(
+                        format!("    {row}"),
+                        Style::default().fg(theme.fg),
+                    )));
+                }
+                continue;
+            }
+            for (i, row) in crate::text_fit::wrap_plain(sh.action, action_width)
+                .into_iter()
+                .enumerate()
+            {
+                if i == 0 {
+                    right_lines.push(Line::from(vec![
+                        Span::styled(
+                            key_label.clone(),
+                            Style::default()
+                                .fg(theme.status_info_fg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("  {row}"), Style::default().fg(theme.fg)),
+                    ]));
+                } else {
+                    right_lines.push(Line::from(Span::styled(
+                        format!("{}{row}", " ".repeat(indent)),
+                        Style::default().fg(theme.fg),
+                    )));
+                }
+            }
         }
 
         // Clamp scroll so we never run off the end of this section's lines.

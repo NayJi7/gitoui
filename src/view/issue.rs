@@ -30,7 +30,7 @@ use crate::{
     view::{
         editor_wrap,
         pr::{
-            fit_cell, label_chip_spans_local, parse_hex_color, push_comment_card,
+            fit_cell, label_chip_rows, label_chip_spans_local, parse_hex_color, push_comment_card,
             short_label_chip_spans, word_left_boundary, word_right_boundary, AvatarSlot,
             CommentAction, CommentCardInput, MERGED_PURPLE,
         },
@@ -3494,10 +3494,15 @@ impl<'a> IssuesView<'a> {
         // (title + divider), optional 3-row error banner, then the
         // body, which is either the bordered list panel or the
         // detail layout.
-        let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
-            3
-        } else {
-            0
+        // The error wraps onto as many rows as it needs (at most a third of
+        // the page): a network error carries a long URL.
+        let banner_height: u16 = match &self.last_error {
+            Some(msg) if area.height > 6 => {
+                let rows =
+                    crate::text_fit::wrap_plain(msg, (area.width as usize).saturating_sub(2)).len();
+                (rows + 2).min((area.height as usize / 3).max(3)) as u16
+            }
+            _ => 0,
         };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -3697,11 +3702,20 @@ impl<'a> IssuesView<'a> {
             )));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let p = Paragraph::new(Span::styled(
-            msg.clone(),
-            Style::default().fg(theme.status_error_fg),
-        ));
-        f.render_widget(p, inner);
+        let rows: Vec<Line> = crate::text_fit::cap_rows(
+            crate::text_fit::wrap_plain(msg, inner.width as usize),
+            inner.height as usize,
+            inner.width as usize,
+        )
+        .into_iter()
+        .map(|row| {
+            Line::from(Span::styled(
+                row,
+                Style::default().fg(theme.status_error_fg),
+            ))
+        })
+        .collect();
+        f.render_widget(Paragraph::new(rows), inner);
     }
 
     /// Build the filter-tabs title row that sits on the top border of
@@ -3897,11 +3911,30 @@ impl<'a> IssuesView<'a> {
             .as_ref()
             .map(|d| !d.labels.is_empty())
             .unwrap_or(false);
-        let labels_height: u16 = if has_labels { 1 } else { 0 };
+        let labels_height: u16 = if has_labels {
+            cached
+                .as_ref()
+                .map(|d| label_chip_rows(&d.labels, area.width as usize, 1).len())
+                .unwrap_or(1) as u16
+        } else {
+            0
+        };
+        let avatars_on_now = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let title_rows = cached
+            .as_ref()
+            .map(|d| {
+                issue_title_rows(
+                    &self.ctx.color_theme,
+                    d,
+                    area.width as usize,
+                    avatars_on_now,
+                )
+            })
+            .unwrap_or(0);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),
+                Constraint::Length(1 + title_rows as u16),
                 Constraint::Length(labels_height),
                 Constraint::Length(1),
                 Constraint::Length(2),
@@ -3978,6 +4011,8 @@ impl<'a> IssuesView<'a> {
         // Avatars captured as we go; painted after the Paragraph
         // renders. `(login, col_within_area)` pairs.
         let mut avatar_paints: Vec<(String, u16)> = Vec::new();
+        // The title, when it has to wrap above the info row.
+        let mut title_lines: Vec<String> = Vec::new();
         if let Some(d) = detail {
             spans.push(state_chip(theme, d.state, d.state_reason));
             spans.push(Span::raw("  "));
@@ -3988,42 +4023,21 @@ impl<'a> IssuesView<'a> {
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::raw("  "));
-            // Conservative title budget, we don't know exact meta
-            // width here without measuring, so estimate generously.
-            // `avatar_pad_each` is 3 cells per author/assignee when
-            // avatars are enabled, 0 otherwise; matches the actual
-            // pad we'll push below.
-            let pad: usize = if avatars_on { 3 } else { 0 };
-            let meta_estimate = "opened by ".len()
-                + d.author.chars().count()
-                + " · ".len()
-                + d.opened_when.chars().count()
-                + pad
-                + if d.assignees.is_empty() {
-                    0
-                } else {
-                    "  ·  assigned: ".len()
-                        + d.assignees
-                            .iter()
-                            .map(|a| a.chars().count() + pad)
-                            .sum::<usize>()
-                        + (d.assignees.len().saturating_sub(1)) * 2
-                }
-                + d.milestone
-                    .as_ref()
-                    .map(|m| "  ·  milestone: ".len() + m.chars().count())
-                    .unwrap_or(0);
-            let fixed = spans
-                .iter()
-                .map(|s| s.content.chars().count())
-                .sum::<usize>();
-            let avail = area.width as usize;
-            let title_budget = avail.saturating_sub(fixed + meta_estimate + 4).max(10);
-            spans.push(Span::styled(
-                fit_cell(&d.title, title_budget),
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::raw("    "));
+            // A title that does not fit beside the rest goes on its own
+            // rows above it, wrapped, instead of being cut.
+            if issue_title_rows(theme, d, area.width as usize, avatars_on) > 0 {
+                title_lines = crate::text_fit::cap_rows(
+                    crate::text_fit::wrap_plain(&d.title, (area.width as usize).saturating_sub(3)),
+                    crate::view::pr::MAX_TITLE_ROWS,
+                    (area.width as usize).saturating_sub(3),
+                );
+            } else {
+                spans.push(Span::styled(
+                    d.title.clone(),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::raw("    "));
+            }
 
             let dim = Style::default().fg(theme.detail_label_fg);
             spans.push(Span::styled("opened by ".to_string(), dim));
@@ -4071,14 +4085,39 @@ impl<'a> IssuesView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ));
         }
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let above = title_lines.len() as u16;
+        if above > 0 {
+            let theme = &self.ctx.color_theme;
+            let lines: Vec<Line> = title_lines
+                .into_iter()
+                .map(|row| {
+                    Line::from(Span::styled(
+                        format!(" {row}"),
+                        Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                    ))
+                })
+                .collect();
+            f.render_widget(
+                Paragraph::new(lines),
+                Rect {
+                    height: above,
+                    ..area
+                },
+            );
+        }
+        let info_area = Rect {
+            y: area.y + above,
+            height: 1,
+            ..area
+        };
+        f.render_widget(Paragraph::new(Line::from(spans)), info_area);
         let theme_bg = self.ctx.color_theme.bg;
         for (login, col) in avatar_paints {
             self.pending_avatar_paints.push((
                 crate::view::pr::PaintedAvatar {
                     login,
                     screen_x: area.x + col,
-                    screen_y: area.y,
+                    screen_y: area.y + above,
                     is_selected: false,
                 },
                 theme_bg,
@@ -4090,16 +4129,11 @@ impl<'a> IssuesView<'a> {
         let Some(d) = detail else {
             return;
         };
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
-        for (i, label) in d.labels.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw(" "));
-            }
-            for s in label_chip_spans_local(label) {
-                spans.push(s);
-            }
-        }
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let rows: Vec<Line> = label_chip_rows(&d.labels, area.width as usize, 1)
+            .into_iter()
+            .map(Line::from)
+            .collect();
+        f.render_widget(Paragraph::new(rows), area);
     }
 
     fn render_tab_bar(&mut self, f: &mut Frame, area: Rect, number: u64) {
@@ -6162,6 +6196,48 @@ fn rect_contains(rect: Option<Rect>, col: u16, row: u16) -> bool {
         return false;
     };
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+}
+
+/// How many rows the title of the opened issue needs above its info row: 0
+/// when it fits beside the state, the number and who opened it.
+fn issue_title_rows(
+    theme: &crate::color::ColorTheme,
+    d: &IssueDetail,
+    width: usize,
+    avatars_on: bool,
+) -> usize {
+    let w = |s: &str| console::measure_text_width(s);
+    let pad: usize = if avatars_on { 3 } else { 0 };
+    let meta = "opened by ".len()
+        + w(&d.author)
+        + " · ".len()
+        + w(&d.opened_when)
+        + pad
+        + if d.assignees.is_empty() {
+            0
+        } else {
+            "  ·  assigned: ".len()
+                + d.assignees.iter().map(|a| w(a) + pad).sum::<usize>()
+                + (d.assignees.len().saturating_sub(1)) * 2
+        }
+        + d.milestone
+            .as_ref()
+            .map(|m| "  ·  milestone: ".len() + w(m))
+            .unwrap_or(0);
+    let chip: usize = state_chip(theme, d.state, d.state_reason)
+        .content
+        .as_ref()
+        .chars()
+        .map(|c| w(&c.to_string()))
+        .sum();
+    let fixed = 1 + chip + 2 + w(&format!("#{}", d.number)) + 2;
+    let room = width.saturating_sub(fixed + meta + 4).max(10);
+    if w(&d.title) <= room {
+        return 0;
+    }
+    crate::text_fit::wrap_plain(&d.title, width.saturating_sub(3))
+        .len()
+        .min(crate::view::pr::MAX_TITLE_ROWS)
 }
 
 fn state_chip(

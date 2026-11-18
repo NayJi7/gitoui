@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::AppContext;
+use crate::text_fit::LabelledRows;
 
 #[derive(Debug, Default)]
 pub struct TagDetailState {
@@ -242,7 +243,11 @@ impl TagDetail<'_> {
             if !key.is_empty() {
                 spans.push(Span::styled(format!(" ({})", key), key_style));
             }
-            lines.push(Line::from(spans));
+            // One row per action: a label too long for the panel ends with `…`.
+            lines.push(Line::from(crate::text_fit::ellipsize_spans(
+                spans,
+                action_inner.width as usize,
+            )));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));
@@ -250,49 +255,51 @@ impl TagDetail<'_> {
     }
 
     fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
-        let mut label_lines: Vec<Line> = Vec::new();
-        let mut value_lines: Vec<Line> = Vec::new();
+        let theme = &self.ctx.color_theme;
+        let mut rows = LabelledRows::new(width, theme.detail_label_fg);
 
         // Tag name
-        label_lines.push(Line::from("      Tag: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(Span::styled(
-            self.metadata.tag_name.as_str(),
-            Style::default()
-                .fg(self.ctx.color_theme.detail_name_fg)
-                .add_modifier(Modifier::BOLD),
-        )));
+        rows.row(
+            "      Tag: ",
+            Line::from(Span::styled(
+                self.metadata.tag_name.clone(),
+                Style::default()
+                    .fg(theme.detail_name_fg)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        );
 
         // Type (annotated vs lightweight)
-        label_lines.push(Line::from("     Type: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(self.metadata.tag_type.as_str()));
+        rows.row("     Type: ", Line::from(self.metadata.tag_type.clone()));
 
         // Target commit: short hash + subject
-        label_lines.push(Line::from("   Target: ").fg(self.ctx.color_theme.detail_label_fg));
-        if self.metadata.target_hash.is_empty() {
-            value_lines.push(Line::from("(unknown)"));
+        let target = if self.metadata.target_hash.is_empty() {
+            Line::from("(unknown)")
         } else {
-            value_lines.push(Line::from(vec![
+            Line::from(vec![
                 Span::styled(
-                    self.metadata.target_hash.as_str(),
-                    Style::default().fg(self.ctx.color_theme.detail_hash_fg),
+                    self.metadata.target_hash.clone(),
+                    Style::default().fg(theme.detail_hash_fg),
                 ),
                 Span::raw(" "),
-                Span::raw(self.metadata.target_commit_message.as_str()),
-            ]));
-        }
+                Span::raw(self.metadata.target_commit_message.clone()),
+            ])
+        };
+        rows.row("   Target: ", target);
 
         // Tagger identity (annotated only)
         if let Some(tagger) = &self.metadata.tagger {
-            label_lines.push(Line::from("   Tagger: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(Span::styled(
-                tagger.as_str(),
-                Style::default().fg(self.ctx.color_theme.detail_name_fg),
-            )));
+            rows.row(
+                "   Tagger: ",
+                Line::from(Span::styled(
+                    tagger.clone(),
+                    Style::default().fg(theme.detail_name_fg),
+                )),
+            );
         }
 
         // Date (annotated only), formatted with the user's configured format
         if let Some(date) = &self.metadata.date {
-            label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
             let formatted = DateTime::parse_from_str(date, "%Y-%m-%d %H:%M:%S %z")
                 .map(|dt| {
                     self.ctx
@@ -301,37 +308,25 @@ impl TagDetail<'_> {
                         .format(&dt, self.ctx.core_config.date_time_local())
                 })
                 .unwrap_or_else(|_| date.clone());
-            value_lines.push(Line::from(Span::styled(
-                formatted,
-                Style::default().fg(self.ctx.color_theme.detail_date_fg),
-            )));
-        }
-
-        // Divider before message
-        if self.metadata.message.is_some() {
-            label_lines.push(Line::from(""));
-            value_lines.push(self.divider_line(width as usize));
+            rows.row(
+                "     Date: ",
+                Line::from(Span::styled(
+                    formatted,
+                    Style::default().fg(theme.detail_date_fg),
+                )),
+            );
         }
 
         // Tag message body (annotated only, multi-line supported)
         if let Some(message) = &self.metadata.message {
-            let msg_lines: Vec<&str> = message.lines().collect();
-            label_lines.push(Line::from("  Message: ").fg(self.ctx.color_theme.detail_label_fg));
-            if let Some((first, rest)) = msg_lines.split_first() {
-                value_lines.push(Line::from(*first));
-                for line in rest {
-                    label_lines.push(Line::from(""));
-                    value_lines.push(Line::from(*line));
-                }
-            } else {
-                value_lines.push(Line::from(message.as_str()));
-            }
+            rows.bare(self.divider_line(width as usize));
+            rows.text("  Message: ", message);
         }
 
-        (label_lines, value_lines)
+        (rows.labels, rows.values)
     }
 
-    fn divider_line(&self, width: usize) -> Line<'_> {
+    fn divider_line(&self, width: usize) -> Line<'static> {
         Line::from("\u{2500}".repeat(width).fg(self.ctx.color_theme.divider_fg))
     }
 }

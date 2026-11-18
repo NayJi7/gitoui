@@ -296,6 +296,27 @@ impl<'a> UncommittedWidget<'a> {
     }
 }
 
+fn banner_text(conflict_count: usize) -> String {
+    let noun = if conflict_count == 1 {
+        "conflict"
+    } else {
+        "conflicts"
+    };
+    format!(" ⚠  {} {}, press to resolve", conflict_count, noun)
+}
+
+/// Rows the conflict banner takes in a panel `detail_width` wide (0 when
+/// there is no conflict). The mouse maths of the view uses it to find the
+/// file rows under the banner.
+pub fn banner_rows(detail_width: u16, conflict_count: usize) -> usize {
+    if conflict_count == 0 {
+        return 0;
+    }
+    let [files, _] = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .areas(Rect::new(0, 0, detail_width, 1));
+    crate::text_fit::wrap_plain(&banner_text(conflict_count), files.width as usize).len()
+}
+
 impl<'a> StatefulWidget for UncommittedWidget<'a> {
     type State = UncommittedState;
 
@@ -366,28 +387,33 @@ impl<'a> UncommittedWidget<'a> {
             .filter(|f| f.status == StatusType::Unmerged)
             .count();
 
+        // The banner wraps onto as many rows as the width asks for.
+        let banner_rows =
+            crate::text_fit::wrap_plain(&banner_text(conflict_count), scroll_area.width as usize);
         let (banner_area, content_area) = if conflict_count > 0 {
-            let [b, c] =
-                Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(scroll_area);
+            let [b, c] = Layout::vertical([
+                Constraint::Length(banner_rows.len().min(scroll_area.height as usize) as u16),
+                Constraint::Min(0),
+            ])
+            .areas(scroll_area);
             (Some(b), c)
         } else {
             (None, scroll_area)
         };
 
         if let Some(banner_area) = banner_area {
-            let noun = if conflict_count == 1 {
-                "conflict"
-            } else {
-                "conflicts"
-            };
-            let banner_text = format!(" ⚠  {} {}, press to resolve", conflict_count, noun);
-            let banner_line = Line::from(Span::styled(
-                banner_text,
-                Style::default()
-                    .fg(self.ctx.color_theme.status_error_fg)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            Paragraph::new(banner_line).render(banner_area, buf);
+            let banner_lines: Vec<Line> = banner_rows
+                .into_iter()
+                .map(|row| {
+                    Line::from(Span::styled(
+                        row,
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_error_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ))
+                })
+                .collect();
+            Paragraph::new(banner_lines).render(banner_area, buf);
         }
 
         let [labels_area, value_area] =
@@ -451,6 +477,7 @@ impl<'a> UncommittedWidget<'a> {
                 empty_msg,
                 files,
                 *section,
+                value_width,
                 &mut labels,
                 &mut values,
             );
@@ -471,6 +498,7 @@ impl<'a> UncommittedWidget<'a> {
         empty_msg: &str,
         files: &[UncommittedFile],
         section: UncommittedSection,
+        value_width: usize,
         labels: &mut Vec<Line<'static>>,
         values: &mut Vec<Line<'static>>,
     ) {
@@ -494,7 +522,7 @@ impl<'a> UncommittedWidget<'a> {
                 } else {
                     Style::default()
                 };
-                values.push(self.file_line(file, style));
+                values.push(self.file_line(file, style, value_width.saturating_sub(3)));
                 if i < files.len() - 1 {
                     labels.push(Line::from(""));
                 }
@@ -502,7 +530,7 @@ impl<'a> UncommittedWidget<'a> {
         }
     }
 
-    fn file_line(&self, file: &UncommittedFile, style: Style) -> Line<'static> {
+    fn file_line(&self, file: &UncommittedFile, style: Style, width: usize) -> Line<'static> {
         let is_unmerged = file.status == StatusType::Unmerged;
         let status_color = match file.status {
             StatusType::Added => self.ctx.color_theme.detail_file_change_add_fg,
@@ -527,6 +555,14 @@ impl<'a> UncommittedWidget<'a> {
         } else {
             "".to_string()
         };
+        // One row per file: the stats and the status stay, the path loses its
+        // middle when the row is too narrow.
+        let fixed = (if is_unmerged { 2 } else { 0 })
+            + 2
+            + 1
+            + crate::text_fit::width(&add_str)
+            + crate::text_fit::width(&del_str);
+        let path = crate::text_fit::ellipsize_path(&file.path, width.saturating_sub(fixed).max(1));
         let mut spans: Vec<Span> = Vec::new();
         if is_unmerged {
             spans.push(Span::styled(
@@ -539,7 +575,7 @@ impl<'a> UncommittedWidget<'a> {
             Style::default().fg(status_color),
         ));
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(file.path.clone(), path_style));
+        spans.push(Span::styled(path, path_style));
         spans.push(Span::styled(
             add_str,
             Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
@@ -625,10 +661,13 @@ impl<'a> UncommittedWidget<'a> {
                 Style::default()
             };
             let key_style = style.add_modifier(Modifier::BOLD);
-            lines.push(Line::from(vec![
-                Span::styled(label.to_string(), style),
-                Span::styled(format!(" ({})", key), key_style),
-            ]));
+            lines.push(Line::from(crate::text_fit::ellipsize_spans(
+                vec![
+                    Span::styled(label.to_string(), style),
+                    Span::styled(format!(" ({})", key), key_style),
+                ],
+                action_inner.width as usize,
+            )));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));

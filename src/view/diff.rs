@@ -761,9 +761,24 @@ impl<'a> DiffView<'a> {
             // the "added-to" endpoint). The double-dot is replaced by " → "
             // for clarity. Falls back to the plain single-span title for any
             // other diff (single-commit, file diff, stash, uncommitted).
+            // The title is one row: its long part (a path, two refs) loses
+            // its middle so the stats and the closing rule always fit.
+            let stats_w = [("+", add_count), ("-", del_count)]
+                .iter()
+                .filter(|(_, n)| *n > 0)
+                .map(|(sign, n)| crate::text_fit::width(&format!("{sign}{n} ")))
+                .sum::<usize>();
+            let room = (diff_area.width as usize)
+                .saturating_sub(4 + 1 + stats_w + 3)
+                .max(1);
+            let title_text = fit_diff_title(&self.title, room);
             let mut title_spans: Vec<Span<'static>> =
                 if let Some(rest) = self.title.strip_prefix("Compare ") {
                     if let Some((older, newer)) = rest.split_once("..") {
+                        let each = room.saturating_sub("Compare ".len() + 3) / 2;
+                        let older = crate::text_fit::ellipsize_middle(older, each.max(1));
+                        let newer = crate::text_fit::ellipsize_middle(newer, each.max(1));
+                        let (older, newer) = (older.as_str(), newer.as_str());
                         vec![
                             Span::styled(
                                 "─── Compare ".to_string(),
@@ -792,7 +807,7 @@ impl<'a> DiffView<'a> {
                         ]
                     } else {
                         vec![Span::styled(
-                            format!("─── {} ", self.title),
+                            format!("─── {} ", title_text),
                             Style::default()
                                 .fg(self.ctx.color_theme.fg)
                                 .add_modifier(Modifier::BOLD),
@@ -800,7 +815,7 @@ impl<'a> DiffView<'a> {
                     }
                 } else {
                     vec![Span::styled(
-                        format!("─── {} ", self.title),
+                        format!("─── {} ", title_text),
                         Style::default()
                             .fg(self.ctx.color_theme.fg)
                             .add_modifier(Modifier::BOLD),
@@ -3177,6 +3192,23 @@ impl<'a> DiffView<'a> {
     }
 }
 
+/// `Diff: path` / `Stash: name` / any title, fitted in `room` columns: the
+/// path keeps its file name, the rest is shortened in the middle.
+fn fit_diff_title(title: &str, room: usize) -> String {
+    if crate::text_fit::width(title) <= room {
+        return title.to_string();
+    }
+    match title.split_once(": ") {
+        Some((prefix, rest)) => {
+            let left = room
+                .saturating_sub(crate::text_fit::width(prefix) + 2)
+                .max(1);
+            format!("{prefix}: {}", crate::text_fit::ellipsize_path(rest, left))
+        }
+        None => crate::text_fit::ellipsize_middle(title, room),
+    }
+}
+
 fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
     let mut lines = Vec::new();
     let mut remaining = text;
@@ -3199,26 +3231,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
 /// right-padded with spaces if `text` is shorter, keeping the column
 /// boundaries fixed in the side-by-side diff renderer.
 fn truncate_to_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    let count = text.chars().count();
-    if count <= max_width {
-        // Pad with spaces to reach exactly max_width cells.
-        let pad = max_width - count;
-        let mut out = String::with_capacity(text.len() + pad);
-        out.push_str(text);
-        for _ in 0..pad {
-            out.push(' ');
-        }
-        out
-    } else {
-        // Take max_width-1 chars + ellipsis. (max_width >= 1 here since we
-        // returned early on 0 above.)
-        let mut out: String = text.chars().take(max_width - 1).collect();
-        out.push('…');
-        out
-    }
+    crate::text_fit::pad_to_width(&crate::text_fit::ellipsize_end(text, max_width), max_width)
 }
 
 /// Pad an empty (or short) string to exactly `width` cells of spaces, used

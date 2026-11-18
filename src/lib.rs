@@ -23,6 +23,7 @@ mod popup;
 mod recents;
 mod shell;
 mod text_edit;
+mod text_fit;
 mod update;
 mod view;
 mod watcher;

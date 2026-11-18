@@ -4,12 +4,13 @@ use chrono::DateTime;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, StatefulWidget, Widget},
 };
 
 use crate::app::AppContext;
+use crate::text_fit::LabelledRows;
 
 #[derive(Debug, Default)]
 pub struct BranchDetailState {
@@ -165,7 +166,7 @@ impl StatefulWidget for BranchDetail<'_> {
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)])
                 .areas(meta_scroll_area);
 
-        let (mut label_lines, mut value_lines) = self.contents();
+        let (mut label_lines, mut value_lines) = self.contents(value_area.width);
 
         let content_height = meta_scroll_area.height as usize;
         state.update(value_lines.len(), content_height);
@@ -268,62 +269,68 @@ impl BranchDetail<'_> {
             if !key.is_empty() {
                 spans.push(Span::styled(format!(" ({})", key), key_style));
             }
-            lines.push(Line::from(spans));
+            // One row per action: a label too long for the panel ends with `…`.
+            lines.push(Line::from(crate::text_fit::ellipsize_spans(
+                spans,
+                action_inner.width as usize,
+            )));
         }
 
         let paragraph = Paragraph::new(lines).style(Style::default().fg(self.ctx.color_theme.fg));
         paragraph.render(action_inner, buf);
     }
 
-    fn contents(&self) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
-        let mut label_lines: Vec<Line> = Vec::new();
-        let mut value_lines: Vec<Line> = Vec::new();
+    fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
+        let theme = &self.ctx.color_theme;
+        let mut rows = LabelledRows::new(width, theme.detail_label_fg);
 
         // Branch name
-        label_lines.push(Line::from("   Branch: ").fg(self.ctx.color_theme.detail_label_fg));
-        value_lines.push(Line::from(Span::styled(
-            self.metadata.branch_name.as_str(),
-            Style::default()
-                .fg(self.ctx.color_theme.detail_name_fg)
-                .add_modifier(Modifier::BOLD),
-        )));
+        rows.row(
+            "   Branch: ",
+            Line::from(Span::styled(
+                self.metadata.branch_name.clone(),
+                Style::default()
+                    .fg(theme.detail_name_fg)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        );
 
         // Type
-        label_lines.push(Line::from("     Type: ").fg(self.ctx.color_theme.detail_label_fg));
         let type_str = if self.metadata.is_remote {
             "Remote Tracking Branch"
         } else {
             "Local Branch"
         };
-        value_lines.push(Line::from(type_str));
+        rows.row("     Type: ", Line::from(type_str));
 
         // Tip commit: hash + subject
-        label_lines.push(Line::from("      Tip: ").fg(self.ctx.color_theme.detail_label_fg));
-        if self.metadata.tip_hash.is_empty() {
-            value_lines.push(Line::from("(unknown)"));
+        let tip = if self.metadata.tip_hash.is_empty() {
+            Line::from("(unknown)")
         } else {
-            value_lines.push(Line::from(vec![
+            Line::from(vec![
                 Span::styled(
-                    self.metadata.tip_hash.as_str(),
-                    Style::default().fg(self.ctx.color_theme.detail_hash_fg),
+                    self.metadata.tip_hash.clone(),
+                    Style::default().fg(theme.detail_hash_fg),
                 ),
                 Span::raw(" "),
-                Span::raw(self.metadata.tip_commit_message.as_str()),
-            ]));
-        }
+                Span::raw(self.metadata.tip_commit_message.clone()),
+            ])
+        };
+        rows.row("      Tip: ", tip);
 
         // Author of tip commit
         if !self.metadata.tip_author.is_empty() {
-            label_lines.push(Line::from("   Author: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(Span::styled(
-                self.metadata.tip_author.as_str(),
-                Style::default().fg(self.ctx.color_theme.detail_name_fg),
-            )));
+            rows.row(
+                "   Author: ",
+                Line::from(Span::styled(
+                    self.metadata.tip_author.clone(),
+                    Style::default().fg(theme.detail_name_fg),
+                )),
+            );
         }
 
         // Date of tip commit, formatted with the user's configured format
         if !self.metadata.tip_date.is_empty() {
-            label_lines.push(Line::from("     Date: ").fg(self.ctx.color_theme.detail_label_fg));
             let formatted =
                 DateTime::parse_from_str(self.metadata.tip_date.trim(), "%Y-%m-%d %H:%M:%S %z")
                     .map(|dt| {
@@ -333,27 +340,28 @@ impl BranchDetail<'_> {
                             .format(&dt, self.ctx.core_config.date_time_local())
                     })
                     .unwrap_or_else(|_| self.metadata.tip_date.clone());
-            value_lines.push(Line::from(Span::styled(
-                formatted,
-                Style::default().fg(self.ctx.color_theme.detail_date_fg),
-            )));
+            rows.row(
+                "     Date: ",
+                Line::from(Span::styled(
+                    formatted,
+                    Style::default().fg(theme.detail_date_fg),
+                )),
+            );
         }
 
         if let Some(upstream) = &self.metadata.upstream {
-            label_lines.push(Line::from("   Remote: ").fg(self.ctx.color_theme.detail_label_fg));
-            value_lines.push(Line::from(upstream.as_str()));
+            rows.row("   Remote: ", Line::from(upstream.clone()));
         }
 
         let ahead_zero = self.metadata.ahead.is_empty() || self.metadata.ahead == "0";
         let behind_zero = self.metadata.behind.is_empty() || self.metadata.behind == "0";
 
         if !self.metadata.comparison_label.is_empty() || self.metadata.upstream.is_some() {
-            label_lines.push(Line::from("   Status: ").fg(self.ctx.color_theme.detail_label_fg));
-            if ahead_zero && behind_zero {
-                value_lines.push(Line::from(Span::styled(
+            let status = if ahead_zero && behind_zero {
+                Line::from(Span::styled(
                     "\u{2713} up to date",
-                    Style::default().fg(self.ctx.color_theme.status_success_fg),
-                )));
+                    Style::default().fg(theme.status_success_fg),
+                ))
             } else {
                 let ahead_num = if ahead_zero {
                     "0"
@@ -365,26 +373,28 @@ impl BranchDetail<'_> {
                 } else {
                     self.metadata.behind.as_str()
                 };
-                value_lines.push(Line::from(vec![
+                Line::from(vec![
                     Span::styled(
                         format!("\u{2191} {}", ahead_num),
-                        Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
+                        Style::default().fg(theme.detail_file_change_add_fg),
                     ),
                     Span::raw(" \u{00b7} "),
                     Span::styled(
                         format!("\u{2193} {}", behind_num),
-                        Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                        Style::default().fg(theme.detail_file_change_delete_fg),
                     ),
-                ]));
-            }
+                ])
+            };
+            rows.row("   Status: ", status);
 
             if !self.metadata.comparison_label.is_empty() {
-                label_lines
-                    .push(Line::from("       vs: ").fg(self.ctx.color_theme.detail_label_fg));
-                value_lines.push(Line::from(self.metadata.comparison_label.as_str()));
+                rows.row(
+                    "       vs: ",
+                    Line::from(self.metadata.comparison_label.clone()),
+                );
             }
         }
 
-        (label_lines, value_lines)
+        (rows.labels, rows.values)
     }
 }

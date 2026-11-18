@@ -192,13 +192,55 @@ pub struct RefList {
     ctx: Rc<AppContext>,
 }
 
+thread_local! {
+    /// Width of the panel the tree is being built for.
+    static PANEL_WIDTH: std::cell::Cell<usize> = const { std::cell::Cell::new(usize::MAX) };
+}
+
+/// A tree row is one line: a name too long for the panel loses its middle
+/// instead of running off the edge. `depth` is the indentation of the row;
+/// the border, the padding and the fold symbol take the rest.
+fn fit_row(line: Line<'static>, depth: usize) -> Line<'static> {
+    let panel = PANEL_WIDTH.with(|w| w.get());
+    if panel == usize::MAX {
+        return line;
+    }
+    let budget = panel.saturating_sub(5 + 2 * depth).max(1);
+    let total: usize = line
+        .spans
+        .iter()
+        .map(|s| crate::text_fit::width(s.content.as_ref()))
+        .sum();
+    if total <= budget {
+        return line;
+    }
+    let mut spans = line.spans;
+    let Some(last) = spans.pop() else {
+        return Line::from(spans);
+    };
+    let before: usize = spans
+        .iter()
+        .map(|s| crate::text_fit::width(s.content.as_ref()))
+        .sum();
+    let name = crate::text_fit::ellipsize_middle(
+        last.content.as_ref(),
+        budget.saturating_sub(before).max(1),
+    );
+    spans.push(Span::styled(name, last.style));
+    Line::from(spans)
+}
+
 impl RefList {
+    /// `panel_width` is the width of the area the tree is drawn in.
     pub fn new(
         refs: &[Ref],
         worktrees: &[crate::git::actions::WorktreeInfo],
         ctx: Rc<AppContext>,
+        panel_width: u16,
     ) -> RefList {
+        PANEL_WIDTH.with(|w| w.set(panel_width as usize));
         let items = build_ref_tree_items(refs, worktrees, &ctx);
+        PANEL_WIDTH.with(|w| w.set(usize::MAX));
         RefList { items, ctx }
     }
 }
@@ -277,7 +319,8 @@ fn build_ref_tree_items(
     sort_tag_tree_nodes(&mut tag_nodes);
     sort_stash_tree_nodes(&mut stash_nodes);
 
-    let branch_items = branch_tree_nodes_to_tree_items(branch_nodes, branch_color_map, color_theme);
+    let branch_items =
+        branch_tree_nodes_to_tree_items(branch_nodes, branch_color_map, color_theme, 1);
     let mut remote_items =
         remote_tree_nodes_to_tree_items(remote_nodes, branch_color_map, color_theme, 0);
     remote_items.push(TreeItem::new_leaf(
@@ -289,7 +332,7 @@ fn build_ref_tree_items(
                 .add_modifier(ratatui::style::Modifier::BOLD),
         )]),
     ));
-    let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme);
+    let tag_items = tag_tree_nodes_to_tree_items(tag_nodes, color_theme, 1);
     let stash_items = stash_tree_nodes_to_tree_items(stash_nodes, color_theme);
 
     // Build worktree items
@@ -347,7 +390,10 @@ fn build_ref_tree_items(
                 ratatui::style::Style::default().fg(color_theme.detail_label_fg),
             ));
 
-            TreeItem::new_leaf(wt.path.clone(), ratatui::text::Line::from(spans))
+            TreeItem::new_leaf(
+                wt.path.clone(),
+                fit_row(ratatui::text::Line::from(spans), 1),
+            )
         })
         .collect();
 
@@ -471,6 +517,7 @@ fn branch_tree_nodes_to_tree_items(
     nodes: Vec<RefTreeNode>,
     branch_color_map: &rustc_hash::FxHashMap<String, Color>,
     color_theme: &ColorTheme,
+    depth: usize,
 ) -> Vec<TreeItem<'static, String>> {
     let mut items = Vec::new();
     for node in nodes {
@@ -489,15 +536,24 @@ fn branch_tree_nodes_to_tree_items(
                 Span::raw("⎇ ").fg(fg).bold(),
                 Span::raw(node.name).fg(fg).bold(),
             ]);
-            items.push(tree_item_with_line(node.identifier, line, Vec::new()));
+            items.push(tree_item_with_line(
+                node.identifier,
+                line,
+                Vec::new(),
+                depth,
+            ));
         } else {
-            let children =
-                branch_tree_nodes_to_tree_items(node.children, branch_color_map, color_theme);
+            let children = branch_tree_nodes_to_tree_items(
+                node.children,
+                branch_color_map,
+                color_theme,
+                depth + 1,
+            );
             let line = Line::from(vec![
                 Span::raw("⎇ ").fg(fg).bold(),
                 Span::raw(node.name).fg(fg).bold(),
             ]);
-            items.push(tree_item_with_line(node.identifier, line, children));
+            items.push(tree_item_with_line(node.identifier, line, children, depth));
         }
     }
     items
@@ -521,7 +577,12 @@ fn remote_tree_nodes_to_tree_items(
                 Span::raw("⎇ ").fg(fg).bold(),
                 Span::raw(node.name).fg(fg).bold(),
             ]);
-            items.push(tree_item_with_line(node.identifier, line, Vec::new()));
+            items.push(tree_item_with_line(
+                node.identifier,
+                line,
+                Vec::new(),
+                depth + 1,
+            ));
         } else {
             let fg = if depth == 0 {
                 None
@@ -545,7 +606,12 @@ fn remote_tree_nodes_to_tree_items(
                     Span::raw(node.name).fg(fg).bold(),
                 ])
             };
-            items.push(tree_item_with_line(node.identifier, line, children));
+            items.push(tree_item_with_line(
+                node.identifier,
+                line,
+                children,
+                depth + 1,
+            ));
         }
     }
     items
@@ -554,6 +620,7 @@ fn remote_tree_nodes_to_tree_items(
 fn tag_tree_nodes_to_tree_items(
     nodes: Vec<RefTreeNode>,
     color_theme: &ColorTheme,
+    depth: usize,
 ) -> Vec<TreeItem<'static, String>> {
     let mut items = Vec::new();
     for node in nodes {
@@ -562,14 +629,19 @@ fn tag_tree_nodes_to_tree_items(
                 Span::raw("🏷  ").fg(color_theme.list_ref_tag_fg).bold(),
                 Span::raw(node.name).fg(color_theme.list_ref_tag_fg).bold(),
             ]);
-            items.push(tree_item_with_line(node.identifier, line, Vec::new()));
+            items.push(tree_item_with_line(
+                node.identifier,
+                line,
+                Vec::new(),
+                depth,
+            ));
         } else {
-            let children = tag_tree_nodes_to_tree_items(node.children, color_theme);
+            let children = tag_tree_nodes_to_tree_items(node.children, color_theme, depth + 1);
             let line = Line::from(vec![
                 Span::raw("🏷  ").fg(color_theme.list_ref_tag_fg).bold(),
                 Span::raw(node.name).fg(color_theme.list_ref_tag_fg).bold(),
             ]);
-            items.push(tree_item_with_line(node.identifier, line, children));
+            items.push(tree_item_with_line(node.identifier, line, children, depth));
         }
     }
     items
@@ -587,7 +659,7 @@ fn stash_tree_nodes_to_tree_items(
                 .fg(color_theme.list_ref_stash_fg)
                 .bold(),
         ]);
-        items.push(tree_item_with_line(node.identifier, line, Vec::new()));
+        items.push(tree_item_with_line(node.identifier, line, Vec::new(), 1));
     }
     items
 }
@@ -641,6 +713,7 @@ fn tree_item_with_line(
     identifier: String,
     line: Line<'static>,
     children: Vec<TreeItem<'static, String>>,
+    depth: usize,
 ) -> TreeItem<'static, String> {
-    TreeItem::new(identifier, line, children).unwrap()
+    TreeItem::new(identifier, fit_row(line, depth), children).unwrap()
 }

@@ -548,6 +548,10 @@ struct PrListColumns {
     /// `LABEL_CHIP_WIDTH` cols wide (2 letters + 2 padding spaces).
     labels: usize,
     author: usize,
+    /// Most columns the source and the target branch may take: a long branch
+    /// name loses its middle instead of squeezing the title out.
+    head: usize,
+    base: usize,
 }
 
 /// How many label chips to show inline in the list, max. Beyond
@@ -590,20 +594,23 @@ impl PrListColumns {
             .unwrap_or(2);
         let author = items
             .iter()
-            .map(|pr| pr.author.chars().count())
+            .map(|pr| crate::text_fit::width(&pr.author))
             .max()
             .unwrap_or(0)
-            .max("AUTHOR".chars().count());
+            .max("AUTHOR".chars().count())
+            .min((available_width / 6).max(10));
         let max_head = items
             .iter()
-            .map(|pr| strip_head_owner(&pr.head_label).chars().count())
+            .map(|pr| crate::text_fit::width(strip_head_owner(&pr.head_label)))
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .min((available_width / 5).max(10));
         let max_base = items
             .iter()
-            .map(|pr| pr.base_ref.chars().count())
+            .map(|pr| crate::text_fit::width(&pr.base_ref))
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .min((available_width / 8).max(8));
         let max_title = items
             .iter()
             .map(|pr| pr.title.chars().count())
@@ -638,7 +645,11 @@ impl PrListColumns {
             + Self::ARROW
             + max_base;
         let remaining = available_width.saturating_sub(fixed);
-        let title = remaining.min(max_title.max(1)).max(1);
+        // The title keeps at least 20 columns: when the window is narrow the
+        // branches give way first, it is the title that says what a PR is.
+        let title = remaining
+            .min(max_title.max(1))
+            .max(20.min(max_title.max(1)));
 
         Self {
             state,
@@ -646,6 +657,8 @@ impl PrListColumns {
             title,
             labels,
             author,
+            head: max_head,
+            base: max_base,
         }
     }
 }
@@ -671,27 +684,54 @@ fn strip_head_owner(label: &str) -> &str {
 /// Left-align `s` into a cell of exactly `width` columns. Truncates
 /// with `…` if it overflows; right-pads with spaces otherwise.
 pub(crate) fn fit_cell(s: &str, width: usize) -> String {
-    let count = s.chars().count();
-    if count == width {
-        s.to_string()
-    } else if count < width {
-        let mut out = String::with_capacity(s.len() + (width - count));
-        out.push_str(s);
-        for _ in 0..(width - count) {
-            out.push(' ');
-        }
-        out
-    } else if width == 0 {
-        String::new()
-    } else {
-        // Truncate to width - 1, then append `…`. Guarded for the
-        // degenerate width=1 case where `…` itself takes the whole cell.
-        let take = width.saturating_sub(1);
-        let mut out: String = s.chars().take(take).collect();
-        out.push('…');
-        out
-    }
+    // Display width, so a wide character counts for two columns.
+    crate::text_fit::pad_to_width(&crate::text_fit::ellipsize_end(s, width), width)
 }
+
+/// How many rows the title of the opened PR needs above its info row: 0 when
+/// it fits beside the state, number, author and branches, else the number of
+/// rows it wraps onto.
+pub(crate) fn pr_title_rows(
+    theme: &crate::color::ColorTheme,
+    detail: &PullRequestDetail,
+    width: usize,
+    avatars_on: bool,
+) -> usize {
+    let w = |s: &str| console::measure_text_width(s);
+    let state = state_word_span(theme, detail.state, detail.draft);
+    let badge: usize = mergeability_badge(theme, detail.mergeability)
+        .iter()
+        .map(|s| w(s.content.as_ref()))
+        .sum();
+    // leading "  " + state + "  " + #num + "  " + title + " · by " + author
+    // + " · " + head + " → " + base + gap + badge + trailing.
+    let fixed = 2
+        + w(state.content.as_ref())
+        + 2
+        + w(&format!("#{}", detail.number))
+        + 2
+        + 3
+        + 3
+        + if avatars_on { 3 } else { 0 }
+        + w(&detail.author)
+        + 3
+        + w(strip_head_owner(&detail.head_label))
+        + 3
+        + w(&detail.base_ref)
+        + 2
+        + badge
+        + 2;
+    let room = width.saturating_sub(fixed);
+    if w(&detail.title) <= room {
+        return 0;
+    }
+    crate::text_fit::wrap_plain(&detail.title, width.saturating_sub(4))
+        .len()
+        .min(MAX_TITLE_ROWS)
+}
+
+/// Most rows the title of a PR or an issue may take above its info row.
+pub(crate) const MAX_TITLE_ROWS: usize = 4;
 
 impl<'a> PullRequestsView<'a> {
     pub fn new(
@@ -4144,10 +4184,15 @@ impl<'a> PullRequestsView<'a> {
         // this frame renders detail mode) before painting fresh.
         self.pending_avatar_paints.clear();
 
-        let banner_height: u16 = if self.last_error.is_some() && area.height > 6 {
-            3
-        } else {
-            0
+        // The error wraps onto as many rows as it needs (at most a third of
+        // the page): a network error carries a long URL.
+        let banner_height: u16 = match &self.last_error {
+            Some(msg) if area.height > 6 => {
+                let rows =
+                    crate::text_fit::wrap_plain(msg, (area.width as usize).saturating_sub(2)).len();
+                (rows + 2).min((area.height as usize / 3).max(3)) as u16
+            }
+            _ => 0,
         };
         let [header_area, banner_area, body_area] = Layout::vertical([
             Constraint::Length(2),
@@ -4363,11 +4408,20 @@ impl<'a> PullRequestsView<'a> {
             )));
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let p = Paragraph::new(Span::styled(
-            msg.clone(),
-            Style::default().fg(theme.status_error_fg),
-        ));
-        f.render_widget(p, inner);
+        let rows: Vec<Line> = crate::text_fit::cap_rows(
+            crate::text_fit::wrap_plain(msg, inner.width as usize),
+            inner.height as usize,
+            inner.width as usize,
+        )
+        .into_iter()
+        .map(|row| {
+            Line::from(Span::styled(
+                row,
+                Style::default().fg(theme.status_error_fg),
+            ))
+        })
+        .collect();
+        f.render_widget(Paragraph::new(rows), inner);
     }
 
     fn render_list(&mut self, f: &mut Frame, area: Rect) {
@@ -4680,14 +4734,17 @@ impl<'a> PullRequestsView<'a> {
             // instead of `branch       → main`. Fork prefix `user:` is
             // stripped, the author column already shows who opened it.
             Span::styled(
-                strip_head_owner(&pr.head_label).to_string(),
+                crate::text_fit::ellipsize_middle(
+                    strip_head_owner(&pr.head_label),
+                    cols.head.max(1),
+                ),
                 Style::default()
                     .fg(theme.list_ref_branch_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" → ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(
-                pr.base_ref.clone(),
+                crate::text_fit::ellipsize_middle(&pr.base_ref, cols.base.max(1)),
                 Style::default()
                     .fg(theme.list_ref_remote_branch_fg)
                     .add_modifier(Modifier::BOLD),
@@ -4737,10 +4794,29 @@ impl<'a> PullRequestsView<'a> {
             .as_ref()
             .map(|d| !d.labels.is_empty())
             .unwrap_or(false);
-        let labels_height: u16 = if has_labels { 1 } else { 0 };
+        let labels_height: u16 = if has_labels {
+            cached_detail
+                .as_ref()
+                .map(|d| label_chip_rows(&d.labels, area.width as usize, 2).len())
+                .unwrap_or(1) as u16
+        } else {
+            0
+        };
+        let avatars_on_now = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        let title_rows = cached_detail
+            .as_ref()
+            .map(|d| {
+                pr_title_rows(
+                    &self.ctx.color_theme,
+                    d,
+                    area.width as usize,
+                    avatars_on_now,
+                )
+            })
+            .unwrap_or(0);
         let [sub_header_area, labels_area, header_divider_area, tab_bar_area, tab_content_area] =
             Layout::vertical([
-                Constraint::Length(1),
+                Constraint::Length(1 + title_rows as u16),
                 Constraint::Length(labels_height),
                 Constraint::Length(1),
                 Constraint::Length(2),
@@ -5703,6 +5779,8 @@ impl<'a> PullRequestsView<'a> {
         let mut spans: Vec<Span<'static>> = Vec::new();
         spans.push(Span::raw("  "));
         let mut badge_spans: Vec<Span<'static>> = Vec::new();
+        // The title, when it has to wrap above the info row.
+        let mut title_rows: Vec<String> = Vec::new();
         // Captured during span construction so we can paint the
         // avatar after `f.render_widget` without re-measuring.
         let mut avatar_paint: Option<(String, u16)> = None;
@@ -5711,10 +5789,6 @@ impl<'a> PullRequestsView<'a> {
             // the right and let the title flex/ellipsis to fit. Without
             // this, a long title pushes the badge off-screen entirely.
             badge_spans = mergeability_badge(theme, detail.mergeability);
-            let badge_width: usize = badge_spans
-                .iter()
-                .map(|s| console::measure_text_width(s.content.as_ref()))
-                .sum();
 
             // Build the non-title spans separately so we can size the
             // title relative to actual terminal width.
@@ -5750,43 +5824,31 @@ impl<'a> PullRequestsView<'a> {
             //   + "  " (2) + [title here] + " · " (3) + "by " (3) + author
             //   + " · " (3) + head + " → " (3) + base + min_gap (2)
             //   + badge + trailing (2).
-            let trailing_pad = 2;
-            let min_gap = 2;
-            let measure = |s: &Span<'_>| console::measure_text_width(s.content.as_ref());
-            // +3 cells reserved between `by ` and the author for the
-            // GitHub avatar (2 cells image + 1 cell breathing space)
-            // only when avatars are enabled, otherwise the line stays
-            // tight and no empty gap appears.
-            let avatar_pad: usize = if avatars_on { 3 } else { 0 };
-            let fixed_overhead = 2
-                + measure(&state_span)
-                + 2
-                + measure(&num_span)
-                + 2
-                + 3
-                + measure(&by_span)
-                + avatar_pad
-                + measure(&author_span)
-                + 3
-                + measure(&head_span)
-                + 3
-                + measure(&base_span)
-                + min_gap
-                + badge_width
-                + trailing_pad;
-            let title_budget = (area.width as usize).saturating_sub(fixed_overhead).max(8);
-            let title_truncated = truncate(&detail.title, title_budget);
+            // A title that does not fit next to the rest goes on its own
+            // rows above it, wrapped, instead of being cut.
+            let on_own_rows = pr_title_rows(theme, detail, area.width as usize, avatars_on) > 0;
 
             let dot_sep = || Span::styled(" · ", Style::default().fg(theme.detail_label_fg));
 
             spans.push(state_span);
             spans.push(Span::raw("  "));
             spans.push(num_span);
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                title_truncated,
-                Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
-            ));
+            if on_own_rows {
+                title_rows = crate::text_fit::cap_rows(
+                    crate::text_fit::wrap_plain(
+                        &detail.title,
+                        (area.width as usize).saturating_sub(4),
+                    ),
+                    MAX_TITLE_ROWS,
+                    (area.width as usize).saturating_sub(4),
+                );
+            } else {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    detail.title.clone(),
+                    Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                ));
+            }
             spans.push(dot_sep());
             spans.push(by_span);
             if avatars_on {
@@ -5837,13 +5899,38 @@ impl<'a> PullRequestsView<'a> {
         // a dedicated row for it that sits below the optional labels
         // chip row, so the order on screen is always:
         //   info → [labels] → divider → tabs → divider → content.
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let above = title_rows.len() as u16;
+        if above > 0 {
+            let theme = &self.ctx.color_theme;
+            let lines: Vec<Line> = title_rows
+                .into_iter()
+                .map(|row| {
+                    Line::from(Span::styled(
+                        format!("  {row}"),
+                        Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+                    ))
+                })
+                .collect();
+            f.render_widget(
+                Paragraph::new(lines),
+                Rect {
+                    height: above,
+                    ..area
+                },
+            );
+        }
+        let info_area = Rect {
+            y: area.y + above,
+            height: 1,
+            ..area
+        };
+        f.render_widget(Paragraph::new(Line::from(spans)), info_area);
         if let Some((login, col)) = avatar_paint {
             self.pending_avatar_paints.push((
                 PaintedAvatar {
                     login,
                     screen_x: area.x + col,
-                    screen_y: area.y,
+                    screen_y: area.y + above,
                     is_selected: false,
                 },
                 self.ctx.color_theme.bg,
@@ -5857,14 +5944,11 @@ impl<'a> PullRequestsView<'a> {
     /// labels (otherwise the row is collapsed by the layout).
     fn render_pr_labels_row(&self, f: &mut Frame, area: Rect, detail: Option<&PullRequestDetail>) {
         let Some(detail) = detail else { return };
-        let mut spans: Vec<Span<'static>> = vec![Span::raw("  ")];
-        for (i, lab) in detail.labels.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw(" "));
-            }
-            spans.extend(label_chip_spans_local(lab));
-        }
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        let rows: Vec<Line> = label_chip_rows(&detail.labels, area.width as usize, 2)
+            .into_iter()
+            .map(Line::from)
+            .collect();
+        f.render_widget(Paragraph::new(rows), area);
     }
 
     /// Tab bar: clickable list of [Conversation, Commits, Checks, Files]
@@ -7846,8 +7930,13 @@ fn file_line(
             Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
+        // The path keeps its file name: it loses its middle, not its end.
         Span::styled(
-            fit_cell(&f.filename, cols.filename),
+            {
+                let name = crate::text_fit::ellipsize_path(&f.filename, cols.filename);
+                let pad = cols.filename.saturating_sub(crate::text_fit::width(&name));
+                format!("{name}{}", " ".repeat(pad))
+            },
             Style::default().fg(theme.fg),
         ),
         Span::raw("  "),
@@ -7861,6 +7950,36 @@ fn file_line(
             Style::default().fg(theme.detail_file_change_delete_fg),
         ),
     ])
+}
+
+/// The label chips laid out in rows that fit `width`: a PR with many labels
+/// gets several rows instead of a row that runs off the screen. `indent` is
+/// the left margin of every row.
+pub(crate) fn label_chip_rows(
+    labels: &[crate::github::pr::Label],
+    width: usize,
+    indent: usize,
+) -> Vec<Vec<Span<'static>>> {
+    let mut rows: Vec<Vec<Span<'static>>> = vec![vec![Span::raw(" ".repeat(indent))]];
+    let mut used = indent;
+    for label in labels {
+        let chip = label_chip_spans_local(label);
+        let w: usize = chip
+            .iter()
+            .map(|s| console::measure_text_width(s.content.as_ref()))
+            .sum();
+        let first_on_row = used == indent;
+        if !first_on_row && used + 1 + w > width {
+            rows.push(vec![Span::raw(" ".repeat(indent))]);
+            used = indent;
+        } else if !first_on_row {
+            rows.last_mut().unwrap().push(Span::raw(" "));
+            used += 1;
+        }
+        rows.last_mut().unwrap().extend(chip);
+        used += w;
+    }
+    rows
 }
 
 /// Render a single label as a GitHub-style coloured chip ` name `,
@@ -9371,10 +9490,5 @@ fn short_relative_iso(iso: &str) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{}…", cut)
-    }
+    crate::text_fit::ellipsize_end(s, max)
 }

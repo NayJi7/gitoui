@@ -2383,7 +2383,7 @@ impl CommitList<'_> {
                 items.push(self.render_uncommitted_commit_message(i, commit_info, state));
                 continue;
             }
-            let (mut spans, hit_areas) = refs_spans(
+            let (mut spans, mut hit_areas) = refs_spans(
                 commit_info,
                 state.head,
                 &state.search_matches[state.offset + i].refs,
@@ -2392,6 +2392,21 @@ impl CommitList<'_> {
                 state.hovered_branch.as_deref(),
                 state.hovered_tag.as_deref(),
             );
+
+            // The refs never take more than half of the column: a long branch
+            // name ends with `…` and the subject keeps its room. The areas
+            // that can be clicked follow what is drawn.
+            let refs_cap = (max_width / 2).max(12);
+            if spans.iter().map(|s| s.width()).sum::<usize>() > refs_cap {
+                spans = crate::text_fit::ellipsize_spans(spans, refs_cap);
+                hit_areas.retain_mut(|hit| {
+                    if hit.start >= refs_cap {
+                        return false;
+                    }
+                    hit.end = hit.end.min(refs_cap);
+                    true
+                });
+            }
 
             // Store hit areas with absolute positions
             let base_x = area.x + 1; // +1 for leading space in to_commit_list_item
@@ -3178,7 +3193,6 @@ struct CommitListColumnWidths {
 }
 
 const AUTHOR_MIN_WIDTH: u16 = 7;
-const DATE_MIN_WIDTH: u16 = 7;
 const AUTHOR_MAX_WIDTH: u16 = 24;
 const DATE_MAX_WIDTH: u16 = 22;
 
@@ -3253,13 +3267,8 @@ fn calc_cell_widths(
         let reduce_by = overflow.min(reducible);
         author_cell_width = author_cell_width.saturating_sub(reduce_by);
     }
-    if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
-        let overflow = fixed_total(author_cell_width, date_cell_width, hash_cell_width)
-            .saturating_sub(area_width);
-        let reducible = date_cell_width.saturating_sub(DATE_MIN_WIDTH);
-        let reduce_by = overflow.min(reducible);
-        date_cell_width = date_cell_width.saturating_sub(reduce_by);
-    }
+    // The date is shown whole or not at all: a date cut to `18/11/` reads
+    // like another date.
     if fixed_total(author_cell_width, date_cell_width, hash_cell_width) > area_width {
         hash_cell_width = 0;
     }
@@ -3391,7 +3400,8 @@ mod tests {
                 Constraint::Min(0),
                 Constraint::Length(0),
                 Constraint::Length(0),
-                Constraint::Length(7),
+                // The date is whole or hidden, never cut to a few characters.
+                Constraint::Length(0),
             ]
         );
     }

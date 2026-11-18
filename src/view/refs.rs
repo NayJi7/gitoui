@@ -181,7 +181,12 @@ impl<'a> RefsView<'a> {
 
         self.render_refs_header(f, header_area);
 
-        let ref_list = RefList::new(&self.refs, &self.worktrees, self.ctx.clone());
+        let ref_list = RefList::new(
+            &self.refs,
+            &self.worktrees,
+            self.ctx.clone(),
+            refs_list_area.width,
+        );
         f.render_stateful_widget(ref_list, refs_list_area, &mut self.ref_list_state);
     }
 

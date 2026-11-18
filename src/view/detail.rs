@@ -843,36 +843,21 @@ impl<'a> DetailView<'a> {
         }
     }
 
+    /// The row of the commit panel where the list of changed files starts.
+    /// It is the widget itself that says so: wrapped values move it with the
+    /// width of the panel.
     fn compute_changes_start_line(&self) -> usize {
-        let mut count = 0;
-        count += 2; // author name + date
-        if self.commit.author_name != self.commit.committer_name
-            || self.commit.author_email != self.commit.committer_email
-            || self.commit.author_date != self.commit.committer_date
-        {
-            count += 2; // committer name + date
-        }
-        count += 1; // SHA
-        if !self.commit.parent_commit_hashes.is_empty() {
-            count += 1; // Parents
-        }
-        if self.refs.iter().any(|r| {
-            matches!(
-                r,
-                Ref::Branch { .. } | Ref::RemoteBranch { .. } | Ref::Tag { .. }
-            )
-        }) {
-            count += 1; // Refs
-        }
-        count += 1; // divider
-        count += 1; // commit message (subject)
-                    // Body lines come straight after the subject, no separator row
-                    // since commit_message_lines() stopped pushing one. Counting an
-                    // empty line here used to push hover detection 1 row off.
-        if !self.commit.body.is_empty() {
-            count += self.commit.body.lines().count();
-        }
-        count += 1; // divider before changes
-        count
+        let Some(area) = self.detail_area else {
+            return 0;
+        };
+        CommitDetail::new(
+            &self.commit,
+            &self.changes,
+            &self.refs,
+            self.ctx.clone(),
+            self.head_branch_name.clone(),
+            self.is_head_commit(),
+        )
+        .changes_start_in(area)
     }
 }

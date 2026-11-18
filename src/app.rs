@@ -2333,7 +2333,8 @@ impl App<'_> {
 
     fn prepare_render(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
         let area: Rect = terminal.size()?.into();
-        let [_, view_area, _, _] = split_app_areas_with_header(area);
+        let status_rows = self.notification_rows(area.width).len().max(1) as u16;
+        let [_, view_area, _, _] = split_app_areas_with_header(area, status_rows);
         self.update_state(view_area);
         if matches!(self.view, View::Terminal(_)) {
             if let Some(session) = self.shell.session() {
@@ -2834,8 +2835,9 @@ impl App<'_> {
             .bg(self.ctx.color_theme.bg);
         f.render_widget(base, f.area());
 
+        let notification = self.notification_rows(f.area().width);
         let [header_area, view_area, gap_area, status_line_area] =
-            split_app_areas_with_header(f.area());
+            split_app_areas_with_header(f.area(), notification.len().max(1) as u16);
 
         self.update_state(view_area);
 
@@ -2857,7 +2859,30 @@ impl App<'_> {
         let sep_span = Span::styled("╌".repeat(gap_area.width as usize), sep_style);
         f.render_widget(Paragraph::new(Line::from(sep_span)), gap_area);
 
-        self.render_status_line(f, status_line_area);
+        if notification.len() > 1 {
+            // An error or a warning too long for one row is wrapped over
+            // the rows the footer grew by, not cut.
+            let (color, bold) = match &self.app_status.status_line {
+                StatusLine::NotificationError(_) => (self.ctx.color_theme.status_error_fg, true),
+                _ => (self.ctx.color_theme.status_warn_fg, true),
+            };
+            let mut style = Style::default().fg(color);
+            if bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            let lines: Vec<Line> = notification
+                .into_iter()
+                .map(|row| Line::from(Span::styled(row, style)))
+                .collect();
+            f.render_widget(
+                Paragraph::new(lines)
+                    .style(Style::default().bg(self.ctx.color_theme.bg))
+                    .block(Block::default().padding(Padding::horizontal(1))),
+                status_line_area,
+            );
+        } else {
+            self.render_status_line(f, status_line_area);
+        }
 
         // Dir-input caret: a "block" cursor painted directly into the
         // buffer, we overwrite the char that sits at the insertion point
@@ -3714,7 +3739,13 @@ impl App<'_> {
                 }
             };
 
-            let shortcut_display_width = shortcut_text.chars().count() as u16;
+            // The hints never push the HEAD info out: they lose their last
+            // entries first when the window is narrow.
+            let shortcut_text = crate::text_fit::fit_hints(
+                &shortcut_text,
+                (area.width as usize).saturating_sub(4 + 14),
+            );
+            let shortcut_display_width = crate::text_fit::width(&shortcut_text) as u16;
             let right_constraint = Constraint::Length(shortcut_display_width + 4);
             let [left_area, right_area] =
                 Layout::horizontal([Constraint::Min(0), right_constraint]).areas(area);
@@ -3756,6 +3787,10 @@ impl App<'_> {
                         dim_text,
                     )]),
                 };
+                let config_hint_line = Line::from(crate::text_fit::ellipsize_spans(
+                    config_hint_line.spans,
+                    (left_area.width as usize).saturating_sub(2),
+                ));
                 let config_hint_paragraph = Paragraph::new(config_hint_line)
                     .style(Style::default().bg(self.ctx.color_theme.bg))
                     .block(Block::default().padding(Padding::horizontal(1)));
@@ -3927,6 +3962,17 @@ impl App<'_> {
             // (Numeric prefix moved to the header, left of the logo.)
         }
 
+        // One row: what does not fit ends with a `…`, except what is being
+        // typed, which slides so the cursor stays in view.
+        let room = (status_area.width as usize).saturating_sub(2);
+        let mut cursor_col: Option<u16> = None;
+        let spans = if let StatusLine::Input(_, Some(cp), _) = &self.app_status.status_line {
+            let (spans, col) = crate::text_fit::scroll_spans_to_cursor(spans, room, *cp as usize);
+            cursor_col = Some(col as u16);
+            spans
+        } else {
+            crate::text_fit::ellipsize_spans(spans, room)
+        };
         let line = Line::from(spans);
         let paragraph = Paragraph::new(line)
             .style(Style::default().bg(self.ctx.color_theme.bg))
@@ -3934,7 +3980,7 @@ impl App<'_> {
         f.render_widget(paragraph, status_area);
 
         if let StatusLine::Input(_, Some(cursor_pos), _) = &self.app_status.status_line {
-            let (x, y) = (area.x + cursor_pos + 1, area.y);
+            let (x, y) = (area.x + cursor_col.unwrap_or(*cursor_pos) + 1, area.y);
             match &self.ctx.ui_config.common.cursor_type {
                 CursorType::Native => {
                     f.set_cursor_position((x, y));
@@ -4197,19 +4243,46 @@ fn shorten_path_prefix(prefix: &str, max: usize) -> String {
     }
 }
 
-fn split_app_areas_with_header(area: Rect) -> [Rect; 4] {
+fn split_app_areas_with_header(area: Rect, status_rows: u16) -> [Rect; 4] {
     let [header, rest] =
         Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(0)]).areas(area);
     let [view, gap, status] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(status_rows.max(1)),
     ])
     .areas(rest);
     [header, view, gap, status]
 }
 
+/// Most rows a notification may take at the bottom of the screen.
+const MAX_NOTIFICATION_ROWS: usize = 3;
+
 impl<'a> App<'a> {
+    /// The rows of the notification in the footer when it is an error or a
+    /// warning too long for one row (empty otherwise: the footer keeps its
+    /// single row). Past `MAX_NOTIFICATION_ROWS` the last row ends with `…`.
+    fn notification_rows(&self, width: u16) -> Vec<String> {
+        let text = match &self.app_status.status_line {
+            StatusLine::NotificationError(msg) => format!("ERROR: {msg}"),
+            StatusLine::NotificationWarn(msg) => msg.clone(),
+            _ => return Vec::new(),
+        };
+        // 1 column of padding on each side.
+        let room = (width as usize).saturating_sub(2).max(1);
+        let mut rows = crate::text_fit::wrap_plain(&text, room);
+        if rows.len() > MAX_NOTIFICATION_ROWS {
+            rows.truncate(MAX_NOTIFICATION_ROWS);
+            if let Some(last) = rows.last_mut() {
+                *last = crate::text_fit::ellipsize_end(&format!("{last} …"), room);
+            }
+        }
+        if rows.len() <= 1 {
+            return Vec::new();
+        }
+        rows
+    }
+
     fn update_state(&mut self, view_area: Rect) {
         self.app_status.view_area = view_area;
     }

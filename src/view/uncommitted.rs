@@ -302,7 +302,10 @@ impl<'a> UncommittedView<'a> {
             let mut clicked_on_file = false;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
                 // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + [banner?] + content
-                let banner_offset = if self.has_conflicts() { 1 } else { 0 };
+                let banner_offset = crate::widget::uncommitted::banner_rows(
+                    detail_area.width,
+                    self.conflict_count(),
+                ) as u16;
                 let visible_row = row.saturating_sub(detail_area.y + 4 + banner_offset) as usize;
 
                 // Content layout: each section takes N lines (N=1 if empty, N=len if files)
@@ -414,7 +417,10 @@ impl<'a> UncommittedView<'a> {
             let files_area_x_end = detail_area.x + (detail_area.width as f32 * 0.6) as u16;
             if col >= detail_area.x && col < files_area_x_end && row >= detail_area.y {
                 // Widget layout: separator(0) + title(1) + underline(2) + spacer(3) + [banner?] + content
-                let banner_offset = if self.has_conflicts() { 1 } else { 0 };
+                let banner_offset = crate::widget::uncommitted::banner_rows(
+                    detail_area.width,
+                    self.conflict_count(),
+                ) as u16;
                 let scroll_start = detail_area.y + 4 + banner_offset;
                 let visible_row = row.saturating_sub(scroll_start) as usize;
 
@@ -482,10 +488,11 @@ impl<'a> UncommittedView<'a> {
     /// Returns true when an unmerged file is present, must mirror the
     /// banner-rendering condition in `widget/uncommitted.rs` so click/hover
     /// row maths stay aligned with what the user sees.
-    fn has_conflicts(&self) -> bool {
+    fn conflict_count(&self) -> usize {
         self.unstaged
             .iter()
-            .any(|f| f.status == StatusType::Unmerged)
+            .filter(|f| f.status == StatusType::Unmerged)
+            .count()
     }
 
     pub fn section(&self) -> UncommittedSection {

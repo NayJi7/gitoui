@@ -928,29 +928,9 @@ impl<'a> BlameView<'a> {
 /// Pad a string with spaces on the right to exactly `w` cells. Truncates with
 /// `…` if longer (truncate is done by `truncate` separately).
 fn pad(s: &str, w: usize) -> String {
-    let count = s.chars().count();
-    if count >= w {
-        s.chars().take(w).collect()
-    } else {
-        let mut out = String::with_capacity(s.len() + (w - count));
-        out.push_str(s);
-        for _ in 0..(w - count) {
-            out.push(' ');
-        }
-        out
-    }
+    crate::text_fit::pad_to_width(&crate::text_fit::ellipsize_end(s, w), w)
 }
 
 fn truncate(s: &str, w: usize) -> String {
-    if w == 0 {
-        return String::new();
-    }
-    let count = s.chars().count();
-    if count <= w {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(w - 1).collect();
-        out.push('…');
-        out
-    }
+    crate::text_fit::ellipsize_end(s, w)
 }

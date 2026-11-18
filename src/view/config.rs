@@ -1144,6 +1144,13 @@ impl<'a> ConfigView<'a> {
                 Span::styled(format!("{:<18}", label), Style::default().fg(label_fg)),
                 Span::styled(format!("{value_prefix}{display}"), value_style),
             ];
+            // One row: a value too long for the column ends with `…` (the field
+            // being typed in keeps its text, the cursor is placed on it).
+            let spans = if self.editing_text && i == self.selected {
+                spans
+            } else {
+                crate::text_fit::ellipsize_spans(spans, left_area.width as usize)
+            };
             let mut line = Line::from(spans);
             if i == self.selected && !is_grayed {
                 line = line.style(

@@ -898,7 +898,7 @@ impl<'a> DialogView<'a> {
 
         match &self.kind {
             DialogKind::AddTag { target } => {
-                lines.push(info_line("Target:", target, dim_fg, yellow));
+                lines.extend(info_line("Target:", target, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 lines.push(label_line("Tag name:", dim_fg));
                 self.input_row = Some(lines.len());
@@ -914,7 +914,7 @@ impl<'a> DialogView<'a> {
                 }
             }
             DialogKind::CreateBranch { target } => {
-                lines.push(info_line("At:", target, dim_fg, yellow));
+                lines.extend(info_line("At:", target, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 lines.push(label_line("Branch name:", dim_fg));
                 self.input_row = Some(lines.len());
@@ -925,15 +925,16 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::Checkout { target, is_branch } => {
                 let kind_str = if *is_branch { "branch" } else { "commit" };
-                lines.push(info_line(
+                lines.extend(info_line(
                     &format!("Checkout {}:", kind_str),
                     target,
                     dim_fg,
                     yellow,
+                    inner_width,
                 ));
             }
             DialogKind::CherryPick { target } => {
-                lines.push(info_line("Commit:", target, dim_fg, yellow));
+                lines.extend(info_line("Commit:", target, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Record origin (-x)"));
@@ -941,14 +942,15 @@ impl<'a> DialogView<'a> {
                 lines.push(self.checkbox_line(1, "No commit (-n)"));
             }
             DialogKind::Revert { target } => {
-                lines.push(info_line("Commit:", target, dim_fg, yellow));
+                lines.extend(info_line("Commit:", target, dim_fg, yellow, inner_width));
             }
             DialogKind::Drop { target } => {
-                lines.push(info_line("Commit:", target, dim_fg, yellow));
+                lines.extend(info_line("Commit:", target, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
-                lines.push(warning_line(
+                lines.extend(warning_line(
                     "This will permanently remove the commit.",
                     warn_fg,
+                    inner_width,
                 ));
             }
             DialogKind::Squash { target } => {
@@ -973,11 +975,12 @@ impl<'a> DialogView<'a> {
             }
             DialogKind::Merge { target, is_branch } => {
                 let kind_str = if *is_branch { "branch" } else { "commit" };
-                lines.push(info_line(
+                lines.extend(info_line(
                     &format!("Merge {}:", kind_str),
                     target,
                     dim_fg,
                     yellow,
+                    inner_width,
                 ));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
@@ -988,7 +991,13 @@ impl<'a> DialogView<'a> {
                 lines.push(self.checkbox_line(2, "No commit (--no-commit)"));
             }
             DialogKind::Rebase { target } => {
-                lines.push(info_line("Rebase onto:", target, dim_fg, yellow));
+                lines.extend(info_line(
+                    "Rebase onto:",
+                    target,
+                    dim_fg,
+                    yellow,
+                    inner_width,
+                ));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Interactive (-i)"));
@@ -996,7 +1005,7 @@ impl<'a> DialogView<'a> {
                 lines.push(self.checkbox_line(1, "Ignore date (--ignore-date)"));
             }
             DialogKind::Reset { target } => {
-                lines.push(info_line("Reset to:", target, dim_fg, yellow));
+                lines.extend(info_line("Reset to:", target, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 lines.push(label_line("Mode:", dim_fg));
                 self.radio_rows.push(lines.len());
@@ -1009,11 +1018,12 @@ impl<'a> DialogView<'a> {
             DialogKind::MergePullRequest {
                 number, pr_title, ..
             } => {
-                lines.push(info_line(
+                lines.extend(info_line(
                     "Merge PR:",
                     &format!("#{} {}", number, pr_title),
                     dim_fg,
                     yellow,
+                    inner_width,
                 ));
                 lines.push(Line::from(""));
                 lines.push(label_line("Method:", dim_fg));
@@ -1025,7 +1035,7 @@ impl<'a> DialogView<'a> {
                 lines.push(self.radio_line(2, "Rebase       : replay each commit onto base"));
             }
             DialogKind::RenameBranch { branch } => {
-                lines.push(info_line("Current:", branch, dim_fg, yellow));
+                lines.extend(info_line("Current:", branch, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 lines.push(label_line("New name:", dim_fg));
                 self.input_row = Some(lines.len());
@@ -1037,25 +1047,25 @@ impl<'a> DialogView<'a> {
                 } else {
                     "Branch"
                 };
-                lines.push(info_line(kind_str, branch, dim_fg, yellow));
+                lines.extend(info_line(kind_str, branch, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Force delete"));
             }
             DialogKind::DeleteTag { tag } => {
-                lines.push(info_line("Tag:", tag, dim_fg, yellow));
+                lines.extend(info_line("Tag:", tag, dim_fg, yellow, inner_width));
             }
             DialogKind::PushTag { tag } => {
-                lines.push(info_line("Tag:", tag, dim_fg, yellow));
+                lines.extend(info_line("Tag:", tag, dim_fg, yellow, inner_width));
             }
             DialogKind::PushBranch { branch } => {
-                lines.push(info_line("Branch:", branch, dim_fg, yellow));
+                lines.extend(info_line("Branch:", branch, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Force with lease (--force-with-lease)"));
             }
             DialogKind::PullBranch { branch } => {
-                lines.push(info_line("Branch:", branch, dim_fg, yellow));
+                lines.extend(info_line("Branch:", branch, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 self.checkbox_rows.push(lines.len());
                 lines.push(self.checkbox_line(0, "Rebase (--rebase)"));
@@ -1064,7 +1074,7 @@ impl<'a> DialogView<'a> {
                 target: _,
                 stash_ref,
             } => {
-                lines.push(info_line("Stash:", stash_ref, dim_fg, yellow));
+                lines.extend(info_line("Stash:", stash_ref, dim_fg, yellow, inner_width));
                 lines.push(Line::from(""));
                 lines.push(label_line("Branch name:", dim_fg));
                 self.input_row = Some(lines.len());
@@ -1100,7 +1110,11 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line("This action cannot be undone.", warn_fg));
+                lines.extend(warning_line(
+                    "This action cannot be undone.",
+                    warn_fg,
+                    inner_width,
+                ));
             }
             DialogKind::ConfirmDiscardAll => {
                 lines.push(Line::from(Span::styled(
@@ -1108,7 +1122,11 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line("This action cannot be undone.", warn_fg));
+                lines.extend(warning_line(
+                    "This action cannot be undone.",
+                    warn_fg,
+                    inner_width,
+                ));
             }
             DialogKind::ConfirmStageAll => {
                 lines.push(Line::from(Span::styled(
@@ -1128,7 +1146,11 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line("This action cannot be undone.", warn_fg));
+                lines.extend(warning_line(
+                    "This action cannot be undone.",
+                    warn_fg,
+                    inner_width,
+                ));
             }
             DialogKind::ConfirmPopStash { stash_ref } => {
                 lines.push(Line::from(Span::styled(
@@ -1142,7 +1164,11 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line("This action cannot be undone.", warn_fg));
+                lines.extend(warning_line(
+                    "This action cannot be undone.",
+                    warn_fg,
+                    inner_width,
+                ));
             }
             DialogKind::ConfirmDeleteComment {
                 author,
@@ -1181,9 +1207,10 @@ impl<'a> DialogView<'a> {
                     lines.push(Line::from(Span::styled("  …", Style::default().fg(dim_fg))));
                 }
                 lines.push(Line::from(""));
-                lines.push(warning_line(
+                lines.extend(warning_line(
                     "Delete this comment? This cannot be undone.",
                     warn_fg,
+                    inner_width,
                 ));
             }
             DialogKind::ConfirmPullRequestStateChange {
@@ -1584,9 +1611,10 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line(
+                lines.extend(warning_line(
                     "This will only remove the remote configuration.",
                     warn_fg,
+                    inner_width,
                 ));
             }
             DialogKind::ChooseRemote { remotes, branch } => {
@@ -1625,9 +1653,10 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line(
+                lines.extend(warning_line(
                     "All changes will be preserved in working tree.",
                     warn_fg,
+                    inner_width,
                 ));
             }
             DialogKind::AmendMessage { .. } => {
@@ -1668,29 +1697,33 @@ impl<'a> DialogView<'a> {
                 )));
                 lines.push(Line::from(""));
                 if *is_dirty {
-                    lines.push(warning_line(
+                    lines.extend(warning_line(
                         "Worktree has uncommitted changes, will use --force.",
                         warn_fg,
+                        inner_width,
                     ));
                 } else {
-                    lines.push(warning_line(
+                    lines.extend(warning_line(
                         "The working directory will be removed.",
                         warn_fg,
+                        inner_width,
                     ));
                 }
             }
             DialogKind::CheckoutHasLocalChanges { target, is_branch } => {
                 let kind_str = if *is_branch { "branch" } else { "commit" };
-                lines.push(info_line(
+                lines.extend(info_line(
                     &format!("Checkout {}:", kind_str),
                     target,
                     dim_fg,
                     yellow,
+                    inner_width,
                 ));
                 lines.push(Line::from(""));
-                lines.push(warning_line(
+                lines.extend(warning_line(
                     "Local changes would be overwritten by checkout.",
                     warn_fg,
+                    inner_width,
                 ));
                 lines.push(Line::from(""));
                 lines.push(label_line("Choose how to proceed:", dim_fg));
@@ -1889,9 +1922,10 @@ impl<'a> DialogView<'a> {
                     Style::default().fg(dim_fg),
                 )));
                 lines.push(Line::from(""));
-                lines.push(warning_line(
+                lines.extend(warning_line(
                     "The entire app context will reload from the new path.",
                     warn_fg,
+                    inner_width,
                 ));
             }
         }
@@ -2928,11 +2962,35 @@ fn separator_line(width: u16, color: Color) -> Line<'static> {
     Line::from(Span::styled(sep, Style::default().fg(color)))
 }
 
-fn info_line(label: &str, value: &str, label_fg: Color, value_fg: Color) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("  {} ", label), Style::default().fg(label_fg)),
-        Span::styled(value.to_string(), Style::default().fg(value_fg)),
-    ])
+/// `  Label value`: the value wraps under itself when it is wider than the
+/// dialog, so a SHA or a path is never cut.
+fn info_line(
+    label: &str,
+    value: &str,
+    label_fg: Color,
+    value_fg: Color,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let head = format!("  {} ", label);
+    let indent = crate::text_fit::width(&head);
+    let room = (width as usize).saturating_sub(indent).max(8);
+    crate::text_fit::wrap_plain(value, room)
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            if i == 0 {
+                Line::from(vec![
+                    Span::styled(head.clone(), Style::default().fg(label_fg)),
+                    Span::styled(row, Style::default().fg(value_fg)),
+                ])
+            } else {
+                Line::from(Span::styled(
+                    format!("{}{row}", " ".repeat(indent)),
+                    Style::default().fg(value_fg),
+                ))
+            }
+        })
+        .collect()
 }
 
 /// Same shape as `pr_header_line` but for issues, `#NUM · title`.
@@ -3003,55 +3061,7 @@ fn label_chip_spans(label: &crate::github::pr::Label, fallback_fg: Color) -> Vec
 /// count). Words longer than `width` are hard-split. Always returns
 /// at least one chunk.
 fn wrap_description(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return vec![text.to_string()];
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_w = 0usize;
-    for word in text.split_whitespace() {
-        let word_w = word.chars().count();
-        if word_w > width {
-            // Word longer than the line, flush current then
-            // hard-split the word.
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-            }
-            let mut buf = String::new();
-            let mut buf_w = 0;
-            for c in word.chars() {
-                if buf_w == width {
-                    out.push(std::mem::take(&mut buf));
-                    buf_w = 0;
-                }
-                buf.push(c);
-                buf_w += 1;
-            }
-            current = buf;
-            current_w = buf_w;
-            continue;
-        }
-        let needed = if current_w == 0 { word_w } else { word_w + 1 };
-        if current_w + needed > width {
-            out.push(std::mem::take(&mut current));
-            current.push_str(word);
-            current_w = word_w;
-        } else {
-            if current_w > 0 {
-                current.push(' ');
-                current_w += 1;
-            }
-            current.push_str(word);
-            current_w += word_w;
-        }
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    if out.is_empty() {
-        out.push(String::new());
-    }
-    out
+    crate::text_fit::wrap_plain(text, width)
 }
 
 /// Parse a `rrggbb` hex string and return `(bg, contrast_fg)`
@@ -3082,9 +3092,10 @@ fn label_line(label: &str, color: Color) -> Line<'static> {
     ))
 }
 
-fn warning_line(text: &str, color: Color) -> Line<'static> {
-    Line::from(Span::styled(
-        format!("  {}", text),
-        Style::default().fg(color),
-    ))
+/// A sentence of the dialog, wrapped to its width.
+fn warning_line(text: &str, color: Color, width: u16) -> Vec<Line<'static>> {
+    crate::text_fit::wrap_plain(text, (width as usize).saturating_sub(2).max(8))
+        .into_iter()
+        .map(|row| Line::from(Span::styled(format!("  {row}"), Style::default().fg(color))))
+        .collect()
 }
