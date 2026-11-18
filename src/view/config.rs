@@ -2029,7 +2029,7 @@ fn rebase_view_description(mode: RebaseViewMode) -> String {
 from the Rebase dialog with `Interactive (-i)` checked).\n\n\
   • Pick / Reword / Edit / Squash / Fixup / Drop per commit\n\
   • Space grabs a row, ↑↓ reorder while grabbed\n\
-  • Enter applies, Esc cancels\n\n";
+  • ↵ applies, Esc cancels\n\n";
     let preview = match mode {
         RebaseViewMode::Compact => frame_lines(
             "Compact",
@@ -2165,22 +2165,22 @@ fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -
     // the same `▕▏` separator the app footer uses elsewhere.
     let row_hint = if selected == GITHUB_AUTH_INDEX {
         if pending {
-            "Enter:re-copy"
+            "↵:re-copy"
         } else if state.is_authenticated() {
-            "Enter:logout"
+            "↵:logout"
         } else {
-            "Enter:auth"
+            "↵:auth"
         }
     } else if selected == GITHUB_AVATARS_INDEX {
         if state.is_authenticated() {
-            "Enter/⇆:toggle"
+            "↵/⇆:toggle"
         } else {
             ""
         }
     } else if selected >= TEXT_EDIT_START_INDEX {
-        "Enter:edit"
+        "↵:edit"
     } else {
-        "Enter/⇆:cycle"
+        "↵/⇆:cycle"
     };
     if row_hint.is_empty() {
         "o:open config file".into()
@@ -2371,7 +2371,7 @@ mod tests {
     fn config_footer_prompts_auth_for_github_auth_row_when_logged_out() {
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), false),
-            "Enter:auth▕▏o:open config file"
+            "↵:auth▕▏o:open config file"
         );
     }
 
@@ -2385,7 +2385,7 @@ mod tests {
 
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &state, false),
-            "Enter:logout▕▏o:open config file"
+            "↵:logout▕▏o:open config file"
         );
     }
 
@@ -2393,7 +2393,7 @@ mod tests {
     fn config_footer_prompts_recopy_during_pending_auth() {
         assert_eq!(
             super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), true),
-            "Enter:re-copy▕▏o:open config file"
+            "↵:re-copy▕▏o:open config file"
         );
     }
 

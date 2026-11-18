@@ -2782,7 +2782,7 @@ impl<'a> DiffView<'a> {
         let mut parts = Vec::new();
         if !self.expand_buttons.is_empty() {
             parts.push("⇆:buttons");
-            parts.push("Enter:expand");
+            parts.push("↵:expand");
         }
         if !self.all_file_paths.is_empty() {
             let is_staged = self.title.contains("(staged)");

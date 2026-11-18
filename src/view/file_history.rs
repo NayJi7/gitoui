@@ -556,7 +556,7 @@ impl<'a> FileHistoryView<'a> {
             parts.push("↑↓:navigate".into());
         }
         if !self.entries.is_empty() {
-            parts.push("Enter:open commit".into());
+            parts.push("↵:open commit".into());
             parts.push(global(crate::event::UserEvent::FullCopy, "msg"));
             parts.push(global(crate::event::UserEvent::ShortCopy, "hash"));
         }

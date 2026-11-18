@@ -658,7 +658,7 @@ impl<'a> IssuesView<'a> {
             return "⌘ ↑↓:nav▕▏↵:pick▕▏Esc:cancel".into();
         }
         if self.comment_editor.is_some() {
-            let submit = scoped(&["compose"], "submit", "send");
+            let submit = format!("{}:send", kb.primary_submit_key());
             return format!("⌘ #:mention▕▏{submit}▕▏Esc:cancel");
         }
         if self.reaction_picker.is_some() {
@@ -696,7 +696,7 @@ impl<'a> IssuesView<'a> {
                 format!("⌘ {}", parts.join("▕▏"))
             }
             Mode::Compose => {
-                let submit = scoped(&["compose"], "submit", "submit");
+                let submit = format!("{}:submit", kb.primary_submit_key());
                 format!("⌘ ↑↓:field▕▏↵:edit/pick▕▏{submit}")
             }
         }
@@ -5128,7 +5128,7 @@ impl<'a> IssuesView<'a> {
         let labels_focused = matches!(state.field, ComposeField::Labels);
         let labels_value: Vec<Span<'static>> = if state.labels.is_empty() {
             vec![Span::styled(
-                "(none, Enter to pick)".to_string(),
+                "(none, ↵ to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )]
         } else {
@@ -5163,7 +5163,7 @@ impl<'a> IssuesView<'a> {
         let mut assignee_paints: Vec<(String, u16)> = Vec::new();
         let assignees_value: Vec<Span<'static>> = if state.assignees.is_empty() {
             vec![Span::styled(
-                "(none, Enter to pick)".to_string(),
+                "(none, ↵ to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )]
         } else {
@@ -5224,7 +5224,7 @@ impl<'a> IssuesView<'a> {
                 )],
             },
             None => vec![Span::styled(
-                "(none, Enter to pick)".to_string(),
+                "(none, ↵ to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             )],
         };

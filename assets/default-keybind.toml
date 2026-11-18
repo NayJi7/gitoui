@@ -246,7 +246,9 @@ prev_hunk              = ["p"]
 # tied to the literal `#` character in the body parser, so it isn't
 # rebindable either.
 [scope.compose]
-submit = ["ctrl-s"]
+# Ctrl+Enter is the one the footers show. Many terminals send a plain Enter
+# for it, so Ctrl+S stays as the combo that works everywhere.
+submit = ["ctrl-enter", "ctrl-s"]
 
 # GitHub Actions page (`A` on the commit list): one accordion, runs unfold
 # into jobs, jobs into steps, steps into their log. Esc closes the page.

@@ -885,7 +885,7 @@ impl<'a> InteractiveRebaseView<'a> {
         let hint_text: &str = if crate::git::rebase::rebase_in_progress(&self.repo_path) {
             "Press A to abort  •  Esc exits (rebase stays half-applied)"
         } else {
-            "Adjust the plan and press Enter to retry"
+            "Adjust the plan and press ↵ to retry"
         };
 
         if inner.height >= 3 {

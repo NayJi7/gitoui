@@ -660,7 +660,7 @@ impl<'a> BlameView<'a> {
             parts.push("←→:prev/next block".into());
         }
         if !self.blocks.is_empty() {
-            parts.push("Enter:open commit".into());
+            parts.push("↵:open commit".into());
         }
         parts.push(global(crate::event::UserEvent::FileHistory, "history"));
         parts.push(global(crate::event::UserEvent::Refresh, "refresh"));

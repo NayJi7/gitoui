@@ -1339,7 +1339,10 @@ impl<'a> PullRequestsView<'a> {
             let parts: Vec<String> = if self.comment_editor.as_ref().is_some_and(|e| e.submitting) {
                 vec!["Sending…".into(), "Esc:cancel".into()]
             } else {
-                vec![scoped(&["compose"], "submit", "send"), "Esc:cancel".into()]
+                vec![
+                    format!("{}:send", kb.primary_submit_key()),
+                    "Esc:cancel".into(),
+                ]
             };
             return format!("⌘ {}", parts.join("▕▏"));
         }
@@ -1357,13 +1360,13 @@ impl<'a> PullRequestsView<'a> {
                 return format!("⌘ {}", ["Submitting…", "Esc:cancel"].join("▕▏"));
             }
             if self.branch_picker.is_some() {
-                return format!("⌘ {}", ["↑↓:select", "Enter:pick", "Esc:close"].join("▕▏"));
+                return format!("⌘ {}", ["↑↓:select", "↵:pick", "Esc:close"].join("▕▏"));
             }
             return format!(
                 "⌘ {}",
                 [
                     "↑↓:field".to_string(),
-                    scoped(&["compose"], "submit", "create"),
+                    format!("{}:create", kb.primary_submit_key()),
                     "Esc:cancel".to_string(),
                 ]
                 .join("▕▏")
@@ -1388,7 +1391,7 @@ impl<'a> PullRequestsView<'a> {
                 let mut p: Vec<String> =
                     vec![scoped(&["pr", "conversation"], "new_comment", "comment")];
                 if matches!(self.active_tab, Tab::Commits | Tab::Files) {
-                    p.push("Enter:view diff".into());
+                    p.push("↵:view diff".into());
                 }
                 p.push(scoped(&["pr"], "approve", "approve"));
                 p.push(scoped(&["pr"], "request_changes", "request changes"));
@@ -1606,9 +1609,8 @@ impl<'a> PullRequestsView<'a> {
             }
             // `submit` is shared with the compose forms, rebindable via
             // [scope.compose]. Ctrl+Enter is the canonical "send" combo
-            // in most terminals but many don't propagate the modifier
-            // with Enter, so Ctrl+S is the reliable fallback baked into
-            // the default scope.compose binding.
+            // but many terminals don't propagate the modifier with Enter,
+            // so Ctrl+S is the reliable fallback: both are bound by default.
             if let Some("submit") = self.ctx.keybind.resolve_scoped(&["compose"], key) {
                 self.submit_comment_editor();
                 return;
@@ -5127,7 +5129,7 @@ impl<'a> PullRequestsView<'a> {
                 Span::raw(" "),
                 value_span,
                 Span::styled(
-                    "  (Enter to choose)".to_string(),
+                    "  (↵ to choose)".to_string(),
                     if focused {
                         Style::default().fg(theme.detail_label_fg)
                     } else {
@@ -5349,7 +5351,7 @@ impl<'a> PullRequestsView<'a> {
         ];
         if state.labels.is_empty() {
             labels_line_spans.push(Span::styled(
-                "(none, Enter to pick)".to_string(),
+                "(none, ↵ to pick)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
             ));
         } else {
@@ -8648,6 +8650,9 @@ pub(crate) fn render_markdown_body(
                 }
                 Tag::BlockQuote(_) => {
                     bq_depth += 1;
+                    // Quoted text is muted, like a quote reply on GitHub: it
+                    // reads as the other person's words, not as the reply.
+                    style_stack.push(Style::default().fg(theme.detail_label_fg));
                 }
                 Tag::CodeBlock(_) => {
                     in_code_block = true;
@@ -8742,14 +8747,20 @@ pub(crate) fn render_markdown_body(
                 }
                 TagEnd::BlockQuote(_) => {
                     bq_depth = bq_depth.saturating_sub(1);
+                    style_stack.pop();
                 }
                 TagEnd::CodeBlock => {
                     let buf = std::mem::take(&mut code_buf);
                     let prefix = build_cont_prefix(bq_depth, list_stack.len());
                     let avail = inner_width.saturating_sub(measure_prefix(&prefix)).max(1);
                     for raw_line in buf.lines() {
+                        let line_style = if bq_depth > 0 {
+                            code_style.add_modifier(Modifier::DIM)
+                        } else {
+                            code_style
+                        };
                         let wrapped = wrap_styled_spans(
-                            vec![Span::styled(raw_line.to_string(), code_style)],
+                            vec![Span::styled(raw_line.to_string(), line_style)],
                             avail,
                         );
                         for piece in wrapped {
@@ -8798,7 +8809,13 @@ pub(crate) fn render_markdown_body(
                 }
             }
             Event::Code(s) => {
-                inline.push(Span::styled(s.into_string(), code_style));
+                // Code inside a quote is muted with the rest of the quote.
+                let style = if bq_depth > 0 {
+                    code_style.add_modifier(Modifier::DIM)
+                } else {
+                    code_style
+                };
+                inline.push(Span::styled(s.into_string(), style));
             }
             Event::Html(_) | Event::InlineHtml(_) => {
                 // Skip raw HTML, looks ugly in a TUI and most GitHub

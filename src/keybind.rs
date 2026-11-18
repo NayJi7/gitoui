@@ -132,6 +132,18 @@ impl KeyBinds {
         keys.into_iter().next().unwrap_or_default()
     }
 
+    /// The key the footers show for `compose.submit`. `Ctrl+↵` when it is
+    /// bound (it is by default), even though `Ctrl+S` is shorter: that is the
+    /// combo people expect to send a comment with. Otherwise the usual pick,
+    /// so a rebound `submit` shows what the user chose.
+    pub fn primary_submit_key(&self) -> String {
+        let keys = self.keys_for_scoped_action(&["compose"], "submit");
+        if keys.iter().any(|k| k == "Ctrl+↵") {
+            return "Ctrl+↵".to_string();
+        }
+        self.primary_scoped_key(&["compose"], "submit")
+    }
+
     /// Same as `primary_scoped_key` but for the global UserEvent map.
     /// Used by footer hints to surface the user's actual bound key for
     /// generic actions like Confirm/Cancel rather than hardcoded
@@ -483,7 +495,8 @@ fn key_event_to_string(key_event: KeyEvent) -> String {
     let char;
     let key_code = match key_event.code {
         KeyCode::Backspace => "Backspace",
-        KeyCode::Enter => "Enter",
+        // The symbol, like everywhere the app shows the key.
+        KeyCode::Enter => "↵",
         KeyCode::Left => "Left",
         KeyCode::Right => "Right",
         KeyCode::Up => "Up",
@@ -659,6 +672,10 @@ mod tests {
 
         let key_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::empty());
         assert_eq!(key_event_to_string(key_event), "Esc");
+        let key_event = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+        assert_eq!(key_event_to_string(key_event), "↵");
+        let key_event = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
+        assert_eq!(key_event_to_string(key_event), "Ctrl+↵");
 
         let key_event = KeyEvent::new(KeyCode::F(12), KeyModifiers::empty());
         assert_eq!(key_event_to_string(key_event), "F12");
@@ -922,6 +939,18 @@ mod tests {
         assert_eq!(kb.resolve_scoped(&["issues"], a), Some("assignees_picker"));
         let ctrl_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert_eq!(kb.resolve_scoped(&["compose"], ctrl_s), Some("submit"));
+        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
+        assert_eq!(kb.resolve_scoped(&["compose"], ctrl_enter), Some("submit"));
+    }
+
+    #[test]
+    fn the_footers_advertise_ctrl_enter_to_send() {
+        let kb = KeyBinds::new(None);
+        assert_eq!(kb.primary_submit_key(), "Ctrl+↵");
+        // A user who rebinds `submit` sees their own key.
+        let custom: KeyBinds = toml::from_str("[scope.compose]\nsubmit = [\"ctrl-g\"]\n").unwrap();
+        let kb = KeyBinds::new(Some(custom));
+        assert_eq!(kb.primary_submit_key(), "Ctrl+g");
     }
 
     #[test]

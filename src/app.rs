@@ -3583,7 +3583,7 @@ impl App<'_> {
                 // Dedicated cd-mode hints, only the keys that actually do
                 // something while the overlay is open. The animated label
                 // lives on the LEFT side (see the spans build above).
-                "⌘ ↑↓:navigate▕▏Tab:complete▕▏Enter:cd▕▏Esc:cancel".into()
+                "⌘ ↑↓:navigate▕▏Tab:complete▕▏↵:cd▕▏Esc:cancel".into()
             } else if is_search_querying {
                 String::new()
             } else if is_search_active {
@@ -3609,7 +3609,7 @@ impl App<'_> {
             } else if is_config_active {
                 self.view
                     .config_footer_hint()
-                    .unwrap_or_else(|| "⌘ Enter/⇆:cycle".into())
+                    .unwrap_or_else(|| "⌘ ↵/⇆:cycle".into())
             } else if compare_pending.is_some() {
                 // Dedicated compare-pending shortcut bar, completely
                 // replaces the usual list view shortcuts so the user knows
@@ -3671,7 +3671,7 @@ impl App<'_> {
                         g(UserEvent::HelpToggle, "help"),
                         g(UserEvent::Refresh, "fetch"),
                     ),
-                    View::Dialog(_) => "⌘ Tab:focus▕▏Enter:confirm".into(),
+                    View::Dialog(_) => "⌘ Tab:focus▕▏↵:confirm".into(),
                     // All branch / tag actions live in the right-hand action
                     // bar, see `LOCAL_BRANCH_ACTIONS` / `REMOTE_BRANCH_ACTIONS`
                     // / `TAG_ACTIONS`. The footer only keeps what's NOT in the
@@ -3709,7 +3709,7 @@ impl App<'_> {
                     View::Issues(_) => self
                         .view
                         .issues_footer_hint()
-                        .unwrap_or_else(|| "⌘ ↑↓:nav▕▏Enter:open▕▏Tab:filter▕▏Esc:close".into()),
+                        .unwrap_or_else(|| "⌘ ↑↓:nav▕▏↵:open▕▏Tab:filter▕▏Esc:close".into()),
                     _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
                 }
             };

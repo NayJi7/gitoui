@@ -645,7 +645,7 @@ impl<'a> CompareView<'a> {
         // Two-cursor model: the file row in the left pane and the focused
         // show-more button in the right pane move independently. Enter
         // activates whichever cursor was used last.
-        "⌘ ↑↓:files▕▏⇆:Buttons▕▏Enter:expand▕▏Esc:close".to_string()
+        "⌘ ↑↓:files▕▏⇆:Buttons▕▏↵:expand▕▏Esc:close".to_string()
     }
 
     pub fn prepare_graph_uploads(&mut self) {

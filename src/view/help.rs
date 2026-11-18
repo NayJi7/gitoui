@@ -587,7 +587,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
             ),
             shortcuts: vec![
                 ss(kb, &["list"], "actions", "Open the Actions page"),
-                lit("Enter", "Open a run, fold or unfold a step or a group"),
+                lit("↵", "Open a run, fold or unfold a step or a group"),
                 lit("← / →", "Status filter (list), jobs and panels (run)"),
                 ss(kb, &["actions"], "switch", "Workflow picker (list), jobs list (run)"),
                 ss(kb, &["actions"], "search", "Search the runs"),
@@ -621,9 +621,9 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Commit Detail",
-            intro: Some("Opens with Enter on a commit. All Navigation shortcuts apply."),
+            intro: Some("Opens with ↵ on a commit. All Navigation shortcuts apply."),
             shortcuts: vec![
-                lit("Esc / Enter", "Close detail"),
+                lit("Esc / ↵", "Close detail"),
                 sg(kb, UserEvent::Blame, "Open blame on the focused file"),
                 sg(
                     kb,
@@ -679,14 +679,14 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("Tab / Esc", "Close refs panel"),
                 lit("Right", "Open / expand node"),
                 lit("Left", "Close / collapse node"),
-                lit("Enter", "Open Branch Detail / Tag Detail / jump to ref"),
+                lit("↵", "Open Branch Detail / Tag Detail / jump to ref"),
                 sg(kb, UserEvent::Refresh, "Refetch"),
                 sg(kb, UserEvent::ShortCopy, "Copy ref name"),
             ],
         },
         HelpSection {
             title: "Branch Detail",
-            intro: Some("Opens with Enter on a branch in the Refs panel."),
+            intro: Some("Opens with ↵ on a branch in the Refs panel."),
             shortcuts: vec![
                 lit("Esc", "Close"),
                 sg(kb, UserEvent::Checkout, "Checkout branch"),
@@ -709,7 +709,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Tag Detail",
-            intro: Some("Opens with Enter on a tag in the Refs panel."),
+            intro: Some("Opens with ↵ on a tag in the Refs panel."),
             shortcuts: vec![
                 lit("Esc", "Close"),
                 sg(kb, UserEvent::PushTag, "Push tag"),
@@ -720,7 +720,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Uncommitted",
-            intro: Some("Opens with Enter on the top row of the commit list (`(uncommitted)`)."),
+            intro: Some("Opens with ↵ on the top row of the commit list (`(uncommitted)`)."),
             shortcuts: vec![
                 lit("Esc", "Back to commit list"),
                 lit("Up / Down", "Navigate files within the active section"),
@@ -728,7 +728,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                     "Left / Right",
                     "Switch section (Unstaged / Staged / Untracked)",
                 ),
-                lit("Enter", "Open diff of the focused file"),
+                lit("↵", "Open diff of the focused file"),
                 sg(kb, UserEvent::Refresh, "Refresh file lists"),
                 lit("", ""),
                 lit("Staging", ""),
@@ -771,9 +771,9 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Diff",
-            intro: Some("Opens with Enter on a file row, from commit Detail or Uncommitted."),
+            intro: Some("Opens with ↵ on a file row, from commit Detail or Uncommitted."),
             shortcuts: vec![
-                lit("Esc / Enter", "Close diff"),
+                lit("Esc / ↵", "Close diff"),
                 lit("j / k / arrows", "Scroll"),
                 lit("Left / Right", "Move focus across hunks / action buttons"),
                 sg(
@@ -807,7 +807,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("Left / Right", "Jump to previous / next blame block"),
                 lit("PageUp / PageDown", "Scroll a page"),
                 lit("g / Shift+G", "Top / bottom"),
-                lit("Enter", "Open the commit that authored the focused line"),
+                lit("↵", "Open the commit that authored the focused line"),
                 sg(kb, UserEvent::FileHistory, "Open file history (same file)"),
             ],
         },
@@ -815,11 +815,11 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
             title: "File History",
             intro: Some("Opens with `Shift+H` on a file, equivalent of `git log --follow`."),
             shortcuts: vec![
-                lit("Esc / Enter", "Close history"),
+                lit("Esc / ↵", "Close history"),
                 lit("j / k / arrows", "Navigate revisions"),
                 lit("PageUp / PageDown", "Scroll a page"),
                 lit("g / Shift+G", "Top / bottom"),
-                lit("Enter", "Open commit detail for the focused revision"),
+                lit("↵", "Open commit detail for the focused revision"),
                 sg(kb, UserEvent::Blame, "Blame the file at this revision"),
                 sg(kb, UserEvent::FullCopy, "Copy commit message"),
                 sg(kb, UserEvent::ShortCopy, "Copy commit hash"),
@@ -827,9 +827,9 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Interactive Rebase",
-            intro: Some("Opens with `e` on a commit. Edit the rebase plan, then Enter to apply."),
+            intro: Some("Opens with `e` on a commit. Edit the rebase plan, then ↵ to apply."),
             shortcuts: vec![
-                lit("Enter", "Apply rebase plan"),
+                lit("↵", "Apply rebase plan"),
                 lit("Esc", "Cancel (releases grab first if any)"),
                 lit("Up / Down", "Move selection (or reorder when grabbed)"),
                 lit("Left / Right", "Cycle action for the selected row"),
@@ -865,7 +865,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 ss(kb, &["rebase", "resume"], "abort", "Abort and bail"),
                 lit("", ""),
                 lit("Reword editor", "(while inline-editing a subject)"),
-                lit("Enter", "Save reworded message"),
+                lit("↵", "Save reworded message"),
                 lit("Esc", "Cancel reword"),
                 ss(
                     kb,
@@ -897,7 +897,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
             title: "Conflict Editor",
             intro: Some("Opens automatically during a conflicted merge / rebase / cherry-pick."),
             shortcuts: vec![
-                lit("Enter", "Save resolution and mark as resolved"),
+                lit("↵", "Save resolution and mark as resolved"),
                 lit("Esc", "Cancel and leave conflict in place"),
                 ss(kb, &["conflict"], "prev_hunk", "Previous conflict hunk"),
                 ss(kb, &["conflict"], "next_hunk", "Next conflict hunk"),
@@ -930,7 +930,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("Esc", "Close compare"),
                 lit("j / k / arrows", "Navigate files / scroll"),
                 lit("Left / Right", "Switch between file list and diff panel"),
-                lit("Enter", "Open the focused file's diff"),
+                lit("↵", "Open the focused file's diff"),
             ],
         },
         HelpSection {
@@ -943,7 +943,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                     "Left / Right",
                     "Cycle filter (Open / Merged / Closed / All)",
                 ),
-                lit("Enter", "Open PR detail"),
+                lit("↵", "Open PR detail"),
                 ss(kb, &["pr", "list"], "new_pr", "Compose a new PR"),
                 ss(kb, &["pr"], "reload", "Reload"),
                 lit("Esc", "Close PR view"),
@@ -953,7 +953,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                     "Left / Right",
                     "Switch tab (Conversation / Files / Commits / References)",
                 ),
-                lit("Enter", "Drill into focused file or commit row"),
+                lit("↵", "Drill into focused file or commit row"),
                 lit("Esc", "Back (drilldown → list → close)"),
                 ss(kb, &["pr"], "reload", "Reload PR"),
                 ss(kb, &["pr"], "open_in_browser", "Open PR in browser"),
@@ -1002,7 +1002,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("j / k / arrows", "Navigate issues"),
                 lit("g / Shift+G", "Top / bottom"),
                 lit("Left / Right", "Cycle filter (Open / Closed / All)"),
-                lit("Enter", "Open issue detail"),
+                lit("↵", "Open issue detail"),
                 ss(kb, &["issues", "list"], "new_issue", "Compose a new issue"),
                 ss(kb, &["issues"], "reload", "Reload"),
                 lit("Esc", "Close Issues view"),
@@ -1017,7 +1017,7 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("PageUp / PageDown", "Scroll"),
                 lit("Ctrl+U / Ctrl+D", "Half-page scroll"),
                 lit(
-                    "Enter",
+                    "↵",
                     "Follow first #N ref (Conversation) / open ref (References)",
                 ),
                 lit("Esc", "Back to list"),
@@ -1069,11 +1069,11 @@ fn sections(kb: &KeyBinds) -> Vec<HelpSection> {
                 lit("Esc / p", "Close configuration"),
                 lit("j / k", "Move between items"),
                 lit("h / l", "Cycle value left / right (for cycle items)"),
-                lit("Enter", "Edit text input or trigger button (GitHub auth)"),
+                lit("↵", "Edit text input or trigger button (GitHub auth)"),
                 lit("o", "Open the config file in your $EDITOR"),
                 lit("", ""),
                 lit("Text edit mode", ""),
-                lit("Enter", "Save edit"),
+                lit("↵", "Save edit"),
                 lit("Esc", "Cancel edit"),
                 lit("Ctrl+Backspace", "Delete word to the left"),
                 lit("Backspace", "Delete char to the left"),
