@@ -6,7 +6,7 @@ pub mod branch_detail;
 mod compare;
 mod config;
 pub mod conflict;
-mod detail;
+pub(crate) mod detail;
 pub mod dialog;
 mod diff;
 mod editor_wrap;

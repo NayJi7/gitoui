@@ -2106,6 +2106,20 @@ impl<'a> PullRequestsView<'a> {
     fn opened_files_len(&self) -> usize {
         self.opened_detail().map(|d| d.files.len()).unwrap_or(0)
     }
+    /// `<user>:<branch>` for a pull request from a fork, `<branch>` for one of
+    /// this repository, from its detail when loaded, else from the list.
+    pub fn head_label_of(&self, number: u64) -> Option<String> {
+        self.detail_cache
+            .get(&number)
+            .map(|d| d.head_label.clone())
+            .or_else(|| {
+                self.items
+                    .iter()
+                    .find(|pr| pr.number == number)
+                    .map(|pr| pr.head_label.clone())
+            })
+    }
+
     fn opened_detail(&self) -> Option<&PullRequestDetail> {
         let number = self.opened_number()?;
         self.detail_cache.get(&number)

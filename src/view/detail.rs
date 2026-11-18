@@ -3,6 +3,9 @@ use std::rc::Rc;
 use ratatui::{
     crossterm::event::KeyEvent,
     layout::{Constraint, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
@@ -17,6 +20,89 @@ use crate::{
     },
 };
 
+/// Where a commit opened from a pull request comes from. Such a commit is
+/// not part of the repository's history, so the commit graph is replaced by
+/// a note saying so.
+#[derive(Debug, Clone)]
+pub struct PrOrigin {
+    pub number: u64,
+    /// `<user>:<branch>` for a fork, `<branch>` for a branch of this
+    /// repository, empty when unknown.
+    pub head_label: String,
+}
+
+/// Takes the place of the commit graph for a commit that comes from a pull
+/// request: says where the commit is from, and that it is not in this
+/// repository's history.
+pub(crate) fn render_pr_origin_note(
+    f: &mut Frame,
+    area: Rect,
+    theme: &crate::color::ColorTheme,
+    origin: &PrOrigin,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.divider_fg))
+        .style(Style::default().bg(theme.bg));
+    let inner = block.inner(area);
+    let label = Style::default().fg(theme.detail_label_fg);
+    let pr = Style::default()
+        .fg(theme.list_hash_fg)
+        .add_modifier(Modifier::BOLD);
+    let name = Style::default().fg(theme.list_name_fg);
+    let headline = Span::styled(
+        "This commit is not part of this repository's history",
+        Style::default()
+            .fg(theme.status_warn_fg)
+            .add_modifier(Modifier::BOLD),
+    );
+    // With room for two lines the origin goes on its own line; the diff view
+    // only leaves one, so everything then shares it.
+    let two_lines = inner.height >= 2;
+    let mut from = vec![Span::styled(
+        if two_lines {
+            "It comes from pull request "
+        } else {
+            ", from pull request "
+        },
+        label,
+    )];
+    from.push(Span::styled(format!("#{}", origin.number), pr));
+    match origin.head_label.split_once(':') {
+        Some((owner, branch)) => {
+            from.push(Span::styled(", branch ", label));
+            from.push(Span::styled(branch.to_string(), name));
+            from.push(Span::styled(" of the fork ", label));
+            from.push(Span::styled(owner.to_string(), name));
+        }
+        None if !origin.head_label.is_empty() => {
+            from.push(Span::styled(", branch ", label));
+            from.push(Span::styled(origin.head_label.clone(), name));
+        }
+        None => {}
+    }
+    from.push(Span::styled(".", label));
+    let lines = if two_lines {
+        vec![Line::from(headline), Line::from(from)]
+    } else {
+        let mut one = vec![headline];
+        one.extend(from);
+        vec![Line::from(one)]
+    };
+    f.render_widget(block, area);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().bg(theme.bg)),
+        Rect::new(
+            inner.x.saturating_add(1),
+            inner.y,
+            inner.width.saturating_sub(2),
+            inner.height,
+        ),
+    );
+}
+
 #[derive(Debug)]
 pub struct DetailView<'a> {
     commit_list_state: Option<CommitListState<'a>>,
@@ -27,9 +113,9 @@ pub struct DetailView<'a> {
     refs: Vec<Ref>,
     head_branch_name: Option<String>,
     head_commit_hash: Option<CommitHash>,
-    /// PR number the user is currently exploring, surfaces in the
-    /// "Commit Details" panel title so they always know the origin.
-    pr_origin: Option<u64>,
+    /// The pull request the user is currently exploring: named in the
+    /// "Commit Details" panel title and in the note that replaces the graph.
+    pr_origin: Option<PrOrigin>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -64,8 +150,8 @@ impl<'a> DetailView<'a> {
         }
     }
 
-    pub fn set_pr_origin(&mut self, pr_number: Option<u64>) {
-        self.pr_origin = pr_number;
+    pub fn set_pr_origin(&mut self, origin: Option<PrOrigin>) {
+        self.pr_origin = origin;
     }
 
     /// Pre-select the file whose path matches in the commit's change list.
@@ -115,6 +201,15 @@ impl<'a> DetailView<'a> {
                     self.commit_detail_state.select_prev_file();
                 }
             }
+            // The next keys walk through the repository's commits: a commit
+            // that comes from a pull request is not among them, so they would
+            // swap it for an unrelated one.
+            UserEvent::NavigateRight
+            | UserEvent::NavigateLeft
+            | UserEvent::SelectDown
+            | UserEvent::SelectUp
+            | UserEvent::GoToParent
+                if self.pr_origin.is_some() => {}
             UserEvent::NavigateRight => {
                 self.tx.send(AppEvent::SelectOlderCommit);
             }
@@ -181,6 +276,7 @@ impl<'a> DetailView<'a> {
             UserEvent::Confirm => {
                 self.open_selected_file_diff();
             }
+            UserEvent::Blame | UserEvent::FileHistory if self.refuse_for_pr_origin() => {}
             UserEvent::Blame => {
                 // Blame the currently-highlighted file in the commit's file list.
                 if let Some(change) = self.changes.get(self.commit_detail_state.selected_file) {
@@ -323,8 +419,13 @@ impl<'a> DetailView<'a> {
         let [list_area, detail_area] = self.split_areas(area);
         self.detail_area = Some(detail_area);
 
-        let commit_list = CommitList::new(self.ctx.clone());
-        f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
+        match &self.pr_origin {
+            Some(origin) => render_pr_origin_note(f, list_area, &self.ctx.color_theme, origin),
+            None => {
+                let commit_list = CommitList::new(self.ctx.clone());
+                f.render_stateful_widget(commit_list, list_area, self.as_mut_list_state());
+            }
+        }
 
         let commit_detail = CommitDetail::new(
             &self.commit,
@@ -334,7 +435,7 @@ impl<'a> DetailView<'a> {
             self.head_branch_name.clone(),
             self.is_head_commit(),
         )
-        .with_pr_origin(self.pr_origin);
+        .with_pr_origin(self.pr_origin.as_ref().map(|o| o.number));
         f.render_stateful_widget(commit_detail, detail_area, &mut self.commit_detail_state);
     }
 
@@ -346,6 +447,10 @@ impl<'a> DetailView<'a> {
     }
 
     pub fn prepare_graph_uploads(&mut self) {
+        // No graph is drawn for a pull request's commit.
+        if self.pr_origin.is_some() {
+            return;
+        }
         self.as_mut_list_state().ensure_visible_graph_uploaded();
         let ctx = self.ctx.clone();
         self.as_mut_list_state().ensure_visible_avatars_uploaded(
@@ -361,6 +466,19 @@ impl<'a> DetailView<'a> {
 }
 
 impl<'a> DetailView<'a> {
+    /// Blame and the history of a file are about the repository's own files,
+    /// not about a commit that comes from a pull request: say so rather than
+    /// open a view of something else.
+    fn refuse_for_pr_origin(&self) -> bool {
+        if self.pr_origin.is_none() {
+            return false;
+        }
+        self.tx.send(AppEvent::NotifyWarn(
+            "Not available for a commit that comes from a pull request.".into(),
+        ));
+        true
+    }
+
     pub fn take_list_state(&mut self) -> CommitListState<'a> {
         self.commit_list_state.take().unwrap()
     }
@@ -610,6 +728,7 @@ impl<'a> DetailView<'a> {
                 0 => self
                     .tx
                     .send(AppEvent::OpenDialog(DialogKind::AddTag { target: hash })),
+                1 if self.refuse_for_pr_origin() => {}
                 1 => {
                     // Blame the currently-highlighted file in the commit's
                     // change list. Same logic as the `b` keybind handler.

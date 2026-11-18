@@ -393,7 +393,9 @@ const NAV_BURST_TIER_2_MULT: usize = 4;
 enum PrNavRestore {
     /// Re-open the PR list view with this PR re-selected (Detail
     /// mode). Used as the bottom of every PR-originated chain.
-    PullRequest { pr_number: u64 },
+    /// `head_label` (`<user>:<branch>` for a fork) says where the PR's
+    /// commits come from, the commit detail shows it.
+    PullRequest { pr_number: u64, head_label: String },
     /// Re-open the local `View::Detail` for this commit. Used as
     /// the layer just below a DiffView when the user drilled into
     /// a file from a PR's commit detail (or PR → file directly,
@@ -4376,6 +4378,10 @@ impl<'a> App<'a> {
                     all_files,
                     self.repository.path().to_path_buf(),
                 );
+                let pr_origin = self.pr_origin_from_stack();
+                if let View::Diff(ref mut v) = self.view {
+                    v.set_pr_origin(pr_origin);
+                }
             }
             Err(err) => {
                 self.ec.send(AppEvent::NotifyError(err));
@@ -4964,7 +4970,7 @@ impl<'a> App<'a> {
         commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
     ) -> bool {
         match frame {
-            PrNavRestore::PullRequest { pr_number } => {
+            PrNavRestore::PullRequest { pr_number, .. } => {
                 let token = self.ctx.github_auth_state.token.clone().unwrap_or_default();
                 let coords = crate::github::RepoCoords::from_repo(self.repository.path());
                 if token.is_empty() {
@@ -5018,10 +5024,7 @@ impl<'a> App<'a> {
                 // The remaining stack frame (if any) is a
                 // PullRequest{n}, tag the Detail with that origin
                 // so its title still reads `· PR #N`.
-                let pr_origin = self.pr_nav_stack.iter().rev().find_map(|f| match f {
-                    PrNavRestore::PullRequest { pr_number } => Some(*pr_number),
-                    _ => None,
-                });
+                let pr_origin = self.pr_origin_from_stack();
                 if let View::Detail(ref mut v) = self.view {
                     v.set_pr_origin(pr_origin);
                 }
@@ -5055,10 +5058,13 @@ impl<'a> App<'a> {
         // duplicate the entry otherwise.
         if !matches!(
             self.pr_nav_stack.last(),
-            Some(PrNavRestore::PullRequest { pr_number: n }) if *n == pr_number
+            Some(PrNavRestore::PullRequest { pr_number: n, .. }) if *n == pr_number
         ) {
-            self.pr_nav_stack
-                .push(PrNavRestore::PullRequest { pr_number });
+            let head_label = self.pr_head_label(pr_number);
+            self.pr_nav_stack.push(PrNavRestore::PullRequest {
+                pr_number,
+                head_label,
+            });
         }
         let repo_path = self.repository.path().to_path_buf();
         let tx = self.ec.sender();
@@ -5175,9 +5181,49 @@ impl<'a> App<'a> {
         );
         // Tag the view so its title row reads `Commit Details · PR #N`
         //, keeps the PR origin visible while the user navigates files.
+        let head_label = self.pr_head_label(pr_number);
         if let View::Detail(ref mut v) = self.view {
-            v.set_pr_origin(Some(pr_number));
+            v.set_pr_origin(Some(crate::view::detail::PrOrigin {
+                number: pr_number,
+                head_label,
+            }));
         }
+    }
+
+    /// The pull request whose commits the user is exploring, when the
+    /// current view sits in a PR drilldown. Such a commit is not in the
+    /// repository's history: the views say so instead of drawing the graph.
+    fn pr_origin_from_stack(&self) -> Option<crate::view::detail::PrOrigin> {
+        self.pr_nav_stack.iter().rev().find_map(|f| match f {
+            PrNavRestore::PullRequest {
+                pr_number,
+                head_label,
+            } => Some(crate::view::detail::PrOrigin {
+                number: *pr_number,
+                head_label: head_label.clone(),
+            }),
+            _ => None,
+        })
+    }
+
+    /// Where the commits of this pull request come from (`<user>:<branch>`
+    /// for a fork), taken from the navigation stack or from the PR page.
+    /// Empty when unknown: the note then only names the pull request.
+    fn pr_head_label(&mut self, pr_number: u64) -> String {
+        let from_stack = self.pr_nav_stack.iter().find_map(|f| match f {
+            PrNavRestore::PullRequest {
+                pr_number: n,
+                head_label,
+            } if *n == pr_number => Some(head_label.clone()),
+            _ => None,
+        });
+        from_stack
+            .filter(|l| !l.is_empty())
+            .or_else(|| {
+                self.pull_requests_view()
+                    .and_then(|v| v.head_label_of(pr_number))
+            })
+            .unwrap_or_default()
     }
 
     /// Transition from the PR view to the existing single-file
@@ -5208,10 +5254,13 @@ impl<'a> App<'a> {
         ) {
             if !matches!(
                 self.pr_nav_stack.first(),
-                Some(PrNavRestore::PullRequest { pr_number: n }) if *n == pr_number
+                Some(PrNavRestore::PullRequest { pr_number: n, .. }) if *n == pr_number
             ) {
-                self.pr_nav_stack
-                    .push(PrNavRestore::PullRequest { pr_number });
+                let head_label = self.pr_head_label(pr_number);
+                self.pr_nav_stack.push(PrNavRestore::PullRequest {
+                    pr_number,
+                    head_label,
+                });
             }
             self.pr_nav_stack
                 .push(PrNavRestore::CommitDetail { sha: sha.clone() });
@@ -5338,6 +5387,10 @@ impl<'a> App<'a> {
             all_paths,
             repo_path,
         );
+        let pr_origin = self.pr_origin_from_stack();
+        if let View::Diff(ref mut v) = self.view {
+            v.set_pr_origin(pr_origin);
+        }
     }
 
     /// True when both prerequisites for the PR / Issues views are

@@ -28,6 +28,10 @@ pub struct DiffView<'a> {
     title: String,
     commit_hash: String,
     all_file_paths: Vec<(String, bool)>,
+    /// Set when the diff is of a commit that comes from a pull request: that
+    /// commit is not in the repository's history, so the commit graph is
+    /// replaced by a note saying where it comes from.
+    pr_origin: Option<crate::view::detail::PrOrigin>,
 
     ctx: Rc<AppContext>,
     tx: Sender,
@@ -234,6 +238,7 @@ impl<'a> DiffView<'a> {
             title,
             commit_hash,
             all_file_paths,
+            pr_origin: None,
             ctx,
             tx,
             diff_content_area: None,
@@ -662,6 +667,13 @@ impl<'a> DiffView<'a> {
                 self.scroll_to_match(self.search_current);
                 self.update_search_status_bar();
             }
+            UserEvent::FileHistory | UserEvent::Blame if self.pr_origin.is_some() => {
+                // About the repository's own files, not about a commit that
+                // comes from a pull request.
+                self.tx.send(AppEvent::NotifyWarn(
+                    "Not available for a commit that comes from a pull request.".into(),
+                ));
+            }
             UserEvent::FileHistory => {
                 let file_path = self
                     .title
@@ -690,10 +702,17 @@ impl<'a> DiffView<'a> {
         }
     }
 
+    pub fn set_pr_origin(&mut self, origin: Option<crate::view::detail::PrOrigin>) {
+        self.pr_origin = origin;
+    }
+
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let [list_area, diff_area] = self.split_areas(area);
 
-        if let Some(ref mut list_state) = self.commit_list_state {
+        if let Some(origin) = &self.pr_origin {
+            crate::view::detail::render_pr_origin_note(f, list_area, &self.ctx.color_theme, origin);
+            self.render_diff(f, diff_area);
+        } else if let Some(ref mut list_state) = self.commit_list_state {
             let commit_list = CommitList::new(self.ctx.clone());
             f.render_stateful_widget(commit_list, list_area, list_state);
             self.render_diff(f, diff_area);
@@ -1087,6 +1106,10 @@ impl<'a> DiffView<'a> {
     }
 
     pub fn prepare_graph_uploads(&mut self) {
+        // No graph is drawn for a pull request's commit.
+        if self.pr_origin.is_some() {
+            return;
+        }
         if let Some(ref mut state) = self.commit_list_state {
             state.ensure_visible_graph_uploaded();
             state.ensure_visible_avatars_uploaded(
@@ -2610,6 +2633,10 @@ impl<'a> DiffView<'a> {
     where
         F: FnOnce(&mut CommitListState<'a>),
     {
+        // The commits of the repository are not the ones of a pull request.
+        if self.pr_origin.is_some() {
+            return Ok(());
+        }
         let state = match self.commit_list_state.as_mut() {
             Some(s) => s,
             None => return Ok(()),
@@ -2672,7 +2699,11 @@ impl<'a> DiffView<'a> {
     }
 
     fn copy_commit_hash(&self) {
-        if let Some(state) = self.commit_list_state.as_ref() {
+        // The list's selection is a commit of the repository: for a pull
+        // request's commit the one shown is the one this view was opened on.
+        if self.pr_origin.is_some() && !self.commit_hash.is_empty() {
+            self.copy_to_clipboard("Commit SHA".into(), self.commit_hash.clone());
+        } else if let Some(state) = self.commit_list_state.as_ref() {
             let hash = state.selected_commit_hash();
             self.copy_to_clipboard("Commit SHA".into(), hash.as_str().into());
         }
