@@ -17,6 +17,12 @@ PS1='PROMPT> '
 alias hi='echo hi-alias'
 ";
 
+// Debian and Ubuntu call `compinit` from /etc/zsh/zshrc, and it stops on a
+// "[y/n]" question when a directory of the machine is not secure enough (the
+// CI runners are). That is the machine's business, not what these tests are
+// about: this is the documented way to leave the global one out.
+const ZSHENV: &str = "skip_global_compinit=1\n";
+
 const ZSHRC: &str = "\
 echo BANNER
 HISTFILE=$HOME/.zsh_history_test; SAVEHIST=100; HISTSIZE=100
@@ -82,7 +88,10 @@ fn test_home(kind: ShellKind) -> tempfile::TempDir {
             )
             .unwrap();
         }
-        ShellKind::Zsh => std::fs::write(p.join(".zshrc"), ZSHRC).unwrap(),
+        ShellKind::Zsh => {
+            std::fs::write(p.join(".zshenv"), ZSHENV).unwrap();
+            std::fs::write(p.join(".zshrc"), ZSHRC).unwrap();
+        }
         ShellKind::Fish => {
             std::fs::create_dir_all(p.join(".config/fish")).unwrap();
             std::fs::write(p.join(".config/fish/config.fish"), FISHRC).unwrap();
@@ -392,7 +401,7 @@ fn zsh_history_file_never_points_into_the_integration_dir() {
     // What a system /etc/zshrc may do while ZDOTDIR still points at our dir.
     std::fs::write(
         home.path().join(".zshenv"),
-        "HISTFILE=$__gitoui_inject_dir/.zsh_history\n",
+        format!("{ZSHENV}HISTFILE=$__gitoui_inject_dir/.zsh_history\n"),
     )
     .unwrap();
     std::fs::write(home.path().join(".zshrc"), "PS1='PROMPT> '\n").unwrap();

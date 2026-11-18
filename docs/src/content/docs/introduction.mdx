@@ -1,6 +1,11 @@
 ---
 title: Introduction
 description: What gitoui is, what it isn't, and why it forked from serie.
+head:
+  # Without this the title is just "Introduction | gitoui", which says nothing
+  # in a search result and leaves search engines free to make one up.
+  - tag: title
+    content: What is gitoui? A terminal UI for git
 ---
 
 import { Card, CardGrid, Badge } from "@astrojs/starlight/components";
