@@ -309,6 +309,11 @@ impl<'a> FileHistoryView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ),
         ]);
+        // One row: a long path ends with `…`.
+        let title = Line::from(crate::text_fit::ellipsize_spans(
+            title.spans,
+            title_area.width as usize,
+        ));
         f.render_widget(Paragraph::new(title), title_area);
 
         let separator = Line::from("─".repeat(area.width as usize).fg(theme.divider_fg));
@@ -327,12 +332,34 @@ impl<'a> FileHistoryView<'a> {
 
         // ── Subject column gets whatever's left after the fixed columns ──
         let total_w = content_area.width as usize;
-        let avatars_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
-        // 2 image cells + 1 space before the author name.
+        let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+        // The subject says what the commit is: the date and then the author give
+        // way when the window cannot give it 16 columns.
+        let min_subject = 16;
+        let fixed = |author: bool, date: bool| {
+            PREFIX_W
+                + HASH_W
+                + COL_GAP
+                + COL_GAP
+                + if author {
+                    // 2 image cells + 1 space before the author name.
+                    (if avatars_on { 3 } else { 0 }) + AUTHOR_W
+                } else {
+                    0
+                }
+                + if date { COL_GAP + DATE_W } else { 0 }
+        };
+        let (mut show_author, mut show_date) = (true, true);
+        if total_w < fixed(true, true) + min_subject {
+            show_date = false;
+        }
+        if total_w < fixed(true, false) + min_subject {
+            show_author = false;
+        }
+        let avatars_enabled = avatars_on && show_author;
         let avatar_col_w: usize = if avatars_enabled { 3 } else { 0 };
-        let fixed_w =
-            PREFIX_W + HASH_W + COL_GAP + COL_GAP + avatar_col_w + AUTHOR_W + COL_GAP + DATE_W;
-        let subject_w = total_w.saturating_sub(fixed_w).max(10);
+        let fixed_w = fixed(show_author, show_date);
+        let subject_w = total_w.saturating_sub(fixed_w).max(4);
 
         let theme = &self.ctx.color_theme;
         let head_fg = theme.list_head_fg;
@@ -381,10 +408,12 @@ impl<'a> FileHistoryView<'a> {
                     + COL_GAP
                     + subject_w
                     + COL_GAP
-                    + avatar_col_w
-                    + AUTHOR_W
-                    + COL_GAP
-                    + DATE_W;
+                    + if show_author {
+                        avatar_col_w + AUTHOR_W
+                    } else {
+                        0
+                    }
+                    + if show_date { COL_GAP + DATE_W } else { 0 };
                 let trailing_pad = total_w.saturating_sub(row_w_used);
 
                 // Avatar placeholder (2 image cells + 1 space). The actual
@@ -410,12 +439,27 @@ impl<'a> FileHistoryView<'a> {
                     Span::styled(" ".repeat(COL_GAP), Style::default().bg(bg)),
                     avatar_span,
                     Span::styled(
-                        pad_right(&author, AUTHOR_W),
+                        if show_author {
+                            pad_right(&author, AUTHOR_W)
+                        } else {
+                            String::new()
+                        },
                         Style::default().fg(author_fg).bg(bg),
                     ),
-                    Span::styled(" ".repeat(COL_GAP), Style::default().bg(bg)),
                     Span::styled(
-                        pad_right(&date, DATE_W),
+                        if show_date {
+                            " ".repeat(COL_GAP)
+                        } else {
+                            String::new()
+                        },
+                        Style::default().bg(bg),
+                    ),
+                    Span::styled(
+                        if show_date {
+                            pad_right(&date, DATE_W)
+                        } else {
+                            String::new()
+                        },
                         Style::default().fg(date_fg).bg(bg),
                     ),
                     Span::styled(" ".repeat(trailing_pad), Style::default().bg(bg)),

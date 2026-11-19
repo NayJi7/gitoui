@@ -853,7 +853,15 @@ impl<'a> DiffView<'a> {
 
         // The search bar is now rendered globally via StatusLine::Input, no
         // need to carve a row out of the content area for an inline bar.
+        // The lines are wrapped for a width: a window that changes width needs
+        // them wrapped again, not the old rows cut by the new edge.
+        let width_changed = self
+            .diff_content_area
+            .is_some_and(|old| old.width != content_area.width);
         self.diff_content_area = Some(content_area);
+        if width_changed {
+            self.needs_rebuild = true;
+        }
 
         // Rebuild base lines if needed (content changed, not just hover)
         if self.needs_rebuild || self.base_lines.is_empty() {

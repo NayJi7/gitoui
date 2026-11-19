@@ -646,6 +646,9 @@ impl ActionsView<'_> {
                 Style::default().fg(theme.detail_label_fg),
             ));
         }
+        // One row: the title ends with `…` before the GitHub mark.
+        let mut head =
+            crate::text_fit::ellipsize_spans(head, (chunks[0].width as usize).saturating_sub(2));
         self.push_github_mark(&mut head, chunks[0].width as usize);
         f.render_widget(Paragraph::new(Line::from(head)), chunks[0]);
         self.divider(f, chunks[1]);
@@ -655,6 +658,9 @@ impl ActionsView<'_> {
 
         let (tabs, rects) = self.filter_title(chunks[3]);
         self.filter_tab_rects = rects;
+        // The status tabs end with `…` when the window cannot show them all.
+        let tabs =
+            crate::text_fit::ellipsize_spans(tabs, (chunks[3].width as usize).saturating_sub(2));
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.divider_fg))
@@ -847,6 +853,9 @@ impl ActionsView<'_> {
                 Style::default().fg(theme.detail_label_fg),
             ));
         }
+        // One row: the title ends with `…` before the GitHub mark.
+        let mut head =
+            crate::text_fit::ellipsize_spans(head, (chunks[0].width as usize).saturating_sub(2));
         self.push_github_mark(&mut head, chunks[0].width as usize);
         f.render_widget(Paragraph::new(Line::from(head)), chunks[0]);
         self.divider(f, chunks[1]);
