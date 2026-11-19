@@ -225,7 +225,7 @@ fn fit_row(line: Line<'static>, depth: usize) -> Line<'static> {
         let Some(last) = spans.pop() else { break };
         let w = crate::text_fit::width(last.content.as_ref());
         if w > over {
-            let name = crate::text_fit::ellipsize_middle(last.content.as_ref(), (w - over).max(1));
+            let name = crate::text_fit::ellipsize_end(last.content.as_ref(), (w - over).max(1));
             spans.push(Span::styled(name, last.style));
             break;
         }
@@ -236,7 +236,7 @@ fn fit_row(line: Line<'static>, depth: usize) -> Line<'static> {
             let fw = crate::text_fit::width(first.content.as_ref());
             let room = fw.saturating_sub(over).max(1);
             spans.push(Span::styled(
-                crate::text_fit::ellipsize_middle(first.content.as_ref(), room),
+                crate::text_fit::ellipsize_end(first.content.as_ref(), room),
                 first.style,
             ));
             break;

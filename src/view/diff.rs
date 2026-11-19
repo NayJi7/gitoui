@@ -776,8 +776,8 @@ impl<'a> DiffView<'a> {
                 if let Some(rest) = self.title.strip_prefix("Compare ") {
                     if let Some((older, newer)) = rest.split_once("..") {
                         let each = room.saturating_sub("Compare ".len() + 3) / 2;
-                        let older = crate::text_fit::ellipsize_middle(older, each.max(1));
-                        let newer = crate::text_fit::ellipsize_middle(newer, each.max(1));
+                        let older = crate::text_fit::ellipsize_end(older, each.max(1));
+                        let newer = crate::text_fit::ellipsize_end(newer, each.max(1));
                         let (older, newer) = (older.as_str(), newer.as_str());
                         vec![
                             Span::styled(
@@ -3219,7 +3219,7 @@ fn fit_diff_title(title: &str, room: usize) -> String {
                 .max(1);
             format!("{prefix}: {}", crate::text_fit::ellipsize_path(rest, left))
         }
-        None => crate::text_fit::ellipsize_middle(title, room),
+        None => crate::text_fit::ellipsize_end(title, room),
     }
 }
 

@@ -4737,17 +4737,14 @@ impl<'a> PullRequestsView<'a> {
             // instead of `branch       → main`. Fork prefix `user:` is
             // stripped, the author column already shows who opened it.
             Span::styled(
-                crate::text_fit::ellipsize_middle(
-                    strip_head_owner(&pr.head_label),
-                    cols.head.max(1),
-                ),
+                crate::text_fit::ellipsize_end(strip_head_owner(&pr.head_label), cols.head.max(1)),
                 Style::default()
                     .fg(theme.list_ref_branch_fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" → ", Style::default().fg(theme.detail_label_fg)),
             Span::styled(
-                crate::text_fit::ellipsize_middle(&pr.base_ref, cols.base.max(1)),
+                crate::text_fit::ellipsize_end(&pr.base_ref, cols.base.max(1)),
                 Style::default()
                     .fg(theme.list_ref_remote_branch_fg)
                     .add_modifier(Modifier::BOLD),
@@ -5886,11 +5883,11 @@ impl<'a> PullRequestsView<'a> {
                 let head_cap = budget.saturating_sub(base_cap).max(6);
                 (
                     Span::styled(
-                        crate::text_fit::ellipsize_middle(head_span.content.as_ref(), head_cap),
+                        crate::text_fit::ellipsize_end(head_span.content.as_ref(), head_cap),
                         head_span.style,
                     ),
                     Span::styled(
-                        crate::text_fit::ellipsize_middle(base_span.content.as_ref(), base_cap),
+                        crate::text_fit::ellipsize_end(base_span.content.as_ref(), base_cap),
                         base_span.style,
                     ),
                 )
