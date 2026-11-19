@@ -205,7 +205,9 @@ fn fit_row(line: Line<'static>, depth: usize) -> Line<'static> {
     if panel == usize::MAX {
         return line;
     }
-    let budget = panel.saturating_sub(5 + 2 * depth).max(1);
+    // One more column than the border, the padding and the fold symbol: a
+    // name never touches the right edge of the panel.
+    let budget = panel.saturating_sub(6 + 2 * depth).max(1);
     let total: usize = line
         .spans
         .iter()

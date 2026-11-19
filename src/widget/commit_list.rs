@@ -2398,12 +2398,16 @@ impl CommitList<'_> {
             // that can be clicked follow what is drawn.
             let refs_cap = (max_width / 2).max(12);
             if spans.iter().map(|s| s.width()).sum::<usize>() > refs_cap {
-                spans = crate::text_fit::ellipsize_spans(spans, refs_cap);
+                // Cut with an ellipsis, then a space so the subject does not
+                // run into it (`…fix(ci)`).
+                spans = crate::text_fit::ellipsize_spans(spans, refs_cap.saturating_sub(1));
+                spans.push(Span::raw(" "));
+                let shown = refs_cap.saturating_sub(1);
                 hit_areas.retain_mut(|hit| {
-                    if hit.start >= refs_cap {
+                    if hit.start >= shown {
                         return false;
                     }
-                    hit.end = hit.end.min(refs_cap);
+                    hit.end = hit.end.min(shown);
                     true
                 });
             }
