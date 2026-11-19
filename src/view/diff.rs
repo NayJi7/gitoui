@@ -1223,8 +1223,8 @@ impl<'a> DiffView<'a> {
     /// by row so a "modification" shows the old and new variants on the same
     /// row. Pure deletions get an empty right cell, pure additions an empty
     /// left cell. Headers (file / hunk) span the full width on their own line.
-    /// Long content is truncated with `…` rather than wrapped, wrapping each
-    /// half independently would misalign the pair.
+    /// Long content wraps inside its half; the shorter side of a pair is padded
+    /// so the separator and the pairing stay aligned.
     fn build_sbs_diff_lines(&mut self, diff_area: &Rect) -> Vec<Line<'static>> {
         use crate::git::diff::DiffLineType;
 
@@ -1260,21 +1260,27 @@ impl<'a> DiffView<'a> {
         let push_row = |lines: &mut Vec<Line<'static>>,
                         left: Option<(String, Style)>,
                         right: Option<(String, Style)>| {
-            let left_text = left
+            // Each side wraps to its half; the shorter one is padded so the
+            // separator stays on one column and the pair stays aligned.
+            let left_rows: Vec<String> = left
                 .as_ref()
-                .map(|(t, _)| truncate_to_width(t, half))
-                .unwrap_or_else(|| pad_to_width("", half));
-            let right_text = right
+                .map(|(t, _)| wrap_text(t, half).into_iter().map(String::from).collect())
+                .unwrap_or_default();
+            let right_rows: Vec<String> = right
                 .as_ref()
-                .map(|(t, _)| truncate_to_width(t, half))
-                .unwrap_or_else(|| pad_to_width("", half));
+                .map(|(t, _)| wrap_text(t, half).into_iter().map(String::from).collect())
+                .unwrap_or_default();
             let left_style = left.map(|(_, s)| s).unwrap_or_default();
             let right_style = right.map(|(_, s)| s).unwrap_or_default();
-            lines.push(Line::from(vec![
-                Span::styled(left_text, left_style),
-                Span::styled("│", sep_style),
-                Span::styled(right_text, right_style),
-            ]));
+            for k in 0..left_rows.len().max(right_rows.len()).max(1) {
+                let left_text = pad_to_width(left_rows.get(k).map_or("", String::as_str), half);
+                let right_text = pad_to_width(right_rows.get(k).map_or("", String::as_str), half);
+                lines.push(Line::from(vec![
+                    Span::styled(left_text, left_style),
+                    Span::styled("│", sep_style),
+                    Span::styled(right_text, right_style),
+                ]));
+            }
         };
 
         let mut sbs_hunk_spans: Vec<HunkRowSpan> = Vec::new();
@@ -1444,38 +1450,39 @@ impl<'a> DiffView<'a> {
                            content: &str,
                            row_bg: Option<Color>,
                            hl: &mut Option<SyntaxHighlighter>|
-         -> Vec<Span<'static>> {
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            let gutter = match line_no {
-                Some(n) => format!("{:>4} │ ", n),
-                None => "     │ ".to_string(),
-            };
+         -> Vec<Vec<Span<'static>>> {
+            let content_w = half - GUTTER;
             let mut gutter_style = Style::default().fg(sep_style.fg.unwrap_or(Color::Reset));
             if let Some(bg) = row_bg {
                 gutter_style = gutter_style.bg(bg);
             }
-            spans.push(Span::styled(gutter, gutter_style));
-
-            let content_w = half - GUTTER;
-            let truncated = truncate_to_width(content, content_w);
-            let visible_text: String = truncated.trim_end().to_string();
-            let pad_w = content_w.saturating_sub(visible_text.chars().count());
             let mut base_style = Style::default();
             if let Some(bg) = row_bg {
                 base_style = base_style.bg(bg);
             }
-            if let Some(h) = hl {
-                let highlighted = h.highlight_line(&visible_text, base_style, None);
-                for s in highlighted {
-                    spans.push(s);
+            // A long line wraps inside its half, under a blank gutter.
+            let chunks = crate::text_fit::wrap_plain(content.trim_end(), content_w);
+            let mut rows: Vec<Vec<Span<'static>>> = Vec::with_capacity(chunks.len());
+            for (k, chunk) in chunks.into_iter().enumerate() {
+                let mut spans: Vec<Span<'static>> = Vec::new();
+                let gutter = match (k, line_no) {
+                    (0, Some(n)) => format!("{:>4} │ ", n),
+                    _ => "     │ ".to_string(),
+                };
+                spans.push(Span::styled(gutter, gutter_style));
+                let visible_text: String = chunk.trim_end().to_string();
+                let pad_w = content_w.saturating_sub(crate::text_fit::width(&visible_text));
+                if let Some(h) = hl {
+                    spans.extend(h.highlight_line(&visible_text, base_style, None));
+                } else {
+                    spans.push(Span::styled(visible_text, base_style));
                 }
-            } else {
-                spans.push(Span::styled(visible_text, base_style));
+                if pad_w > 0 {
+                    spans.push(Span::styled(" ".repeat(pad_w), base_style));
+                }
+                rows.push(spans);
             }
-            if pad_w > 0 {
-                spans.push(Span::styled(" ".repeat(pad_w), base_style));
-            }
-            spans
+            rows
         };
 
         // Build a paired row from optional left + right cells.
@@ -1483,25 +1490,30 @@ impl<'a> DiffView<'a> {
                                left: Option<(Option<u32>, &str, Color)>,
                                right: Option<(Option<u32>, &str, Color)>,
                                hl: &mut Option<SyntaxHighlighter>| {
-            let mut row: Vec<Span<'static>> = Vec::new();
-            match left {
-                Some((no, content, bg)) => {
-                    row.extend(render_half(no, content, Some(bg), hl));
-                }
-                None => {
-                    row.push(Span::raw(" ".repeat(half)));
-                }
+            let left_rows = match left {
+                Some((no, content, bg)) => render_half(no, content, Some(bg), hl),
+                None => Vec::new(),
+            };
+            let right_rows = match right {
+                Some((no, content, bg)) => render_half(no, content, Some(bg), hl),
+                None => Vec::new(),
+            };
+            // The shorter side is padded with blanks: both stay aligned.
+            let n = left_rows.len().max(right_rows.len()).max(1);
+            let mut left_rows = left_rows.into_iter();
+            let mut right_rows = right_rows.into_iter();
+            for _ in 0..n {
+                let mut row: Vec<Span<'static>> = left_rows
+                    .next()
+                    .unwrap_or_else(|| vec![Span::raw(" ".repeat(half))]);
+                row.push(Span::styled("│", sep_style));
+                row.extend(
+                    right_rows
+                        .next()
+                        .unwrap_or_else(|| vec![Span::raw(" ".repeat(half))]),
+                );
+                lines.push(Line::from(row));
             }
-            row.push(Span::styled("│", sep_style));
-            match right {
-                Some((no, content, bg)) => {
-                    row.extend(render_half(no, content, Some(bg), hl));
-                }
-                None => {
-                    row.push(Span::raw(" ".repeat(half)));
-                }
-            }
-            lines.push(Line::from(row));
         };
 
         // Push a single full-width line styled uniformly (banners, gap markers).
@@ -1523,11 +1535,13 @@ impl<'a> DiffView<'a> {
                     return;
                 }
                 let content = new_file_lines[line_no - 1].as_str();
-                let mut row: Vec<Span<'static>> = Vec::new();
-                row.extend(render_half(Some(line_no as u32), content, None, hl));
-                row.push(Span::styled("│", sep_style));
-                row.extend(render_half(Some(line_no as u32), content, None, hl));
-                lines.push(Line::from(row));
+                let left = render_half(Some(line_no as u32), content, None, hl);
+                let right = render_half(Some(line_no as u32), content, None, hl);
+                for (mut row, right_row) in left.into_iter().zip(right) {
+                    row.push(Span::styled("│", sep_style));
+                    row.extend(right_row);
+                    lines.push(Line::from(row));
+                }
             };
 
         // ── helpers for hunk gap detection (mirrors build_base_lines) ──
@@ -1704,21 +1718,13 @@ impl<'a> DiffView<'a> {
                         i += 1;
                     }
                     DiffLineType::Context => {
-                        let mut row: Vec<Span<'static>> = Vec::new();
-                        row.extend(render_half(
-                            l.old_line_no,
-                            &l.content,
-                            None,
-                            &mut highlighter,
-                        ));
-                        row.push(Span::styled("│", sep_style));
-                        row.extend(render_half(
-                            l.new_line_no,
-                            &l.content,
-                            None,
-                            &mut highlighter,
-                        ));
-                        lines.push(Line::from(row));
+                        let left = render_half(l.old_line_no, &l.content, None, &mut highlighter);
+                        let right = render_half(l.new_line_no, &l.content, None, &mut highlighter);
+                        for (mut row, right_row) in left.into_iter().zip(right) {
+                            row.push(Span::styled("│", sep_style));
+                            row.extend(right_row);
+                            lines.push(Line::from(row));
+                        }
                         i += 1;
                     }
                     DiffLineType::Deletion => {

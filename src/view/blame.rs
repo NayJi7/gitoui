@@ -75,6 +75,13 @@ pub struct BlameView<'a> {
     scroll_offset: usize,
     view_height: usize,
     content_area: Option<Rect>,
+    /// For each screen row of the code area, the line it shows (a long line
+    /// takes several rows) and whether it is the first row of that line.
+    row_lines: Vec<usize>,
+    row_first: Vec<bool>,
+    /// Rows each line takes at the width in `wrap_cache_width`.
+    wrap_cache: Vec<u16>,
+    wrap_cache_width: usize,
     /// Deterministic per-SHA palette index.
     commit_colors: FxHashMap<String, usize>,
     ctx: Rc<AppContext>,
@@ -86,7 +93,7 @@ pub struct BlameView<'a> {
     /// Scroll position from the last avatar render pass. Changing only
     /// causes a full re-render; selection changes use the lighter selective
     /// path instead (mirrors commit_list's 3-path approach).
-    avatar_stable_key: Option<(usize, usize)>,
+    avatar_stable_key: Option<(usize, usize, usize)>,
     /// Which block was active during the last avatar render pass. Used to
     /// detect selection-only changes so we only re-render the two affected
     /// block heads instead of every visible row.
@@ -143,6 +150,10 @@ impl<'a> BlameView<'a> {
             scroll_offset: 0,
             view_height: 0,
             content_area: None,
+            row_lines: Vec::new(),
+            row_first: Vec::new(),
+            wrap_cache: Vec::new(),
+            wrap_cache_width: 0,
             commit_colors,
             ctx,
             tx,
@@ -332,7 +343,9 @@ impl<'a> BlameView<'a> {
         if row < area.y || row >= area.y + area.height {
             return;
         }
-        let line_idx = self.scroll_offset + (row - area.y) as usize;
+        let Some(&line_idx) = self.row_lines.get((row - area.y) as usize) else {
+            return;
+        };
         if line_idx >= self.lines.len() {
             return;
         }
@@ -356,7 +369,11 @@ impl<'a> BlameView<'a> {
             }
             return;
         }
-        let line_idx = self.scroll_offset + (row - area.y) as usize;
+        let line_idx = self
+            .row_lines
+            .get((row - area.y) as usize)
+            .copied()
+            .unwrap_or(usize::MAX);
         let block = if line_idx < self.lines.len() {
             self.block_at_line(line_idx)
         } else {
@@ -479,7 +496,14 @@ impl<'a> BlameView<'a> {
             + if show_author { sep_mid } else { 0 }
             + subject_w
             + if show_subject { sep_mid } else { 0 };
-        let code_w = total_w.saturating_sub(actual_left).max(1);
+        // One more column than the fixed parts add up to: the separator after the
+        // time column was never counted, and the code ran under the right edge.
+        let code_w = total_w.saturating_sub(actual_left + 1).max(1);
+        self.ensure_wrap_cache(code_w);
+        let max_scroll = self.max_scroll();
+        if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
 
         // Initialise a syntax highlighter once for this file, `highlight_line`
         // is stateful (multi-line context).
@@ -502,7 +526,10 @@ impl<'a> BlameView<'a> {
             .map(|t| self.cached_relative_time(t.as_ref()))
             .collect();
 
-        let visible_lines: Vec<Line<'static>> = visible_range
+        // A line whose code is wider than the column takes several rows.
+        let mut row_lines: Vec<usize> = Vec::new();
+        let mut row_first: Vec<bool> = Vec::new();
+        let rendered: Vec<Vec<Line<'static>>> = visible_range
             .clone()
             .enumerate()
             .map(|(j, i)| {
@@ -524,6 +551,19 @@ impl<'a> BlameView<'a> {
                 )
             })
             .collect();
+        let mut visible_lines: Vec<Line<'static>> = Vec::new();
+        for (rows, i) in rendered.into_iter().zip(visible_range.clone()) {
+            for (k, row) in rows.into_iter().enumerate() {
+                if visible_lines.len() >= self.view_height {
+                    break;
+                }
+                visible_lines.push(row);
+                row_lines.push(i);
+                row_first.push(k == 0);
+            }
+        }
+        self.row_lines = row_lines;
+        self.row_first = row_first;
 
         f.render_widget(Paragraph::new(visible_lines), content);
 
@@ -539,7 +579,7 @@ impl<'a> BlameView<'a> {
         // Paths 1 and 2 emit O(1) Kitty APCs even for large files; only path 3
         // scales with row count (and it only fires on actual scrolls).
         if avatars_enabled {
-            let scroll_key = (self.scroll_offset, self.view_height);
+            let scroll_key = (self.scroll_offset, self.view_height, code_w);
             let active_block = self.hovered_block.or(self.focused_block);
 
             let scroll_stable = self.avatar_stable_key == Some(scroll_key);
@@ -579,10 +619,7 @@ impl<'a> BlameView<'a> {
 
             if scroll_stable && select_stable {
                 // ── Path 1: nothing changed ──────────────────────────────────
-                for j in 0..self
-                    .view_height
-                    .min(self.lines.len().saturating_sub(self.scroll_offset))
-                {
+                for j in 0..self.row_lines.len() {
                     let y = content.top() + j as u16;
                     for x in 0..2u16 {
                         buf[(avatar_x + x, y)].set_skip(true);
@@ -592,10 +629,10 @@ impl<'a> BlameView<'a> {
                 // ── Path 2: selection changed, scroll same ───────────────────
                 let old_active = self.avatar_prev_active_block.flatten();
 
-                for (j, i) in visible_range.enumerate() {
+                for (j, i) in self.row_lines.clone().into_iter().enumerate() {
                     let y = content.top() + j as u16;
                     let block_idx = self.block_at_line(i);
-                    let is_head = self.is_block_head(i);
+                    let is_head = self.is_block_head(i) && self.row_first[j];
 
                     let was_active = old_active.is_some() && block_idx == old_active;
                     let is_now_active = active_block.is_some() && block_idx == active_block;
@@ -621,9 +658,9 @@ impl<'a> BlameView<'a> {
                 }
             } else {
                 // ── Path 3: scroll changed, full render ─────────────────────
-                for (j, i) in visible_range.enumerate() {
+                for (j, i) in self.row_lines.clone().into_iter().enumerate() {
                     let y = content.top() + j as u16;
-                    let is_head = self.is_block_head(i);
+                    let is_head = self.is_block_head(i) && self.row_first[j];
                     let block_idx = self.block_at_line(i);
                     let is_now_active = active_block.is_some() && block_idx == active_block;
                     let row_bg = if is_now_active { sel_bg } else { normal_bg };
@@ -715,7 +752,7 @@ impl<'a> BlameView<'a> {
         }
         if let Some(idx) = self.focused_block {
             if let Some(block) = self.blocks.get(idx) {
-                let max_scroll = self.lines.len().saturating_sub(self.view_height);
+                let max_scroll = self.max_scroll();
                 if block.start < self.scroll_offset {
                     self.scroll_offset = block.start;
                 } else if block.start >= self.scroll_offset + self.view_height {
@@ -737,10 +774,47 @@ impl<'a> BlameView<'a> {
         if self.view_height == 0 {
             return;
         }
-        let max_scroll = self.lines.len().saturating_sub(self.view_height);
+        let max_scroll = self.max_scroll();
         let new_off = self.scroll_offset as isize + delta;
         let clamped = new_off.max(0).min(max_scroll as isize);
         self.scroll_offset = clamped as usize;
+    }
+
+    /// The last scroll offset that still fills the view: lines that wrap take
+    /// several rows, so the end of the file stays reachable.
+    fn max_scroll(&self) -> usize {
+        let n = self.lines.len();
+        if self.wrap_cache.len() != n {
+            return n.saturating_sub(self.view_height);
+        }
+        let mut rows = 0usize;
+        let mut start = n;
+        while start > 0 {
+            let r = self.wrap_cache[start - 1] as usize;
+            if rows + r > self.view_height {
+                break;
+            }
+            rows += r;
+            start -= 1;
+        }
+        start
+    }
+
+    /// Rows every line takes when its code is wrapped to `code_w` columns.
+    fn ensure_wrap_cache(&mut self, code_w: usize) {
+        if self.wrap_cache_width == code_w && self.wrap_cache.len() == self.lines.len() {
+            return;
+        }
+        self.wrap_cache = self
+            .lines
+            .iter()
+            .map(|bl| {
+                crate::text_fit::wrap_plain(&bl.content.replace('\t', "    "), code_w)
+                    .len()
+                    .clamp(1, u16::MAX as usize) as u16
+            })
+            .collect();
+        self.wrap_cache_width = code_w;
     }
 
     fn block_at_line(&self, line: usize) -> Option<usize> {
@@ -796,7 +870,7 @@ impl<'a> BlameView<'a> {
         lineno_w: usize,
         code_w: usize,
         highlighter: Option<&mut SyntaxHighlighter>,
-    ) -> Line<'static> {
+    ) -> Vec<Line<'static>> {
         let bar_color = self.commit_color(&bl.hash);
         // Same grey highlight for both keyboard focus and mouse hover, hover
         // wins when set so the highlight follows the mouse, otherwise focus
@@ -910,23 +984,67 @@ impl<'a> BlameView<'a> {
             Style::default().fg(sep_fg).bg(row_bg),
         ));
 
-        // Code with optional syntax highlighting, truncated to code_w cells.
-        let mut code = bl.content.clone();
-        // Replace tabs with 4 spaces so width math is correct.
-        code = code.replace('\t', "    ");
-        let truncated_code = truncate(&code, code_w);
-        if let Some(h) = highlighter {
-            let mut hl_spans = h.highlight_line(&truncated_code, code_base_style, None);
-            // Apply row_bg overlay (syntect doesn't know about row_bg).
-            for sp in &mut hl_spans {
-                sp.style.bg = Some(row_bg);
+        // The code, wrapped to the column: a long line takes several rows,
+        // the annotation columns stay blank under the first one.
+        let code = bl.content.replace('\t', "    ");
+        let chunks = crate::text_fit::wrap_plain(&code, code_w);
+        let continuation_prefix: Vec<Span<'static>> = {
+            let mut p: Vec<Span<'static>> = Vec::new();
+            p.push(Span::styled(
+                "▎".to_string(),
+                Style::default().fg(bar_color).bg(row_bg),
+            ));
+            p.push(Span::styled(" ".to_string(), Style::default().bg(row_bg)));
+            if avatars_enabled {
+                p.push(Span::styled("   ".to_string(), Style::default().bg(row_bg)));
             }
-            spans.extend(hl_spans);
-        } else {
-            spans.push(Span::styled(truncated_code, code_base_style));
+            let blank_w = hash_w
+                + 1
+                + author_w
+                + if show_author { 1 } else { 0 }
+                + reltime_w
+                + 1
+                + subject_w
+                + if show_subject { 1 } else { 0 };
+            p.push(Span::styled(
+                " ".repeat(blank_w),
+                Style::default().bg(row_bg),
+            ));
+            p.push(Span::styled(
+                " │ ".to_string(),
+                Style::default().fg(sep_fg).bg(row_bg),
+            ));
+            p.push(Span::styled(
+                " ".repeat(lineno_w),
+                Style::default().bg(row_bg),
+            ));
+            p.push(Span::styled(
+                " │ ".to_string(),
+                Style::default().fg(sep_fg).bg(row_bg),
+            ));
+            p
+        };
+        let mut highlighter = highlighter;
+        let mut rows: Vec<Line<'static>> = Vec::with_capacity(chunks.len());
+        for (k, chunk) in chunks.into_iter().enumerate() {
+            let mut row: Vec<Span<'static>> = if k == 0 {
+                std::mem::take(&mut spans)
+            } else {
+                continuation_prefix.clone()
+            };
+            if let Some(h) = highlighter.as_deref_mut() {
+                let mut hl_spans = h.highlight_line(&chunk, code_base_style, None);
+                // Apply row_bg overlay (syntect doesn't know about row_bg).
+                for sp in &mut hl_spans {
+                    sp.style.bg = Some(row_bg);
+                }
+                row.extend(hl_spans);
+            } else {
+                row.push(Span::styled(chunk, code_base_style));
+            }
+            rows.push(Line::from(row));
         }
-
-        Line::from(spans)
+        rows
     }
 }
 

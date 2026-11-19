@@ -575,7 +575,10 @@ impl<'a> ConflictView<'a> {
         f.render_widget(block, area);
 
         let _ = dark_bg; // retained for build_result_lines below
-        let lines = self.build_source_lines(side, accent, theme.bg, inner.width);
+        let lines = wrap_rendered(
+            self.build_source_lines(side, accent, theme.bg, inner.width),
+            inner.width,
+        );
         let current_hunk_line = self.current_hunk_line(&lines);
         let (visible, hit_rows) =
             self.apply_scroll(&lines, inner.height as usize, current_hunk_line);
@@ -640,7 +643,10 @@ impl<'a> ConflictView<'a> {
             })
             .unwrap_or(false);
         if !cache_hit {
-            let lines = self.build_result_lines(theme.bg, dark_bg, inner.width);
+            let lines = wrap_rendered(
+                self.build_result_lines(theme.bg, dark_bg, inner.width),
+                inner.width,
+            );
             self.result_cache = Some(ResultCache {
                 resolutions: current_resolutions,
                 inner_width: inner.width,
@@ -1018,6 +1024,72 @@ struct RenderedLine {
     line: Line<'static>,
     /// Hunk this line belongs to (None for context / placeholders).
     hunk_idx: Option<usize>,
+    /// How many leading spans are the gutter (bar, line number, prefix) and
+    /// not the code: a line wider than the pane wraps its code under them.
+    prefix_spans: usize,
+    /// Whether the first of those spans is the hunk bar, repeated on every
+    /// row of a wrapped line.
+    keep_bar: bool,
+}
+
+/// The lines cut into rows that fit `width`: the code of a long line goes on
+/// the next rows, under a blank gutter (the hunk bar stays), so nothing is
+/// cut by the edge of the pane. Every row keeps the hunk of its line.
+fn wrap_rendered(lines: Vec<RenderedLine>, width: u16) -> Vec<RenderedLine> {
+    let width = width as usize;
+    let mut out: Vec<RenderedLine> = Vec::with_capacity(lines.len());
+    for rl in lines {
+        let total: usize = rl
+            .line
+            .spans
+            .iter()
+            .map(|s| crate::text_fit::width(s.content.as_ref()))
+            .sum();
+        if total <= width || rl.prefix_spans >= rl.line.spans.len() {
+            out.push(rl);
+            continue;
+        }
+        let mut spans = rl.line.spans.clone();
+        let code = spans.split_off(rl.prefix_spans);
+        let prefix = spans;
+        let prefix_w: usize = prefix
+            .iter()
+            .map(|s| crate::text_fit::width(s.content.as_ref()))
+            .sum();
+        let room = width.saturating_sub(prefix_w).max(1);
+        let blank_prefix: Vec<Span<'static>> = prefix
+            .iter()
+            .enumerate()
+            .map(|(i, sp)| {
+                if i == 0 && rl.keep_bar {
+                    sp.clone()
+                } else {
+                    Span::styled(
+                        " ".repeat(crate::text_fit::width(sp.content.as_ref())),
+                        sp.style,
+                    )
+                }
+            })
+            .collect();
+        for (k, chunk) in crate::text_fit::wrap_spans(code, room)
+            .into_iter()
+            .enumerate()
+        {
+            let mut row = if k == 0 {
+                prefix.clone()
+            } else {
+                blank_prefix.clone()
+            };
+            row.extend(chunk);
+            out.push(RenderedLine {
+                line: Line::from(row).style(rl.line.style),
+                hunk_idx: rl.hunk_idx,
+                prefix_spans: rl.prefix_spans,
+                keep_bar: rl.keep_bar,
+            });
+        }
+    }
+    out
 }
 
 /// Build a single source-pane line. Picks the side-bar glyph, the row
@@ -1108,6 +1180,8 @@ fn make_line(
     RenderedLine {
         line: Line::from(spans),
         hunk_idx,
+        prefix_spans: 3,
+        keep_bar: true,
     }
 }
 
@@ -1181,6 +1255,8 @@ fn make_annotated_line(
     RenderedLine {
         line: Line::from(spans),
         hunk_idx,
+        prefix_spans: 1,
+        keep_bar: false,
     }
 }
 
@@ -1243,5 +1319,68 @@ fn non_empty<'a>(s: &'a str, fallback: &'a str) -> &'a str {
         fallback
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_conflict_line_wraps_under_a_blank_gutter() {
+        let long = "let message = \"one two three four five six seven eight nine ten\";";
+        let line = make_line(
+            Some(7),
+            "+",
+            long,
+            Color::White,
+            Color::Green,
+            HunkState::Current,
+            Color::Black,
+            None,
+            24,
+            Some(3),
+        );
+        let rows = wrap_rendered(vec![line], 24);
+        assert!(rows.len() > 1);
+        for row in &rows {
+            let w: usize = row
+                .line
+                .spans
+                .iter()
+                .map(|s| crate::text_fit::width(s.content.as_ref()))
+                .sum();
+            assert!(w <= 24, "{w}");
+            // Every row stays in the hunk of its line.
+            assert_eq!(row.hunk_idx, Some(3));
+        }
+        // The line number only appears on the first row; the bar on all.
+        assert!(rows[0].line.spans[1].content.contains('7'));
+        assert!(rows[1].line.spans[1].content.trim().is_empty());
+        assert_eq!(rows[1].line.spans[0].content.as_ref(), "▎");
+        // Nothing of the code is lost.
+        let code: String = rows
+            .iter()
+            .flat_map(|r| r.line.spans.iter().skip(3).map(|s| s.content.as_ref()))
+            .collect();
+        let squeeze = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        assert_eq!(squeeze(&code), squeeze(long));
+    }
+
+    #[test]
+    fn a_short_line_is_left_alone() {
+        let line = make_line(
+            Some(1),
+            " ",
+            "fn a() {}",
+            Color::White,
+            Color::Green,
+            HunkState::Idle,
+            Color::Black,
+            None,
+            40,
+            None,
+        );
+        assert_eq!(wrap_rendered(vec![line], 40).len(), 1);
     }
 }
