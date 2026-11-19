@@ -2996,12 +2996,10 @@ impl App<'_> {
         // for Kitty to keep painting the commit-graph image on top of the
         // popup. Explicit reset -> set the bg -> set the char.
         //
-        // Clear the MAXIMUM possible dropdown area (MAX_VISIBLE + 2 border
-        // rows), not just the current suggestion count. When the dropdown
-        // shrinks (fewer matching suggestions), cells from the previous
-        // taller dropdown persist as visual junk below the resized popup.
-        let max_height = ((crate::dir_input::MAX_VISIBLE + 2) as u16).min(view_area.height);
-        let clear_height = max_height.max(area.height);
+        // Clear only what the popup covers (plus its margin). The view under it
+        // is redrawn in full every frame, so nothing stale remains when the
+        // popup shrinks, and the commit rows below it stay readable.
+        let clear_height = area.height;
         let popup_bg = theme.bg;
         // One more column on the right and one more row below stay empty, like
         // the margin of every popup (the top and left sides touch the edge of
