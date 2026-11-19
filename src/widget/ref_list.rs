@@ -214,19 +214,32 @@ fn fit_row(line: Line<'static>, depth: usize) -> Line<'static> {
     if total <= budget {
         return line;
     }
+    // From the end: shorten the last piece, or drop it when it is smaller than
+    // what is missing and go on with the one before (a worktree row has a
+    // branch, a mark and a path: the path gives way first).
     let mut spans = line.spans;
-    let Some(last) = spans.pop() else {
-        return Line::from(spans);
-    };
-    let before: usize = spans
-        .iter()
-        .map(|s| crate::text_fit::width(s.content.as_ref()))
-        .sum();
-    let name = crate::text_fit::ellipsize_middle(
-        last.content.as_ref(),
-        budget.saturating_sub(before).max(1),
-    );
-    spans.push(Span::styled(name, last.style));
+    let mut over = total - budget;
+    while over > 0 {
+        let Some(last) = spans.pop() else { break };
+        let w = crate::text_fit::width(last.content.as_ref());
+        if w > over {
+            let name = crate::text_fit::ellipsize_middle(last.content.as_ref(), (w - over).max(1));
+            spans.push(Span::styled(name, last.style));
+            break;
+        }
+        over -= w;
+        // Keep at least the first piece, shortened to what is left.
+        if spans.len() == 1 {
+            let first = spans.pop().unwrap();
+            let fw = crate::text_fit::width(first.content.as_ref());
+            let room = fw.saturating_sub(over).max(1);
+            spans.push(Span::styled(
+                crate::text_fit::ellipsize_middle(first.content.as_ref(), room),
+                first.style,
+            ));
+            break;
+        }
+    }
     Line::from(spans)
 }
 
@@ -745,6 +758,21 @@ mod fit_row_tests {
             assert!(w + 5 + 2 * depth <= 30, "depth {depth}: {w}");
             assert!(line.spans.last().unwrap().content.contains('…'));
         }
+        // A worktree row (branch, mark, path): the path gives way first, then the
+        // branch is shortened; nothing runs over the edge.
+        let line = Line::from(vec![
+            Span::raw("  wt-a-very-long-worktree-branch-name-xxxxxxxx".to_string()),
+            Span::raw(" *".to_string()),
+            Span::raw(" (some/path)".to_string()),
+        ]);
+        let fitted = fit_row(line, 1);
+        let w: usize = fitted
+            .spans
+            .iter()
+            .map(|s| crate::text_fit::width(s.content.as_ref()))
+            .sum();
+        assert!(w + 5 + 2 <= 30, "{w}");
+        assert!(fitted.spans.iter().any(|s| s.content.contains('…')));
         // A short name is left alone.
         let short = fit_row(row("main"), 1);
         assert_eq!(short.spans.last().unwrap().content.as_ref(), "main");
