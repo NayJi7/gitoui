@@ -405,6 +405,11 @@ impl<'a> BlameView<'a> {
                 Style::default().fg(theme.detail_label_fg),
             ),
         ]);
+        // One row: a long path ends with `…`.
+        let title_line = Line::from(crate::text_fit::ellipsize_spans(
+            title_line.spans,
+            title.width as usize,
+        ));
         f.render_widget(Paragraph::new(title_line), title);
 
         let sep_line = Line::from("─".repeat(area.width as usize).fg(theme.divider_fg));

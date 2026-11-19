@@ -543,7 +543,7 @@ impl CommitDetail<'_> {
         }
         value_lines.extend(subject);
         if !self.commit.body.is_empty() {
-            let body = crate::text_fit::wrap_plain(&self.commit.body, vw);
+            let body = crate::text_fit::wrap_body(&self.commit.body, vw);
             label_lines.push(Line::from("     Body: ").fg(label_fg));
             for _ in 1..body.len() {
                 label_lines.push(Line::from(""));
@@ -687,11 +687,13 @@ impl CommitDetail<'_> {
                     "HEAD -> ",
                     Style::default().fg(fg).add_modifier(Modifier::BOLD),
                 ));
-                first = false;
             }
         }
 
-        for (short_name, full_names) in compacted_branches.iter() {
+        // The branch HEAD points to comes first, right after `HEAD -> `.
+        let mut ordered: Vec<(&String, &Vec<String>)> = compacted_branches.iter().collect();
+        ordered.sort_by_key(|(name, _)| self.head_branch_name.as_deref() != Some(name.as_str()));
+        for (short_name, full_names) in ordered {
             let is_head = self.head_branch_name.as_deref() == Some(short_name.as_str());
             if !first {
                 spans.push(Span::raw(", "));

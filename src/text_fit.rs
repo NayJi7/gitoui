@@ -37,6 +37,17 @@ fn take_width(s: &str, max: usize) -> &str {
     s
 }
 
+/// Length in bytes of the longest prefix of `s` that fits in `max` columns
+/// (at least one character, so a loop that cuts rows always moves forward).
+pub fn prefix_bytes_for_width(s: &str, max: usize) -> usize {
+    let n = take_width(s, max).len();
+    if n == 0 {
+        s.chars().next().map_or(0, char::len_utf8)
+    } else {
+        n
+    }
+}
+
 /// The longest suffix of `s` that fits in `max` columns.
 fn take_width_end(s: &str, max: usize) -> &str {
     let mut used = 0;
@@ -228,6 +239,141 @@ pub fn wrap_plain(text: &str, max: usize) -> Vec<String> {
     rows
 }
 
+/// Greedy word wrap of `text` where the first row starts with `first` and the
+/// next ones with `rest` (a hanging indent under a list marker).
+fn wrap_hanging(text: &str, first: &str, rest: &str, max: usize) -> Vec<String> {
+    let max = max.max(1);
+    let mut rows: Vec<String> = Vec::new();
+    let mut cur = first.to_string();
+    let mut cur_w = width(first);
+    let mut empty = true;
+    for word in text.split(' ').filter(|w| !w.is_empty()) {
+        let ww = width(word);
+        let sep = usize::from(!empty);
+        if cur_w + sep + ww <= max || empty && cur_w + ww <= max {
+            if !empty {
+                cur.push(' ');
+            }
+            cur.push_str(word);
+            cur_w += sep + ww;
+            empty = false;
+            continue;
+        }
+        if !empty {
+            rows.push(std::mem::replace(&mut cur, rest.to_string()));
+            cur_w = width(rest);
+        }
+        // A word wider than a whole row is cut.
+        let mut left = word;
+        while !left.is_empty() {
+            let room = max.saturating_sub(cur_w).max(1);
+            let piece = take_width(left, room);
+            let piece = if piece.is_empty() {
+                &left[..left.chars().next().map_or(0, |c| c.len_utf8())]
+            } else {
+                piece
+            };
+            cur.push_str(piece);
+            left = &left[piece.len()..];
+            if left.is_empty() {
+                cur_w += width(piece);
+            } else {
+                rows.push(std::mem::replace(&mut cur, rest.to_string()));
+                cur_w = width(rest);
+            }
+        }
+        empty = false;
+    }
+    rows.push(cur);
+    rows
+}
+
+/// The marker of a list item (`- `, `* `, `+ `, `1. `, `2) `) at the start of
+/// `s`, with its length.
+fn list_marker(s: &str) -> Option<usize> {
+    let mut chars = s.char_indices();
+    let (_, c) = chars.next()?;
+    if matches!(c, '-' | '*' | '+') {
+        return s[1..].starts_with(' ').then_some(2);
+    }
+    if c.is_ascii_digit() {
+        let digits = s.chars().take_while(char::is_ascii_digit).count();
+        let after = &s[digits..];
+        if (after.starts_with(". ") || after.starts_with(") ")) && digits <= 3 {
+            return Some(digits + 2);
+        }
+    }
+    None
+}
+
+/// A message written by hand (a commit body, a tag annotation) in `max`
+/// columns. Its author already cut the lines at about 72 columns, so a line
+/// break inside a paragraph is joined back and the paragraph is wrapped once,
+/// to this width. What is not prose is left alone: blank lines, list items
+/// (their continuation lines are joined under them, with a hanging indent),
+/// quotes, code (4 spaces of indentation) and lines with aligned columns.
+pub fn wrap_body(text: &str, max: usize) -> Vec<String> {
+    struct Para {
+        first: String,
+        rest: String,
+        text: String,
+        is_item: bool,
+    }
+    fn flush(para: &mut Option<Para>, rows: &mut Vec<String>, max: usize) {
+        if let Some(p) = para.take() {
+            rows.extend(wrap_hanging(&p.text, &p.first, &p.rest, max));
+        }
+    }
+    let max = max.max(1);
+    let mut rows: Vec<String> = Vec::new();
+    let mut para: Option<Para> = None;
+    for raw in text.trim_end_matches('\n').split('\n') {
+        let line = raw.trim_end_matches('\r').replace('\t', "    ");
+        if line.trim().is_empty() {
+            flush(&mut para, &mut rows, max);
+            rows.push(String::new());
+            continue;
+        }
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let body = line.trim_start_matches(' ');
+        let in_item = para.as_ref().is_some_and(|p| p.is_item);
+        if let Some(mlen) = list_marker(body) {
+            flush(&mut para, &mut rows, max);
+            para = Some(Para {
+                first: format!("{}{}", " ".repeat(indent), &body[..mlen]),
+                rest: " ".repeat(indent + mlen),
+                text: body[mlen..].to_string(),
+                is_item: true,
+            });
+        } else if body.starts_with('>') || (indent >= 4 && !in_item) || body.contains("  ") {
+            // Quote, code or aligned columns: kept as written.
+            flush(&mut para, &mut rows, max);
+            rows.extend(wrap_plain(&line, max));
+        } else if para
+            .as_ref()
+            .is_some_and(|p| !p.is_item || indent >= p.rest.len())
+        {
+            // The next line of the same paragraph, or an indented line under
+            // a list item.
+            if let Some(p) = para.as_mut() {
+                p.text.push(' ');
+                p.text.push_str(body);
+            }
+        } else {
+            // A new paragraph (a line that is not indented after a list).
+            flush(&mut para, &mut rows, max);
+            para = Some(Para {
+                first: " ".repeat(indent),
+                rest: " ".repeat(indent),
+                text: body.to_string(),
+                is_item: false,
+            });
+        }
+    }
+    flush(&mut para, &mut rows, max);
+    rows
+}
+
 /// Same for a styled line: every piece keeps its style across the wrap.
 pub fn wrap_spans(spans: Vec<Span<'static>>, max: usize) -> Vec<Vec<Span<'static>>> {
     crate::view::pr::wrap_styled_spans(spans, max.max(1))
@@ -377,7 +523,7 @@ impl LabelledRows {
     /// Several lines of text (a message): kept as written, blank lines and
     /// indentation included, long lines wrapped.
     pub fn text(&mut self, label: &str, text: &str) {
-        let rows: Vec<Line<'static>> = wrap_plain(text, self.value_width)
+        let rows: Vec<Line<'static>> = wrap_body(text, self.value_width)
             .into_iter()
             .map(Line::from)
             .collect();
@@ -477,6 +623,56 @@ mod tests {
     }
 
     #[test]
+    fn a_hand_wrapped_paragraph_is_wrapped_once() {
+        let body = "feat(ui): the first paragraph cut at\nabout seventy columns by its\nauthor.\n\nSecond one.";
+        let rows = wrap_body(body, 40);
+        assert_eq!(
+            rows,
+            vec![
+                "feat(ui): the first paragraph cut at",
+                "about seventy columns by its author.",
+                "",
+                "Second one."
+            ]
+        );
+    }
+
+    #[test]
+    fn list_items_keep_their_marker_and_hang_their_continuation() {
+        let body = "- The first item that is long\n  and continues here\n- Second item";
+        let rows = wrap_body(body, 24);
+        assert_eq!(rows[0], "- The first item that is");
+        assert!(rows[1].starts_with("  long and continues"), "{rows:?}");
+        assert!(rows.iter().any(|r| r == "- Second item"), "{rows:?}");
+        assert!(rows.iter().all(|r| width(r) <= 24), "{rows:?}");
+    }
+
+    #[test]
+    fn code_quotes_and_columns_are_not_joined() {
+        let body =
+            "Intro line\n    let x = 1;\n    let y = 2;\n> quoted\nname    value\nnext    thing";
+        let rows = wrap_body(body, 60);
+        assert_eq!(rows[0], "Intro line");
+        assert_eq!(rows[1], "    let x = 1;");
+        assert_eq!(rows[2], "    let y = 2;");
+        assert_eq!(rows[3], "> quoted");
+        assert_eq!(rows[4], "name    value");
+        assert_eq!(rows[5], "next    thing");
+    }
+
+    #[test]
+    fn a_body_never_loses_a_word_or_overflows() {
+        let body = "- one two three four five six seven eight nine ten eleven twelve\n  thirteen fourteen\nA https://example.com/a/very/long/path/that/never/ends word";
+        for w in [5usize, 9, 17, 33] {
+            let rows = wrap_body(body, w);
+            assert!(rows.iter().all(|r| width(r) <= w), "{w}: {rows:?}");
+            // Nothing is lost: the same characters, only spaces and breaks move.
+            let squeeze = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            assert_eq!(squeeze(&rows.join("\n")), squeeze(body), "{w}");
+        }
+    }
+
+    #[test]
     fn blank_lines_and_indentation_are_kept() {
         let rows = wrap_plain("first\n\n    indented words that wrap around", 14);
         assert_eq!(rows[0], "first");
@@ -538,5 +734,37 @@ mod tests {
         assert_eq!(ellipsize_path("a/b/c", 1), "c");
         assert!(!wrap_plain("abc", 0).is_empty());
         assert!(!wrap_plain("", 5).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_character_on_the_cut_never_overflows_the_row() {
+        // "ab" + a 2-column character: cutting at 3 must not keep half of it.
+        let spans = vec![Span::raw("ab"), Span::raw("오병준")];
+        let cut = ellipsize_spans(spans, 4);
+        let text: String = cut.iter().map(|s| s.content.as_ref()).collect();
+        assert!(width(&text) <= 4 && text.ends_with('…'), "{text}");
+    }
+
+    #[test]
+    fn hints_without_a_prefix_or_with_a_first_hint_too_wide_still_fit() {
+        let h = "search-everything-in-the-repository:f▕▏quit:q";
+        let fitted = fit_hints(h, 12);
+        assert!(width(&fitted) <= 12, "{fitted}");
+        assert!(fitted.ends_with('…'), "{fitted}");
+        assert_eq!(fit_hints("q:quit▕▏?:help", 40), "q:quit▕▏?:help");
+    }
+
+    #[test]
+    fn capped_rows_end_with_an_ellipsis_only_when_rows_were_dropped() {
+        let rows: Vec<String> = ["one", "two", "three", "four"].map(String::from).to_vec();
+        let capped = cap_rows(rows.clone(), 2, 20);
+        assert_eq!(capped.len(), 2);
+        assert!(capped[1].ends_with('…'));
+        assert_eq!(cap_rows(rows.clone(), 10, 20), rows);
     }
 }

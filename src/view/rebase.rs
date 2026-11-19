@@ -1085,6 +1085,11 @@ impl<'a> InteractiveRebaseView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
+        // One row: what does not fit ends with `…`.
+        let title = Line::from(crate::text_fit::ellipsize_spans(
+            title.spans,
+            area.width as usize,
+        ));
         f.render_widget(Paragraph::new(vec![title, divider]), area);
     }
 
@@ -1344,6 +1349,20 @@ impl<'a> InteractiveRebaseView<'a> {
         } else {
             Modifier::empty()
         };
+
+        // One row: the author and the date give way first, then the subject
+        // ends with `…`; the action and the hash always stay.
+        let measure_w = |s: &str| crate::text_fit::width(s);
+        let prefix_w = measure_w(cursor_glyph)
+            + measure_w(&action_text)
+            + measure_w(&format!("  {}  ", short_hash));
+        let meta_need =
+            measure_w("  ") + measure_w(&item.author) + measure_w(" · ") + measure_w(&item.date);
+        let verbose = verbose && (width as usize) >= prefix_w + meta_need + 14;
+        let subject_room = (width as usize)
+            .saturating_sub(prefix_w + if verbose { meta_need + 1 } else { 0 } + 1)
+            .max(4);
+        let subject = crate::text_fit::ellipsize_end(&subject, subject_room);
 
         let mut spans: Vec<Span<'static>> = vec![cursor_span];
         let action_col_start = cursor_glyph.chars().count() as u16;

@@ -506,6 +506,11 @@ impl<'a> ConflictView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
+        // One row: a long path or a long status ends with `…`.
+        let title = Line::from(crate::text_fit::ellipsize_spans(
+            title.spans,
+            area.width as usize,
+        ));
         f.render_widget(Paragraph::new(vec![title, divider]), area);
     }
 

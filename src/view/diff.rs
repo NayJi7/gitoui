@@ -3214,7 +3214,7 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<&str> {
     let mut remaining = text;
 
     while !remaining.is_empty() {
-        if remaining.chars().count() <= max_width {
+        if crate::text_fit::width(remaining) <= max_width {
             lines.push(remaining);
             break;
         }
@@ -3247,13 +3247,10 @@ fn gap_has_hidden_lines(total: usize, visible_up: usize, visible_down: usize) ->
 /// Split `s` at the nearest whitespace boundary before `max_chars` characters,
 /// returning `(head, tail)`.  Falls back to a hard break at `max_chars` if no
 /// whitespace is found.  Avoids allocating a Vec of char indices.
-fn split_at_width(s: &str, max_chars: usize) -> (&str, &str) {
-    // Find the byte offset of the char AFTER `max_chars` chars
-    let hard_byte = s
-        .char_indices()
-        .nth(max_chars)
-        .map(|(b, _)| b)
-        .unwrap_or(s.len());
+fn split_at_width(s: &str, max_cols: usize) -> (&str, &str) {
+    // The byte offset where the row is full, counted in display columns (a
+    // Korean character is two).
+    let hard_byte = crate::text_fit::prefix_bytes_for_width(s, max_cols);
 
     let candidate = &s[..hard_byte];
 
@@ -3303,7 +3300,7 @@ fn wrap_diff_line_with_syntax(
     }
 
     while !remaining.is_empty() {
-        let (chunk, rest) = if remaining.chars().count() > content_width {
+        let (chunk, rest) = if crate::text_fit::width(remaining) > content_width {
             split_at_width(remaining, content_width)
         } else {
             (remaining, "")
@@ -3358,7 +3355,7 @@ fn wrap_diff_line(
     }
 
     while !remaining.is_empty() {
-        let (chunk, rest) = if remaining.chars().count() > content_width {
+        let (chunk, rest) = if crate::text_fit::width(remaining) > content_width {
             split_at_width(remaining, content_width)
         } else {
             (remaining, "")
@@ -3444,7 +3441,7 @@ fn wrap_diff_line_with_bar(
     }
 
     while !remaining.is_empty() {
-        let (chunk, rest) = if remaining.chars().count() > content_width {
+        let (chunk, rest) = if crate::text_fit::width(remaining) > content_width {
             split_at_width(remaining, content_width)
         } else {
             (remaining, "")
@@ -3706,7 +3703,7 @@ fn wrap_diff_line_with_syntax_and_bar(
     }
 
     while !remaining.is_empty() {
-        let (chunk, rest) = if remaining.chars().count() > content_width {
+        let (chunk, rest) = if crate::text_fit::width(remaining) > content_width {
             split_at_width(remaining, content_width)
         } else {
             (remaining, "")
@@ -3756,5 +3753,32 @@ mod tests {
         assert!(!gap_has_hidden_lines(10, 5, 5));
         assert!(!gap_has_hidden_lines(10, 12, 0));
         assert!(gap_has_hidden_lines(10, 4, 5));
+    }
+}
+
+#[cfg(test)]
+mod fit_title_tests {
+    use super::fit_diff_title;
+    use crate::text_fit::width;
+
+    #[test]
+    fn a_diff_line_of_wide_characters_wraps_by_columns() {
+        // Ten Korean characters are twenty columns: a row of 8 holds four.
+        let (head, tail) = super::split_at_width("오병준오병준오병준오병준오병준", 8);
+        assert_eq!(width(head), 8, "{head}");
+        assert!(!tail.is_empty());
+        assert_eq!(format!("{head}{tail}"), "오병준오병준오병준오병준오병준");
+    }
+
+    #[test]
+    fn a_diff_title_keeps_the_end_of_its_path() {
+        let t = fit_diff_title("Diff: src/view/actions/a_long_directory/render.rs", 30);
+        assert!(width(&t) <= 30, "{t}");
+        assert!(t.starts_with("Diff: ") && t.ends_with("render.rs"), "{t}");
+        // A title that fits is left alone.
+        assert_eq!(fit_diff_title("Diff: a.rs", 30), "Diff: a.rs");
+        // A title with no `: ` loses its middle.
+        let u = fit_diff_title("a-very-long-title-without-a-separator", 12);
+        assert!(width(&u) <= 12 && u.contains('…'), "{u}");
     }
 }

@@ -442,7 +442,7 @@ impl<'a> CompareView<'a> {
                     .add_modifier(Modifier::BOLD),
             ));
         }
-        let title_line = Line::from(spans);
+        let title_line = Line::from(crate::text_fit::ellipsize_spans(spans, area.width as usize));
         let divider = Line::from(Span::styled(
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
@@ -526,7 +526,26 @@ impl<'a> CompareView<'a> {
                         .fg(status_color)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!(" {}", summary.path), Style::default().fg(theme_fg)),
+                {
+                    // One row per file: the stats stay, the path keeps its
+                    // file name and the directories next to it.
+                    let stats_w = (if summary.add_count > 0 {
+                        2 + crate::text_fit::width(&format!("+{}", summary.add_count))
+                    } else {
+                        0
+                    }) + (if summary.del_count > 0 {
+                        1 + crate::text_fit::width(&format!("-{}", summary.del_count))
+                    } else {
+                        0
+                    });
+                    let room = (inner.width as usize)
+                        .saturating_sub(1 + 3 + 1 + stats_w)
+                        .max(1);
+                    Span::styled(
+                        format!(" {}", crate::text_fit::ellipsize_path(&summary.path, room)),
+                        Style::default().fg(theme_fg),
+                    )
+                },
             ];
             if summary.add_count > 0 {
                 spans.push(Span::raw("  "));

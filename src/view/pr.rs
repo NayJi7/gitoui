@@ -4389,6 +4389,8 @@ impl<'a> PullRequestsView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
+        // One row: the repository name ends with `…` when the window is narrow.
+        let left = crate::text_fit::ellipsize_spans(left, area.width as usize);
         f.render_widget(Paragraph::new(vec![Line::from(left), divider]), area);
     }
 
@@ -5864,6 +5866,31 @@ impl<'a> PullRequestsView<'a> {
             }
             spans.push(author_span);
             spans.push(dot_sep());
+            // The branches share what is left of the row: a long name loses its
+            // middle, the target branch and the badge stay.
+            let w = |sp: &Span<'_>| console::measure_text_width(sp.content.as_ref());
+            let used: usize = spans.iter().map(w).sum();
+            let badge_w: usize = badge_spans.iter().map(w).sum();
+            let budget = (area.width as usize)
+                .saturating_sub(used + w(&arrow_span) + badge_w + 3)
+                .max(12);
+            let (head_w, base_w) = (w(&head_span), w(&base_span));
+            let (head_span, base_span) = if head_w + base_w > budget {
+                let base_cap = (budget / 3).max(6).min(base_w);
+                let head_cap = budget.saturating_sub(base_cap).max(6);
+                (
+                    Span::styled(
+                        crate::text_fit::ellipsize_middle(head_span.content.as_ref(), head_cap),
+                        head_span.style,
+                    ),
+                    Span::styled(
+                        crate::text_fit::ellipsize_middle(base_span.content.as_ref(), base_cap),
+                        base_span.style,
+                    ),
+                )
+            } else {
+                (head_span, base_span)
+            };
             spans.push(head_span);
             spans.push(arrow_span);
             spans.push(base_span);
@@ -9491,4 +9518,56 @@ fn short_relative_iso(iso: &str) -> String {
 
 fn truncate(s: &str, max: usize) -> String {
     crate::text_fit::ellipsize_end(s, max)
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn label(name: &str) -> crate::github::pr::Label {
+        crate::github::pr::Label {
+            name: name.to_string(),
+            color: Some("d73a4a".to_string()),
+            description: None,
+        }
+    }
+
+    #[test]
+    fn label_chips_flow_onto_rows_that_fit() {
+        let labels: Vec<_> = (0..12)
+            .map(|i| label(&format!("label-number-{i}")))
+            .collect();
+        for width in [20usize, 30, 60] {
+            let rows = label_chip_rows(&labels, width, 2);
+            assert!(rows.len() > 1, "{width}");
+            for row in &rows {
+                let w: usize = row
+                    .iter()
+                    .map(|s| console::measure_text_width(s.content.as_ref()))
+                    .sum();
+                // A chip wider than the row sits alone on its own row.
+                let chips = row.iter().filter(|s| s.style.bg.is_some()).count();
+                assert!(w <= width || chips <= 1, "{width}: {w}");
+            }
+            // No chip is lost.
+            let all: String = rows
+                .iter()
+                .flat_map(|r| r.iter().map(|s| s.content.as_ref()))
+                .collect();
+            for i in 0..12 {
+                assert!(
+                    all.contains(&format!("label-number-{i}")) || all.contains(&format!("{i}"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wide_title_is_cut_to_its_cell_by_display_width() {
+        // Four Korean characters are eight columns.
+        let cell = fit_cell("오병준이", 6);
+        assert_eq!(console::measure_text_width(&cell), 6, "{cell}");
+        assert!(cell.contains('…'));
+        assert_eq!(console::measure_text_width(&fit_cell("ab", 6)), 6);
+    }
 }

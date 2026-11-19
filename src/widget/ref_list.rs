@@ -717,3 +717,37 @@ fn tree_item_with_line(
 ) -> TreeItem<'static, String> {
     TreeItem::new(identifier, fit_row(line, depth), children).unwrap()
 }
+
+#[cfg(test)]
+mod fit_row_tests {
+    use super::*;
+
+    fn row(text: &str) -> Line<'static> {
+        Line::from(vec![
+            Span::raw("⎇ ".to_string()),
+            Span::raw(text.to_string()),
+        ])
+    }
+
+    #[test]
+    fn a_long_ref_name_is_cut_to_the_panel_at_every_depth() {
+        PANEL_WIDTH.with(|w| w.set(30));
+        for depth in 0..4usize {
+            let line = fit_row(
+                row("feature/an-extremely-long-branch-name-that-overflows"),
+                depth,
+            );
+            let w: usize = line
+                .spans
+                .iter()
+                .map(|s| crate::text_fit::width(s.content.as_ref()))
+                .sum();
+            assert!(w + 5 + 2 * depth <= 30, "depth {depth}: {w}");
+            assert!(line.spans.last().unwrap().content.contains('…'));
+        }
+        // A short name is left alone.
+        let short = fit_row(row("main"), 1);
+        assert_eq!(short.spans.last().unwrap().content.as_ref(), "main");
+        PANEL_WIDTH.with(|w| w.set(usize::MAX));
+    }
+}

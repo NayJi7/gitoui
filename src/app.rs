@@ -3065,7 +3065,14 @@ impl App<'_> {
                         "│ ".to_string(),
                         Style::default().fg(theme.divider_fg).bg(bg),
                     ),
-                    Span::styled(s.display.clone(), Style::default().fg(theme.fg).bg(bg)),
+                    // A long path keeps its last directories: they tell which one it is.
+                    Span::styled(
+                        crate::text_fit::ellipsize_path(
+                            &s.display,
+                            (inner.width as usize).saturating_sub(6 + 1),
+                        ),
+                        Style::default().fg(theme.fg).bg(bg),
+                    ),
                 ])
             })
             .collect();

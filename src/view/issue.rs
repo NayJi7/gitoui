@@ -3683,6 +3683,8 @@ impl<'a> IssuesView<'a> {
             "─".repeat(area.width as usize),
             Style::default().fg(theme.divider_fg),
         ));
+        // One row: the repository name ends with `…` when the window is narrow.
+        let left = crate::text_fit::ellipsize_spans(left, area.width as usize);
         f.render_widget(Paragraph::new(vec![Line::from(left), divider]), area);
     }
 
@@ -4110,6 +4112,8 @@ impl<'a> IssuesView<'a> {
             height: 1,
             ..area
         };
+        // One row: the assignees and the milestone that do not fit end with `…`.
+        let spans = crate::text_fit::ellipsize_spans(spans, info_area.width as usize);
         f.render_widget(Paragraph::new(Line::from(spans)), info_area);
         let theme_bg = self.ctx.color_theme.bg;
         for (login, col) in avatar_paints {
