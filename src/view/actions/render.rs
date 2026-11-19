@@ -491,6 +491,7 @@ fn more_below(f: &mut Frame, area: Rect, theme: &ColorTheme, text: &'static str)
             text,
             Style::default().fg(theme.detail_label_fg),
         ))
+        .wrap(ratatui::widgets::Wrap { trim: false })
         .alignment(Alignment::Center),
         line,
     );
@@ -571,7 +572,8 @@ impl ActionsView<'_> {
             Paragraph::new(Span::styled(
                 "─".repeat(area.width as usize),
                 Style::default().fg(self.ctx.color_theme.divider_fg),
-            )),
+            ))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
             area,
         );
     }
@@ -730,7 +732,7 @@ impl ActionsView<'_> {
             } else if hovered {
                 style = style.add_modifier(Modifier::BOLD);
             }
-            let w = label.chars().count() as u16;
+            let w = crate::text_fit::width(&label) as u16;
             rects.push((*filter, Rect::new(x, area.y, w, 1)));
             spans.push(Span::styled(label, style));
             x = x.saturating_add(w);
@@ -759,6 +761,7 @@ impl ActionsView<'_> {
                     msg,
                     Style::default().fg(theme.detail_label_fg),
                 ))
+                .wrap(ratatui::widgets::Wrap { trim: false })
                 .alignment(Alignment::Center),
                 body,
             );

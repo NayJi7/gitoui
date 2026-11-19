@@ -1458,7 +1458,7 @@ impl<'a> DialogView<'a> {
                         };
                         let mut spans: Vec<Span<'static>> =
                             vec![Span::raw(indicator.to_string()), check_span];
-                        let mut avatar_col: u16 = (indicator.chars().count() + 2) as u16; // indicator + "● "
+                        let mut avatar_col: u16 = (crate::text_fit::width(indicator) + 2) as u16; // indicator + "● "
                         if avatars_on {
                             // Reserve 3 cells: 2 for the avatar + 1
                             // gap before the login. The paint pass
@@ -1804,14 +1804,14 @@ impl<'a> DialogView<'a> {
                 // blue-500) so it reads as "hyperlink" regardless of
                 // the active theme's accent palette.
                 let max_url_w = (inner_width as usize).saturating_sub(2).max(4);
-                let url_chars = url.chars().count();
+                let url_chars = crate::text_fit::width(&url);
                 let url_display = if url_chars > max_url_w {
                     let head: String = url.chars().take(max_url_w - 1).collect();
                     format!("{}…", head)
                 } else {
                     url
                 };
-                let display_w = url_display.chars().count();
+                let display_w = crate::text_fit::width(&url_display);
                 let pad = (inner_width as usize).saturating_sub(display_w) / 2;
                 lines.push(Line::from(vec![
                     Span::raw(" ".repeat(pad)),
@@ -1892,14 +1892,14 @@ impl<'a> DialogView<'a> {
                 // same treatment as the OrphanedPrCommit dialog so the
                 // two "open on GitHub" prompts read identically.
                 let max_url_w = (inner_width as usize).saturating_sub(2).max(4);
-                let url_chars = url.chars().count();
+                let url_chars = crate::text_fit::width(url);
                 let url_display = if url_chars > max_url_w {
                     let head: String = url.chars().take(max_url_w - 1).collect();
                     format!("{}…", head)
                 } else {
                     url.clone()
                 };
-                let display_w = url_display.chars().count();
+                let display_w = crate::text_fit::width(&url_display);
                 let pad = (inner_width as usize).saturating_sub(display_w) / 2;
                 lines.push(Line::from(vec![
                     Span::raw(" ".repeat(pad)),
@@ -2091,7 +2091,7 @@ impl<'a> DialogView<'a> {
         };
 
         // Available width for the subject text itself (leave room for " " + counter + " ").
-        let counter_width = counter_text.chars().count();
+        let counter_width = crate::text_fit::width(&counter_text);
         // We need: 1 (left space) + subject_display + padding + counter + 1 (right space) == inner_width
         // subject_display width = content_width - counter_width
         let subject_display_width = content_width.saturating_sub(counter_width);
@@ -2206,7 +2206,7 @@ impl<'a> DialogView<'a> {
         // gap before the description, descriptions wrap onto
         // continuation lines indented to this offset so they line
         // up under the description instead of the row's left edge.
-        let chip_width = label.name.chars().count() + 2; // ` name `
+        let chip_width = crate::text_fit::width(&label.name) + 2; // ` name `
         let indent: usize = 2 /* indicator */
             + 2 /* checkmark */
             + chip_width

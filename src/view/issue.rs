@@ -3761,7 +3761,7 @@ impl<'a> IssuesView<'a> {
             } else if is_hovered {
                 style = style.add_modifier(Modifier::BOLD);
             }
-            let label_len = label.chars().count() as u16;
+            let label_len = crate::text_fit::width(&label) as u16;
             rects.push((*filter, Rect::new(cursor_x, area.y, label_len, 1)));
             spans.push(Span::styled(label, style));
             cursor_x = cursor_x.saturating_add(label_len);
@@ -3816,6 +3816,7 @@ impl<'a> IssuesView<'a> {
                     msg,
                     Style::default().fg(theme.detail_label_fg),
                 ))
+                .wrap(ratatui::widgets::Wrap { trim: false })
                 .alignment(Alignment::Center),
                 body_area,
             );
@@ -3922,21 +3923,21 @@ impl<'a> IssuesView<'a> {
             0
         };
         let avatars_on_now = self.ctx.avatar_manager.lock().unwrap().is_enabled();
-        let title_rows = cached
+        let (title_rows, second_row) = cached
             .as_ref()
             .map(|d| {
-                issue_title_rows(
+                issue_header_rows(
                     &self.ctx.color_theme,
                     d,
                     area.width as usize,
                     avatars_on_now,
                 )
             })
-            .unwrap_or(0);
+            .unwrap_or((0, false));
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1 + title_rows as u16),
+                Constraint::Length(1 + title_rows as u16 + u16::from(second_row)),
                 Constraint::Length(labels_height),
                 Constraint::Length(1),
                 Constraint::Length(2),
@@ -3961,7 +3962,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     "─".repeat(divider_area.width as usize),
                     Style::default().fg(theme.divider_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 divider_area,
             );
         }
@@ -3977,7 +3979,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     label,
                     Style::default().fg(theme_label_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 tab_content_area,
             );
             return;
@@ -4015,6 +4018,10 @@ impl<'a> IssuesView<'a> {
         let mut avatar_paints: Vec<(String, u16)> = Vec::new();
         // The title, when it has to wrap above the info row.
         let mut title_lines: Vec<String> = Vec::new();
+        // The assignees and the milestone, when they go on a second row.
+        let mut second_spans: Vec<Span<'static>> = Vec::new();
+        // Index of the first avatar that belongs to that second row.
+        let mut second_from: Option<usize> = None;
         if let Some(d) = detail {
             spans.push(state_chip(theme, d.state, d.state_reason));
             spans.push(Span::raw("  "));
@@ -4044,7 +4051,10 @@ impl<'a> IssuesView<'a> {
             let dim = Style::default().fg(theme.detail_label_fg);
             spans.push(Span::styled("opened by ".to_string(), dim));
             if avatars_on {
-                let author_col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
+                let author_col: u16 = spans
+                    .iter()
+                    .map(|s| crate::text_fit::width(&s.content) as u16)
+                    .sum();
                 spans.push(Span::raw("   "));
                 avatar_paints.push((d.author.clone(), author_col));
             }
@@ -4060,6 +4070,11 @@ impl<'a> IssuesView<'a> {
                 Style::default().fg(theme.list_date_fg),
             ));
 
+            // The assignees and the milestone: on a second row when they do not
+            // fit beside the rest, else on the same one.
+            let (_, second) = issue_header_rows(theme, d, area.width as usize, avatars_on);
+            let first_len = spans.len();
+            let first_paints = avatar_paints.len();
             if !d.assignees.is_empty() {
                 spans.push(Span::styled("  ·  assigned: ".to_string(), dim));
                 for (i, a) in d.assignees.iter().enumerate() {
@@ -4067,7 +4082,10 @@ impl<'a> IssuesView<'a> {
                         spans.push(Span::styled(", ".to_string(), dim));
                     }
                     if avatars_on {
-                        let col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
+                        let col: u16 = spans
+                            .iter()
+                            .map(|s| crate::text_fit::width(&s.content) as u16)
+                            .sum();
                         spans.push(Span::raw("   "));
                         avatar_paints.push((a.clone(), col));
                     }
@@ -4080,6 +4098,31 @@ impl<'a> IssuesView<'a> {
             if let Some(ms) = &d.milestone {
                 spans.push(Span::styled("  ·  milestone: ".to_string(), dim));
                 spans.push(Span::styled(ms.clone(), dim));
+            }
+            if second {
+                // Move them to their own row, indented like the title; the
+                // avatar columns are counted again from the start of that row.
+                let mut moved: Vec<Span<'static>> = spans.split_off(first_len);
+                let before: u16 = 3;
+                let old_start: u16 = spans
+                    .iter()
+                    .map(|s| crate::text_fit::width(&s.content) as u16)
+                    .sum();
+                if let Some(first) = moved.first_mut() {
+                    // Drop the "  ·  " lead of the first piece.
+                    let trimmed = first
+                        .content
+                        .trim_start()
+                        .trim_start_matches('·')
+                        .trim_start();
+                    *first = Span::styled(trimmed.to_string(), first.style);
+                }
+                let lead = old_start + 5; // what was cut: "  ·  "
+                for paint in avatar_paints.iter_mut().skip(first_paints) {
+                    paint.1 = paint.1.saturating_sub(lead) + before;
+                }
+                second_spans = std::iter::once(Span::raw("   ")).chain(moved).collect();
+                second_from = Some(first_paints);
             }
         } else {
             spans.push(Span::styled(
@@ -4112,16 +4155,26 @@ impl<'a> IssuesView<'a> {
             height: 1,
             ..area
         };
-        // One row: the assignees and the milestone that do not fit end with `…`.
+        // One row each: what still does not fit ends with `…`.
         let spans = crate::text_fit::ellipsize_spans(spans, info_area.width as usize);
         f.render_widget(Paragraph::new(Line::from(spans)), info_area);
+        if !second_spans.is_empty() && area.height > above + 1 {
+            let second_area = Rect {
+                y: area.y + above + 1,
+                height: 1,
+                ..area
+            };
+            let row = crate::text_fit::ellipsize_spans(second_spans, second_area.width as usize);
+            f.render_widget(Paragraph::new(Line::from(row)), second_area);
+        }
         let theme_bg = self.ctx.color_theme.bg;
-        for (login, col) in avatar_paints {
+        for (idx, (login, col)) in avatar_paints.into_iter().enumerate() {
+            let on_second = second_from.is_some_and(|k| idx >= k);
             self.pending_avatar_paints.push((
                 crate::view::pr::PaintedAvatar {
                     login,
                     screen_x: area.x + col,
-                    screen_y: area.y + above,
+                    screen_y: area.y + above + u16::from(on_second),
                     is_selected: false,
                 },
                 theme_bg,
@@ -4189,7 +4242,7 @@ impl<'a> IssuesView<'a> {
             if is_active {
                 style = style.add_modifier(Modifier::UNDERLINED);
             }
-            let width = label.chars().count() as u16;
+            let width = crate::text_fit::width(&label) as u16;
             let rect = Rect {
                 x: cursor_x,
                 y: area.y,
@@ -4462,7 +4515,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     label,
                     Style::default().fg(theme.detail_label_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 area,
             );
             return;
@@ -4472,7 +4526,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     "  No timeline events yet.",
                     Style::default().fg(theme.detail_label_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 area,
             );
             return;
@@ -4647,7 +4702,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     label,
                     Style::default().fg(theme.detail_label_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 area,
             );
             // Clean up stale state so a click stops triggering on
@@ -4720,9 +4776,9 @@ impl<'a> IssuesView<'a> {
             ];
             let fixed = spans
                 .iter()
-                .map(|s| s.content.chars().count())
+                .map(|s| crate::text_fit::width(&s.content))
                 .sum::<usize>()
-                + dir_tooltip.chars().count()
+                + crate::text_fit::width(dir_tooltip)
                 + 4;
             let title_budget = (area.width as usize).saturating_sub(fixed).max(10);
             spans.push(Span::styled(
@@ -4861,7 +4917,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Span::styled(
                     "  Sending…".to_string(),
                     Style::default().fg(theme.status_warn_fg),
-                )),
+                ))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 footer_area,
             );
         }
@@ -5048,7 +5105,8 @@ impl<'a> IssuesView<'a> {
             Paragraph::new(Line::from(Span::styled(
                 "─".repeat(divider_area.width as usize),
                 Style::default().fg(theme.divider_fg),
-            ))),
+            )))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
             divider_area,
         );
 
@@ -5156,7 +5214,8 @@ impl<'a> IssuesView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     "─".repeat(underline_w as usize),
                     Style::default().fg(theme.list_head_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 Rect::new(title_value_x, underline_y, underline_w, 1),
             );
         }
@@ -5227,7 +5286,7 @@ impl<'a> IssuesView<'a> {
                     a.clone(),
                     Style::default().fg(theme.list_name_fg),
                 ));
-                col_in_value = col_in_value.saturating_add(a.chars().count() as u16);
+                col_in_value = col_in_value.saturating_add(crate::text_fit::width(a) as u16);
             }
             spans
         };
@@ -5518,7 +5577,7 @@ where
             hover_bg,
         );
         for s in new_spans.drain(..) {
-            col = col.saturating_add(s.content.chars().count() as u16);
+            col = col.saturating_add(crate::text_fit::width(&s.content) as u16);
             out.push(s);
         }
     }
@@ -5612,9 +5671,9 @@ where
                             let rendered = text[i..j].to_string();
                             (rendered, user_mention_color.expect("checked above"), None)
                         };
-                        let ref_chars = rendered.chars().count() as u16;
+                        let ref_chars = crate::text_fit::width(&rendered) as u16;
                         let pre_chars = if i > chunk_start {
-                            text[chunk_start..i].chars().count() as u16
+                            crate::text_fit::width(&text[chunk_start..i]) as u16
                         } else {
                             0
                         };
@@ -5798,7 +5857,7 @@ pub(crate) fn paint_mention_popup(
             // User rows omit the secondary title, only the
             // `@login` token is shown, sized via `widest_primary`.
             MentionKind::User => 0,
-            _ => m.title.chars().count() as u16,
+            _ => crate::text_fit::width(&m.title) as u16,
         })
         .max()
         .unwrap_or(20);
@@ -5814,7 +5873,7 @@ pub(crate) fn paint_mention_popup(
                     .chars()
                     .count() as u16
             }
-            _ => 1 + m.number.to_string().chars().count() as u16,
+            _ => 1 + crate::text_fit::width(&m.number.to_string()) as u16,
         })
         .max()
         .unwrap_or(3);
@@ -5879,7 +5938,7 @@ pub(crate) fn paint_mention_popup(
             }
             _ => format!("#{}", item.number),
         };
-        let used = 1 + 3 + 1 + primary.chars().count() + 2;
+        let used = 1 + 3 + 1 + crate::text_fit::width(&primary) + 2;
         let title_budget = (inner.width as usize).saturating_sub(used + 2).max(4);
         let secondary = match item.kind {
             MentionKind::User => String::new(),
@@ -6033,7 +6092,7 @@ impl IssueListColumns {
             })
             .max()
             .unwrap_or(4)
-            .max("STATE".chars().count());
+            .max(crate::text_fit::width("STATE"));
         let number = items
             .iter()
             .map(|i| 1 + digits_count(i.number))
@@ -6041,13 +6100,13 @@ impl IssueListColumns {
             .unwrap_or(2);
         let author = items
             .iter()
-            .map(|i| i.author.chars().count())
+            .map(|i| crate::text_fit::width(&i.author))
             .max()
             .unwrap_or(0)
-            .max("AUTHOR".chars().count());
+            .max(crate::text_fit::width("AUTHOR"));
         let max_title = items
             .iter()
-            .map(|i| i.title.chars().count())
+            .map(|i| crate::text_fit::width(&i.title))
             .max()
             .unwrap_or(0);
         let max_chips = items
@@ -6150,7 +6209,10 @@ fn format_issue_row(
     // the caller to paint the avatar after the List renders.
     row.push(Span::raw("  "));
     let avatar_col: Option<u16> = if avatars_on {
-        let pos: u16 = row.iter().map(|s| s.content.chars().count() as u16).sum();
+        let pos: u16 = row
+            .iter()
+            .map(|s| crate::text_fit::width(&s.content) as u16)
+            .sum();
         row.push(Span::raw("   "));
         Some(pos)
     } else {
@@ -6176,7 +6238,7 @@ fn format_issue_row(
                 span.style = span.style.bg(sel_bg);
             }
         }
-        let content_width: usize = row.iter().map(|s| s.content.chars().count()).sum();
+        let content_width: usize = row.iter().map(|s| crate::text_fit::width(&s.content)).sum();
         if content_width < row_width {
             row.push(Span::styled(
                 " ".repeat(row_width - content_width),
@@ -6210,24 +6272,31 @@ fn issue_title_rows(
     width: usize,
     avatars_on: bool,
 ) -> usize {
+    issue_header_rows(theme, d, width, avatars_on).0
+}
+
+/// The rows the header of the opened issue needs: `(title rows above the info
+/// row, whether the assignees and the milestone go on a second info row)`.
+fn issue_header_rows(
+    theme: &crate::color::ColorTheme,
+    d: &IssueDetail,
+    width: usize,
+    avatars_on: bool,
+) -> (usize, bool) {
     let w = |s: &str| console::measure_text_width(s);
     let pad: usize = if avatars_on { 3 } else { 0 };
-    let meta = "opened by ".len()
-        + w(&d.author)
-        + " · ".len()
-        + w(&d.opened_when)
-        + pad
-        + if d.assignees.is_empty() {
-            0
-        } else {
-            "  ·  assigned: ".len()
-                + d.assignees.iter().map(|a| w(a) + pad).sum::<usize>()
-                + (d.assignees.len().saturating_sub(1)) * 2
-        }
-        + d.milestone
-            .as_ref()
-            .map(|m| "  ·  milestone: ".len() + w(m))
-            .unwrap_or(0);
+    let opened = "opened by ".len() + w(&d.author) + " · ".len() + w(&d.opened_when) + pad;
+    let extra = (if d.assignees.is_empty() {
+        0
+    } else {
+        "  ·  assigned: ".len()
+            + d.assignees.iter().map(|a| w(a) + pad).sum::<usize>()
+            + (d.assignees.len().saturating_sub(1)) * 2
+    }) + d
+        .milestone
+        .as_ref()
+        .map(|m| "  ·  milestone: ".len() + w(m))
+        .unwrap_or(0);
     let chip: usize = state_chip(theme, d.state, d.state_reason)
         .content
         .as_ref()
@@ -6235,13 +6304,16 @@ fn issue_title_rows(
         .map(|c| w(&c.to_string()))
         .sum();
     let fixed = 1 + chip + 2 + w(&format!("#{}", d.number)) + 2;
-    let room = width.saturating_sub(fixed + meta + 4).max(10);
+    let room = width.saturating_sub(fixed + opened + extra + 4).max(10);
     if w(&d.title) <= room {
-        return 0;
+        return (0, false);
     }
-    crate::text_fit::wrap_plain(&d.title, width.saturating_sub(3))
+    let title_rows = crate::text_fit::wrap_plain(&d.title, width.saturating_sub(3))
         .len()
-        .min(crate::view::pr::MAX_TITLE_ROWS)
+        .min(crate::view::pr::MAX_TITLE_ROWS);
+    // The title is on its own rows: the assignees and the milestone only go
+    // down to a second info row when they do not fit beside the rest.
+    (title_rows, fixed + opened + extra + 2 > width && extra > 0)
 }
 
 fn state_chip(

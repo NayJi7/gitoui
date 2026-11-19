@@ -586,7 +586,7 @@ impl PrListColumns {
             })
             .max()
             .unwrap_or(4)
-            .max("STATUS".chars().count());
+            .max(crate::text_fit::width("STATUS"));
         let number = items
             .iter()
             .map(|pr| 1 + digits(pr.number))
@@ -597,7 +597,7 @@ impl PrListColumns {
             .map(|pr| crate::text_fit::width(&pr.author))
             .max()
             .unwrap_or(0)
-            .max("AUTHOR".chars().count())
+            .max(crate::text_fit::width("AUTHOR"))
             .min((available_width / 6).max(10));
         let max_head = items
             .iter()
@@ -613,7 +613,7 @@ impl PrListColumns {
             .min((available_width / 8).max(8));
         let max_title = items
             .iter()
-            .map(|pr| pr.title.chars().count())
+            .map(|pr| crate::text_fit::width(&pr.title))
             .max()
             .unwrap_or(0);
 
@@ -4476,6 +4476,7 @@ impl<'a> PullRequestsView<'a> {
                 msg,
                 Style::default().fg(theme.detail_label_fg),
             ))
+            .wrap(ratatui::widgets::Wrap { trim: false })
             .alignment(Alignment::Center);
             f.render_widget(empty, body_area);
             return;
@@ -4615,7 +4616,7 @@ impl<'a> PullRequestsView<'a> {
             } else if is_hovered {
                 style = style.add_modifier(Modifier::BOLD);
             }
-            let label_len = label.chars().count() as u16;
+            let label_len = crate::text_fit::width(&label) as u16;
             rects.push((*filter, Rect::new(cursor_x, area.y, label_len, 1)));
             spans.push(Span::styled(label, style));
             cursor_x = cursor_x.saturating_add(label_len);
@@ -4838,7 +4839,8 @@ impl<'a> PullRequestsView<'a> {
                 Paragraph::new(Line::from(Span::styled(
                     "─".repeat(header_divider_area.width as usize),
                     Style::default().fg(theme.divider_fg),
-                ))),
+                )))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 header_divider_area,
             );
         }
@@ -4850,7 +4852,8 @@ impl<'a> PullRequestsView<'a> {
             } else {
                 "  No PR opened."
             };
-            let p = Paragraph::new(Span::styled(label, Style::default().fg(theme_label_fg)));
+            let p = Paragraph::new(Span::styled(label, Style::default().fg(theme_label_fg)))
+                .wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(p, tab_content_area);
             return;
         };
@@ -4935,7 +4938,8 @@ impl<'a> PullRequestsView<'a> {
             Paragraph::new(Line::from(Span::styled(
                 "─".repeat(divider_area.width as usize),
                 Style::default().fg(theme.divider_fg),
-            ))),
+            )))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
             divider_area,
         );
 
@@ -5537,7 +5541,8 @@ impl<'a> PullRequestsView<'a> {
             let p = Paragraph::new(Span::styled(
                 "  (set head + base to see the preview)".to_string(),
                 Style::default().fg(theme.detail_label_fg),
-            ));
+            ))
+            .wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(p, inner);
             return;
         };
@@ -5752,7 +5757,8 @@ impl<'a> PullRequestsView<'a> {
                 Paragraph::new(Span::styled(
                     "  Sending…".to_string(),
                     Style::default().fg(theme.status_warn_fg),
-                )),
+                ))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 footer_area,
             );
         }
@@ -6018,7 +6024,7 @@ impl<'a> PullRequestsView<'a> {
             if is_active {
                 style = style.add_modifier(Modifier::UNDERLINED);
             }
-            let width = label.chars().count() as u16;
+            let width = crate::text_fit::width(&label) as u16;
             let rect = Rect {
                 x: cursor_x,
                 y: area.y,
@@ -6562,7 +6568,8 @@ impl<'a> PullRequestsView<'a> {
             let p = Paragraph::new(Span::styled(
                 "  No commits in this PR.",
                 Style::default().fg(theme.detail_label_fg),
-            ));
+            ))
+            .wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(p, area);
             return;
         }
@@ -6640,7 +6647,8 @@ impl<'a> PullRequestsView<'a> {
             let p = Paragraph::new(Span::styled(
                 "  No checks configured.",
                 Style::default().fg(theme.detail_label_fg),
-            ));
+            ))
+            .wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(p, area);
             return;
         }
@@ -6701,7 +6709,8 @@ impl<'a> PullRequestsView<'a> {
             let p = Paragraph::new(Span::styled(
                 "  No file changes.",
                 Style::default().fg(theme.detail_label_fg),
-            ));
+            ))
+            .wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(p, area);
             return;
         }
@@ -6741,7 +6750,8 @@ impl<'a> PullRequestsView<'a> {
             let p = Paragraph::new(Span::styled(
                 "  Loading commit detail…".to_string(),
                 Style::default().fg(theme.detail_label_fg),
-            ));
+            ))
+            .wrap(ratatui::widgets::Wrap { trim: false });
             f.render_widget(p, area);
             return;
         };
@@ -7509,8 +7519,24 @@ pub(crate) fn push_comment_card(
     // U+2576 + U+2574) keeps the 2-column footprint of the footer's
     // `▕▏` but sits at the line's midpoint instead of full height
     // reads as a low-key separator that matches the box-drawing family.
+    // Room left on the border for them: the last ones are dropped when the
+    // card is narrow, rather than cut in the middle of a key.
+    let shortcut_room = card_width.saturating_sub(consumed).saturating_sub(2 + 3);
     let shortcut_text = if input.is_selected && !input.inline_shortcuts.is_empty() {
-        format!(" {} ", input.inline_shortcuts.join("╶╴"))
+        let mut keep = input.inline_shortcuts.len();
+        while keep > 0
+            && console::measure_text_width(&format!(
+                " {} ",
+                input.inline_shortcuts[..keep].join("╶╴")
+            )) > shortcut_room
+        {
+            keep -= 1;
+        }
+        if keep == 0 {
+            String::new()
+        } else {
+            format!(" {} ", input.inline_shortcuts[..keep].join("╶╴"))
+        }
     } else {
         String::new()
     };
@@ -7696,22 +7722,22 @@ impl CommitColumns {
     fn compute(items: &[PullCommit], available_width: usize) -> Self {
         let sha = items
             .iter()
-            .map(|c| c.short_sha.chars().count())
+            .map(|c| crate::text_fit::width(&c.short_sha))
             .max()
             .unwrap_or(7);
         let author = items
             .iter()
-            .map(|c| c.author.chars().count())
+            .map(|c| crate::text_fit::width(&c.author))
             .max()
             .unwrap_or(0);
         let date = items
             .iter()
-            .map(|c| c.date.chars().count())
+            .map(|c| crate::text_fit::width(&c.date))
             .max()
             .unwrap_or(0);
         let max_subject = items
             .iter()
-            .map(|c| c.subject.chars().count())
+            .map(|c| crate::text_fit::width(&c.subject))
             .max()
             .unwrap_or(0);
         // leading "  " (2) + sha + "  " (2) + subject + "  " (2)
@@ -7765,7 +7791,10 @@ fn commit_row(
     // commit has a resolved GitHub login (otherwise paint would
     // skip and the pad would just be a gap).
     let avatar_col = if want_avatar {
-        let col: u16 = spans.iter().map(|s| s.content.chars().count() as u16).sum();
+        let col: u16 = spans
+            .iter()
+            .map(|s| crate::text_fit::width(&s.content) as u16)
+            .sum();
         spans.push(Span::raw("   "));
         Some(col)
     } else {
@@ -7918,7 +7947,7 @@ impl FileColumns {
             .unwrap_or(2);
         let max_filename = items
             .iter()
-            .map(|f| f.filename.chars().count())
+            .map(|f| crate::text_fit::width(&f.filename))
             .max()
             .unwrap_or(0);
         // leading "    " (4) + tag (1) + "  " (2) + filename + "  " (2)
@@ -8503,7 +8532,7 @@ fn split_row(
         let (lineno, text) = side
             .map(|(n, t)| (format!("{:>w$}", n, w = gutter_width), t.to_string()))
             .unwrap_or_else(|| (" ".repeat(gutter_width), String::new()));
-        let truncated: String = if text.chars().count() > text_side_width {
+        let truncated: String = if crate::text_fit::width(&text) > text_side_width {
             let cut: String = text
                 .chars()
                 .take(text_side_width.saturating_sub(1))
