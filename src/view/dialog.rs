@@ -699,6 +699,114 @@ impl<'a> DialogView<'a> {
         }
     }
 
+    /// `lines` cut down to `max_rows` when a dialog is taller than the
+    /// screen: the lines above the list and the last ones (separator and
+    /// buttons) stay, a window of the list follows the focused row, and `↑` /
+    /// `↓` rows say there is more. The rows the clicks and the cursor rely on
+    /// are moved to where their lines now are.
+    fn window_lines(
+        &mut self,
+        lines: Vec<Line<'static>>,
+        max_rows: usize,
+        width: u16,
+    ) -> Vec<Line<'static>> {
+        let total = lines.len();
+        let list_rows: Vec<usize> = self
+            .checkbox_rows
+            .iter()
+            .chain(self.radio_rows.iter())
+            .copied()
+            .collect();
+        let (Some(&first), Some(&last)) = (list_rows.iter().min(), list_rows.iter().max()) else {
+            return lines;
+        };
+        // The list ends with its last item (and its wrapped description);
+        // what follows (blank, separator, buttons) is the tail.
+        // The tail starts at the blank line before the separator, so the last
+        // item keeps its wrapped description in the list.
+        let separator = lines
+            .iter()
+            .rposition(|l| l.spans.first().is_some_and(|s| s.content.starts_with('─')));
+        let tail_len = match separator {
+            Some(sep) if sep > last => total - sep.saturating_sub(1).max(last + 1),
+            _ => total.saturating_sub(last + 1).max(3),
+        }
+        .min(total.saturating_sub(first + 1));
+        let head_len = first;
+        let body_len = total.saturating_sub(head_len + tail_len);
+        let room = max_rows.saturating_sub(head_len + tail_len + 2);
+        if room < 3 || body_len <= room {
+            return lines;
+        }
+        let focus_row = match self.focused {
+            DialogElement::Checkbox(i) => self.checkbox_rows.get(i).copied(),
+            DialogElement::Radio(i) => self.radio_rows.get(i).copied(),
+            _ => None,
+        }
+        .unwrap_or(first)
+        .clamp(head_len, head_len + body_len - 1);
+        let focus_in_body = focus_row - head_len;
+        let off = focus_in_body.saturating_sub(room / 2).min(body_len - room);
+        let body_start = head_len + off;
+        let dim = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let mut out: Vec<Line<'static>> = Vec::with_capacity(max_rows);
+        out.extend(lines[..head_len].iter().cloned());
+        out.push(Line::from(Span::styled(
+            if off > 0 { "  ↑ more" } else { "" },
+            dim,
+        )));
+        out.extend(lines[body_start..body_start + room].iter().cloned());
+        out.push(Line::from(Span::styled(
+            if off + room < body_len {
+                "  ↓ more"
+            } else {
+                ""
+            },
+            dim,
+        )));
+        out.extend(lines[total - tail_len..].iter().cloned());
+        // Every row is written in full: a shorter line must not leave the text
+        // of the previous frame under it.
+        for line in out.iter_mut() {
+            let w: usize = line
+                .spans
+                .iter()
+                .map(|s| crate::text_fit::width(s.content.as_ref()))
+                .sum();
+            if w < width as usize {
+                line.spans.push(Span::raw(" ".repeat(width as usize - w)));
+            }
+        }
+        let tail_start_old = total - tail_len;
+        let tail_start_new = head_len + 1 + room + 1;
+        let map = |old: usize| -> usize {
+            if old < head_len {
+                old
+            } else if old >= tail_start_old {
+                tail_start_new + (old - tail_start_old)
+            } else if old >= body_start && old < body_start + room {
+                head_len + 1 + (old - body_start)
+            } else {
+                usize::MAX
+            }
+        };
+        self.input_row = self.input_row.map(map);
+        self.second_input_row = self.second_input_row.map(map);
+        self.body_expand_row = self.body_expand_row.map(map);
+        self.button_row = map(self.button_row);
+        for r in self
+            .checkbox_rows
+            .iter_mut()
+            .chain(self.radio_rows.iter_mut())
+        {
+            *r = map(*r);
+        }
+        for p in self.assignee_avatar_paints.iter_mut() {
+            p.1 = map(p.1);
+        }
+        out
+    }
+
     fn find_element_at(&self, col: u16, row: u16) -> Option<DialogElement> {
         if col < self.inner_area.x || row < self.inner_area.y {
             return None;
@@ -777,7 +885,12 @@ impl<'a> DialogView<'a> {
         let width = (area.width as u32 * 50 / 100).clamp(42, 65) as u16;
         let inner_width = width.saturating_sub(2);
 
-        let lines = self.build_lines(inner_width);
+        let mut lines = self.build_lines(inner_width);
+        // Taller than the screen: the list scrolls with the focus, the title
+        // part and the buttons stay.
+        if lines.len() + 2 > area.height as usize {
+            lines = self.window_lines(lines, (area.height as usize).saturating_sub(2), inner_width);
+        }
 
         let height = (lines.len() as u16 + 2).min(area.height);
         let dialog_area = centered_rect_exact(width, height, area);
@@ -814,6 +927,10 @@ impl<'a> DialogView<'a> {
         if matches!(self.kind, DialogKind::IssueAssignees { .. }) {
             let theme_bg = self.ctx.color_theme.bg;
             for (login, line_idx, col_offset) in self.assignee_avatar_paints.clone() {
+                // A row scrolled out of the window has no place on screen.
+                if line_idx == usize::MAX {
+                    continue;
+                }
                 let screen_x = inner.x + col_offset;
                 let screen_y = inner.y + line_idx as u16;
                 if screen_x + 2 > inner.x + inner.width || screen_y >= inner.y + inner.height {

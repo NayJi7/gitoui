@@ -184,6 +184,11 @@ impl<'a> ConfigView<'a> {
             })
             .max()
             .unwrap_or(36) as u16;
+        // Too narrow for a list and its details side by side: the list keeps
+        // the whole width, the details need a wider window.
+        if total_width < 64 {
+            return total_width;
+        }
         let min_width = 34.min(total_width);
         let max_width = (total_width.saturating_mul(48) / 100).max(min_width);
         (content_width + 4).max(min_width).min(max_width)
@@ -904,6 +909,16 @@ impl<'a> ConfigView<'a> {
             width: inner.width,
             height: 1,
         };
+        // One row shared with the version on the right: the title ends with `…`.
+        let meta_w = crate::text_fit::width(&format!(
+            "v{} · {}",
+            env!("CARGO_PKG_VERSION"),
+            crate::update::install_label()
+        ));
+        let title = Line::from(crate::text_fit::ellipsize_spans(
+            title.spans,
+            (inner.width as usize).saturating_sub(meta_w + 2),
+        ));
         f.render_widget(Paragraph::new(title), title_area);
 
         // Top-right meta, `vX.Y.Z · <install>`. Kept discreet
