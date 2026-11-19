@@ -4533,18 +4533,30 @@ impl<'a> IssuesView<'a> {
             return;
         }
         let mut lines: Vec<Line<'static>> = Vec::new();
-        // `(login, col, row)` triples, the timeline lays out events
-        // top-down, one per row, so row == index into `events`.
+        // `(login, col, row)` triples: the first row of each event (an event
+        // that wraps takes several rows).
         let avatars_on = self.ctx.avatar_manager.lock().unwrap().is_enabled();
         let mut paints: Vec<(String, u16, u16)> = Vec::new();
-        for (row, ev) in events.iter().enumerate() {
+        for ev in events.iter() {
             let (line, actor_col) = timeline_event_line(theme, ev, avatars_on);
+            // An event too long for the row goes on the next rows, indented.
+            let row = lines.len();
             if let (Some(col), Some(actor)) = (actor_col, &ev.actor) {
                 if !actor.is_empty() {
                     paints.push((actor.clone(), col, row as u16));
                 }
             }
-            lines.push(line);
+            let style = line.style;
+            for (k, chunk) in crate::text_fit::wrap_spans(line.spans, area.width as usize)
+                .into_iter()
+                .enumerate()
+            {
+                let mut spans = chunk;
+                if k > 0 {
+                    spans.insert(0, Span::raw("     "));
+                }
+                lines.push(Line::from(spans).style(style));
+            }
         }
         // Clamp scroll so the user can't drag content entirely off-
         // screen by overshooting (e.g. PgDn spam, GoToBottom). The

@@ -674,3 +674,26 @@ impl<'a> UncommittedWidget<'a> {
         paragraph.render(action_inner, buf);
     }
 }
+
+#[cfg(test)]
+mod banner_tests {
+    use super::*;
+
+    #[test]
+    fn the_banner_takes_as_many_rows_as_the_panel_asks_for() {
+        // No conflict, no banner.
+        assert_eq!(banner_rows(100, 0), 0);
+        // Wide: one row. Narrow: it wraps, and it never takes a row for nothing.
+        assert_eq!(banner_rows(120, 2), 1);
+        let narrow = banner_rows(40, 12);
+        assert!(narrow >= 2, "{narrow}");
+        // The count follows the text that is drawn: 60 % of the width, wrapped.
+        let files = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .areas::<2>(Rect::new(0, 0, 40, 1))[0]
+            .width as usize;
+        assert_eq!(
+            narrow,
+            crate::text_fit::wrap_plain(&banner_text(12), files).len()
+        );
+    }
+}

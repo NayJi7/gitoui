@@ -960,4 +960,35 @@ mod tests {
         assert!(all.contains("whole-commit"));
         assert!(all.contains("edge"));
     }
+
+    #[test]
+    fn the_row_the_mouse_maths_expects_is_the_row_that_is_drawn() {
+        use ratatui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+        let mut commit = test_commit();
+        commit.commit_message =
+            "fix(diff): a subject that is quite a bit longer than the panel is wide".into();
+        commit.body = "A body line that goes on and on and on and on until it has to wrap around.\n\nSecond paragraph.".into();
+        let changes = vec![crate::git::FileChange::Add {
+            path: "marker.rs".into(),
+            additions: 3,
+        }];
+        let refs = Vec::new();
+        let ctx = Rc::new(AppContext::default());
+        for width in [60u16, 90, 140] {
+            let area = Rect::new(0, 0, width, 30);
+            let detail = CommitDetail::new(&commit, &changes, &refs, ctx.clone(), None, false);
+            let expected = detail.changes_start_in(area);
+            let mut buf = Buffer::empty(area);
+            let mut state = CommitDetailState::default();
+            detail.render(area, &mut buf, &mut state);
+            // The scrollable part starts 4 rows under the top of the panel.
+            let drawn = (0..area.height).find(|&y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .contains("marker.rs")
+            });
+            assert_eq!(drawn, Some(4 + expected as u16), "width {width}");
+        }
+    }
 }

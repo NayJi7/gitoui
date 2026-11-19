@@ -436,7 +436,8 @@ impl<'a> BlameView<'a> {
         self.content_area = Some(content);
         // Clamp scroll if the terminal shrank (or this is the first render
         // after view_height became known) so the focused block stays anchored.
-        let max_scroll = self.lines.len().saturating_sub(self.view_height.max(1));
+        // (a line that wraps takes several rows: the limit knows it)
+        let max_scroll = self.max_scroll();
         if self.scroll_offset > max_scroll {
             self.scroll_offset = max_scroll;
         }

@@ -453,8 +453,8 @@ pub enum DiffMode {
     /// Two columns: old version on the left, new on the right, separated by a
     /// vertical bar. Removed lines render only on the left, added only on the
     /// right; consecutive Del+Add pairs are zipped row-by-row so modifications
-    /// align side by side. Long lines are truncated with `…` rather than
-    /// wrapped (wrapping each half independently misaligns the pair).
+    /// align side by side. Long lines wrap inside their half and the shorter
+    /// side of a pair is padded, so the pairing stays aligned.
     SideBySide,
     /// Side-by-side layout with the Enhanced styling: per-side line-number
     /// gutter, full-row background color on additions / deletions, and syntax

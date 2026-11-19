@@ -8113,3 +8113,23 @@ mod header_path_tests {
         assert_eq!(shorten_path_prefix("~/work/clients/", 0), "");
     }
 }
+
+#[cfg(test)]
+mod footer_layout_tests {
+    use super::*;
+
+    #[test]
+    fn the_footer_grows_by_taking_rows_from_the_view_not_from_the_screen() {
+        let area = Rect::new(0, 0, 80, 30);
+        let [h1, v1, g1, s1] = split_app_areas_with_header(area, 1);
+        let [h3, v3, g3, s3] = split_app_areas_with_header(area, 3);
+        assert_eq!((s1.height, s3.height), (1, 3));
+        // The header and the gap keep their size, the view gives up the rows.
+        assert_eq!((h1.height, g1.height), (h3.height, g3.height));
+        assert_eq!(v1.height, v3.height + 2);
+        // Together they still fill the screen exactly.
+        assert_eq!(h3.height + v3.height + g3.height + s3.height, 30);
+        // A zero is a footer of one row, never none.
+        assert_eq!(split_app_areas_with_header(area, 0)[3].height, 1);
+    }
+}
