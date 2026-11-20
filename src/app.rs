@@ -327,6 +327,13 @@ pub struct App<'a> {
     /// tries to commit a non-git target. Auto-clears once `Instant::elapsed`
     /// passes the 2 s threshold.
     dir_error_message: Option<(String, std::time::Instant)>,
+    /// Text selected with the mouse (drag), highlighted and copied on release.
+    text_selection: Option<crate::selection::TextSelection>,
+    /// The `Ctrl` + left-button press being held back until the button comes
+    /// up (a click or the start of a selection).
+    mouse_press: Option<ratatui::crossterm::event::MouseEvent>,
+    /// The last frame drawn: the selected text is read from it.
+    last_frame: Option<ratatui::buffer::Buffer>,
     /// Shell session of the integrated terminal (`t`), owned by `run()` so it
     /// survives refreshes.
     shell: &'a mut crate::shell::host::ShellHost,
@@ -646,6 +653,9 @@ impl<'a> App<'a> {
             dir_input_cursor_anchor: None,
             pending_refresh: None,
             dir_error_message: None,
+            text_selection: None,
+            mouse_press: None,
+            last_frame: None,
             shell,
             ci,
             ci_dot_rect: None,
@@ -784,7 +794,13 @@ impl App<'_> {
                 self.drain_pending_replace_graph();
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
-                terminal.draw(|f| self.render(f))?;
+                let completed = terminal.draw(|f| {
+                    self.render(f);
+                    if let Some(selection) = &self.text_selection {
+                        crate::selection::highlight(f.buffer_mut(), selection);
+                    }
+                })?;
+                self.last_frame = Some(completed.buffer.clone());
                 self.flush_pending_avatar_deletes()?;
                 if let Some(dialog_area) = self.view.dialog_area() {
                     if !dialog_area.is_empty() {
@@ -953,6 +969,9 @@ impl App<'_> {
             'dispatch: loop {
                 match current_event {
                     AppEvent::Key(key) => {
+                        // A key ends a selection in progress.
+                        self.text_selection = None;
+                        self.mouse_press = None;
                         // In the integrated terminal every key belongs to the
                         // shell, except the one that leaves it.
                         if self.handle_terminal_key(key) {
@@ -1294,6 +1313,8 @@ impl App<'_> {
                     }
                     AppEvent::Resize(w, h) => {
                         let _ = (w, h);
+                        self.text_selection = None;
+                        self.mouse_press = None;
                         self.invalidate_header();
                         // A resize clears the terminal, and with it every
                         // Sixel pixel. The graph column keeps the same
@@ -1306,7 +1327,21 @@ impl App<'_> {
                         }
                     }
                     AppEvent::Mouse(mouse) => {
-                        needs_draw = self.handle_mouse_event(mouse, terminal)?;
+                        let selection_before = self.text_selection;
+                        needs_draw = match self.select_with_mouse(mouse) {
+                            MouseSelection::Handled(draw) => draw,
+                            MouseSelection::Ignored => self.handle_mouse_event(mouse, terminal)?,
+                            MouseSelection::Click(press) => {
+                                // The click the selection held back, then the release.
+                                let pressed = self.handle_mouse_event(press, terminal)?;
+                                let released = self.handle_mouse_event(mouse, terminal)?;
+                                pressed || released
+                            }
+                        };
+                        // The highlight has to appear or go away.
+                        if self.text_selection != selection_before {
+                            needs_draw = true;
+                        }
                         if let Some(req) = self.pending_refresh.take() {
                             // A handler (currently: dir-input dropdown 2nd-click)
                             // asked for a full app rebuild. Mirror the keyboard
@@ -3469,8 +3504,13 @@ impl App<'_> {
         // otherwise a long notification ("Opened https://…") collides
         // with the bar and the user sees both layers mashed together.
         // Integrated terminal: the footer reports the shell instead.
+        // A notification ("Copied 12 chars to clipboard") takes the place of
+        // the shell's status while it is shown.
         let terminal_footer = match &self.view {
-            View::Terminal(t) if !self.dir_input.active => {
+            View::Terminal(t)
+                if !self.dir_input.active
+                    && matches!(&self.app_status.status_line, StatusLine::None) =>
+            {
                 let kb = &self.ctx.keybind;
                 Some(crate::view::terminal::terminal_footer(
                     &t.session().status(),
@@ -4207,6 +4247,94 @@ impl<'a> App<'a> {
         }
         true
     }
+
+    /// Mouse selection, in every view (see `crate::selection`): `Ctrl` + drag
+    /// selects the text under the pointer, and the text is copied when the
+    /// button is released, with a "Copied" message in the footer. The
+    /// selection is only there while dragging.
+    ///
+    /// A plain drag, a click and the wheel are the views' own, and `Shift` +
+    /// drag is the terminal's selection: none of them is touched. A
+    /// `Ctrl` + click (the compare mark of the commit list) is handed to the
+    /// view when the button comes up on the cell it went down on.
+    ///
+    /// Not used while a program in the integrated terminal asks for the
+    /// mouse: it gets the events.
+    fn select_with_mouse(
+        &mut self,
+        mouse: ratatui::crossterm::event::MouseEvent,
+    ) -> MouseSelection {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
+
+        if let View::Terminal(t) = &self.view {
+            if t.session().mouse_protocol().is_some() {
+                return MouseSelection::Ignored;
+            }
+        }
+        let here = (mouse.row, mouse.column);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left)
+                if mouse.modifiers.contains(KeyModifiers::CONTROL)
+                    && !mouse.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                // Kept back: it is a click or the start of a selection, the
+                // button coming up tells which.
+                self.text_selection = None;
+                self.mouse_press = Some(mouse);
+                MouseSelection::Handled(false)
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(press) = self.mouse_press else {
+                    return MouseSelection::Ignored;
+                };
+                self.text_selection = Some(crate::selection::TextSelection {
+                    anchor: (press.row, press.column),
+                    cursor: here,
+                });
+                MouseSelection::Handled(true)
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let Some(press) = self.mouse_press.take() else {
+                    return MouseSelection::Ignored;
+                };
+                let selection = crate::selection::TextSelection {
+                    anchor: (press.row, press.column),
+                    cursor: here,
+                };
+                // The highlight goes away with the button.
+                self.text_selection = None;
+                if selection.is_empty() {
+                    return MouseSelection::Click(press);
+                }
+                if let Some(frame) = &self.last_frame {
+                    let text = crate::selection::selected_text(frame, &selection);
+                    if !text.is_empty() {
+                        self.copy_selection(text);
+                    }
+                }
+                MouseSelection::Handled(true)
+            }
+            _ => MouseSelection::Ignored,
+        }
+    }
+
+    /// Puts selected text on the clipboard and says so in the footer.
+    fn copy_selection(&mut self, text: String) {
+        let count = text.chars().count();
+        let unit = if count == 1 { "char" } else { "chars" };
+        self.copy_raw_to_clipboard(text, format!("Copied {count} {unit} to clipboard"));
+    }
+}
+
+/// What `App::select_with_mouse` did with a mouse event.
+enum MouseSelection {
+    /// Not for the selection: the view handles it.
+    Ignored,
+    /// Used by the selection; the flag says whether the screen must be redrawn.
+    Handled(bool),
+    /// `Ctrl` + click, not a drag: the held-back press, to hand to the view
+    /// (the release that follows is handled as usual).
+    Click(ratatui::crossterm::event::MouseEvent),
 }
 
 const HEADER_HEIGHT: u16 = 2;

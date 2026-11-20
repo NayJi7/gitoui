@@ -22,6 +22,7 @@ mod panic_guard;
 mod paths;
 mod popup;
 mod recents;
+mod selection;
 mod shell;
 mod term_probe;
 mod text_edit;
