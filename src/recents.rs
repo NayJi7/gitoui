@@ -167,7 +167,10 @@ mod tests {
         let target = TempDir::new().unwrap();
         let recents = push(target.path(), &[]);
         assert_eq!(recents.len(), 1);
-        assert_eq!(recents[0], target.path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            crate::paths::simplify(target.path().canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -178,8 +181,14 @@ mod tests {
         let recents = push(a.path(), &[]);
         let recents = push(b.path(), &recents);
         assert_eq!(recents.len(), 2);
-        assert_eq!(recents[0], b.path().canonicalize().unwrap());
-        assert_eq!(recents[1], a.path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            crate::paths::simplify(b.path().canonicalize().unwrap())
+        );
+        assert_eq!(
+            recents[1],
+            crate::paths::simplify(a.path().canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -191,8 +200,14 @@ mod tests {
         let recents = push(b.path(), &recents);
         let recents = push(a.path(), &recents);
         assert_eq!(recents.len(), 2, "must dedup, not grow");
-        assert_eq!(recents[0], a.path().canonicalize().unwrap());
-        assert_eq!(recents[1], b.path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            crate::paths::simplify(a.path().canonicalize().unwrap())
+        );
+        assert_eq!(
+            recents[1],
+            crate::paths::simplify(b.path().canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -209,7 +224,7 @@ mod tests {
         // The 5 oldest must have been dropped; the very last pushed is on top.
         assert_eq!(
             recents[0],
-            dirs.last().unwrap().path().canonicalize().unwrap()
+            crate::paths::simplify(dirs.last().unwrap().path().canonicalize().unwrap())
         );
     }
 
@@ -264,6 +279,9 @@ mod tests {
         save_at(&recents_file().unwrap(), &recents);
         let loaded = load();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0], weird.canonicalize().unwrap());
+        assert_eq!(
+            loaded[0],
+            crate::paths::simplify(weird.canonicalize().unwrap())
+        );
     }
 }

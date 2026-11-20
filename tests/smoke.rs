@@ -101,6 +101,7 @@ fn the_commit_list_is_drawn_and_q_quits() {
         shown.contains("commit number 0"),
         "the oldest commit is missing"
     );
+    assert!(!shown.contains(r"\\?\"), "the header shows a verbatim path");
 
     writer.lock().unwrap().write_all(b"q").unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
