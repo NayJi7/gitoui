@@ -4122,6 +4122,18 @@ impl<'a> App<'a> {
             self.ec.send(AppEvent::CloseTerminal);
             return true;
         }
+        // Ctrl+Shift+C is the copy shortcut of terminal emulators: it is never
+        // a key for the shell, where Ctrl+C would interrupt the running command.
+        {
+            use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+            let copy_chord = key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && matches!(key.code, KeyCode::Char('c' | 'C'));
+            if copy_chord {
+                return true;
+            }
+        }
         // Shift+PageUp / PageDown / Home / End browse the history, like in
         // most terminal emulators.
         if key

@@ -54,7 +54,12 @@ impl ShellHost {
     pub(crate) fn ensure_started(&mut self, rows: u16, cols: u16) -> io::Result<&mut ShellSession> {
         if !self.session.as_ref().is_some_and(ShellSession::is_alive) {
             let env: EnvVars = std::env::vars_os().collect();
-            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            // The shell starts in `C:\dir`, not in the verbatim `\\?\C:\dir`
+            // form: PowerShell would print its prompt as
+            // `Microsoft.PowerShell.Core\FileSystem::\\?\C:\dir>`.
+            let cwd = crate::paths::simplify(
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            );
             let shell = platform::user_shell(&env);
             let session = ShellSession::start(&shell, env.clone(), &cwd, rows, cols, self.waker())
                 .or_else(|_| {
