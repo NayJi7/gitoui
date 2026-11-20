@@ -8,6 +8,19 @@
 use std::env;
 use std::path::PathBuf;
 
+/// Windows gives back paths in their verbatim form (`\\?\C:\dir`) after
+/// `canonicalize`: shown as is, they look broken. `C:\dir` is the same place.
+/// UNC shares (`\\?\UNC\server\share`) and every other path are left alone.
+pub fn simplify(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") && rest.chars().nth(1) == Some(':') => {
+            PathBuf::from(rest)
+        }
+        _ => path,
+    }
+}
+
 fn var_dir(name: &str) -> Option<PathBuf> {
     env::var_os(name)
         .filter(|v| !v.is_empty())
@@ -51,6 +64,15 @@ mod tests {
         env::set_var("GITOUI_TEST_EMPTY_DIR", "/x");
         assert_eq!(var_dir("GITOUI_TEST_EMPTY_DIR"), Some(PathBuf::from("/x")));
         env::remove_var("GITOUI_TEST_EMPTY_DIR");
+    }
+
+    #[test]
+    fn verbatim_drive_paths_lose_their_prefix() {
+        let p = |s: &str| simplify(PathBuf::from(s));
+        assert_eq!(p(r"\\?\C:\Users\a"), PathBuf::from(r"C:\Users\a"));
+        assert_eq!(p(r"\\?\UNC\srv\share"), PathBuf::from(r"\\?\UNC\srv\share"));
+        assert_eq!(p("/home/a"), PathBuf::from("/home/a"));
+        assert_eq!(p(r"C:\Users\a"), PathBuf::from(r"C:\Users\a"));
     }
 
     #[test]

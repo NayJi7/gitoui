@@ -85,7 +85,8 @@ fn save_at(path: &Path, entries: &[PathBuf]) {
 /// `path` is canonicalised so the same physical dir entered via different
 /// relative routes maps to a single entry.
 pub fn push(path: &Path, current: &[PathBuf]) -> Vec<PathBuf> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical =
+        crate::paths::simplify(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     let mut recents = current.to_vec();
     recents.retain(|p| p != &canonical);
     recents.insert(0, canonical);

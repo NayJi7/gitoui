@@ -3112,7 +3112,9 @@ impl App<'_> {
         };
 
         // Derive a tilde-relative path from the current working directory.
-        let cwd = std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf());
+        let cwd = crate::paths::simplify(
+            std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf()),
+        );
         let home = crate::paths::home_dir();
         let display_path =
             if let Some(rest) = home.as_deref().and_then(|h| cwd.strip_prefix(h).ok()) {
