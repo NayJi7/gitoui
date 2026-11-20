@@ -91,7 +91,11 @@ fn the_commit_list_is_drawn_and_q_quits() {
         std::thread::sleep(Duration::from_millis(200));
     }
     let shown = screen();
-    println!("---- screen ----\n{shown}\n---- end ----");
+    println!("---- screen ----");
+    for (i, row) in shown.lines().enumerate() {
+        println!("{i:02}|{row}");
+    }
+    println!("---- end ({} rows) ----", shown.lines().count());
     assert!(shown.contains("commit number 2"), "the list was not drawn");
     assert!(
         shown.contains("commit number 0"),

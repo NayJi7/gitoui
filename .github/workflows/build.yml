@@ -77,8 +77,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-      - name: Build
-        run: cargo build --verbose
       - name: Tests
         run: cargo test --lib -- --test-threads=1
       - name: Smoke test (the real binary in a pseudo-terminal)
