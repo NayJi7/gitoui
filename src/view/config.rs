@@ -19,6 +19,15 @@ use crate::{
     GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, SelectionMode,
 };
 
+// Adding a setting? Besides the config field (`CoreOptionConfig` or the UI
+// config, its accessor and `save`), this page needs, in order:
+//   1. the index below, and the indices of the rows after it shifted;
+//   2. its entry in `items` and `descriptions` (render), `config_left_width`,
+//      and the two cycle functions;
+//   3. its entry in `ROW_APPLIES`: WHEN does it take effect (see `ApplyWhen`);
+//   4. the code that applies it, where step 3 says: `App::apply_live_config_settings`
+//      for `Live`, `App::close_config` for `OnClose`.
+//
 // Item indices, listed here so future inserts only have to touch one spot
 // instead of hunting for `selected == N` matches scattered through the file.
 //   0  Theme
@@ -51,6 +60,73 @@ const TEXT_EDIT_START_INDEX: usize = 13;
 const GITHUB_AUTH_INDEX: usize = 16;
 const GITHUB_AVATARS_INDEX: usize = 17;
 const CONFIG_ITEM_INDENT: &str = " ";
+
+/// When a change made in this page takes effect. EVERY row has one, decided in
+/// `ROW_APPLIES` below: it is the question to answer when adding a setting.
+///
+/// Every change is saved to the config file the moment it is made. What differs
+/// is when the running app starts to use it, because this page works on its own
+/// copy of the config and the app only reads the settings back in
+/// `App::close_config`, except for the ones applied while the page is open.
+///
+/// How to decide:
+///
+/// - `Live`: apply it at once when the setting changes how THIS PAGE looks or
+///   works, or when the effect can only be judged by trying it right here. The
+///   theme colors the page itself. The mouse and the select mode are used on the
+///   page too: a user who flips Select Mode wants to drag over the page and see.
+///   It must be cheap and safe to apply under an open page, with no rebuild and
+///   no flicker. Code: `App::apply_live_config_settings`.
+/// - `OnClose`: the default. Apply it when the page is left, in
+///   `App::close_config`. Right for anything that rebuilds or re-renders the view
+///   underneath (graph images, layout, the commit list) or reloads the app (the
+///   renderer, the order, whether the graph is on), because doing that while the
+///   page is up would flicker or throw the underlying view away, and nothing on
+///   the page shows the result anyway.
+/// - `NextLaunch`: only saved, read once at startup, and applying it later
+///   would make no sense (the commit the cursor starts on).
+///
+/// Not sure? Ask whether the user could tell it worked without leaving the page.
+/// If they could, and it is safe, it is `Live`; if not, it is `OnClose`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyWhen {
+    Live,
+    OnClose,
+    NextLaunch,
+}
+
+/// One entry per row, in the order of the index list above. The length is tied
+/// to `CONFIG_ITEM_COUNT`, so adding a row without deciding here does not
+/// compile.
+const ROW_APPLIES: [ApplyWhen; CONFIG_ITEM_COUNT] = [
+    ApplyWhen::Live,       //  0 Theme (the page is drawn with it)
+    ApplyWhen::OnClose,    //  1 Renderer (reloads the app)
+    ApplyWhen::OnClose,    //  2 Graph Enabled (reloads the app)
+    ApplyWhen::OnClose,    //  3 Graph Style (rebakes the graph images)
+    ApplyWhen::OnClose,    //  4 Graph Width (rebakes the graph images)
+    ApplyWhen::OnClose,    //  5 Diff Mode
+    ApplyWhen::OnClose,    //  6 Resolve Mode
+    ApplyWhen::OnClose,    //  7 Rebase Mode
+    ApplyWhen::OnClose,    //  8 Order (reloads the app)
+    ApplyWhen::NextLaunch, //  9 Initial Select (read once at startup)
+    ApplyWhen::Live,       // 10 Mouse (the page uses it)
+    ApplyWhen::Live,       // 11 Select Mode (tried right on the page)
+    ApplyWhen::OnClose,    // 12 Date Format
+    ApplyWhen::OnClose,    // 13 Git Name
+    ApplyWhen::OnClose,    // 14 Git Email
+    ApplyWhen::OnClose,    // 15 Default Branch
+    ApplyWhen::OnClose,    // 16 GitHub Auth (state handed over when leaving)
+    ApplyWhen::OnClose,    // 17 Github Avatars
+];
+
+/// The line under a row's description that says when it takes effect.
+fn apply_note(when: ApplyWhen) -> &'static str {
+    match when {
+        ApplyWhen::Live => "Applied immediately.",
+        ApplyWhen::OnClose => "Applied when you leave this page.",
+        ApplyWhen::NextLaunch => "Applied at the next launch.",
+    }
+}
 
 #[derive(Debug, Clone)]
 struct PendingGithubDevice {
@@ -1432,6 +1508,16 @@ impl<'a> ConfigView<'a> {
             )));
         }
 
+        // When the change takes effect: the user can tell which settings they
+        // can try out right here.
+        if let Some(when) = ROW_APPLIES.get(self.selected) {
+            right_lines.push(Line::from(""));
+            right_lines.push(Line::from(Span::styled(
+                apply_note(*when),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            )));
+        }
+
         // Leaving the Graph Style / Graph Width items, pre-clear the cells
         // that previously held the preview so labels/image-trailing-spaces
         // are overwritten with plain spaces. Paragraph rendering will then
@@ -2373,6 +2459,28 @@ fn config_value_display(index: usize, value: &str, editing: bool, editing_value:
 #[cfg(test)]
 mod tests {
     use crate::github_auth::GithubAuthState;
+
+    #[test]
+    fn only_the_theme_the_mouse_and_the_select_mode_apply_live() {
+        // Adding a `Live` row is a decision (see `ApplyWhen`): this list is
+        // where it shows, so the choice gets looked at in review.
+        let live: Vec<usize> = (0..super::CONFIG_ITEM_COUNT)
+            .filter(|&i| super::ROW_APPLIES[i] == super::ApplyWhen::Live)
+            .collect();
+        assert_eq!(live, vec![0, super::MOUSE_INDEX, super::SELECT_MODE_INDEX]);
+    }
+
+    #[test]
+    fn what_reloads_or_rebakes_waits_for_the_page_to_close() {
+        for index in [
+            super::RENDERER_INDEX,
+            super::GRAPH_ENABLED_INDEX,
+            super::GRAPH_STYLE_INDEX,
+            super::GRAPH_WIDTH_INDEX,
+        ] {
+            assert_eq!(super::ROW_APPLIES[index], super::ApplyWhen::OnClose);
+        }
+    }
 
     #[test]
     fn github_auth_display_shows_authenticated_login() {

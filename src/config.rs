@@ -246,6 +246,10 @@ pub struct CoreConfig {
     pub external: CoreExternalConfig,
 }
 
+/// Adding an option the Configuration view can change? Decide WHEN it takes
+/// effect: at once while the page is open, when it is left, or at the next
+/// launch. The rule and the table to fill in are `ApplyWhen` and `ROW_APPLIES`
+/// in `view/config.rs`.
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct CoreOptionConfig {
@@ -782,6 +786,10 @@ impl UiCommonConfig {
     }
 }
 
+/// Writes the settings the Configuration view changes into the config file in
+/// use: the one `GITOUI_CONFIG_FILE` points to, otherwise the default one. It
+/// is the file `load()` reads, so a change made in the page is the one the next
+/// launch sees.
 pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
     let path = resolve_config_file_path().ok_or("Could not determine config path")?;
     save_to(&path, core, ui)

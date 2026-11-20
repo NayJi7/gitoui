@@ -2538,7 +2538,7 @@ impl App<'_> {
     ) -> Result<(), std::io::Error> {
         let event_with_count = self.apply_nav_burst_acceleration(event_with_count);
         self.view.handle_event(event_with_count, key);
-        self.apply_live_config_theme();
+        self.apply_live_config_settings();
         Ok(())
     }
 
@@ -2587,6 +2587,53 @@ impl App<'_> {
             ewc
         } else {
             crate::event::UserEventWithCount::new(ewc.event, ewc.count.saturating_mul(mult))
+        }
+    }
+
+    /// Applies, while the Config view is open, the settings that take effect
+    /// at once: the ones marked `Live` in `ROW_APPLIES` (view/config.rs, which
+    /// also says how to decide for a new setting). Everything else waits for
+    /// `close_config`. Called after every input that can change a row
+    /// (keyboard and mouse).
+    fn apply_live_config_settings(&mut self) {
+        self.apply_live_config_theme();
+        self.apply_live_config_behaviour();
+    }
+
+    /// The `Live` settings that are not the theme: what Ctrl + drag selects,
+    /// and whether the mouse is on. Both are about how the page itself is
+    /// used, so the user tries them right there.
+    fn apply_live_config_behaviour(&mut self) {
+        let View::Config(ref view) = self.view else {
+            return;
+        };
+        let selection_mode = view.core_config().selection_mode();
+        let mouse_enabled = view.ui_config().common.mouse_enabled;
+        let selection_changed = selection_mode != self.ctx.core_config.selection_mode();
+        let mouse_changed = mouse_enabled != self.ctx.ui_config.common.mouse_enabled;
+        if !selection_changed && !mouse_changed {
+            return;
+        }
+        let ctx = Rc::make_mut(&mut self.ctx);
+        ctx.core_config.set_selection_mode(selection_mode);
+        ctx.ui_config.common.set_mouse_enabled(mouse_enabled);
+        if mouse_changed {
+            // The terminal's mouse capture is switched right away, and
+            // `close_config` then sees nothing left to do for it.
+            let _ = if mouse_enabled {
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::EnableMouseCapture
+                )
+            } else {
+                // A selection or a held press has no mouse to finish it.
+                self.text_selection = None;
+                self.mouse_press = None;
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::DisableMouseCapture
+                )
+            };
         }
     }
 
@@ -6631,16 +6678,21 @@ impl<'a> App<'a> {
             // setting in-place, no full app refresh, that path used to
             // delete every Kitty image placement before re-rendering,
             // producing a visible double blink when transitioning back
-            // to the commit list. Settings that only matter at startup
-            // (protocol, order, initial_selection) are persisted on ctx
-            // and applied on the next launch; the user explicitly opted
-            // in by editing them, no surprise here.
+            // to the commit list.
+            //
+            // This is where the settings marked `OnClose` in `ROW_APPLIES`
+            // (view/config.rs) take effect. The `Live` ones were applied while
+            // the page was open (`apply_live_config_settings`), the
+            // `NextLaunch` one is only saved. A new setting needs a decision
+            // in that table first, then the matching code here or there.
             let old_core = self.ctx.core_config.clone();
             let theme_changed = old_core.option.theme != core.option.theme
                 || old_core.option.syntax_theme != core.option.syntax_theme;
             let graph_style_changed = old_core.option.graph_style != core.option.graph_style;
             let graph_width_changed = old_core.option.graph_width != core.option.graph_width;
             let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
+            // Already applied live (the capture switched), unless the config
+            // was edited some other way.
             let mouse_changed = self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
             let auth_changed = github_auth_state != self.ctx.github_auth_state;
             // Toggling graph_enabled flips the entire layout (the Graph
@@ -7141,9 +7193,10 @@ impl<'a> App<'a> {
                 } else {
                     self.view.handle_click(mouse.column, mouse.row);
                 }
-                // Click in the Config view can cycle the theme, mirror
-                // the live-apply that the keyboard path runs.
-                self.apply_live_config_theme();
+                // Click in the Config view can cycle a live setting (the
+                // theme, the select mode), mirror the live-apply that the
+                // keyboard path runs.
+                self.apply_live_config_settings();
                 true
             }
             MouseEventKind::Moved => {

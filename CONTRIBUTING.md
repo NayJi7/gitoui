@@ -59,6 +59,10 @@ Windows support is experimental. To build and test it:
 - Run `cargo test`. The smoke test (`tests/smoke.rs`) runs the real binary in a pseudo-terminal, which goes through ConPTY on Windows.
 - To look at it, run the binary in **Windows Terminal**. A debug build is enough (`cargo build`). If `NO_COLOR` is set in your environment the colors are off by design.
 
+### Adding a setting
+
+A setting the Configuration view (`p`) can change needs a decision besides its code: **when does it take effect?** The page keeps its own copy of the config and saves every change at once, but the running app only reads it back when the page is left, except for the few settings applied immediately. Each row says which in `ROW_APPLIES` (`src/view/config.rs`, next to the rule for choosing); the table's size is tied to the number of rows, so a new row does not compile until it has an answer. In short: `Live` for what the page itself uses or what only makes sense to try right there (the theme, the mouse, the select mode), `OnClose` for anything that rebuilds or reloads (the default), `NextLaunch` for what is read once at startup. The page tells the user which one applies under each setting's description.
+
 ### Improving the Commit Graph
 
 Improvements to the commit graph are welcome.
