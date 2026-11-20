@@ -427,6 +427,9 @@ impl<'a> DetailView<'a> {
             }
         }
 
+        let graph_color = self
+            .as_list_state()
+            .graph_color_of(&self.commit.commit_hash);
         let commit_detail = CommitDetail::new(
             &self.commit,
             &self.changes,
@@ -435,6 +438,7 @@ impl<'a> DetailView<'a> {
             self.head_branch_name.clone(),
             self.is_head_commit(),
         )
+        .with_graph_color(graph_color)
         .with_pr_origin(self.pr_origin.as_ref().map(|o| o.number));
         f.render_stateful_widget(commit_detail, detail_area, &mut self.commit_detail_state);
     }

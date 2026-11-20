@@ -1,6 +1,6 @@
-// Tiny ping counter for the curl install one-liner. install.sh fires
-// `GET /ping` early so we can tally how many people are running the
-// installer; `GET /count` returns a shields.io-shaped JSON the README
+// Tiny ping counter for the install one-liners (install.sh with curl,
+// install.ps1 on Windows). They fire `GET /ping` after a real install so we
+// can tally how many people ran the installer; `GET /count` returns a shields.io-shaped JSON the README
 // badge consumes.
 
 const KEY = "installs";
@@ -72,11 +72,16 @@ export default {
     if (request.method === "GET" && url.pathname === "/ping") {
       // Only count requests that look like our installer. Browsers
       // and naive scrapers send `Mozilla/...`; we reject those to
-      // keep the number meaningful. install.sh runs via `curl|bash`
+      // keep the number meaningful. install.sh runs via `curl|sh`
       // so the UA starts with `curl/` (or `Wget/` if a user manually
-      // swaps the fetcher).
+      // swaps the fetcher). install.ps1 says what it is, honestly:
+      // `gitoui-install-windows/<version>`.
       const ua = request.headers.get("user-agent") || "";
-      if (!ua.startsWith("curl/") && !ua.startsWith("Wget/")) {
+      if (
+        !ua.startsWith("curl/") &&
+        !ua.startsWith("Wget/") &&
+        !ua.startsWith("gitoui-install-windows/")
+      ) {
         return new Response("", { status: 204 });
       }
       const current = parseInt((await env.COUNTER.get(KEY)) || "0", 10);
@@ -95,7 +100,7 @@ export default {
       return Response.json(
         {
           schemaVersion: 1,
-          label: "curl installs",
+          label: "script installs",
           message: count.toLocaleString("en-US"),
           color: "F05133",
           cacheSeconds: 300,

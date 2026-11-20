@@ -29,12 +29,21 @@ pub(crate) fn shell_kind(shell: &Path) -> ShellKind {
 
 pub(crate) fn env_value<'e>(env: &'e EnvVars, name: &str) -> Option<&'e OsStr> {
     env.iter()
-        .find(|(k, _)| k == name)
+        .find(|(k, _)| same_var(k, name))
         .map(|(_, v)| v.as_os_str())
 }
 
+/// Windows variable names are case-insensitive (`Path`, `ComSpec`).
+fn same_var(key: &OsStr, name: &str) -> bool {
+    if cfg!(windows) {
+        key.to_string_lossy().eq_ignore_ascii_case(name)
+    } else {
+        key == name
+    }
+}
+
 fn set_var(env: &mut EnvVars, name: &str, value: impl Into<OsString>) {
-    env.retain(|(k, _)| k != name);
+    env.retain(|(k, _)| !same_var(k, name));
     env.push((OsString::from(name), value.into()));
 }
 

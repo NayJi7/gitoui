@@ -6,8 +6,9 @@ description: Your own shell inside gitoui, in place of the commit graph.
 import { Aside } from "@astrojs/starlight/components";
 
 Press `t` on the commit list and the graph is replaced by a real terminal
-running your own shell (bash, zsh or fish). Type in it, run as many commands
-as you like, and come back to the graph when you are done.
+running your own shell (bash, zsh or fish, PowerShell or cmd on Windows). Type
+in it, run as many commands as you like, and come back to the graph when you
+are done.
 
 ## What you get
 
@@ -18,6 +19,10 @@ as you like, and come back to the graph when you are done.
   pagers, colors, progress bars. The terminal follows your window size.
 - **History.** Scroll back with the mouse wheel or `Shift+PgUp` / `Shift+PgDn`;
   typing brings you back to the live screen.
+- **Copy.** Hold `Ctrl` and drag over the text: it is copied when you release,
+  and the footer says how many characters. A program that uses the mouse
+  (vim, htop…) gets the mouse instead; `Shift` + drag is then your terminal's
+  own selection.
 
 ## Leaving
 
@@ -27,6 +32,8 @@ as you like, and come back to the graph when you are done.
 | `exit`        | Closes the shell and goes back to the graph. The next `t` starts a new one. |
 
 Every other key, including `Esc`, `q` and `Ctrl+C`, goes to the shell.
+`Ctrl+Shift+C`, the copy shortcut of terminal emulators, is never sent to it,
+so it cannot interrupt a running command.
 
 Going back refreshes the graph, since your commands may have changed the
 repository.
@@ -49,7 +56,11 @@ shell function and is not part of gitoui yet.
 - Shells other than bash, zsh and fish are started as they are: they work, but
   gitoui cannot follow their `cd`.
 - If your `$SHELL` cannot be started, gitoui falls back to `/bin/sh`.
-- Windows is not supported yet.
+- On Windows the shell is PowerShell (`pwsh`, then `powershell`), or `cmd.exe`,
+  unless `SHELL` is set. It starts in the repository folder (`C:\dir`, not the
+  long `\\?\C:\dir` form). gitoui cannot follow a `cd` made in PowerShell or
+  cmd (see the first point). Windows is experimental: see the
+  [Windows notes](/getting-started/compatibility/#windows).
 
 ## Keys
 

@@ -6,7 +6,8 @@ description: Schema reference for gitoui's TOML config file.
 import { FileTree, Aside, Tabs, TabItem } from "@astrojs/starlight/components";
 
 The config file lives at `$XDG_CONFIG_HOME/gitoui/config.toml` (default
-`~/.config/gitoui/config.toml`). Override with `GITOUI_CONFIG_FILE=...`.
+`~/.config/gitoui/config.toml`). On Windows it is `%APPDATA%\gitoui\config.toml`.
+Override with `GITOUI_CONFIG_FILE=...`.
 
 Everything below is optional, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships with sensible defaults and only
 reads the keys you specify. Unknown keys are rejected with a styled
@@ -43,8 +44,9 @@ diagnostic at boot.
 | `syntax_theme`      | string / `"base16-ocean.dark"`            | Syntect theme for diff syntax highlighting. Overridden when `theme` is a named theme. |
 | `graph_renderer`    | `auto` / `ascii` / `kitty` / `iterm` / `kitty-unicode` / `sixel` (default `auto`) | Image protocol for the commit graph. `auto` detects at startup. `ascii` renders with Unicode box-drawing characters (no image protocol). |
 | `graph_style`       | `rounded` / `angular` / `smooth` (default `smooth`) | Branch corner shape. |
-| `graph_width`       | `auto` / `single` / `double` (default `auto`) | Graph image cell width. |
+| `graph_width`       | `auto` / `single` / `double` (default `auto`) | Graph image cell width. `auto` takes `double` when the graph fits that wide in the terminal, `single` otherwise. |
 | `initial_selection` | `latest` / `head` / `top` (default `latest`) | Cursor position when opening. |
+| `selection_mode`    | `classic` / `smart` (default `classic`) | What `Ctrl` + drag selects and copies. `classic` takes everything under the drag, frames and neighbouring panels included. `smart` keeps to the panel the drag started in. Also in the Configuration view (`p`), "Select Mode". |
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
 | `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
 | `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |

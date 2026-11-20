@@ -5,8 +5,9 @@ description: System and terminal prerequisites for running gitoui.
 
 import { Aside, Badge } from "@astrojs/starlight/components";
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> targets recent Linux and macOS terminals. Windows isn't officially
-supported but should work under WSL2 with a compatible terminal.
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> targets recent Linux and macOS terminals. Windows is experimental:
+it runs in Windows Terminal (PowerShell, cmd), see [Installation](../installation/)
+and the [Windows notes](../compatibility/#windows). WSL2 with a compatible terminal also works.
 
 ## Runtime
 
@@ -14,7 +15,8 @@ supported but should work under WSL2 with a compatible terminal.
 |---------------|------------------------|--------------------------------------------|
 | `git`         | 2.30+                  | <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> shells out to the CLI for every git operation. |
 | A terminal    | Recent (see below)     | The commit graph and avatars are rendered inline as images. |
-| `xdg-open` / `open` | platform default | Used by the "open in browser" shortcut for PRs and issues. |
+| `xdg-open` / `open` | platform default | Used by the "open in browser" shortcut for PRs and issues. On Windows the system opener is used. |
+| A Windows console | Windows only | <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> reads the keyboard through it: Windows Terminal, PowerShell, cmd. Not Git Bash's mintty. |
 
 ## Terminal image protocols
 
@@ -25,8 +27,8 @@ graph, your terminal needs to speak one of:
 |----------|------------------------------------------------------|-----------------------------------------|
 | **Kitty**     | available, auto-detect default          | **Ghostty (recommended)**, Kitty, WezTerm, Konsole 22.04+, modern gnome-terminal / Ptyxis (VTE ≥ 0.78) |
 | **iTerm2**    | on macOS                                 | iTerm2, WezTerm                         |
-| **Sixel**     | nothing else works                       | foot (Wayland), mlterm, xterm `-ti vt340`, WezTerm |
-| **Unicode**   | fallback in any other terminal           | Alacritty, Terminal.app, Windows Terminal… (no inline images) |
+| **Sixel**     | nothing else works                       | foot (Wayland), mlterm, xterm `-ti vt340`, WezTerm, **Windows Terminal 1.22+** |
+| **Unicode**   | fallback in any other terminal           | Alacritty, Terminal.app, older Windows Terminal… (no inline images) |
 
 The same protocol drives the GitHub avatar rendering. If your terminal can show
 the commit graph, it can show avatars next to commits, comments, and review
@@ -64,7 +66,8 @@ The Pull Requests and Issues views need:
   custom name, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> scans `git remote -v` at startup).
 - A logged-in **GitHub account** via OAuth device-flow (configure under the
   Configuration page, section "GitHub Auth"). Token is stored at
-  `~/.config/gitoui/github_token.toml` with `0600` permissions.
+  `~/.config/gitoui/github_token.toml` with `0600` permissions (on Windows,
+  `%APPDATA%\gitoui\github_token.toml`).
 
 <Aside type="note">
 Without auth or without a GitHub remote, the `Shift+R` (PRs) and `Shift+I`

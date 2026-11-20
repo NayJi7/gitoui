@@ -416,7 +416,7 @@ impl DirInputState {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(PathBuf::from)
+    crate::paths::home_dir()
 }
 
 /// Word-boundary classifier for Ctrl+Left/Right and Ctrl+Backspace.
@@ -448,6 +448,19 @@ fn next_char_boundary(s: &str, byte_idx: usize) -> usize {
         .unwrap_or(byte_idx)
 }
 
+/// A path separator: `/` everywhere, `\` too on Windows.
+fn is_sep(c: char) -> bool {
+    c == '/' || (cfg!(windows) && c == '\\')
+}
+
+/// `rest` of `text` once a leading `~/` (or `~\` on Windows) is removed.
+fn strip_tilde_prefix(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('~')?;
+    let mut chars = rest.chars();
+    let first = chars.next()?;
+    is_sep(first).then_some(chars.as_str())
+}
+
 fn looks_like_path(s: &str) -> bool {
     s.starts_with('/')
         || s.starts_with('~')
@@ -455,7 +468,8 @@ fn looks_like_path(s: &str) -> bool {
         || s.starts_with("../")
         || s == "."
         || s == ".."
-        || s.contains('/')
+        || s.contains(is_sep)
+        || Path::new(s).is_absolute()
 }
 
 /// Tilde-relative display: `~/foo` instead of `/home/user/foo`.
@@ -477,13 +491,13 @@ pub fn tilde_path(p: &Path, home: Option<&Path>) -> String {
 fn split_for_completion(text: &str, home: Option<&Path>) -> (PathBuf, String) {
     // Expand the parent portion via `resolve_path`. Anything after the last
     // `/` is treated as the in-progress prefix and not resolved.
-    if let Some(slash) = text.rfind('/') {
+    if let Some(slash) = text.rfind(is_sep) {
         let parent_raw = &text[..=slash];
         let prefix = text[slash + 1..].to_string();
-        let parent = if parent_raw == "~" || parent_raw == "~/" {
+        let parent = if parent_raw == "~" || strip_tilde_prefix(parent_raw) == Some("") {
             home.map(|h| h.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("/"))
-        } else if let Some(rest) = parent_raw.strip_prefix("~/") {
+        } else if let Some(rest) = strip_tilde_prefix(parent_raw) {
             home.map(|h| h.join(rest))
                 .unwrap_or_else(|| PathBuf::from(parent_raw))
         } else {
@@ -508,10 +522,10 @@ pub fn resolve_path(text: &str, cwd: &Path) -> PathBuf {
     let home = home_dir();
     let base = if text == "~" {
         return home.unwrap_or_else(|| PathBuf::from(text));
-    } else if let Some(rest) = text.strip_prefix("~/") {
+    } else if let Some(rest) = strip_tilde_prefix(text) {
         home.map(|h| h.join(rest))
             .unwrap_or_else(|| PathBuf::from(text))
-    } else if text.starts_with('/') {
+    } else if text.starts_with('/') || Path::new(text).is_absolute() {
         PathBuf::from(text)
     } else {
         cwd.join(text)

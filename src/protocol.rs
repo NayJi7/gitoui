@@ -1,6 +1,7 @@
 use std::{
     env,
     io::{self, Write},
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 use base64::Engine;
@@ -12,8 +13,22 @@ use ratatui::style::{Color, Style};
 /// guessed by default. VTE terminals (Ptyxis, GNOME Terminal, Tilix)
 /// export none of the variables below, and blindly emitting iTerm2
 /// escapes there swallows everything printed afterwards.
+///
+/// When the environment names nothing, a terminal that announced Sixel in
+/// its device attributes reply (see `term_probe`) gets Sixel.
 pub fn auto_detect() -> Option<ImageProtocol> {
-    detect_from_env(|key| env::var(key).ok())
+    detect_from_env(|key| env::var(key).ok()).or_else(|| {
+        SIXEL_REPORTED
+            .load(Ordering::Relaxed)
+            .then_some(ImageProtocol::Sixel)
+    })
+}
+
+/// Set once at startup from the terminal's own answer.
+static SIXEL_REPORTED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_sixel_reported(reported: bool) {
+    SIXEL_REPORTED.store(reported, Ordering::Relaxed);
 }
 
 /// Pure detection over an arbitrary environment lookup, so the rules
@@ -170,11 +185,14 @@ impl ImageProtocol {
             style: Style::default(),
             skip: false,
         });
+        // Sixel pixels belong to the text buffer: a space written over one
+        // of the cells the image covers wipes that part of the image.
+        let skip_followers = matches!(self, ImageProtocol::Sixel);
         for _ in 1..cell_width {
             cells.push(PreparedImageCell {
                 symbol: " ".to_string(),
                 style: Style::default(),
-                skip: false,
+                skip: skip_followers,
             });
         }
         PreparedImage {
@@ -238,6 +256,14 @@ impl ImageProtocol {
             ImageProtocol::Kitty => kitty_delete_images(image_ids),
             ImageProtocol::KittyUnicode { tmux } => kitty_unicode_delete_images(image_ids, *tmux),
         }
+    }
+
+    /// Sixel pixels live in the terminal's cell buffer: text written over
+    /// them replaces them, so an overlay can never be painted over by an
+    /// image underneath. Placement protocols (Kitty) float above the text
+    /// and need their images cleared while an overlay is open.
+    pub fn paints_into_cells(&self) -> bool {
+        matches!(self, ImageProtocol::Sixel)
     }
 
     pub fn clear_cell(&self) -> PreparedImageCell {
@@ -845,11 +871,53 @@ fn passthrough_escapes(tmux: bool) -> (&'static str, &'static str, &'static str)
     }
 }
 
+/// Cell size assumed for Sixel until the terminal reports its own.
+const DEFAULT_CELL_PX: (u32, u32) = (10, 20);
+
+/// Real cell size in pixels, packed as `width << 16 | height`; 0 = unknown.
+static CELL_PX: AtomicU32 = AtomicU32::new(0);
+
+/// Records the terminal's cell size in pixels, as measured at startup.
+pub fn set_cell_pixels(cell_px: Option<(u16, u16)>) {
+    let packed = cell_px.map_or(0, |(w, h)| u32::from(w) << 16 | u32::from(h));
+    CELL_PX.store(packed, Ordering::Relaxed);
+}
+
+fn cell_pixels() -> (u32, u32) {
+    match CELL_PX.load(Ordering::Relaxed) {
+        0 => DEFAULT_CELL_PX,
+        packed => (packed >> 16, packed & 0xffff),
+    }
+}
+
+/// Resizes `img` to cover exactly `cells` (width, height) cells of
+/// `cell_px` pixels each.
+fn fit_to_cells(
+    img: image::RgbaImage,
+    cells: (usize, usize),
+    cell_px: (u32, u32),
+) -> image::RgbaImage {
+    let target = (cells.0 as u32 * cell_px.0, cells.1 as u32 * cell_px.1);
+    if target.0 == 0 || target.1 == 0 || img.dimensions() == target {
+        return img;
+    }
+    image::imageops::resize(
+        &img,
+        target.0,
+        target.1,
+        image::imageops::FilterType::Lanczos3,
+    )
+}
+
+/// Sixel draws raw pixels and never scales, so the image is resized to
+/// exactly `cell_width × cell_height` cells of the real cell size first.
+/// Kitty and iTerm2 get the cell count instead and scale by themselves.
 fn sixel_encode(png_bytes: &[u8], cell_width: usize, cell_height: usize) -> String {
     let img = match image::load_from_memory(png_bytes) {
         Ok(i) => i.to_rgba8(),
         Err(_) => return iterm2_encode(png_bytes, cell_width, cell_height),
     };
+    let img = fit_to_cells(img, (cell_width, cell_height), cell_pixels());
     let (w, h) = (img.width() as usize, img.height() as usize);
     let sixel_img = icy_sixel::SixelImage::from_rgba(img.into_raw(), w, h);
     match sixel_img.encode() {
@@ -876,6 +944,31 @@ mod tests {
         let prepared = ImageProtocol::Kitty.prepare_image(&[1, 2, 3], 2, 42);
         assert_eq!(prepared.image_id(), Some(42));
         assert!(prepared.cells()[0].symbol().contains("i=42,"));
+    }
+
+    #[test]
+    fn sixel_images_are_scaled_to_whole_cells() {
+        let src = image::RgbaImage::new(50, 56);
+        let fitted = fit_to_cells(src, (2, 1), (10, 20));
+        assert_eq!(fitted.dimensions(), (20, 20));
+        let fitted = fit_to_cells(image::RgbaImage::new(20, 20), (2, 1), (10, 20));
+        assert_eq!(fitted.dimensions(), (20, 20));
+    }
+
+    #[test]
+    fn unknown_cell_size_leaves_the_image_alone() {
+        let fitted = fit_to_cells(image::RgbaImage::new(50, 56), (2, 1), (0, 0));
+        assert_eq!(fitted.dimensions(), (50, 56));
+    }
+
+    #[test]
+    fn sixel_keeps_the_cells_after_the_first_out_of_the_diff() {
+        // A space written over a Sixel cell would wipe that part of the image.
+        let sixel = ImageProtocol::Sixel.prepare_image(&[1, 2, 3], 3, 1);
+        let skips: Vec<bool> = sixel.cells().iter().map(|c| c.skip()).collect();
+        assert_eq!(skips, [false, true, true]);
+        let iterm = ImageProtocol::Iterm2.prepare_image(&[1, 2, 3], 3, 1);
+        assert!(iterm.cells().iter().all(|c| !c.skip()));
     }
 
     fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {

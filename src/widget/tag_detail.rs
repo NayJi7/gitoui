@@ -263,8 +263,9 @@ impl TagDetail<'_> {
             "      Tag: ",
             Line::from(Span::styled(
                 self.metadata.tag_name.clone(),
+                // The color a tag has in the commit list and the commit detail.
                 Style::default()
-                    .fg(theme.detail_name_fg)
+                    .fg(theme.detail_ref_tag_fg)
                     .add_modifier(Modifier::BOLD),
             )),
         );
@@ -289,13 +290,21 @@ impl TagDetail<'_> {
 
         // Tagger identity (annotated only)
         if let Some(tagger) = &self.metadata.tagger {
-            rows.row(
-                "   Tagger: ",
-                Line::from(Span::styled(
-                    tagger.clone(),
-                    Style::default().fg(theme.detail_name_fg),
-                )),
-            );
+            // Name and `<email>` colored like the author of a commit.
+            let (name, email) = crate::widget::branch_detail::split_author(tagger);
+            let mut spans = vec![Span::styled(
+                name.to_string(),
+                Style::default().fg(theme.detail_name_fg),
+            )];
+            if !email.is_empty() {
+                spans.push(Span::raw(" <"));
+                spans.push(Span::styled(
+                    email.to_string(),
+                    Style::default().fg(theme.detail_email_fg),
+                ));
+                spans.push(Span::raw(">"));
+            }
+            rows.row("   Tagger: ", Line::from(spans));
         }
 
         // Date (annotated only), formatted with the user's configured format

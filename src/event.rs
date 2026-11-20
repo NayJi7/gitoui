@@ -976,6 +976,24 @@ impl Debug for Receiver {
     }
 }
 
+/// The Windows console reports AltGr as Ctrl+Alt, so `AltGr+0` (`@` on an
+/// AZERTY keyboard) arrives as `Ctrl+Alt+@` and no text field takes it.
+/// A symbol or an accented letter typed with both flags is that character
+/// itself: the flags go. ASCII letters and digits keep them, `Ctrl+Alt+a`
+/// is a real shortcut and AltGr gives none of those.
+fn without_altgr(
+    mut key: ratatui::crossterm::event::KeyEvent,
+) -> ratatui::crossterm::event::KeyEvent {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+    if let KeyCode::Char(c) = key.code {
+        if key.modifiers.contains(altgr) && !c.is_ascii_alphanumeric() && !c.is_control() {
+            key.modifiers.remove(altgr);
+        }
+    }
+    key
+}
+
 #[derive(Debug)]
 pub struct EventController {
     tx: Sender,
@@ -1045,6 +1063,10 @@ impl EventController {
                             // dropping it makes the lookup
                             // numlock/capslock-insensitive.
                             key.state = ratatui::crossterm::event::KeyEventState::NONE;
+                            key = crate::keybind::normalize_key_event(key);
+                            if cfg!(windows) {
+                                key = without_altgr(key);
+                            }
                             tx.send(AppEvent::Key(key));
                         }
                         ratatui::crossterm::event::Event::Mouse(mouse) => {
@@ -1447,6 +1469,26 @@ impl UserEventWithCount {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn altgr_characters_lose_the_ctrl_alt_flags_but_shortcuts_keep_them() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let ctrl_alt = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        // AltGr+0 on AZERTY: `@`, AltGr+é: `~`, AltGr+e: `€`.
+        for c in ['@', '#', '{', '[', '|', '\\', '^', '~', '€'] {
+            assert_eq!(
+                without_altgr(KeyEvent::new(KeyCode::Char(c), ctrl_alt)),
+                KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+                "{c}"
+            );
+        }
+        // Real Ctrl+Alt shortcuts stay as they are.
+        let shortcut = KeyEvent::new(KeyCode::Char('a'), ctrl_alt);
+        assert_eq!(without_altgr(shortcut), shortcut);
+        // Ctrl alone and Alt alone are untouched.
+        let ctrl = KeyEvent::new(KeyCode::Char('@'), KeyModifiers::CONTROL);
+        assert_eq!(without_altgr(ctrl), ctrl);
+    }
 
     #[test]
     fn test_user_event_with_count_new() {

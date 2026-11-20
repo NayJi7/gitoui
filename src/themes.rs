@@ -20,6 +20,7 @@ pub fn list_themes() -> &'static [&'static str] {
         "Solarized Light",
         "One Dark",
         "Monokai Pro",
+        "PowerShell",
     ]
 }
 
@@ -59,7 +60,7 @@ pub fn discover_custom_themes() -> Vec<String> {
 /// Built-ins + custom themes, in a stable order suitable for the
 /// config view's ←/→ cycle: built-ins first (as listed), then custom
 /// themes sorted alphabetically. Empty vec is never returned, even
-/// without custom files we get the 10 built-ins.
+/// without custom files we get the 11 built-ins.
 pub fn list_all_themes() -> Vec<String> {
     let mut all: Vec<String> = list_themes().iter().map(|&s| s.to_string()).collect();
     all.extend(discover_custom_themes());
@@ -78,6 +79,7 @@ pub fn get_theme(name: &str) -> Option<ThemeDefinition> {
         "Solarized Light" => Some(solarized_light()),
         "One Dark" => Some(one_dark()),
         "Monokai Pro" => Some(monokai_pro()),
+        "PowerShell" => Some(powershell()),
         _ => None,
     }
 }
@@ -281,7 +283,7 @@ fn catppuccin_latte() -> ThemeDefinition {
             detail_name_fg: rgb(0x04, 0xa5, 0xe5),
             detail_date_fg: rgb(0x88, 0x39, 0xef),
             detail_email_fg: rgb(0x1e, 0x66, 0xf5),
-            detail_hash_fg: rgb(0xdf, 0x8e, 0x1d),
+            detail_hash_fg: rgb(0xfe, 0x64, 0x0b),
             detail_ref_branch_fg: rgb(0x40, 0xa0, 0x2b),
             detail_ref_remote_branch_fg: rgb(0xd2, 0x0f, 0x39),
             detail_ref_tag_fg: rgb(0xdf, 0x8e, 0x1d),
@@ -633,6 +635,63 @@ fn monokai_pro() -> ThemeDefinition {
     }
 }
 
+/// The look of Windows PowerShell in Windows Terminal: the Campbell scheme,
+/// background `#0c0c0c` and foreground `#cccccc`. Text uses the bright
+/// variants of the Campbell colors, they read better on that background.
+fn powershell() -> ThemeDefinition {
+    ThemeDefinition {
+        syntax_theme: "Dracula".to_string(),
+        color_theme: ColorTheme {
+            bg: rgb(0x0c, 0x0c, 0x0c),
+            fg: rgb(0xcc, 0xcc, 0xcc),
+            list_selected_fg: rgb(0xf2, 0xf2, 0xf2),
+            list_selected_bg: rgb(0x30, 0x30, 0x30),
+            list_compare_marked_fg: rgb(0xf2, 0xf2, 0xf2),
+            list_compare_marked_bg: rgb(0x88, 0x17, 0x98),
+            list_ref_paren_fg: rgb(0x76, 0x76, 0x76),
+            list_ref_branch_fg: rgb(0x16, 0xc6, 0x0c),
+            list_ref_remote_branch_fg: rgb(0xe7, 0x48, 0x56),
+            list_ref_tag_fg: rgb(0xf9, 0xf1, 0xa5),
+            list_ref_stash_fg: rgb(0xb4, 0x00, 0x9e),
+            list_head_fg: rgb(0x61, 0xd6, 0xd6),
+            list_commit_message_fg: rgb(0xcc, 0xcc, 0xcc),
+            list_name_fg: rgb(0x16, 0xc6, 0x0c),
+            list_hash_fg: rgb(0xf9, 0xf1, 0xa5),
+            list_date_fg: rgb(0x3a, 0x96, 0xdd),
+            list_match_fg: rgb(0x0c, 0x0c, 0x0c),
+            list_match_bg: rgb(0xf9, 0xf1, 0xa5),
+            detail_label_fg: rgb(0x76, 0x76, 0x76),
+            detail_name_fg: rgb(0x16, 0xc6, 0x0c),
+            detail_date_fg: rgb(0x3a, 0x96, 0xdd),
+            detail_email_fg: rgb(0x61, 0xd6, 0xd6),
+            detail_hash_fg: rgb(0xf9, 0xf1, 0xa5),
+            detail_ref_branch_fg: rgb(0x16, 0xc6, 0x0c),
+            detail_ref_remote_branch_fg: rgb(0xe7, 0x48, 0x56),
+            detail_ref_tag_fg: rgb(0xf9, 0xf1, 0xa5),
+            detail_file_change_add_fg: rgb(0x16, 0xc6, 0x0c),
+            detail_file_change_modify_fg: rgb(0xf9, 0xf1, 0xa5),
+            detail_file_change_delete_fg: rgb(0xe7, 0x48, 0x56),
+            detail_file_change_move_fg: rgb(0x61, 0xd6, 0xd6),
+            ref_selected_fg: rgb(0xf2, 0xf2, 0xf2),
+            ref_selected_bg: rgb(0x30, 0x30, 0x30),
+            help_block_title_fg: rgb(0x16, 0xc6, 0x0c),
+            help_key_fg: rgb(0xf9, 0xf1, 0xa5),
+            virtual_cursor_fg: Color::Reset,
+            status_input_fg: Color::Reset,
+            status_input_transient_fg: rgb(0x76, 0x76, 0x76),
+            status_info_fg: rgb(0x61, 0xd6, 0xd6),
+            status_success_fg: rgb(0x16, 0xc6, 0x0c),
+            status_warn_fg: rgb(0xf9, 0xf1, 0xa5),
+            status_error_fg: rgb(0xe7, 0x48, 0x56),
+            divider_fg: rgb(0x4a, 0x4a, 0x4a),
+            graph_branches: graph_palette(&[
+                "#e74856", "#3b78ff", "#16c60c", "#f9f1a5", "#b4009e", "#61d6d6", "#c50f1f",
+                "#13a10e", "#c19c00", "#3a96dd", "#881798", "#f2f2f2",
+            ]),
+        },
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Custom theme files on disk
 //
@@ -829,7 +888,15 @@ mod tests {
 
     #[test]
     fn all_themes_are_listed() {
-        assert_eq!(list_themes().len(), 10);
+        assert_eq!(list_themes().len(), 11);
+    }
+
+    #[test]
+    fn powershell_theme_uses_the_windows_terminal_background() {
+        let def = get_theme("PowerShell").unwrap();
+        assert_eq!(def.color_theme.bg, Color::Rgb(0x0c, 0x0c, 0x0c));
+        assert_eq!(def.color_theme.fg, Color::Rgb(0xcc, 0xcc, 0xcc));
+        assert_eq!(def.color_theme.graph_branches.len(), 12);
     }
 
     #[test]

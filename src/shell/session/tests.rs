@@ -415,6 +415,8 @@ fn zsh_history_file_never_points_into_the_integration_dir() {
     assert!(!text.contains("gitoui-shell"), "{text}");
 }
 
+// `/bin/sh` only exists on Unix.
+#[cfg(unix)]
 #[test]
 fn an_unknown_shell_runs_without_directory_tracking() {
     let home = tempfile::tempdir().unwrap();
@@ -424,6 +426,20 @@ fn an_unknown_shell_runs_without_directory_tracking() {
     s.send_input(b"echo plain-shell\r");
     wait_for_text(&s.view(), "plain-shell");
     assert_eq!(s.view().cwd(), None);
+}
+
+// Without `$SHELL`, Windows runs its own shell: it must start and echo.
+#[cfg(windows)]
+#[test]
+fn the_windows_shell_runs_commands() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let env: EnvVars = std::env::vars_os().collect();
+    let shell = crate::shell::platform::user_shell(&env);
+    let s = ShellSession::start(&shell, env, repo.path(), 24, 80, Arc::new(|| {})).unwrap();
+    let _ = home;
+    s.send_input(b"echo windows-shell-works\r");
+    wait_for_text(&s.view(), "windows-shell-works");
 }
 
 struct PanickingReader;

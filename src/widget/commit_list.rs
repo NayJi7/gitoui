@@ -41,7 +41,9 @@ use crate::{
 
 static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().respect_case());
 
-const ELLIPSIS: &str = "...";
+/// What a cut name or message ends with: the same `…` every other view uses
+/// (`text_fit`), one cell wide, not three dots.
+const ELLIPSIS: &str = "…";
 
 /// Commit row metadata used by the list view. `commit` is an `Arc`
 /// rather than a borrow so the manager (which owns the underlying
@@ -346,15 +348,6 @@ pub struct CommitListState<'a> {
     offset: usize,
     total: usize,
     height: usize,
-    /// Cached max widths so the per-frame `content_column_widths`
-    /// call doesn't have to iterate the entire commit list
-    /// (catastrophic on 332k-commit repos: ~664k string-measure
-    /// calls per frame × 20 frames per second froze the UI for
-    /// the whole bg-streaming window). Recomputed only when
-    /// commits are appended (`extend_commits`) - which is
-    /// itself a one-shot per-batch O(batch_size) pass, not a
-    /// per-frame cost.
-    cached_author_name_width: u16,
     // Lazy-load dedup lives in a module-level static (see
     // `LAST_LAZY_TRIGGER_POS` below) so it survives the state rebuild
     // that happens on every refresh. Storing it here would be reset
@@ -417,12 +410,6 @@ impl<'a> CommitListState<'a> {
         // (the cheap path: 500 commits at launch, walks once). The
         // bg streaming loader keeps it up to date via
         // `extend_commits`.
-        let cached_author_name_width: u16 = commits
-            .iter()
-            .filter(|c| !c.is_uncommitted)
-            .map(|c| console::measure_text_width(&c.commit.author_name) as u16)
-            .max()
-            .unwrap_or(0);
         let head_commit_hash = match head {
             Head::Detached { target } => Some(target.clone()),
             Head::Branch { name } => ref_name_to_commit_index_map
@@ -450,7 +437,6 @@ impl<'a> CommitListState<'a> {
             offset: 0,
             total,
             height: 0,
-            cached_author_name_width,
             default_ignore_case,
             default_fuzzy,
             default_regex,
@@ -756,12 +742,6 @@ impl<'a> CommitListState<'a> {
             let i = base_index + offset;
             self.commit_hash_to_index
                 .insert(info.commit.commit_hash.clone(), i);
-            if !info.is_uncommitted {
-                let w = console::measure_text_width(&info.commit.author_name) as u16;
-                if w > self.cached_author_name_width {
-                    self.cached_author_name_width = w;
-                }
-            }
             for r in &info.refs {
                 self.ref_name_to_commit_index_map
                     .insert(r.name().to_string(), i);
@@ -827,11 +807,21 @@ impl<'a> CommitListState<'a> {
         self.avatars_fully_prepared = false;
     }
 
-    /// Cached longest author name across the entire commit list.
-    /// Computed at `new()` and rolled forward on `extend_commits`,
-    /// so per-frame access is O(1) instead of the old O(N).
-    pub fn cached_author_name_width(&self) -> u16 {
-        self.cached_author_name_width
+    /// Width of the longest author name among the rows on screen now. The
+    /// author column follows it, so a long name far down the history does
+    /// not widen the column while it is not shown. Only the visible rows are
+    /// measured (a screenful), never the whole list.
+    pub fn visible_author_name_width(&self) -> u16 {
+        // Before the first layout the height is not known yet.
+        let rows = if self.height == 0 { 64 } else { self.height };
+        self.commits
+            .iter()
+            .skip(self.offset)
+            .take(rows)
+            .filter(|c| !c.is_uncommitted)
+            .map(|c| console::measure_text_width(&c.commit.author_name) as u16)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Mark the visible-avatars cache as needing a refresh on the
@@ -1198,6 +1188,20 @@ impl<'a> CommitListState<'a> {
             let new_index = m.match_index;
             self.search_state.update_match_index(new_index);
         }
+    }
+
+    /// Branch name to lane color, kept current as the full graph loads. The
+    /// copy on `AppContext` is only the one of the first graph, so a view that
+    /// colors branches like the list reads this one.
+    pub fn branch_color_map(&self) -> &FxHashMap<String, Color> {
+        &self.branch_color_map
+    }
+
+    /// The color of the graph lane of a commit: what the list paints its
+    /// branch labels with, so a view that shows the same labels can match it.
+    pub fn graph_color_of(&self, hash: &CommitHash) -> Option<Color> {
+        let index = *self.commit_hash_to_index.get(hash)?;
+        self.commits.get(index).map(|info| info.graph_color)
     }
 
     pub fn selected_commit_hash(&self) -> &CommitHash {
@@ -1972,13 +1976,10 @@ impl CommitList<'_> {
         avatars_enabled: bool,
     ) -> CommitListColumnWidths {
         let avatar_width = if avatars_enabled { 3 } else { 0 };
-        // Use the cached longest-author width (O(1)) instead of
-        // re-iterating the entire commit list on EVERY frame. The
-        // cache is seeded at CommitListState::new and rolled
-        // forward on extend_commits, so it's always in sync with
-        // the longest visible name regardless of how many
-        // background-streamed batches have arrived.
-        let author_content_width = state.cached_author_name_width();
+        // The longest name on screen now (a screenful measured per frame,
+        // never the whole history: that was catastrophic on 332k-commit
+        // repos).
+        let author_content_width = state.visible_author_name_width();
         // Date width is governed by the configured format string,
         // not the individual values - all dates of the same format
         // render to the same number of characters. Sample the
@@ -2020,7 +2021,7 @@ impl CommitList<'_> {
         let graph_cap = (area_width * 40 / 100).max(8);
         CommitListColumnWidths {
             graph: state.graph_area_cell_width().min(area_width).min(graph_cap),
-            author: author_column_width_from_cached(area_width, avatar_width, author_content_width),
+            author: author_column_width(area_width, avatar_width, author_content_width),
             hash: 9,
             date: date_column_width(&dates),
         }
@@ -2445,7 +2446,7 @@ impl CommitList<'_> {
             let max_width = max_width
                 .saturating_sub(ref_spans_width)
                 .saturating_sub(paused_badge_width);
-            if max_width > ELLIPSIS.len() {
+            if max_width > console::measure_text_width(ELLIPSIS) {
                 // Always take the first line only: %s should already be single-line
                 // but defensively guard against any embedded newlines.
                 let subject = commit
@@ -2515,7 +2516,7 @@ impl CommitList<'_> {
                     } else {
                         self.ctx.color_theme.list_name_fg
                     };
-                    let mut spans = if avatars_enabled && max_width > 10 {
+                    let mut spans = if avatars_enabled && max_width >= AVATAR_MIN_ROOM {
                         vec![Span::raw("   ")]
                     } else {
                         vec![]
@@ -2524,7 +2525,7 @@ impl CommitList<'_> {
                     return self.to_commit_list_item(i, spans, state);
                 }
                 let commit: &CommitSummary = &commit_info.commit;
-                let effective_max = if avatars_enabled && max_width > 10 {
+                let effective_max = if avatars_enabled && max_width >= AVATAR_MIN_ROOM {
                     max_width.saturating_sub(avatar_width)
                 } else {
                     max_width
@@ -2535,7 +2536,7 @@ impl CommitList<'_> {
                 } else {
                     commit.author_name.to_string()
                 };
-                let mut spans = if avatars_enabled && max_width > 10 {
+                let mut spans = if avatars_enabled && max_width >= AVATAR_MIN_ROOM {
                     vec![Span::raw("   ")]
                 } else {
                     vec![]
@@ -2559,7 +2560,7 @@ impl CommitList<'_> {
             .collect();
         Widget::render(List::new(items), area, buf);
 
-        if !avatars_enabled || max_width <= 10 {
+        if !avatars_enabled || max_width < AVATAR_MIN_ROOM {
             state.avatar_stable_key = None;
             state.avatar_prev_selected = None;
             return;
@@ -3197,12 +3198,24 @@ struct CommitListColumnWidths {
 }
 
 const AUTHOR_MIN_WIDTH: u16 = 7;
-const AUTHOR_MAX_WIDTH: u16 = 24;
 const DATE_MAX_WIDTH: u16 = 22;
 
-fn author_column_width_from_cached(area_width: u16, avatar_width: u16, content_width: u16) -> u16 {
-    let max_width = AUTHOR_MAX_WIDTH.min(area_width);
-    (content_width + avatar_width + 2).max(9).min(max_width)
+/// A name longer than this ends with `…`, whatever the room.
+const AUTHOR_NAME_MAX_CHARS: u16 = 16;
+
+/// The avatar (2 cells and a gap) is drawn when the author column has room
+/// for it and at least 4 characters of name, margin left out. The column is
+/// never narrower than that, so a short name still gets its avatar.
+const AVATAR_MIN_ROOM: usize = 7;
+
+/// Width of the author column: the longest name shown (`content_width`),
+/// the avatar and a margin, at most `AUTHOR_NAME_MAX_CHARS` of name and what
+/// the panel allows.
+fn author_column_width(area_width: u16, avatar_width: u16, content_width: u16) -> u16 {
+    let max_width = (AUTHOR_NAME_MAX_CHARS + avatar_width + 2).min(area_width);
+    (content_width + avatar_width + 2)
+        .max(AVATAR_MIN_ROOM as u16 + 2)
+        .min(max_width)
 }
 
 fn date_column_width(dates: &[String]) -> u16 {
@@ -3417,8 +3430,27 @@ mod tests {
             .map(|s| console::measure_text_width(s) as u16)
             .max()
             .unwrap_or(0);
-        let width = author_column_width_from_cached(80, 3, content);
-        assert_eq!(width, 24);
+        // 16 characters of name, the avatar (3) and a margin (2).
+        let width = author_column_width(80, 3, content);
+        assert_eq!(width, 21);
+        assert_eq!(author_column_width(80, 0, content), 18);
+    }
+
+    #[test]
+    fn the_column_follows_the_longest_name_it_is_given() {
+        // `NayJi7` alone: 6 + avatar 3 + margin 2.
+        assert_eq!(author_column_width(120, 3, 6), 11);
+        // And that is enough room for its avatar.
+        let column = author_column_width(120, 3, 6) as usize;
+        assert!(column - 2 >= AVATAR_MIN_ROOM);
+        assert_eq!(author_column_width(120, 3, 12), 17);
+        // And never wider than the panel.
+        assert_eq!(author_column_width(14, 3, 30), 14);
+    }
+
+    #[test]
+    fn a_short_name_keeps_room_for_the_avatar() {
+        assert!(author_column_width(120, 3, 2) as usize - 2 >= AVATAR_MIN_ROOM);
     }
 
     #[test]
@@ -3428,7 +3460,7 @@ mod tests {
             .map(|s| console::measure_text_width(s) as u16)
             .max()
             .unwrap_or(0);
-        let width = author_column_width_from_cached(80, 0, content);
+        let width = author_column_width(80, 0, content);
         assert_eq!(width, 9);
     }
 

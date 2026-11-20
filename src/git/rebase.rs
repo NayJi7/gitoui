@@ -561,7 +561,7 @@ pub fn apply_rebase(
 #                     edits, combined message for Squash).
 file="$1"
 name=$(basename "$file")
-scratch={scratch}
+scratch="{scratch}"
 case "$name" in
   git-rebase-todo)
     cp "$scratch/todo" "$file"
@@ -577,21 +577,27 @@ case "$name" in
 esac
 exit 0
 "#,
-        scratch = scratch.display()
+        scratch = shell_path(&scratch)
     );
     std::fs::write(&editor_path, editor_src).map_err(|e| format!("write editor: {}", e))?;
-    let mut perms = std::fs::metadata(&editor_path)
-        .map_err(|e| format!("stat editor: {}", e))?
-        .permissions();
-    use std::os::unix::fs::PermissionsExt;
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&editor_path, perms).map_err(|e| format!("chmod editor: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&editor_path)
+            .map_err(|e| format!("stat editor: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&editor_path, perms)
+            .map_err(|e| format!("chmod editor: {}", e))?;
+    }
+    // git runs the editor through its own `sh`, which wants forward slashes.
+    let editor_arg = shell_path(&editor_path);
 
     // 4. Run rebase. We pipe stderr/stdout so the caller can surface them.
     let out = Command::new("git")
         .current_dir(repo)
-        .env("GIT_SEQUENCE_EDITOR", &editor_path)
-        .env("GIT_EDITOR", &editor_path)
+        .env("GIT_SEQUENCE_EDITOR", &editor_arg)
+        .env("GIT_EDITOR", &editor_arg)
         .args(["rebase", "-i", base_hash])
         .output()
         .map_err(|e| format!("git rebase failed to spawn: {}", e))?;
@@ -608,6 +614,11 @@ exit 0
         let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
         Ok(RebaseOutcome::Paused(msg))
     }
+}
+
+/// A path as the POSIX shell git runs scripts with reads it (forward slashes).
+fn shell_path(p: &std::path::Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]

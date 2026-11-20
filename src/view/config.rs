@@ -16,9 +16,18 @@ use crate::{
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
     view::{graph_preview::GraphPreview, View},
-    GraphRenderer, GraphStyle, GraphWidthType, InitialSelection,
+    GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, SelectionMode,
 };
 
+// Adding a setting? Besides the config field (`CoreOptionConfig` or the UI
+// config, its accessor and `save`), this page needs, in order:
+//   1. the index below, and the indices of the rows after it shifted;
+//   2. its entry in `items` and `descriptions` (render), `config_left_width`,
+//      and the two cycle functions;
+//   3. its entry in `ROW_APPLIES`: WHEN does it take effect (see `ApplyWhen`);
+//   4. the code that applies it, where step 3 says: `App::apply_live_config_settings`
+//      for `Live`, `App::close_config` for `OnClose`.
+//
 // Item indices, listed here so future inserts only have to touch one spot
 // instead of hunting for `selected == N` matches scattered through the file.
 //   0  Theme
@@ -32,21 +41,92 @@ use crate::{
 //   8  Order
 //   9  Initial Selection
 //  10  Mouse
-//  11  Date Format
-//  12  Git Name            <- TEXT_EDIT_START_INDEX
-//  13  Git Email
-//  14  Default Branch
-//  15  GitHub Auth         <- GITHUB_AUTH_INDEX
-//  16  Github Avatars      <- GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 17;
+//  11  Select Mode         <- SELECT_MODE_INDEX (grayed when Mouse = Off)
+//  12  Date Format
+//  13  Git Name            <- TEXT_EDIT_START_INDEX
+//  14  Git Email
+//  15  Default Branch
+//  16  GitHub Auth         <- GITHUB_AUTH_INDEX
+//  17  Github Avatars      <- GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 18;
 const RENDERER_INDEX: usize = 1;
 const GRAPH_ENABLED_INDEX: usize = 2;
 const GRAPH_STYLE_INDEX: usize = 3;
 const GRAPH_WIDTH_INDEX: usize = 4;
-const TEXT_EDIT_START_INDEX: usize = 12;
-const GITHUB_AUTH_INDEX: usize = 15;
-const GITHUB_AVATARS_INDEX: usize = 16;
+const MOUSE_INDEX: usize = 10;
+const SELECT_MODE_INDEX: usize = 11;
+const DATE_FORMAT_INDEX: usize = 12;
+const TEXT_EDIT_START_INDEX: usize = 13;
+const GITHUB_AUTH_INDEX: usize = 16;
+const GITHUB_AVATARS_INDEX: usize = 17;
 const CONFIG_ITEM_INDENT: &str = " ";
+
+/// When a change made in this page takes effect. EVERY row has one, decided in
+/// `ROW_APPLIES` below: it is the question to answer when adding a setting.
+///
+/// Every change is saved to the config file the moment it is made. What differs
+/// is when the running app starts to use it, because this page works on its own
+/// copy of the config and the app only reads the settings back in
+/// `App::close_config`, except for the ones applied while the page is open.
+///
+/// How to decide:
+///
+/// - `Live`: apply it at once when the setting changes how THIS PAGE looks or
+///   works, or when the effect can only be judged by trying it right here. The
+///   theme colors the page itself. The mouse and the select mode are used on the
+///   page too: a user who flips Select Mode wants to drag over the page and see.
+///   It must be cheap and safe to apply under an open page, with no rebuild and
+///   no flicker. Code: `App::apply_live_config_settings`.
+/// - `OnClose`: the default. Apply it when the page is left, in
+///   `App::close_config`. Right for anything that rebuilds or re-renders the view
+///   underneath (graph images, layout, the commit list) or reloads the app (the
+///   renderer, the order, whether the graph is on), because doing that while the
+///   page is up would flicker or throw the underlying view away, and nothing on
+///   the page shows the result anyway.
+/// - `NextLaunch`: only saved, read once at startup, and applying it later
+///   would make no sense (the commit the cursor starts on).
+///
+/// Not sure? Ask whether the user could tell it worked without leaving the page.
+/// If they could, and it is safe, it is `Live`; if not, it is `OnClose`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyWhen {
+    Live,
+    OnClose,
+    NextLaunch,
+}
+
+/// One entry per row, in the order of the index list above. The length is tied
+/// to `CONFIG_ITEM_COUNT`, so adding a row without deciding here does not
+/// compile.
+const ROW_APPLIES: [ApplyWhen; CONFIG_ITEM_COUNT] = [
+    ApplyWhen::Live,       //  0 Theme (the page is drawn with it)
+    ApplyWhen::OnClose,    //  1 Renderer (reloads the app)
+    ApplyWhen::OnClose,    //  2 Graph Enabled (reloads the app)
+    ApplyWhen::OnClose,    //  3 Graph Style (rebakes the graph images)
+    ApplyWhen::OnClose,    //  4 Graph Width (rebakes the graph images)
+    ApplyWhen::OnClose,    //  5 Diff Mode
+    ApplyWhen::OnClose,    //  6 Resolve Mode
+    ApplyWhen::OnClose,    //  7 Rebase Mode
+    ApplyWhen::OnClose,    //  8 Order (reloads the app)
+    ApplyWhen::NextLaunch, //  9 Initial Select (read once at startup)
+    ApplyWhen::Live,       // 10 Mouse (the page uses it)
+    ApplyWhen::Live,       // 11 Select Mode (tried right on the page)
+    ApplyWhen::OnClose,    // 12 Date Format
+    ApplyWhen::OnClose,    // 13 Git Name
+    ApplyWhen::OnClose,    // 14 Git Email
+    ApplyWhen::OnClose,    // 15 Default Branch
+    ApplyWhen::OnClose,    // 16 GitHub Auth (state handed over when leaving)
+    ApplyWhen::OnClose,    // 17 Github Avatars
+];
+
+/// The line under a row's description that says when it takes effect.
+fn apply_note(when: ApplyWhen) -> &'static str {
+    match when {
+        ApplyWhen::Live => "Applied immediately.",
+        ApplyWhen::OnClose => "Applied when you leave this page.",
+        ApplyWhen::NextLaunch => "Applied at the next launch.",
+    }
+}
 
 #[derive(Debug, Clone)]
 struct PendingGithubDevice {
@@ -130,6 +210,7 @@ impl<'a> ConfigView<'a> {
             commit_order_display(self.core_config.order()),
             initial_selection_display(self.core_config.initial_selection()),
             mouse_display(self.ui_config.common.mouse_enabled),
+            selection_mode_display(self.core_config.selection_mode()),
             self.core_config
                 .date_time_format()
                 .display_name()
@@ -167,6 +248,7 @@ impl<'a> ConfigView<'a> {
             "Order",
             "Initial Select",
             "Mouse",
+            "Select Mode",
             "Date Format",
             "Git Name",
             "Git Email",
@@ -200,12 +282,30 @@ impl<'a> ConfigView<'a> {
                 Some(crate::protocol::auto_detect_name().to_string())
             }
             GRAPH_WIDTH_INDEX if self.core_config.graph_width() == crate::GraphWidthType::Auto => {
-                let (w, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
-                let label = if w >= 100 { "Double" } else { "Single" };
+                let label = match self.auto_cell_width() {
+                    crate::graph::CellWidthType::Double => "Double",
+                    crate::graph::CellWidthType::Single => "Single",
+                };
                 Some(label.to_string())
             }
             _ => None,
         }
+    }
+
+    /// What `graph_width = "auto"` gives right now, by the same rule as the
+    /// commit list: it depends on the lanes of the open repository and the
+    /// terminal width. The hint and both previews read it from here so they
+    /// never disagree. Without a list behind (opened from another view) the
+    /// two lanes of the preview graph stand in.
+    fn auto_cell_width(&self) -> crate::graph::CellWidthType {
+        const PREVIEW_LANES: usize = 2;
+        let lanes = match &self.before {
+            View::List(list) => list.graph_lane_count(),
+            _ => None,
+        }
+        .unwrap_or(PREVIEW_LANES);
+        let (width, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
+        crate::check::auto_cell_width(lanes, width as usize)
     }
 
     fn render_vertical_separator(&self, f: &mut Frame, area: Rect) {
@@ -288,6 +388,10 @@ impl<'a> ConfigView<'a> {
         if (idx == GRAPH_STYLE_INDEX || idx == GRAPH_WIDTH_INDEX)
             && !self.graph_options_selectable()
         {
+            return true;
+        }
+        // The selection is made with the mouse.
+        if idx == SELECT_MODE_INDEX && !self.ui_config.common.mouse_enabled {
             return true;
         }
         false
@@ -430,9 +534,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            12 => self.core_config.user_name().unwrap_or("").to_string(),
-            13 => self.core_config.user_email().unwrap_or("").to_string(),
-            14 => self.core_config.default_branch().unwrap_or("").to_string(),
+            13 => self.core_config.user_name().unwrap_or("").to_string(),
+            14 => self.core_config.user_email().unwrap_or("").to_string(),
+            15 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -611,9 +715,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            12 => self.core_config.set_user_name(value),
-            13 => self.core_config.set_user_email(value),
-            14 => self.core_config.set_default_branch(value),
+            13 => self.core_config.set_user_name(value),
+            14 => self.core_config.set_user_email(value),
+            15 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -662,7 +766,7 @@ impl<'a> ConfigView<'a> {
             }
             GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
-                let text_mode = self.core_config.graph_renderer() == GraphRenderer::Ascii;
+                let text_mode = self.core_config.graph_renderer().is_ascii();
                 let prev = if text_mode {
                     match current {
                         GraphStyle::Rounded => GraphStyle::Angular,
@@ -733,14 +837,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            10 => {
-                // Mouse (was index 9, now 10)
+            MOUSE_INDEX => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            11 => {
-                // Date Format
+            SELECT_MODE_INDEX => {
+                let prev = self.core_config.selection_mode().other();
+                self.core_config.set_selection_mode(prev);
+            }
+            DATE_FORMAT_INDEX => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
@@ -794,12 +900,13 @@ impl<'a> ConfigView<'a> {
             GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
                 // In Ascii mode, Smooth is not available - skip it.
-                let text_mode = self.core_config.graph_renderer() == GraphRenderer::Ascii;
+                let text_mode = self.core_config.graph_renderer().is_ascii();
                 let next = if text_mode {
                     match current {
                         GraphStyle::Rounded => GraphStyle::Angular,
                         GraphStyle::Angular => GraphStyle::Rounded,
-                        GraphStyle::Smooth => GraphStyle::Rounded,
+                        // Shown as Rounded in text mode, so the next one is Angular.
+                        GraphStyle::Smooth => GraphStyle::Angular,
                     }
                 } else {
                     match current {
@@ -863,14 +970,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(next);
             }
-            10 => {
-                // Mouse (was index 9, now 10)
+            MOUSE_INDEX => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            11 => {
-                // Date Format
+            SELECT_MODE_INDEX => {
+                let next = self.core_config.selection_mode().other();
+                self.core_config.set_selection_mode(next);
+            }
+            DATE_FORMAT_INDEX => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
@@ -1002,7 +1111,17 @@ impl<'a> ConfigView<'a> {
             ),
             (
                 "Graph Style",
-                graph_style_display(self.core_config.graph_style()),
+                // Smooth needs images: in a text-only terminal the graph is drawn
+                // as Rounded, so that is what the list shows.
+                graph_style_display(
+                    if self.core_config.graph_renderer().is_ascii()
+                        && self.core_config.graph_style() == GraphStyle::Smooth
+                    {
+                        GraphStyle::Rounded
+                    } else {
+                        self.core_config.graph_style()
+                    },
+                ),
                 false,
             ),
             (
@@ -1038,6 +1157,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Mouse",
                 mouse_display(self.ui_config.common.mouse_enabled),
+                false,
+            ),
+            (
+                "Select Mode",
+                selection_mode_display(self.core_config.selection_mode()),
                 false,
             ),
             (
@@ -1269,13 +1393,14 @@ impl<'a> ConfigView<'a> {
                 }
             },
             "Controls how commit connection lines are rendered in the graph.\n\nSmooth is only available in Image render mode.".into(),
-            "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
+            "Cell width used by each graph row image.\n\nAuto picks Double when the graph fits that wide in the terminal, and Single otherwise.".into(),
             diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
             rebase_view_description(self.ui_config.common.rebase_view),
             "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children, branches stay grouped, like `git log --topo-order`.".into(),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.\n\nWill update at next launch of gitoui.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
+            "What Ctrl + drag selects and copies, in any view.\n\nClassic: everything under the drag, like a terminal does, frames and the panel next door included.\nSmart: only the text of the panel the drag started in, never its frame or the panels around it.\n\nA drag that does not start inside a framed panel selects like Classic. Needs the mouse On.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
             format!(
                 "Override git user.name for commits.\n\nCurrent git config: '{}'",
@@ -1380,6 +1505,16 @@ impl<'a> ConfigView<'a> {
             right_lines.push(Line::from(Span::styled(
                 format!("Auto resolved: {resolved}"),
                 Style::default().fg(hint_fg),
+            )));
+        }
+
+        // When the change takes effect: the user can tell which settings they
+        // can try out right here.
+        if let Some(when) = ROW_APPLIES.get(self.selected) {
+            right_lines.push(Line::from(""));
+            right_lines.push(Line::from(Span::styled(
+                apply_note(*when),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
             )));
         }
 
@@ -1520,15 +1655,7 @@ impl<'a> ConfigView<'a> {
         let cell_width = match self.core_config.graph_width() {
             GraphWidthType::Double => crate::graph::CellWidthType::Double,
             GraphWidthType::Single => crate::graph::CellWidthType::Single,
-            GraphWidthType::Auto => {
-                use crate::protocol::ImageProtocol;
-                match preview_protocol {
-                    ImageProtocol::Sixel | ImageProtocol::KittyUnicode { .. } => {
-                        crate::graph::CellWidthType::Single
-                    }
-                    _ => crate::graph::CellWidthType::Double,
-                }
-            }
+            GraphWidthType::Auto => self.auto_cell_width(),
         };
         let needs_rebuild = self
             .graph_preview
@@ -1689,14 +1816,10 @@ impl<'a> ConfigView<'a> {
         let lane_width: usize = match self.core_config.graph_width() {
             GraphWidthType::Double => 3,
             GraphWidthType::Single => 2,
-            GraphWidthType::Auto => {
-                let (w, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
-                if w >= 100 {
-                    3
-                } else {
-                    2
-                }
-            }
+            GraphWidthType::Auto => match self.auto_cell_width() {
+                crate::graph::CellWidthType::Double => 3,
+                crate::graph::CellWidthType::Single => 2,
+            },
         };
 
         let hashes = ["m1", "f1", "m0"];
@@ -2147,6 +2270,13 @@ fn mouse_display(enabled: bool) -> String {
     }
 }
 
+fn selection_mode_display(mode: SelectionMode) -> String {
+    match mode {
+        SelectionMode::Classic => "Classic".to_string(),
+        SelectionMode::Smart => "Smart".to_string(),
+    }
+}
+
 fn github_auth_display(state: &GithubAuthState, pending: bool) -> String {
     if pending {
         return "- Authenticating... -".to_string();
@@ -2329,6 +2459,28 @@ fn config_value_display(index: usize, value: &str, editing: bool, editing_value:
 #[cfg(test)]
 mod tests {
     use crate::github_auth::GithubAuthState;
+
+    #[test]
+    fn only_the_theme_the_mouse_and_the_select_mode_apply_live() {
+        // Adding a `Live` row is a decision (see `ApplyWhen`): this list is
+        // where it shows, so the choice gets looked at in review.
+        let live: Vec<usize> = (0..super::CONFIG_ITEM_COUNT)
+            .filter(|&i| super::ROW_APPLIES[i] == super::ApplyWhen::Live)
+            .collect();
+        assert_eq!(live, vec![0, super::MOUSE_INDEX, super::SELECT_MODE_INDEX]);
+    }
+
+    #[test]
+    fn what_reloads_or_rebakes_waits_for_the_page_to_close() {
+        for index in [
+            super::RENDERER_INDEX,
+            super::GRAPH_ENABLED_INDEX,
+            super::GRAPH_STYLE_INDEX,
+            super::GRAPH_WIDTH_INDEX,
+        ] {
+            assert_eq!(super::ROW_APPLIES[index], super::ApplyWhen::OnClose);
+        }
+    }
 
     #[test]
     fn github_auth_display_shows_authenticated_login() {

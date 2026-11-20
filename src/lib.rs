@@ -19,9 +19,12 @@ mod event;
 mod external;
 mod keybind;
 mod panic_guard;
+mod paths;
 mod popup;
 mod recents;
+mod selection;
 mod shell;
+mod term_probe;
 mod text_edit;
 mod text_fit;
 mod uninstall;
@@ -153,6 +156,27 @@ pub enum GraphWidthType {
     Auto,
     Double,
     Single,
+}
+
+/// What `Ctrl` + drag selects (see `selection`). `Classic` takes whatever is
+/// under the drag, frames and neighbouring panels included, like a terminal;
+/// `Smart` keeps to the panel the drag started in.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionMode {
+    #[default]
+    Classic,
+    Smart,
+}
+
+impl SelectionMode {
+    /// The other one: there are two, so cycling either way is the same.
+    pub fn other(self) -> Self {
+        match self {
+            SelectionMode::Classic => SelectionMode::Smart,
+            SelectionMode::Smart => SelectionMode::Classic,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
@@ -332,6 +356,14 @@ pub fn run() -> Result<()> {
         }
         return Ok(());
     }
+    // Ask the terminal for its cell size and Sixel support now: Sixel
+    // cannot scale, so every image has to be sized in real pixels. Done
+    // before the event thread starts, which would otherwise read the
+    // terminal's reply as keys.
+    let terminal_report = term_probe::probe();
+    protocol::set_cell_pixels(terminal_report.cell_px);
+    protocol::set_sixel_reported(terminal_report.sixel);
+
     // Otherwise, do the silent once-a-day check + prompt. The function
     // bails out fast (no network) when the cache is fresh, the user has
     // chosen "never", or we're not attached to a TTY. On `Updated` it
@@ -1721,6 +1753,12 @@ pub fn run() -> Result<()> {
         );
 
         if terminal.is_none() {
+            // Before the screen is switched: a message that stays readable
+            // instead of a black screen that never answers.
+            if !term_probe::can_read_keys() {
+                eprint!("{}", term_probe::NO_CONSOLE_MESSAGE);
+                std::process::exit(1);
+            }
             terminal = Some(ratatui::init());
             // Push the kitty keyboard protocol disambiguation flag
             // RIGHT after raw mode + alt-screen are entered. Without

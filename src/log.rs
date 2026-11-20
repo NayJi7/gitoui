@@ -44,10 +44,7 @@ static LOGGER: OnceLock<Logger> = OnceLock::new();
 /// `~/.config/gitoui/logs`. Returns None on platforms where we can't
 /// figure out a home dir (in which case logging is disabled).
 fn log_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("gitoui").join("logs"))
+    Some(crate::paths::config_base()?.join("gitoui").join("logs"))
 }
 
 fn today_filename() -> String {

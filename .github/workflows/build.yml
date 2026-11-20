@@ -68,6 +68,26 @@ jobs:
       - name: Terminal tests
         run: "cargo test --lib shell:: -- --test-threads=1"
 
+  # Windows support is in progress: for now the job only has to compile.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+      - name: Tests
+        run: cargo test --lib -- --test-threads=1
+      - name: install.ps1 parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+      - name: Smoke test (the real binary in a pseudo-terminal)
+        run: cargo test --test smoke -- --nocapture
+
   build:
     strategy:
       fail-fast: false

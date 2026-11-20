@@ -104,6 +104,10 @@ pub struct CommitDetail<'a> {
     ctx: Rc<AppContext>,
     head_branch_name: Option<String>,
     is_head_commit: bool,
+    /// The graph lane color of this commit, which the commit list paints its
+    /// branch labels with. Without it (a commit opened from a PR, not in the
+    /// list) the labels fall back to the branch color table.
+    graph_color: Option<ratatui::style::Color>,
     /// `Some(n)` when this commit was opened from a PR drilldown
     /// surfaces as `· PR #n` next to the panel title so the user
     /// always sees the originating context.
@@ -126,8 +130,15 @@ impl<'a> CommitDetail<'a> {
             ctx,
             head_branch_name,
             is_head_commit,
+            graph_color: None,
             pr_origin: None,
         }
+    }
+
+    /// The lane color the commit list gives this commit's branch labels.
+    pub fn with_graph_color(mut self, color: Option<ratatui::style::Color>) -> Self {
+        self.graph_color = color;
+        self
     }
 
     /// Attach a PR origin to the widget so the title row reads
@@ -694,7 +705,6 @@ impl CommitDetail<'_> {
         let mut ordered: Vec<(&String, &Vec<String>)> = compacted_branches.iter().collect();
         ordered.sort_by_key(|(name, _)| self.head_branch_name.as_deref() != Some(name.as_str()));
         for (short_name, full_names) in ordered {
-            let is_head = self.head_branch_name.as_deref() == Some(short_name.as_str());
             if !first {
                 spans.push(Span::raw(", "));
             }
@@ -707,8 +717,10 @@ impl CommitDetail<'_> {
                 .map(|n| n.split_once('/').map(|(r, _)| r).unwrap_or(n))
                 .collect();
 
-            let fg = if is_head {
-                self.ctx.color_theme.list_head_fg
+            // Like the commit list: the label has the color of the commit's
+            // graph lane, and only the `HEAD ->` marker is the HEAD color.
+            let fg = if let Some(lane_color) = self.graph_color {
+                lane_color
             } else if is_local {
                 self.ctx
                     .branch_color_map

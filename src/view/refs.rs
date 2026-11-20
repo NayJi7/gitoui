@@ -186,6 +186,7 @@ impl<'a> RefsView<'a> {
             &self.worktrees,
             self.ctx.clone(),
             refs_list_area.width,
+            self.as_list_state().branch_color_map(),
         );
         f.render_stateful_widget(ref_list, refs_list_area, &mut self.ref_list_state);
     }

@@ -327,6 +327,15 @@ pub struct App<'a> {
     /// tries to commit a non-git target. Auto-clears once `Instant::elapsed`
     /// passes the 2 s threshold.
     dir_error_message: Option<(String, std::time::Instant)>,
+    /// Text selected with the mouse (drag), highlighted and copied on release.
+    text_selection: Option<crate::selection::TextSelection>,
+    /// The `Ctrl` + left-button press being held back until the button comes
+    /// up (a click or the start of a selection).
+    mouse_press: Option<ratatui::crossterm::event::MouseEvent>,
+    /// The panel a smart selection is kept to, found when the button went down.
+    selection_bounds: Option<crate::selection::Bounds>,
+    /// The last frame drawn: the selected text is read from it.
+    last_frame: Option<ratatui::buffer::Buffer>,
     /// Shell session of the integrated terminal (`t`), owned by `run()` so it
     /// survives refreshes.
     shell: &'a mut crate::shell::host::ShellHost,
@@ -646,6 +655,10 @@ impl<'a> App<'a> {
             dir_input_cursor_anchor: None,
             pending_refresh: None,
             dir_error_message: None,
+            text_selection: None,
+            mouse_press: None,
+            selection_bounds: None,
+            last_frame: None,
             shell,
             ci,
             ci_dot_rect: None,
@@ -784,7 +797,13 @@ impl App<'_> {
                 self.drain_pending_replace_graph();
                 self.prepare_render(terminal)?;
                 self.flush_pending_graph_uploads()?;
-                terminal.draw(|f| self.render(f))?;
+                let completed = terminal.draw(|f| {
+                    self.render(f);
+                    if let Some(selection) = &self.text_selection {
+                        crate::selection::highlight(f.buffer_mut(), selection);
+                    }
+                })?;
+                self.last_frame = Some(completed.buffer.clone());
                 self.flush_pending_avatar_deletes()?;
                 if let Some(dialog_area) = self.view.dialog_area() {
                     if !dialog_area.is_empty() {
@@ -953,6 +972,9 @@ impl App<'_> {
             'dispatch: loop {
                 match current_event {
                     AppEvent::Key(key) => {
+                        // A key ends a selection in progress.
+                        self.text_selection = None;
+                        self.mouse_press = None;
                         // In the integrated terminal every key belongs to the
                         // shell, except the one that leaves it.
                         if self.handle_terminal_key(key) {
@@ -1294,10 +1316,35 @@ impl App<'_> {
                     }
                     AppEvent::Resize(w, h) => {
                         let _ = (w, h);
+                        self.text_selection = None;
+                        self.mouse_press = None;
                         self.invalidate_header();
+                        // A resize clears the terminal, and with it every
+                        // Sixel pixel. The graph column keeps the same
+                        // (offset, height, area) key when only the width
+                        // of the window changes, so its cache would write
+                        // skip cells and leave the column black. Drop it
+                        // so the rows are written again.
+                        if self.ctx.image_protocol.paints_into_cells() {
+                            self.view.clear_graph_images();
+                        }
                     }
                     AppEvent::Mouse(mouse) => {
-                        needs_draw = self.handle_mouse_event(mouse, terminal)?;
+                        let selection_before = self.text_selection;
+                        needs_draw = match self.select_with_mouse(mouse) {
+                            MouseSelection::Handled(draw) => draw,
+                            MouseSelection::Ignored => self.handle_mouse_event(mouse, terminal)?,
+                            MouseSelection::Click(press) => {
+                                // The click the selection held back, then the release.
+                                let pressed = self.handle_mouse_event(press, terminal)?;
+                                let released = self.handle_mouse_event(mouse, terminal)?;
+                                pressed || released
+                            }
+                        };
+                        // The highlight has to appear or go away.
+                        if self.text_selection != selection_before {
+                            needs_draw = true;
+                        }
                         if let Some(req) = self.pending_refresh.take() {
                             // A handler (currently: dir-input dropdown 2nd-click)
                             // asked for a full app rebuild. Mirror the keyboard
@@ -2348,7 +2395,9 @@ impl App<'_> {
         // same gate used for bg_streaming applies here: defer all
         // uploads until the overlay closes, then the next render
         // cycle regenerates them cleanly.
-        if !self.dir_input.active {
+        // Sixel pixels are plain cell content, the popup simply overwrites
+        // them, so the images are kept up to date underneath it.
+        if !self.dir_input.active || self.ctx.image_protocol.paints_into_cells() {
             self.view.prepare_graph_uploads();
         }
         Ok(())
@@ -2489,7 +2538,7 @@ impl App<'_> {
     ) -> Result<(), std::io::Error> {
         let event_with_count = self.apply_nav_burst_acceleration(event_with_count);
         self.view.handle_event(event_with_count, key);
-        self.apply_live_config_theme();
+        self.apply_live_config_settings();
         Ok(())
     }
 
@@ -2538,6 +2587,53 @@ impl App<'_> {
             ewc
         } else {
             crate::event::UserEventWithCount::new(ewc.event, ewc.count.saturating_mul(mult))
+        }
+    }
+
+    /// Applies, while the Config view is open, the settings that take effect
+    /// at once: the ones marked `Live` in `ROW_APPLIES` (view/config.rs, which
+    /// also says how to decide for a new setting). Everything else waits for
+    /// `close_config`. Called after every input that can change a row
+    /// (keyboard and mouse).
+    fn apply_live_config_settings(&mut self) {
+        self.apply_live_config_theme();
+        self.apply_live_config_behaviour();
+    }
+
+    /// The `Live` settings that are not the theme: what Ctrl + drag selects,
+    /// and whether the mouse is on. Both are about how the page itself is
+    /// used, so the user tries them right there.
+    fn apply_live_config_behaviour(&mut self) {
+        let View::Config(ref view) = self.view else {
+            return;
+        };
+        let selection_mode = view.core_config().selection_mode();
+        let mouse_enabled = view.ui_config().common.mouse_enabled;
+        let selection_changed = selection_mode != self.ctx.core_config.selection_mode();
+        let mouse_changed = mouse_enabled != self.ctx.ui_config.common.mouse_enabled;
+        if !selection_changed && !mouse_changed {
+            return;
+        }
+        let ctx = Rc::make_mut(&mut self.ctx);
+        ctx.core_config.set_selection_mode(selection_mode);
+        ctx.ui_config.common.set_mouse_enabled(mouse_enabled);
+        if mouse_changed {
+            // The terminal's mouse capture is switched right away, and
+            // `close_config` then sees nothing left to do for it.
+            let _ = if mouse_enabled {
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::EnableMouseCapture
+                )
+            } else {
+                // A selection or a held press has no mouse to finish it.
+                self.text_selection = None;
+                self.mouse_press = None;
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::DisableMouseCapture
+                )
+            };
         }
     }
 
@@ -3112,13 +3208,20 @@ impl App<'_> {
         };
 
         // Derive a tilde-relative path from the current working directory.
-        let cwd = std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf());
-        let home = std::env::var("HOME").unwrap_or_default();
-        let display_path = if !home.is_empty() && cwd.starts_with(&home) {
-            format!("~{}", &cwd.to_string_lossy()[home.len()..])
-        } else {
-            cwd.to_string_lossy().to_string()
-        };
+        let cwd = crate::paths::simplify(
+            std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf()),
+        );
+        let home = crate::paths::home_dir();
+        let display_path =
+            if let Some(rest) = home.as_deref().and_then(|h| cwd.strip_prefix(h).ok()) {
+                if rest.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
+                }
+            } else {
+                cwd.to_string_lossy().to_string()
+            };
 
         // Repo name (last component) in bold, rest dimmer.
         let repo_name = cwd
@@ -3359,7 +3462,7 @@ impl App<'_> {
                             cell.set_style(ic.style());
                         }
                         cell.set_bg(theme_bg);
-                        cell.set_skip(logo_skip);
+                        cell.set_skip(logo_skip || ic.skip());
                     }
                 }
             }
@@ -3376,7 +3479,7 @@ impl App<'_> {
                             cell.set_style(ic.style());
                         }
                         cell.set_bg(theme_bg);
-                        cell.set_skip(wordmark_skip);
+                        cell.set_skip(wordmark_skip || ic.skip());
                     }
                 }
             }
@@ -3451,8 +3554,13 @@ impl App<'_> {
         // otherwise a long notification ("Opened https://…") collides
         // with the bar and the user sees both layers mashed together.
         // Integrated terminal: the footer reports the shell instead.
+        // A notification ("Copied 12 chars to clipboard") takes the place of
+        // the shell's status while it is shown.
         let terminal_footer = match &self.view {
-            View::Terminal(t) if !self.dir_input.active => {
+            View::Terminal(t)
+                if !self.dir_input.active
+                    && matches!(&self.app_status.status_line, StatusLine::None) =>
+            {
                 let kb = &self.ctx.keybind;
                 Some(crate::view::terminal::terminal_footer(
                     &t.session().status(),
@@ -3866,9 +3974,16 @@ impl App<'_> {
             }
             match self.repository.head() {
                 Head::Branch { name } => {
-                    let branch_color = self
-                        .ctx
-                        .branch_color_map
+                    // The list's own table when it is on screen: `ctx` keeps
+                    // the one of the first graph, which the full load replaces.
+                    let list_colors = match &self.view {
+                        View::List(list_view) => list_view
+                            .commit_list_state_ref()
+                            .map(|state| state.branch_color_map()),
+                        _ => None,
+                    };
+                    let branch_color = list_colors
+                        .unwrap_or(&self.ctx.branch_color_map)
                         .get(name)
                         .copied()
                         .unwrap_or(self.ctx.color_theme.status_info_fg);
@@ -4104,6 +4219,18 @@ impl<'a> App<'a> {
             self.ec.send(AppEvent::CloseTerminal);
             return true;
         }
+        // Ctrl+Shift+C is the copy shortcut of terminal emulators: it is never
+        // a key for the shell, where Ctrl+C would interrupt the running command.
+        {
+            use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+            let copy_chord = key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && matches!(key.code, KeyCode::Char('c' | 'C'));
+            if copy_chord {
+                return true;
+            }
+        }
         // Shift+PageUp / PageDown / Home / End browse the history, like in
         // most terminal emulators.
         if key
@@ -4177,6 +4304,106 @@ impl<'a> App<'a> {
         }
         true
     }
+
+    /// Mouse selection, in every view (see `crate::selection`): `Ctrl` + drag
+    /// selects the text under the pointer, and the text is copied when the
+    /// button is released, with a "Copied" message in the footer. The
+    /// selection is only there while dragging.
+    ///
+    /// A plain drag, a click and the wheel are the views' own, and `Shift` +
+    /// drag is the terminal's selection: none of them is touched. A
+    /// `Ctrl` + click (the compare mark of the commit list) is handed to the
+    /// view when the button comes up on the cell it went down on.
+    ///
+    /// Not used while a program in the integrated terminal asks for the
+    /// mouse: it gets the events.
+    fn select_with_mouse(
+        &mut self,
+        mouse: ratatui::crossterm::event::MouseEvent,
+    ) -> MouseSelection {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
+
+        if let View::Terminal(t) = &self.view {
+            if t.session().mouse_protocol().is_some() {
+                return MouseSelection::Ignored;
+            }
+        }
+        let here = (mouse.row, mouse.column);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left)
+                if mouse.modifiers.contains(KeyModifiers::CONTROL)
+                    && !mouse.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                // Kept back: it is a click or the start of a selection, the
+                // button coming up tells which.
+                self.text_selection = None;
+                self.mouse_press = Some(mouse);
+                // Smart mode: find the panel the press is in, now, from the
+                // screen the user is looking at. Without a frame around the
+                // press it selects like classic.
+                self.selection_bounds =
+                    match (self.ctx.core_config.selection_mode(), &self.last_frame) {
+                        (crate::SelectionMode::Smart, Some(frame)) => {
+                            crate::selection::smart_bounds(frame, (mouse.row, mouse.column))
+                        }
+                        _ => None,
+                    };
+                MouseSelection::Handled(false)
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(press) = self.mouse_press else {
+                    return MouseSelection::Ignored;
+                };
+                self.text_selection = Some(crate::selection::TextSelection::new(
+                    (press.row, press.column),
+                    here,
+                    self.selection_bounds,
+                ));
+                MouseSelection::Handled(true)
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let Some(press) = self.mouse_press.take() else {
+                    return MouseSelection::Ignored;
+                };
+                let selection = crate::selection::TextSelection::new(
+                    (press.row, press.column),
+                    here,
+                    self.selection_bounds.take(),
+                );
+                // The highlight goes away with the button.
+                self.text_selection = None;
+                if here == (press.row, press.column) {
+                    return MouseSelection::Click(press);
+                }
+                if let Some(frame) = &self.last_frame {
+                    let text = crate::selection::selected_text(frame, &selection);
+                    if !text.is_empty() {
+                        self.copy_selection(text);
+                    }
+                }
+                MouseSelection::Handled(true)
+            }
+            _ => MouseSelection::Ignored,
+        }
+    }
+
+    /// Puts selected text on the clipboard and says so in the footer.
+    fn copy_selection(&mut self, text: String) {
+        let count = text.chars().count();
+        let unit = if count == 1 { "char" } else { "chars" };
+        self.copy_raw_to_clipboard(text, format!("Copied {count} {unit} to clipboard"));
+    }
+}
+
+/// What `App::select_with_mouse` did with a mouse event.
+enum MouseSelection {
+    /// Not for the selection: the view handles it.
+    Ignored,
+    /// Used by the selection; the flag says whether the screen must be redrawn.
+    Handled(bool),
+    /// `Ctrl` + click, not a drag: the held-back press, to hand to the view
+    /// (the release that follows is handled as usual).
+    Click(ratatui::crossterm::event::MouseEvent),
 }
 
 const HEADER_HEIGHT: u16 = 2;
@@ -6458,16 +6685,21 @@ impl<'a> App<'a> {
             // setting in-place, no full app refresh, that path used to
             // delete every Kitty image placement before re-rendering,
             // producing a visible double blink when transitioning back
-            // to the commit list. Settings that only matter at startup
-            // (protocol, order, initial_selection) are persisted on ctx
-            // and applied on the next launch; the user explicitly opted
-            // in by editing them, no surprise here.
+            // to the commit list.
+            //
+            // This is where the settings marked `OnClose` in `ROW_APPLIES`
+            // (view/config.rs) take effect. The `Live` ones were applied while
+            // the page was open (`apply_live_config_settings`), the
+            // `NextLaunch` one is only saved. A new setting needs a decision
+            // in that table first, then the matching code here or there.
             let old_core = self.ctx.core_config.clone();
             let theme_changed = old_core.option.theme != core.option.theme
                 || old_core.option.syntax_theme != core.option.syntax_theme;
             let graph_style_changed = old_core.option.graph_style != core.option.graph_style;
             let graph_width_changed = old_core.option.graph_width != core.option.graph_width;
             let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
+            // Already applied live (the capture switched), unless the config
+            // was edited some other way.
             let mouse_changed = self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
             let auth_changed = github_auth_state != self.ctx.github_auth_state;
             // Toggling graph_enabled flips the entire layout (the Graph
@@ -6968,9 +7200,10 @@ impl<'a> App<'a> {
                 } else {
                     self.view.handle_click(mouse.column, mouse.row);
                 }
-                // Click in the Config view can cycle the theme, mirror
-                // the live-apply that the keyboard path runs.
-                self.apply_live_config_theme();
+                // Click in the Config view can cycle a live setting (the
+                // theme, the select mode), mirror the live-apply that the
+                // keyboard path runs.
+                self.apply_live_config_settings();
                 true
             }
             MouseEventKind::Moved => {

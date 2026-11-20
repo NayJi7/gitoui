@@ -372,10 +372,22 @@ impl<'a> ListView<'a> {
         self.commit_list_state.as_ref().unwrap()
     }
 
+    /// Number of lanes of the graph being shown, `None` while the list
+    /// state is taken out (a detail view is open over it).
+    pub fn graph_lane_count(&self) -> Option<usize> {
+        self.commit_list_state
+            .as_ref()
+            .map(|state| state.graph().max_pos_x + 1)
+    }
+
     /// Mutable accessor for the bg streaming loader. Returns
     /// `None` if the list state has been taken (e.g. mid-Detail
     /// open). Used by `AppEvent::AppendCommits` to push freshly
     /// loaded `CommitInfo` batches into the live list.
+    pub fn commit_list_state_ref(&self) -> Option<&CommitListState<'a>> {
+        self.commit_list_state.as_ref()
+    }
+
     pub fn commit_list_state_mut(&mut self) -> Option<&mut CommitListState<'a>> {
         self.commit_list_state.as_mut()
     }

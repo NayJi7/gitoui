@@ -16,6 +16,7 @@ use crate::{
     graph::GraphImageWidthMode,
     keybind::KeyBinds,
     CommitOrderType, GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, Result,
+    SelectionMode,
 };
 
 /// Predefined date/time formats for the application.
@@ -117,8 +118,6 @@ impl<'de> Deserialize<'de> for DateTimeFormat {
     }
 }
 
-const XDG_CONFIG_HOME_ENV_NAME: &str = "XDG_CONFIG_HOME";
-const DEFAULT_CONFIG_DIR: &str = ".config";
 const APP_DIR_NAME: &str = "gitoui";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const CONFIG_FILE_ENV_NAME: &str = "GITOUI_CONFIG_FILE";
@@ -178,10 +177,7 @@ fn config_file_path_from_env() -> Option<PathBuf> {
 }
 
 fn config_file_path() -> Option<PathBuf> {
-    env::var(XDG_CONFIG_HOME_ENV_NAME)
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| env::home_dir().map(|home| home.join(DEFAULT_CONFIG_DIR)))
+    crate::paths::config_base()
         .map(|config_dir| config_dir.join(APP_DIR_NAME).join(CONFIG_FILE_NAME))
 }
 
@@ -250,6 +246,10 @@ pub struct CoreConfig {
     pub external: CoreExternalConfig,
 }
 
+/// Adding an option the Configuration view can change? Decide WHEN it takes
+/// effect: at once while the page is open, when it is left, or at the next
+/// launch. The rule and the table to fill in are `ApplyWhen` and `ROW_APPLIES`
+/// in `view/config.rs`.
 #[optional(derives = [Deserialize])]
 #[derive(Debug, Clone, PartialEq, Eq, SmartDefault)]
 pub struct CoreOptionConfig {
@@ -259,6 +259,9 @@ pub struct CoreOptionConfig {
     pub graph_width: Option<GraphWidthType>,
     pub graph_style: Option<GraphStyle>,
     pub initial_selection: Option<InitialSelection>,
+    /// What `Ctrl` + drag selects: `classic` (everything under the drag) or
+    /// `smart` (only the panel the drag started in).
+    pub selection_mode: Option<SelectionMode>,
     #[default = true]
     pub auto_refresh: bool,
     #[default = 500]
@@ -700,6 +703,12 @@ impl CoreConfig {
     pub fn set_initial_selection(&mut self, sel: crate::InitialSelection) {
         self.option.initial_selection = Some(sel);
     }
+    pub fn selection_mode(&self) -> crate::SelectionMode {
+        self.option.selection_mode.unwrap_or_default()
+    }
+    pub fn set_selection_mode(&mut self, mode: crate::SelectionMode) {
+        self.option.selection_mode = Some(mode);
+    }
     pub fn graph_renderer(&self) -> crate::GraphRenderer {
         self.option.graph_renderer.unwrap_or_default()
     }
@@ -777,12 +786,19 @@ impl UiCommonConfig {
     }
 }
 
+/// Writes the settings the Configuration view changes into the config file in
+/// use: the one `GITOUI_CONFIG_FILE` points to, otherwise the default one. It
+/// is the file `load()` reads, so a change made in the page is the one the next
+/// launch sees.
 pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
-    let path = config_file_path().ok_or("Could not determine config path")?;
+    let path = resolve_config_file_path().ok_or("Could not determine config path")?;
+    save_to(&path, core, ui)
+}
 
+fn save_to(path: &Path, core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
     let mut doc = if path.exists() {
         let content =
-            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
+            std::fs::read_to_string(path).map_err(|e| format!("Failed to read config: {}", e))?;
         content
             .parse::<toml::Table>()
             .map_err(|e| format!("Failed to parse config: {}", e))?
@@ -814,6 +830,17 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
                 crate::GraphWidthType::Auto => "auto",
                 crate::GraphWidthType::Double => "double",
                 crate::GraphWidthType::Single => "single",
+            },
+        );
+    }
+
+    if let Some(mode) = core.option.selection_mode {
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "selection_mode"],
+            match mode {
+                crate::SelectionMode::Classic => "classic",
+                crate::SelectionMode::Smart => "smart",
             },
         );
     }
@@ -962,7 +989,7 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
 
     let toml_string =
         toml::to_string_pretty(&doc).map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&path, toml_string).map_err(|e| format!("Failed to write config: {}", e))?;
+    std::fs::write(path, toml_string).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
 
@@ -1340,6 +1367,30 @@ mod tests {
     }
 
     #[test]
+    fn save_writes_to_the_given_file_and_keeps_what_is_already_there() {
+        // `save` hands `save_to` the file in use (the one GITOUI_CONFIG_FILE
+        // points to when it is set): that file is the one written, not the
+        // default one. The settings of the page are written, and the keys the
+        // page does not manage (the keybinds here) are left alone.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("custom.toml");
+        std::fs::write(&path, "[keybind]\nquit = [\"x\"]\n").unwrap();
+        let config = Config::default();
+        let mut core = config.core.clone();
+        core.set_selection_mode(SelectionMode::Smart);
+        save_to(&path, &core, &config.ui).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("selection_mode = \"smart\""), "{text}");
+        assert!(text.contains("quit = [\"x\"]"), "{text}");
+    }
+
+    #[test]
+    fn the_selection_mode_defaults_to_classic() {
+        let cfg = Config::default();
+        assert_eq!(cfg.core.selection_mode(), SelectionMode::Classic);
+    }
+
+    #[test]
     fn test_config_complete_toml() {
         let toml = r##"
             [core.option]
@@ -1348,6 +1399,7 @@ mod tests {
             graph_width = "single"
             graph_style = "angular"
             initial_selection = "head"
+            selection_mode = "smart"
             [core.search]
             ignore_case = true
             fuzzy = true
@@ -1392,6 +1444,7 @@ mod tests {
         expected.core.option.graph_width = Some(GraphWidthType::Single);
         expected.core.option.graph_style = Some(GraphStyle::Angular);
         expected.core.option.initial_selection = Some(InitialSelection::Head);
+        expected.core.option.selection_mode = Some(SelectionMode::Smart);
         expected.core.search.ignore_case = true;
         expected.core.search.fuzzy = true;
         expected.core.user_command.commands = FxHashMap::from_iter([

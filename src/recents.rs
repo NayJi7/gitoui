@@ -13,22 +13,41 @@ use std::path::{Path, PathBuf};
 const MAX_RECENTS: usize = 20;
 
 fn recents_file() -> Option<PathBuf> {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".config"))
-        })?;
-    Some(base.join("gitoui").join("recents.json"))
+    Some(
+        crate::paths::config_base()?
+            .join("gitoui")
+            .join("recents.json"),
+    )
+}
+
+/// Reads the file, riding out the instant a concurrent save swaps it in. On
+/// Windows the replacement is not atomic for a reader: for a moment the name
+/// can be missing (`NotFound`) or locked (`PermissionDenied`) although the
+/// file exists before and after. A few short retries get past it; a file that
+/// is really absent costs a few milliseconds, once.
+fn read_file(path: &Path) -> std::io::Result<String> {
+    use std::io::ErrorKind;
+    let mut retries = 0;
+    loop {
+        match fs::read_to_string(path) {
+            Err(e)
+                if cfg!(windows)
+                    && retries < 5
+                    && matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) =>
+            {
+                retries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            other => return other,
+        }
+    }
 }
 
 pub fn load() -> Vec<PathBuf> {
     let Some(path) = recents_file() else {
         return Vec::new();
     };
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = read_file(&path) else {
         return Vec::new();
     };
     // Minimalist parser: the file is `["/path/a","/path/b",...]`, one entry
@@ -89,7 +108,8 @@ fn save_at(path: &Path, entries: &[PathBuf]) {
 /// `path` is canonicalised so the same physical dir entered via different
 /// relative routes maps to a single entry.
 pub fn push(path: &Path, current: &[PathBuf]) -> Vec<PathBuf> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical =
+        crate::paths::simplify(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
     let mut recents = current.to_vec();
     recents.retain(|p| p != &canonical);
     recents.insert(0, canonical);
@@ -170,7 +190,10 @@ mod tests {
         let target = TempDir::new().unwrap();
         let recents = push(target.path(), &[]);
         assert_eq!(recents.len(), 1);
-        assert_eq!(recents[0], target.path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            crate::paths::simplify(target.path().canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -181,8 +204,14 @@ mod tests {
         let recents = push(a.path(), &[]);
         let recents = push(b.path(), &recents);
         assert_eq!(recents.len(), 2);
-        assert_eq!(recents[0], b.path().canonicalize().unwrap());
-        assert_eq!(recents[1], a.path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            crate::paths::simplify(b.path().canonicalize().unwrap())
+        );
+        assert_eq!(
+            recents[1],
+            crate::paths::simplify(a.path().canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -194,8 +223,14 @@ mod tests {
         let recents = push(b.path(), &recents);
         let recents = push(a.path(), &recents);
         assert_eq!(recents.len(), 2, "must dedup, not grow");
-        assert_eq!(recents[0], a.path().canonicalize().unwrap());
-        assert_eq!(recents[1], b.path().canonicalize().unwrap());
+        assert_eq!(
+            recents[0],
+            crate::paths::simplify(a.path().canonicalize().unwrap())
+        );
+        assert_eq!(
+            recents[1],
+            crate::paths::simplify(b.path().canonicalize().unwrap())
+        );
     }
 
     #[test]
@@ -212,7 +247,7 @@ mod tests {
         // The 5 oldest must have been dropped; the very last pushed is on top.
         assert_eq!(
             recents[0],
-            dirs.last().unwrap().path().canonicalize().unwrap()
+            crate::paths::simplify(dirs.last().unwrap().path().canonicalize().unwrap())
         );
     }
 
@@ -238,7 +273,7 @@ mod tests {
         };
         let mut bad_reads = 0;
         while !writer.is_finished() {
-            let text = fs::read_to_string(&path).unwrap_or_default();
+            let text = read_file(&path).unwrap_or_default();
             if !text.ends_with(']') {
                 bad_reads += 1;
             }
@@ -250,6 +285,8 @@ mod tests {
         );
     }
 
+    // A quote is not allowed in a Windows file name.
+    #[cfg(unix)]
     #[test]
     fn path_with_special_chars_round_trips() {
         let _g = EnvGuard::new();
@@ -265,6 +302,9 @@ mod tests {
         save_at(&recents_file().unwrap(), &recents);
         let loaded = load();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0], weird.canonicalize().unwrap());
+        assert_eq!(
+            loaded[0],
+            crate::paths::simplify(weird.canonicalize().unwrap())
+        );
     }
 }

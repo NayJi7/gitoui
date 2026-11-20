@@ -16,7 +16,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 const CRATES_URL: &str = "https://crates.io/api/v1/crates/gitoui";
+#[cfg(not(windows))]
 const INSTALL_SH_URL: &str = "https://gitoui.nayji7.dev/install.sh";
+#[cfg(windows)]
+const INSTALL_PS1_URL: &str = "https://gitoui.nayji7.dev/install.ps1";
 const GH_RELEASES_BASE: &str = "https://github.com/NayJi7/gitoui/releases/download";
 const CACHE_DIRNAME: &str = "gitoui";
 const CACHE_FILENAME: &str = "update.toml";
@@ -42,10 +45,11 @@ struct UpdateState {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    let base = env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join(CACHE_DIRNAME).join(CACHE_FILENAME))
+    Some(
+        crate::paths::cache_base()?
+            .join(CACHE_DIRNAME)
+            .join(CACHE_FILENAME),
+    )
 }
 
 fn read_state() -> UpdateState {
@@ -171,15 +175,21 @@ pub fn install_label() -> &'static str {
     let Ok(exe) = env::current_exe() else {
         return "unknown";
     };
-    let exe_str = exe.to_string_lossy();
-    if exe_str.contains("/target/debug/") || exe_str.contains("/target/release/") {
+    if is_build_artifact_path(&exe.to_string_lossy()) {
         return "dev";
     }
     match detect_install_method() {
         InstallMethod::Cargo => "cargo",
-        InstallMethod::CurlScript => "curl",
+        InstallMethod::CurlScript => "script",
         InstallMethod::Homebrew => "brew",
     }
+}
+
+/// True for a binary built in place by `cargo build`, on either path style
+/// (Windows paths use backslashes).
+fn is_build_artifact_path(exe_str: &str) -> bool {
+    let exe_str = exe_str.replace('\\', "/");
+    exe_str.contains("/target/debug/") || exe_str.contains("/target/release/")
 }
 
 fn which(cmd: &str) -> bool {
@@ -228,6 +238,24 @@ fn run_update(keep_welcome: bool) -> io::Result<()> {
                 print_post_update_welcome();
             }
         }
+        #[cfg(windows)]
+        InstallMethod::CurlScript => {
+            // install.ps1 renames the running gitoui.exe out of the way and
+            // writes the new one, which Windows allows while it runs.
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]);
+            cmd.arg(format!("irm '{INSTALL_PS1_URL}' | iex"));
+            if !keep_welcome {
+                cmd.env("GITOUI_INSTALL_NO_WELCOME", "1");
+            }
+            let status = cmd.status()?;
+            if !status.success() {
+                return Err(io::Error::other(
+                    "install.ps1 exited non-zero, leaving current binary in place",
+                ));
+            }
+        }
+        #[cfg(not(windows))]
         InstallMethod::CurlScript => {
             // sh -c "curl -fsSL <url> | sh" so the pipe stays inside
             // the shell. install.sh honours these env knobs:
@@ -287,6 +315,7 @@ fn current_target_triple() -> Option<&'static str> {
         ("linux", "aarch64") => "aarch64-unknown-linux-musl",
         ("macos", "x86_64") => "x86_64-apple-darwin",
         ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
         _ => return None,
     })
 }
@@ -305,7 +334,8 @@ fn current_target_triple() -> Option<&'static str> {
 /// in that window resolves an older tag and silently exits "up to date".
 fn github_release_ready(version: &str) -> Option<bool> {
     let target = current_target_triple()?;
-    let url = format!("{GH_RELEASES_BASE}/v{version}/gitoui-{version}-{target}.tar.gz");
+    let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
+    let url = format!("{GH_RELEASES_BASE}/v{version}/gitoui-{version}-{target}.{ext}");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .user_agent(concat!("gitoui/", env!("CARGO_PKG_VERSION")))
@@ -670,6 +700,20 @@ mod tests {
                 "cargo must not be probed for a non-cargo path"
             )),
             InstallMethod::CurlScript
+        ));
+    }
+
+    #[test]
+    fn a_cargo_build_is_recognised_on_both_path_styles() {
+        assert!(is_build_artifact_path("/home/u/gitoui/target/debug/gitoui"));
+        assert!(is_build_artifact_path(
+            r"A:\gitstore\gitoui\target\debug\gitoui.exe"
+        ));
+        assert!(is_build_artifact_path(
+            r"A:\gitstore\gitoui\target\release\gitoui.exe"
+        ));
+        assert!(!is_build_artifact_path(
+            r"C:\Users\u\AppData\Local\Programs\gitoui\gitoui.exe"
         ));
     }
 
