@@ -68,6 +68,18 @@ jobs:
       - name: Terminal tests
         run: "cargo test --lib shell:: -- --test-threads=1"
 
+  # Windows support is in progress: for now the job only has to compile.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+      - name: Build
+        run: cargo build --verbose
+
   build:
     strategy:
       fail-fast: false
