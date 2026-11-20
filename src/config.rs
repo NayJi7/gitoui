@@ -783,11 +783,14 @@ impl UiCommonConfig {
 }
 
 pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
-    let path = config_file_path().ok_or("Could not determine config path")?;
+    let path = resolve_config_file_path().ok_or("Could not determine config path")?;
+    save_to(&path, core, ui)
+}
 
+fn save_to(path: &Path, core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String> {
     let mut doc = if path.exists() {
         let content =
-            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
+            std::fs::read_to_string(path).map_err(|e| format!("Failed to read config: {}", e))?;
         content
             .parse::<toml::Table>()
             .map_err(|e| format!("Failed to parse config: {}", e))?
@@ -978,7 +981,7 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
 
     let toml_string =
         toml::to_string_pretty(&doc).map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&path, toml_string).map_err(|e| format!("Failed to write config: {}", e))?;
+    std::fs::write(path, toml_string).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
 
@@ -1353,6 +1356,24 @@ mod tests {
 
         // Graph branch palette must be non-empty (otherwise the graph wouldn't render).
         assert!(!cfg.graph.color.branches.is_empty());
+    }
+
+    #[test]
+    fn save_writes_to_the_given_file_and_keeps_what_is_already_there() {
+        // `save` hands `save_to` the file in use (the one GITOUI_CONFIG_FILE
+        // points to when it is set): that file is the one written, not the
+        // default one. The settings of the page are written, and the keys the
+        // page does not manage (the keybinds here) are left alone.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("custom.toml");
+        std::fs::write(&path, "[keybind]\nquit = [\"x\"]\n").unwrap();
+        let config = Config::default();
+        let mut core = config.core.clone();
+        core.set_selection_mode(SelectionMode::Smart);
+        save_to(&path, &core, &config.ui).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("selection_mode = \"smart\""), "{text}");
+        assert!(text.contains("quit = [\"x\"]"), "{text}");
     }
 
     #[test]
