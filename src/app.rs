@@ -1295,6 +1295,15 @@ impl App<'_> {
                     AppEvent::Resize(w, h) => {
                         let _ = (w, h);
                         self.invalidate_header();
+                        // A resize clears the terminal, and with it every
+                        // Sixel pixel. The graph column keeps the same
+                        // (offset, height, area) key when only the width
+                        // of the window changes, so its cache would write
+                        // skip cells and leave the column black. Drop it
+                        // so the rows are written again.
+                        if self.ctx.image_protocol.paints_into_cells() {
+                            self.view.clear_graph_images();
+                        }
                     }
                     AppEvent::Mouse(mouse) => {
                         needs_draw = self.handle_mouse_event(mouse, terminal)?;
@@ -2348,7 +2357,9 @@ impl App<'_> {
         // same gate used for bg_streaming applies here: defer all
         // uploads until the overlay closes, then the next render
         // cycle regenerates them cleanly.
-        if !self.dir_input.active {
+        // Sixel pixels are plain cell content, the popup simply overwrites
+        // them, so the images are kept up to date underneath it.
+        if !self.dir_input.active || self.ctx.image_protocol.paints_into_cells() {
             self.view.prepare_graph_uploads();
         }
         Ok(())
@@ -3366,7 +3377,7 @@ impl App<'_> {
                             cell.set_style(ic.style());
                         }
                         cell.set_bg(theme_bg);
-                        cell.set_skip(logo_skip);
+                        cell.set_skip(logo_skip || ic.skip());
                     }
                 }
             }
@@ -3383,7 +3394,7 @@ impl App<'_> {
                             cell.set_style(ic.style());
                         }
                         cell.set_bg(theme_bg);
-                        cell.set_skip(wordmark_skip);
+                        cell.set_skip(wordmark_skip || ic.skip());
                     }
                 }
             }
