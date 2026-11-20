@@ -20,11 +20,34 @@ fn recents_file() -> Option<PathBuf> {
     )
 }
 
+/// Reads the file, riding out the instant a concurrent save swaps it in. On
+/// Windows the replacement is not atomic for a reader: for a moment the name
+/// can be missing (`NotFound`) or locked (`PermissionDenied`) although the
+/// file exists before and after. A few short retries get past it; a file that
+/// is really absent costs a few milliseconds, once.
+fn read_file(path: &Path) -> std::io::Result<String> {
+    use std::io::ErrorKind;
+    let mut retries = 0;
+    loop {
+        match fs::read_to_string(path) {
+            Err(e)
+                if cfg!(windows)
+                    && retries < 5
+                    && matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) =>
+            {
+                retries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            other => return other,
+        }
+    }
+}
+
 pub fn load() -> Vec<PathBuf> {
     let Some(path) = recents_file() else {
         return Vec::new();
     };
-    let Ok(text) = fs::read_to_string(&path) else {
+    let Ok(text) = read_file(&path) else {
         return Vec::new();
     };
     // Minimalist parser: the file is `["/path/a","/path/b",...]`, one entry
@@ -250,7 +273,7 @@ mod tests {
         };
         let mut bad_reads = 0;
         while !writer.is_finished() {
-            let text = fs::read_to_string(&path).unwrap_or_default();
+            let text = read_file(&path).unwrap_or_default();
             if !text.ends_with(']') {
                 bad_reads += 1;
             }

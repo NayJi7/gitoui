@@ -714,13 +714,20 @@ mod tests {
     fn cache_key_does_not_depend_on_the_checkout_path() {
         let (root, repo) = sample_repo("key-path");
         let copy = root.join("copy");
-        let status = std::process::Command::new("cp")
-            .args(["-a"])
-            .arg(&repo)
-            .arg(&copy)
-            .status()
-            .unwrap();
-        assert!(status.success());
+        // `cp -a` does not exist on Windows: copy the tree ourselves.
+        fn copy_tree(from: &Path, to: &Path) {
+            fs::create_dir_all(to).unwrap();
+            for entry in fs::read_dir(from).unwrap() {
+                let entry = entry.unwrap();
+                let target = to.join(entry.file_name());
+                if entry.file_type().unwrap().is_dir() {
+                    copy_tree(&entry.path(), &target);
+                } else {
+                    fs::copy(entry.path(), &target).unwrap();
+                }
+            }
+        }
+        copy_tree(&repo, &copy);
         assert_eq!(key_of(&repo), key_of(&copy));
         let _ = fs::remove_dir_all(&root);
     }

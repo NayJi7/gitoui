@@ -27,6 +27,8 @@ fn init_repo() -> TempDir {
     run_git(dir.path(), &["init", "-b", "main"]);
     run_git(dir.path(), &["config", "user.email", "test@test.com"]);
     run_git(dir.path(), &["config", "user.name", "Test"]);
+    // The machine's core.autocrlf must not change the bytes the tests compare.
+    run_git(dir.path(), &["config", "core.autocrlf", "false"]);
     run_git(dir.path(), &["config", "commit.gpgsign", "false"]);
     dir
 }
