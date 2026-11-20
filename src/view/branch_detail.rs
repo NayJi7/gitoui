@@ -160,7 +160,13 @@ impl<'a> BranchDetailView<'a> {
             f.render_stateful_widget(commit_list, list_area, list_state);
         }
 
-        let branch_detail = BranchDetail::new(&self.metadata, self.ctx.clone());
+        let branch_color = self
+            .commit_list_state
+            .as_ref()
+            .and_then(|state| state.branch_color_map().get(&self.metadata.branch_name))
+            .copied();
+        let branch_detail =
+            BranchDetail::new(&self.metadata, self.ctx.clone()).with_branch_color(branch_color);
         f.render_stateful_widget(branch_detail, detail_area, &mut self.branch_detail_state);
         self.detail_area = Some(detail_area);
     }

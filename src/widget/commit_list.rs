@@ -1188,6 +1188,20 @@ impl<'a> CommitListState<'a> {
         }
     }
 
+    /// Branch name to lane color, kept current as the full graph loads. The
+    /// copy on `AppContext` is only the one of the first graph, so a view that
+    /// colors branches like the list reads this one.
+    pub fn branch_color_map(&self) -> &FxHashMap<String, Color> {
+        &self.branch_color_map
+    }
+
+    /// The color of the graph lane of a commit: what the list paints its
+    /// branch labels with, so a view that shows the same labels can match it.
+    pub fn graph_color_of(&self, hash: &CommitHash) -> Option<Color> {
+        let index = *self.commit_hash_to_index.get(hash)?;
+        self.commits.get(index).map(|info| info.graph_color)
+    }
+
     pub fn selected_commit_hash(&self) -> &CommitHash {
         let info = &self.commits[self.current_selected_index()];
         &info.commit.commit_hash

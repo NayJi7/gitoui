@@ -263,8 +263,9 @@ impl TagDetail<'_> {
             "      Tag: ",
             Line::from(Span::styled(
                 self.metadata.tag_name.clone(),
+                // The color a tag has in the commit list and the commit detail.
                 Style::default()
-                    .fg(theme.detail_name_fg)
+                    .fg(theme.detail_ref_tag_fg)
                     .add_modifier(Modifier::BOLD),
             )),
         );

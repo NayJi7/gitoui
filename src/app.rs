@@ -3974,9 +3974,16 @@ impl App<'_> {
             }
             match self.repository.head() {
                 Head::Branch { name } => {
-                    let branch_color = self
-                        .ctx
-                        .branch_color_map
+                    // The list's own table when it is on screen: `ctx` keeps
+                    // the one of the first graph, which the full load replaces.
+                    let list_colors = match &self.view {
+                        View::List(list_view) => list_view
+                            .commit_list_state_ref()
+                            .map(|state| state.branch_color_map()),
+                        _ => None,
+                    };
+                    let branch_color = list_colors
+                        .unwrap_or(&self.ctx.branch_color_map)
                         .get(name)
                         .copied()
                         .unwrap_or(self.ctx.color_theme.status_info_fg);

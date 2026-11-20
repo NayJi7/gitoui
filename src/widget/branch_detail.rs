@@ -98,11 +98,23 @@ pub struct BranchMetadata {
 pub struct BranchDetail<'a> {
     metadata: &'a BranchMetadata,
     ctx: Rc<AppContext>,
+    /// The color the commit list and the refs panel give this branch (its
+    /// graph lane); without it the name uses the detail name color.
+    branch_color: Option<ratatui::style::Color>,
 }
 
 impl<'a> BranchDetail<'a> {
     pub fn new(metadata: &'a BranchMetadata, ctx: Rc<AppContext>) -> Self {
-        Self { metadata, ctx }
+        Self {
+            metadata,
+            ctx,
+            branch_color: None,
+        }
+    }
+
+    pub fn with_branch_color(mut self, color: Option<ratatui::style::Color>) -> Self {
+        self.branch_color = color;
+        self
     }
 }
 
@@ -296,7 +308,7 @@ impl BranchDetail<'_> {
             Line::from(Span::styled(
                 self.metadata.branch_name.clone(),
                 Style::default()
-                    .fg(theme.detail_name_fg)
+                    .fg(self.branch_color.unwrap_or(theme.detail_name_fg))
                     .add_modifier(Modifier::BOLD),
             )),
         );

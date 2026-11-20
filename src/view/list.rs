@@ -384,6 +384,10 @@ impl<'a> ListView<'a> {
     /// `None` if the list state has been taken (e.g. mid-Detail
     /// open). Used by `AppEvent::AppendCommits` to push freshly
     /// loaded `CommitInfo` batches into the live list.
+    pub fn commit_list_state_ref(&self) -> Option<&CommitListState<'a>> {
+        self.commit_list_state.as_ref()
+    }
+
     pub fn commit_list_state_mut(&mut self) -> Option<&mut CommitListState<'a>> {
         self.commit_list_state.as_mut()
     }

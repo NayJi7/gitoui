@@ -247,14 +247,17 @@ fn fit_row(line: Line<'static>, depth: usize) -> Line<'static> {
 
 impl RefList {
     /// `panel_width` is the width of the area the tree is drawn in.
+    /// `branch_colors` is the commit list's branch name to lane color table,
+    /// so a branch here has the color it has in the list.
     pub fn new(
         refs: &[Ref],
         worktrees: &[crate::git::actions::WorktreeInfo],
         ctx: Rc<AppContext>,
         panel_width: u16,
+        branch_colors: &rustc_hash::FxHashMap<String, Color>,
     ) -> RefList {
         PANEL_WIDTH.with(|w| w.set(panel_width as usize));
-        let items = build_ref_tree_items(refs, worktrees, &ctx);
+        let items = build_ref_tree_items(refs, worktrees, &ctx, branch_colors);
         PANEL_WIDTH.with(|w| w.set(usize::MAX));
         RefList { items, ctx }
     }
@@ -306,9 +309,9 @@ fn build_ref_tree_items(
     refs: &[Ref],
     worktrees: &[crate::git::actions::WorktreeInfo],
     ctx: &AppContext,
+    branch_color_map: &rustc_hash::FxHashMap<String, Color>,
 ) -> Vec<TreeItem<'static, String>> {
     let color_theme = &ctx.color_theme;
-    let branch_color_map = &ctx.branch_color_map;
 
     let mut branch_refs = Vec::new();
     let mut remote_refs = Vec::new();
