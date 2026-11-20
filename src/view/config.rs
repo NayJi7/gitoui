@@ -16,7 +16,7 @@ use crate::{
     github_auth::{self, GithubAuthState},
     highlight::SyntaxHighlighter,
     view::{graph_preview::GraphPreview, View},
-    GraphRenderer, GraphStyle, GraphWidthType, InitialSelection,
+    GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, SelectionMode,
 };
 
 // Item indices, listed here so future inserts only have to touch one spot
@@ -32,20 +32,24 @@ use crate::{
 //   8  Order
 //   9  Initial Selection
 //  10  Mouse
-//  11  Date Format
-//  12  Git Name            <- TEXT_EDIT_START_INDEX
-//  13  Git Email
-//  14  Default Branch
-//  15  GitHub Auth         <- GITHUB_AUTH_INDEX
-//  16  Github Avatars      <- GITHUB_AVATARS_INDEX
-const CONFIG_ITEM_COUNT: usize = 17;
+//  11  Select Mode         <- SELECT_MODE_INDEX (grayed when Mouse = Off)
+//  12  Date Format
+//  13  Git Name            <- TEXT_EDIT_START_INDEX
+//  14  Git Email
+//  15  Default Branch
+//  16  GitHub Auth         <- GITHUB_AUTH_INDEX
+//  17  Github Avatars      <- GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 18;
 const RENDERER_INDEX: usize = 1;
 const GRAPH_ENABLED_INDEX: usize = 2;
 const GRAPH_STYLE_INDEX: usize = 3;
 const GRAPH_WIDTH_INDEX: usize = 4;
-const TEXT_EDIT_START_INDEX: usize = 12;
-const GITHUB_AUTH_INDEX: usize = 15;
-const GITHUB_AVATARS_INDEX: usize = 16;
+const MOUSE_INDEX: usize = 10;
+const SELECT_MODE_INDEX: usize = 11;
+const DATE_FORMAT_INDEX: usize = 12;
+const TEXT_EDIT_START_INDEX: usize = 13;
+const GITHUB_AUTH_INDEX: usize = 16;
+const GITHUB_AVATARS_INDEX: usize = 17;
 const CONFIG_ITEM_INDENT: &str = " ";
 
 #[derive(Debug, Clone)]
@@ -130,6 +134,7 @@ impl<'a> ConfigView<'a> {
             commit_order_display(self.core_config.order()),
             initial_selection_display(self.core_config.initial_selection()),
             mouse_display(self.ui_config.common.mouse_enabled),
+            selection_mode_display(self.core_config.selection_mode()),
             self.core_config
                 .date_time_format()
                 .display_name()
@@ -167,6 +172,7 @@ impl<'a> ConfigView<'a> {
             "Order",
             "Initial Select",
             "Mouse",
+            "Select Mode",
             "Date Format",
             "Git Name",
             "Git Email",
@@ -306,6 +312,10 @@ impl<'a> ConfigView<'a> {
         if (idx == GRAPH_STYLE_INDEX || idx == GRAPH_WIDTH_INDEX)
             && !self.graph_options_selectable()
         {
+            return true;
+        }
+        // The selection is made with the mouse.
+        if idx == SELECT_MODE_INDEX && !self.ui_config.common.mouse_enabled {
             return true;
         }
         false
@@ -448,9 +458,9 @@ impl<'a> ConfigView<'a> {
 
     fn start_text_edit(&mut self) {
         let current_value = match self.selected {
-            12 => self.core_config.user_name().unwrap_or("").to_string(),
-            13 => self.core_config.user_email().unwrap_or("").to_string(),
-            14 => self.core_config.default_branch().unwrap_or("").to_string(),
+            13 => self.core_config.user_name().unwrap_or("").to_string(),
+            14 => self.core_config.user_email().unwrap_or("").to_string(),
+            15 => self.core_config.default_branch().unwrap_or("").to_string(),
             _ => return,
         };
         self.editing_text = true;
@@ -629,9 +639,9 @@ impl<'a> ConfigView<'a> {
             Some(self.editing_value.clone())
         };
         match self.selected {
-            12 => self.core_config.set_user_name(value),
-            13 => self.core_config.set_user_email(value),
-            14 => self.core_config.set_default_branch(value),
+            13 => self.core_config.set_user_name(value),
+            14 => self.core_config.set_user_email(value),
+            15 => self.core_config.set_default_branch(value),
             _ => {}
         }
         if let Err(e) = save(&self.core_config, &self.ui_config) {
@@ -751,14 +761,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(prev);
             }
-            10 => {
-                // Mouse (was index 9, now 10)
+            MOUSE_INDEX => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            11 => {
-                // Date Format
+            SELECT_MODE_INDEX => {
+                let prev = self.core_config.selection_mode().other();
+                self.core_config.set_selection_mode(prev);
+            }
+            DATE_FORMAT_INDEX => {
                 let prev = self.core_config.date_time_format().cycle_prev();
                 self.core_config.set_date_time_format(prev);
             }
@@ -882,14 +894,16 @@ impl<'a> ConfigView<'a> {
                 };
                 self.core_config.set_initial_selection(next);
             }
-            10 => {
-                // Mouse (was index 9, now 10)
+            MOUSE_INDEX => {
                 self.ui_config
                     .common
                     .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
             }
-            11 => {
-                // Date Format
+            SELECT_MODE_INDEX => {
+                let next = self.core_config.selection_mode().other();
+                self.core_config.set_selection_mode(next);
+            }
+            DATE_FORMAT_INDEX => {
                 let next = self.core_config.date_time_format().cycle_next();
                 self.core_config.set_date_time_format(next);
             }
@@ -1067,6 +1081,11 @@ impl<'a> ConfigView<'a> {
             (
                 "Mouse",
                 mouse_display(self.ui_config.common.mouse_enabled),
+                false,
+            ),
+            (
+                "Select Mode",
+                selection_mode_display(self.core_config.selection_mode()),
                 false,
             ),
             (
@@ -1305,6 +1324,7 @@ impl<'a> ConfigView<'a> {
             "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children, branches stay grouped, like `git log --topo-order`.".into(),
             "Which commit is focused when gitoui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.\n\nWill update at next launch of gitoui.".into(),
             "Enable mouse support for clicking and scrolling.".into(),
+            "What Ctrl + drag selects and copies, in any view.\n\nClassic: everything under the drag, like a terminal does, frames and the panel next door included.\nSmart: only the text of the panel the drag started in, never its frame or the panels around it.\n\nA drag that does not start inside a framed panel selects like Classic. Needs the mouse On.".into(),
             "Date and time display format for commits in the list and detail views.".into(),
             format!(
                 "Override git user.name for commits.\n\nCurrent git config: '{}'",
@@ -2161,6 +2181,13 @@ fn mouse_display(enabled: bool) -> String {
         "On".to_string()
     } else {
         "Off".to_string()
+    }
+}
+
+fn selection_mode_display(mode: SelectionMode) -> String {
+    match mode {
+        SelectionMode::Classic => "Classic".to_string(),
+        SelectionMode::Smart => "Smart".to_string(),
     }
 }
 

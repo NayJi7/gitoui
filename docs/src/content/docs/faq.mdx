@@ -145,6 +145,8 @@ Git Bash's own window (mintty) does not provide the Windows console that <span c
 
 Hold `Ctrl` and drag over the text, in any view. It is copied as soon as you release the button, and the footer says `Copied N chars to clipboard`. A plain click or drag keeps doing what the view does with it, and `Shift` + drag is your terminal's own selection, which you copy with the terminal's copy shortcut (in Windows Terminal that is whatever your settings bind, often `Ctrl+C` while a selection exists).
 
+The drag takes everything under it, frames and the next panel included, like a terminal. To copy only the text of the panel you started in, set **Select Mode** to `Smart` (Configuration view, `p`, or `selection_mode = "smart"` under `[core.option]`).
+
 </details>
 
 <details class="faq-item">

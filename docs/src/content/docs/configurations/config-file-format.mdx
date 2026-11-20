@@ -46,6 +46,7 @@ diagnostic at boot.
 | `graph_style`       | `rounded` / `angular` / `smooth` (default `smooth`) | Branch corner shape. |
 | `graph_width`       | `auto` / `single` / `double` (default `auto`) | Graph image cell width. `auto` takes `double` when the graph fits that wide in the terminal, `single` otherwise. |
 | `initial_selection` | `latest` / `head` / `top` (default `latest`) | Cursor position when opening. |
+| `selection_mode`    | `classic` / `smart` (default `classic`) | What `Ctrl` + drag selects and copies. `classic` takes everything under the drag, frames and neighbouring panels included. `smart` keeps to the panel the drag started in. Also in the Configuration view (`p`), "Select Mode". |
 | `github_avatars`    | bool / `true`                             | Render GitHub avatars next to commits, comments, reviews. |
 | `date_time_format`  | enum (default `ddmmyyyy_hhmm`)            | One of: `ddmmyyyy_hhmm`, `ddmmyyyy`, `mmddyyyy_hhmm`, `yyyymmdd_hhmm`, `iso`, `yyyymmdd_hhmm_dash`. |
 | `date_time_local`   | bool / `true`                             | Convert commit times to your local zone. |

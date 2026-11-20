@@ -86,7 +86,11 @@ Switch to `Ctrl+...` for your custom bindings, see
   the text is copied the moment you release the button, and the footer says
   `Copied N chars to clipboard`. The highlight goes away with the button. A plain click or
   drag still does what the view does with it, and `Ctrl` + click on a commit still
-  marks it for a comparison. Hold `Shift` and drag instead to use your terminal's
+  marks it for a comparison. What is selected depends on `selection_mode`
+  ("Select Mode" in the Configuration view): `classic` takes everything under the
+  drag, like a terminal, frames and the panel next door included; `smart` keeps to
+  the panel the drag started in, so a drag that goes over its neighbour or its frame
+  copies neither. Hold `Shift` and drag instead to use your terminal's
   own selection (copy it with your terminal's copy shortcut). Inside a program
   running in the integrated terminal that asks for the mouse (vim, htop…), the
   program gets the mouse.

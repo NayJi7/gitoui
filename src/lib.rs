@@ -158,6 +158,27 @@ pub enum GraphWidthType {
     Single,
 }
 
+/// What `Ctrl` + drag selects (see `selection`). `Classic` takes whatever is
+/// under the drag, frames and neighbouring panels included, like a terminal;
+/// `Smart` keeps to the panel the drag started in.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionMode {
+    #[default]
+    Classic,
+    Smart,
+}
+
+impl SelectionMode {
+    /// The other one: there are two, so cycling either way is the same.
+    pub fn other(self) -> Self {
+        match self {
+            SelectionMode::Classic => SelectionMode::Smart,
+            SelectionMode::Smart => SelectionMode::Classic,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GraphStyle {

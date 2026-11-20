@@ -59,6 +59,15 @@
                 "head"
               ],
               "default": "latest"
+            },
+            "selection_mode": {
+              "type": "string",
+              "description": "What Ctrl + drag selects and copies. `classic` takes everything under the drag, frames and neighbouring panels included. `smart` keeps to the panel the drag started in.",
+              "enum": [
+                "classic",
+                "smart"
+              ],
+              "default": "classic"
             }
           },
           "additionalProperties": false

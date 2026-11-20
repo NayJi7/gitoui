@@ -332,6 +332,8 @@ pub struct App<'a> {
     /// The `Ctrl` + left-button press being held back until the button comes
     /// up (a click or the start of a selection).
     mouse_press: Option<ratatui::crossterm::event::MouseEvent>,
+    /// The panel a smart selection is kept to, found when the button went down.
+    selection_bounds: Option<crate::selection::Bounds>,
     /// The last frame drawn: the selected text is read from it.
     last_frame: Option<ratatui::buffer::Buffer>,
     /// Shell session of the integrated terminal (`t`), owned by `run()` so it
@@ -655,6 +657,7 @@ impl<'a> App<'a> {
             dir_error_message: None,
             text_selection: None,
             mouse_press: None,
+            selection_bounds: None,
             last_frame: None,
             shell,
             ci,
@@ -4281,29 +4284,41 @@ impl<'a> App<'a> {
                 // button coming up tells which.
                 self.text_selection = None;
                 self.mouse_press = Some(mouse);
+                // Smart mode: find the panel the press is in, now, from the
+                // screen the user is looking at. Without a frame around the
+                // press it selects like classic.
+                self.selection_bounds =
+                    match (self.ctx.core_config.selection_mode(), &self.last_frame) {
+                        (crate::SelectionMode::Smart, Some(frame)) => {
+                            crate::selection::smart_bounds(frame, (mouse.row, mouse.column))
+                        }
+                        _ => None,
+                    };
                 MouseSelection::Handled(false)
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 let Some(press) = self.mouse_press else {
                     return MouseSelection::Ignored;
                 };
-                self.text_selection = Some(crate::selection::TextSelection {
-                    anchor: (press.row, press.column),
-                    cursor: here,
-                });
+                self.text_selection = Some(crate::selection::TextSelection::new(
+                    (press.row, press.column),
+                    here,
+                    self.selection_bounds,
+                ));
                 MouseSelection::Handled(true)
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let Some(press) = self.mouse_press.take() else {
                     return MouseSelection::Ignored;
                 };
-                let selection = crate::selection::TextSelection {
-                    anchor: (press.row, press.column),
-                    cursor: here,
-                };
+                let selection = crate::selection::TextSelection::new(
+                    (press.row, press.column),
+                    here,
+                    self.selection_bounds.take(),
+                );
                 // The highlight goes away with the button.
                 self.text_selection = None;
-                if selection.is_empty() {
+                if here == (press.row, press.column) {
                     return MouseSelection::Click(press);
                 }
                 if let Some(frame) = &self.last_frame {

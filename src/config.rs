@@ -16,6 +16,7 @@ use crate::{
     graph::GraphImageWidthMode,
     keybind::KeyBinds,
     CommitOrderType, GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, Result,
+    SelectionMode,
 };
 
 /// Predefined date/time formats for the application.
@@ -254,6 +255,9 @@ pub struct CoreOptionConfig {
     pub graph_width: Option<GraphWidthType>,
     pub graph_style: Option<GraphStyle>,
     pub initial_selection: Option<InitialSelection>,
+    /// What `Ctrl` + drag selects: `classic` (everything under the drag) or
+    /// `smart` (only the panel the drag started in).
+    pub selection_mode: Option<SelectionMode>,
     #[default = true]
     pub auto_refresh: bool,
     #[default = 500]
@@ -695,6 +699,12 @@ impl CoreConfig {
     pub fn set_initial_selection(&mut self, sel: crate::InitialSelection) {
         self.option.initial_selection = Some(sel);
     }
+    pub fn selection_mode(&self) -> crate::SelectionMode {
+        self.option.selection_mode.unwrap_or_default()
+    }
+    pub fn set_selection_mode(&mut self, mode: crate::SelectionMode) {
+        self.option.selection_mode = Some(mode);
+    }
     pub fn graph_renderer(&self) -> crate::GraphRenderer {
         self.option.graph_renderer.unwrap_or_default()
     }
@@ -809,6 +819,17 @@ pub fn save(core: &CoreConfig, ui: &UiConfig) -> std::result::Result<(), String>
                 crate::GraphWidthType::Auto => "auto",
                 crate::GraphWidthType::Double => "double",
                 crate::GraphWidthType::Single => "single",
+            },
+        );
+    }
+
+    if let Some(mode) = core.option.selection_mode {
+        set_nested_string(
+            &mut doc,
+            &["core", "option", "selection_mode"],
+            match mode {
+                crate::SelectionMode::Classic => "classic",
+                crate::SelectionMode::Smart => "smart",
             },
         );
     }
@@ -1335,6 +1356,12 @@ mod tests {
     }
 
     #[test]
+    fn the_selection_mode_defaults_to_classic() {
+        let cfg = Config::default();
+        assert_eq!(cfg.core.selection_mode(), SelectionMode::Classic);
+    }
+
+    #[test]
     fn test_config_complete_toml() {
         let toml = r##"
             [core.option]
@@ -1343,6 +1370,7 @@ mod tests {
             graph_width = "single"
             graph_style = "angular"
             initial_selection = "head"
+            selection_mode = "smart"
             [core.search]
             ignore_case = true
             fuzzy = true
@@ -1387,6 +1415,7 @@ mod tests {
         expected.core.option.graph_width = Some(GraphWidthType::Single);
         expected.core.option.graph_style = Some(GraphStyle::Angular);
         expected.core.option.initial_selection = Some(InitialSelection::Head);
+        expected.core.option.selection_mode = Some(SelectionMode::Smart);
         expected.core.search.ignore_case = true;
         expected.core.search.fuzzy = true;
         expected.core.user_command.commands = FxHashMap::from_iter([
