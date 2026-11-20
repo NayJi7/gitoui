@@ -24,6 +24,7 @@ mod recents;
 mod shell;
 mod text_edit;
 mod text_fit;
+mod uninstall;
 mod update;
 mod view;
 mod watcher;
@@ -68,6 +69,11 @@ struct Args {
     /// Force an update check + prompt now, then exit
     #[arg(long, conflicts_with_all = &["no_update_check"])]
     update: bool,
+
+    /// Remove gitoui from this machine (asks before deleting anything),
+    /// then exit
+    #[arg(long, conflicts_with_all = &["update", "no_update_check"])]
+    uninstall: bool,
 
     /// Skip the once-a-day automatic update check at startup
     #[arg(long)]
@@ -284,6 +290,15 @@ pub fn run() -> Result<()> {
     // update check or repository lookup.
     if args.why {
         why::run();
+        return Ok(());
+    }
+
+    // `--uninstall`: remove the binary and, if asked, the user's data, then exit.
+    if args.uninstall {
+        if let Err(e) = uninstall::run() {
+            eprintln!("gitoui: {e}");
+            std::process::exit(1);
+        }
         return Ok(());
     }
 

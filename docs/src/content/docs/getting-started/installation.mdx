@@ -159,7 +159,18 @@ touching your config.
 
 ## Uninstalling
 
-Remove the binary, then the directories <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> writes to:
+```sh
+gitoui --uninstall
+```
+
+It removes <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> the way it was installed: the binary is deleted
+(curl install), or `cargo uninstall gitoui` / `brew uninstall gitoui` is run.
+It then lists your config, custom themes, recent repos, GitHub login, logs and
+caches, and offers to delete them too. Nothing is removed without a `y`, and
+each question is asked on its own, so you can keep your settings for a later
+reinstall.
+
+### By hand
 
 ```sh
 rm ~/.local/bin/gitoui              # binary (curl install)

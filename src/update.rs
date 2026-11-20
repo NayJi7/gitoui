@@ -124,7 +124,7 @@ fn is_newer(latest: &str, current: &str) -> bool {
 const HOMEBREW_UPGRADE_HINT: &str =
     "gitoui was installed with Homebrew, update it with: brew upgrade gitoui";
 
-fn detect_install_method() -> InstallMethod {
+pub(crate) fn detect_install_method() -> InstallMethod {
     let Ok(exe) = env::current_exe() else {
         return InstallMethod::CurlScript;
     };
@@ -155,8 +155,8 @@ fn install_method_for_path(exe_str: &str, cargo_on_path: impl FnOnce() -> bool) 
     InstallMethod::CurlScript
 }
 
-#[derive(Debug, Clone, Copy)]
-enum InstallMethod {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstallMethod {
     Cargo,
     CurlScript,
     Homebrew,
@@ -329,7 +329,7 @@ fn github_release_ready(version: &str) -> Option<bool> {
 /// 3. `PATH`-based lookup of `gitoui` as a last resort, for the case
 ///    where install.sh wrote to a different directory than the one the
 ///    user invoked us from.
-fn resolved_self_path() -> io::Result<PathBuf> {
+pub(crate) fn resolved_self_path() -> io::Result<PathBuf> {
     let raw = env::current_exe()?;
     if raw.exists() {
         return Ok(raw);
