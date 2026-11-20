@@ -8,8 +8,9 @@ on:
       - ".github/workflows/gh-pages.yml"
       # Hosted assets that the docs site syncs from the repo root via
       # the `sync-public` npm script. A change to either re-deploys
-      # /gitoui/install.sh and /gitoui/brand/<name>.svg.
+      # /gitoui/install.sh, install.ps1 and /gitoui/brand/<name>.svg.
       - "install.sh"
+      - "install.ps1"
       - "assets/brand/**"
       # SiteTitle.astro reads the workspace version from Cargo.toml at
       # build time (via Vite's `?raw` import). A bump must trigger a
