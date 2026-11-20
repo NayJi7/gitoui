@@ -337,10 +337,7 @@ impl Drop for StreamWriter {
 }
 
 fn cache_root() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join("gitoui"))
+    Some(crate::paths::cache_base()?.join("gitoui"))
 }
 
 /// 64-bit FxHash that identifies a repo for cache purposes.

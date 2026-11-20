@@ -13,15 +13,11 @@ use std::path::{Path, PathBuf};
 const MAX_RECENTS: usize = 20;
 
 fn recents_file() -> Option<PathBuf> {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".config"))
-        })?;
-    Some(base.join("gitoui").join("recents.json"))
+    Some(
+        crate::paths::config_base()?
+            .join("gitoui")
+            .join("recents.json"),
+    )
 }
 
 pub fn load() -> Vec<PathBuf> {

@@ -42,10 +42,11 @@ struct UpdateState {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    let base = env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join(CACHE_DIRNAME).join(CACHE_FILENAME))
+    Some(
+        crate::paths::cache_base()?
+            .join(CACHE_DIRNAME)
+            .join(CACHE_FILENAME),
+    )
 }
 
 fn read_state() -> UpdateState {

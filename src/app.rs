@@ -3113,12 +3113,17 @@ impl App<'_> {
 
         // Derive a tilde-relative path from the current working directory.
         let cwd = std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf());
-        let home = std::env::var("HOME").unwrap_or_default();
-        let display_path = if !home.is_empty() && cwd.starts_with(&home) {
-            format!("~{}", &cwd.to_string_lossy()[home.len()..])
-        } else {
-            cwd.to_string_lossy().to_string()
-        };
+        let home = crate::paths::home_dir();
+        let display_path =
+            if let Some(rest) = home.as_deref().and_then(|h| cwd.strip_prefix(h).ok()) {
+                if rest.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
+                }
+            } else {
+                cwd.to_string_lossy().to_string()
+            };
 
         // Repo name (last component) in bold, rest dimmer.
         let repo_name = cwd

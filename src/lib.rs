@@ -19,6 +19,7 @@ mod event;
 mod external;
 mod keybind;
 mod panic_guard;
+mod paths;
 mod popup;
 mod recents;
 mod shell;

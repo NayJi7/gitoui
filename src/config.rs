@@ -117,8 +117,6 @@ impl<'de> Deserialize<'de> for DateTimeFormat {
     }
 }
 
-const XDG_CONFIG_HOME_ENV_NAME: &str = "XDG_CONFIG_HOME";
-const DEFAULT_CONFIG_DIR: &str = ".config";
 const APP_DIR_NAME: &str = "gitoui";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const CONFIG_FILE_ENV_NAME: &str = "GITOUI_CONFIG_FILE";
@@ -178,10 +176,7 @@ fn config_file_path_from_env() -> Option<PathBuf> {
 }
 
 fn config_file_path() -> Option<PathBuf> {
-    env::var(XDG_CONFIG_HOME_ENV_NAME)
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| env::home_dir().map(|home| home.join(DEFAULT_CONFIG_DIR)))
+    crate::paths::config_base()
         .map(|config_dir| config_dir.join(APP_DIR_NAME).join(CONFIG_FILE_NAME))
 }
 
