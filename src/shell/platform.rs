@@ -11,15 +11,46 @@ pub(crate) fn login_shell() -> bool {
     cfg!(target_os = "macos")
 }
 
-/// Used when `$SHELL` is missing, empty or cannot be started.
+/// Used when no shell is configured or the configured one cannot be started.
+#[cfg(not(windows))]
 pub(crate) const FALLBACK_SHELL: &str = "/bin/sh";
+#[cfg(windows)]
+pub(crate) const FALLBACK_SHELL: &str = "cmd.exe";
 
-/// `$SHELL`, or the fallback shell when it is missing or empty.
+/// `$SHELL` (Git Bash and friends set it), otherwise the platform's default.
 pub(crate) fn user_shell(env: &EnvVars) -> PathBuf {
     match env_value(env, "SHELL") {
         Some(shell) if !shell.is_empty() => PathBuf::from(shell),
+        _ => default_shell(env),
+    }
+}
+
+#[cfg(not(windows))]
+fn default_shell(_env: &EnvVars) -> PathBuf {
+    PathBuf::from(FALLBACK_SHELL)
+}
+
+/// PowerShell 7, then Windows PowerShell, then `%ComSpec%`.
+#[cfg(windows)]
+fn default_shell(env: &EnvVars) -> PathBuf {
+    for name in ["pwsh.exe", "powershell.exe"] {
+        if let Some(found) = find_in_path(env, name) {
+            return found;
+        }
+    }
+    match env_value(env, "ComSpec") {
+        Some(comspec) if !comspec.is_empty() => PathBuf::from(comspec),
         _ => PathBuf::from(FALLBACK_SHELL),
     }
+}
+
+/// The first `PATH` directory that holds `name`.
+#[cfg(any(windows, test))]
+pub(crate) fn find_in_path(env: &EnvVars, name: &str) -> Option<PathBuf> {
+    let path = env_value(env, "PATH")?;
+    std::env::split_paths(path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(unix)]
@@ -56,4 +87,49 @@ pub(crate) fn process_exists(pid: u32) -> bool {
 #[cfg(all(not(unix), test))]
 pub(crate) fn process_exists(_pid: u32) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn env(pairs: &[(&str, OsString)]) -> EnvVars {
+        pairs
+            .iter()
+            .map(|(k, v)| (OsString::from(*k), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn the_shell_variable_wins() {
+        let e = env(&[("SHELL", "/usr/bin/fish".into())]);
+        assert_eq!(user_shell(&e), PathBuf::from("/usr/bin/fish"));
+    }
+
+    #[test]
+    fn find_in_path_returns_the_first_directory_holding_the_file() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        std::fs::write(second.path().join("tool"), "").unwrap();
+        let joined = std::env::join_paths([first.path(), second.path()]).unwrap();
+        let e = env(&[("PATH", joined)]);
+        assert_eq!(find_in_path(&e, "tool"), Some(second.path().join("tool")));
+        assert_eq!(find_in_path(&e, "absent"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_prefers_powershell_then_comspec() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("powershell.exe"), "").unwrap();
+        let path = std::env::join_paths([dir.path()]).unwrap();
+        let e = env(&[
+            ("Path", path),
+            ("ComSpec", r"C:\Windows\System32\cmd.exe".into()),
+        ]);
+        assert_eq!(user_shell(&e), dir.path().join("powershell.exe"));
+        let none = env(&[("ComSpec", r"C:\x\cmd.exe".into())]);
+        assert_eq!(user_shell(&none), PathBuf::from(r"C:\x\cmd.exe"));
+    }
 }

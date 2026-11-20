@@ -428,6 +428,20 @@ fn an_unknown_shell_runs_without_directory_tracking() {
     assert_eq!(s.view().cwd(), None);
 }
 
+// Without `$SHELL`, Windows runs its own shell: it must start and echo.
+#[cfg(windows)]
+#[test]
+fn the_windows_shell_runs_commands() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let env: EnvVars = std::env::vars_os().collect();
+    let shell = crate::shell::platform::user_shell(&env);
+    let s = ShellSession::start(&shell, env, repo.path(), 24, 80, Arc::new(|| {})).unwrap();
+    let _ = home;
+    s.send_input(b"echo windows-shell-works\r");
+    wait_for_text(&s.view(), "windows-shell-works");
+}
+
 struct PanickingReader;
 
 impl std::io::Read for PanickingReader {
