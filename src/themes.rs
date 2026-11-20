@@ -283,7 +283,7 @@ fn catppuccin_latte() -> ThemeDefinition {
             detail_name_fg: rgb(0x04, 0xa5, 0xe5),
             detail_date_fg: rgb(0x88, 0x39, 0xef),
             detail_email_fg: rgb(0x1e, 0x66, 0xf5),
-            detail_hash_fg: rgb(0xdf, 0x8e, 0x1d),
+            detail_hash_fg: rgb(0xfe, 0x64, 0x0b),
             detail_ref_branch_fg: rgb(0x40, 0xa0, 0x2b),
             detail_ref_remote_branch_fg: rgb(0xd2, 0x0f, 0x39),
             detail_ref_tag_fg: rgb(0xdf, 0x8e, 0x1d),

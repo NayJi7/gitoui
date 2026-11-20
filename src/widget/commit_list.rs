@@ -41,7 +41,9 @@ use crate::{
 
 static FUZZY_MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().respect_case());
 
-const ELLIPSIS: &str = "...";
+/// What a cut name or message ends with: the same `…` every other view uses
+/// (`text_fit`), one cell wide, not three dots.
+const ELLIPSIS: &str = "…";
 
 /// Commit row metadata used by the list view. `commit` is an `Arc`
 /// rather than a borrow so the manager (which owns the underlying
@@ -2444,7 +2446,7 @@ impl CommitList<'_> {
             let max_width = max_width
                 .saturating_sub(ref_spans_width)
                 .saturating_sub(paused_badge_width);
-            if max_width > ELLIPSIS.len() {
+            if max_width > console::measure_text_width(ELLIPSIS) {
                 // Always take the first line only: %s should already be single-line
                 // but defensively guard against any embedded newlines.
                 let subject = commit
