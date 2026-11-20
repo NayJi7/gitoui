@@ -1045,6 +1045,7 @@ impl EventController {
                             // dropping it makes the lookup
                             // numlock/capslock-insensitive.
                             key.state = ratatui::crossterm::event::KeyEventState::NONE;
+                            let key = crate::keybind::normalize_key_event(key);
                             tx.send(AppEvent::Key(key));
                         }
                         ratatui::crossterm::event::Event::Mouse(mouse) => {

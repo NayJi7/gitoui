@@ -485,6 +485,20 @@ fn parse_key_code_with_modifiers(
     Ok(KeyEvent::new(c, modifiers))
 }
 
+/// Windows (and some other terminals) report `?`, `:` or `+` with the Shift
+/// modifier set, because Shift is how the key is typed on the layout (`?` is
+/// Shift+, on a French keyboard). The bindings are written without it, so it
+/// is dropped from characters that are not letters: Shift is already part of
+/// the character. Letters keep it (`shift-g` is `G` with Shift).
+pub fn normalize_key_event(mut key: KeyEvent) -> KeyEvent {
+    if let KeyCode::Char(c) = key.code {
+        if key.modifiers.contains(KeyModifiers::SHIFT) && !c.is_alphabetic() {
+            key.modifiers.remove(KeyModifiers::SHIFT);
+        }
+    }
+    key
+}
+
 fn key_event_to_string(key_event: KeyEvent) -> String {
     if let KeyCode::Char(c) = key_event.code {
         if key_event.modifiers == KeyModifiers::SHIFT {
@@ -951,6 +965,25 @@ mod tests {
         let custom: KeyBinds = toml::from_str("[scope.compose]\nsubmit = [\"ctrl-g\"]\n").unwrap();
         let kb = KeyBinds::new(Some(custom));
         assert_eq!(kb.primary_submit_key(), "Ctrl+g");
+    }
+
+    #[test]
+    fn shift_is_dropped_from_symbols_but_kept_on_letters() {
+        let q = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT);
+        assert_eq!(
+            normalize_key_event(q),
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE)
+        );
+        let g = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT);
+        assert_eq!(normalize_key_event(g), g);
+        let ctrl = KeyEvent::new(
+            KeyCode::Char('?'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(
+            normalize_key_event(ctrl),
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::CONTROL)
+        );
     }
 
     #[test]

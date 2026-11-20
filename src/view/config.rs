@@ -662,7 +662,7 @@ impl<'a> ConfigView<'a> {
             }
             GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
-                let text_mode = self.core_config.graph_renderer() == GraphRenderer::Ascii;
+                let text_mode = self.core_config.graph_renderer().is_ascii();
                 let prev = if text_mode {
                     match current {
                         GraphStyle::Rounded => GraphStyle::Angular,
@@ -794,12 +794,13 @@ impl<'a> ConfigView<'a> {
             GRAPH_STYLE_INDEX => {
                 let current = self.core_config.graph_style();
                 // In Ascii mode, Smooth is not available - skip it.
-                let text_mode = self.core_config.graph_renderer() == GraphRenderer::Ascii;
+                let text_mode = self.core_config.graph_renderer().is_ascii();
                 let next = if text_mode {
                     match current {
                         GraphStyle::Rounded => GraphStyle::Angular,
                         GraphStyle::Angular => GraphStyle::Rounded,
-                        GraphStyle::Smooth => GraphStyle::Rounded,
+                        // Shown as Rounded in text mode, so the next one is Angular.
+                        GraphStyle::Smooth => GraphStyle::Angular,
                     }
                 } else {
                     match current {
@@ -1002,7 +1003,17 @@ impl<'a> ConfigView<'a> {
             ),
             (
                 "Graph Style",
-                graph_style_display(self.core_config.graph_style()),
+                // Smooth needs images: in a text-only terminal the graph is drawn
+                // as Rounded, so that is what the list shows.
+                graph_style_display(
+                    if self.core_config.graph_renderer().is_ascii()
+                        && self.core_config.graph_style() == GraphStyle::Smooth
+                    {
+                        GraphStyle::Rounded
+                    } else {
+                        self.core_config.graph_style()
+                    },
+                ),
                 false,
             ),
             (
