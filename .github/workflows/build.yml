@@ -81,6 +81,8 @@ jobs:
         run: cargo build --verbose
       - name: Tests
         run: cargo test --lib -- --test-threads=1
+      - name: Smoke test (the real binary in a pseudo-terminal)
+        run: cargo test --test smoke -- --nocapture
 
   build:
     strategy:
