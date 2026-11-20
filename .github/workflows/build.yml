@@ -79,6 +79,8 @@ jobs:
           cache-bin: false
       - name: Build
         run: cargo build --verbose
+      - name: Tests
+        run: cargo test --lib -- --test-threads=1
 
   build:
     strategy:
