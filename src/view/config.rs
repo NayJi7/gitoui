@@ -1201,7 +1201,9 @@ impl<'a> ConfigView<'a> {
         if selection_changed {
             if self.selected == 0 {
                 self.left_scroll = 0;
-            } else if self.selected + 1 >= CONFIG_ITEM_COUNT {
+            } else if (self.selected + 1..CONFIG_ITEM_COUNT).all(|i| self.is_item_grayed(i)) {
+                // Nothing selectable below (the last item can be grayed out):
+                // show the end of the list, grayed rows included.
                 self.left_scroll = total_lines.saturating_sub(viewport_h);
             } else if let Some(sel_row) = self
                 .left_item_rows
@@ -1209,10 +1211,13 @@ impl<'a> ConfigView<'a> {
                 .position(|r| r == &Some(self.selected))
             {
                 if viewport_h > 0 {
-                    if sel_row < self.left_scroll {
-                        self.left_scroll = sel_row;
-                    } else if sel_row >= self.left_scroll + viewport_h {
-                        self.left_scroll = sel_row + 1 - viewport_h;
+                    // The first and last visible rows hold the `…` markers when
+                    // the list scrolls: keep the selection one row inside them.
+                    let margin = usize::from(total_lines > viewport_h && viewport_h > 2);
+                    if sel_row < self.left_scroll + margin {
+                        self.left_scroll = sel_row.saturating_sub(margin);
+                    } else if sel_row + margin >= self.left_scroll + viewport_h {
+                        self.left_scroll = sel_row + margin + 1 - viewport_h;
                     }
                 }
             }
