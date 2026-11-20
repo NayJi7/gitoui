@@ -20,6 +20,8 @@ When reporting a bug, please include the following information:
 - Information about the git repository to reproduce the issue
   - If possible, provide the smallest possible repository (debugging a repository with 100,000 commits is difficult)
 
+On Windows, also say which terminal you ran it in (Windows Terminal, the classic console, the VS Code terminal…) and its version. gitoui reads the keyboard through the Windows console, so it does not run in Git Bash's mintty (it stops with a message).
+
 ### Suggesting Features
 
 Before proposing a new feature, please review the [Goals](https://gitoui.nayji7.dev/introduction/index.html#goals) and [Non-Goals](https://gitoui.nayji7.dev/introduction/index.html#non-goals).
@@ -47,6 +49,15 @@ We use [GitHub Actions](https://github.com/NayJi7/gitoui/blob/master/.github/wor
 
 - Run stable Rust.
 - Run build, test, format, and lint.
+
+### Building on Windows
+
+Windows support is experimental. To build and test it:
+
+- Install the **Visual Studio Build Tools** with the "Desktop development with C++" workload (Rust's MSVC toolchain needs its linker).
+- Build from **PowerShell or cmd**, not from Git Bash: Git's `link` shadows the MSVC linker there and the build fails.
+- Run `cargo test`. The smoke test (`tests/smoke.rs`) runs the real binary in a pseudo-terminal, which goes through ConPTY on Windows.
+- To look at it, run the binary in **Windows Terminal**. A debug build is enough (`cargo build`). If `NO_COLOR` is set in your environment the colors are off by design.
 
 ### Improving the Commit Graph
 

@@ -11,6 +11,10 @@ Sixel). It auto-detects the renderer at startup; force one with `--graph-rendere
 Alternatively, use `--graph-renderer ascii` to render with Unicode box-drawing
 characters in any terminal (no image protocol needed).
 
+On Windows Terminal the images go through Sixel: the terminal is asked at
+startup whether it speaks it, and how big a cell is, since Sixel draws exact
+pixels. See the [Windows notes](/getting-started/compatibility/#windows).
+
 ## What's shown
 
 Each row carries:
@@ -18,6 +22,9 @@ Each row carries:
 - **Graph cell**, branches, merges, the commit dot (orange for HEAD).
 - **Commit message** with inline ref glyphs (branch / remote / tag / stash).
 - **Author name**, coloured per the theme. Avatar painted inline when cached.
+  The column is as wide as the longest name **on screen**, so it narrows when
+  only short names are shown and widens when you scroll to longer ones. A name
+  over 16 characters ends with `…`.
 - **Short hash**.
 - **Date**, format set by `core.option.date_time_format`.
 
@@ -113,6 +120,13 @@ of lanes wide. gitoui handles this by **capping the graph column at
 - All visible rows scroll together (Kitty source-rect crop).
 - iTerm2 / Sixel terminals don't support source-rect crop: lanes past
   the cap are clipped.
+
+### Graph width
+
+`graph_width` sets how many cells each lane takes: `single`, `double`, or
+`auto` (the default). `auto` picks `double` when the graph fits that wide in
+your terminal (2 cells per lane plus 2) and `single` otherwise. The Configuration
+view (`p`) shows what `auto` gives right now ("Auto resolved") and previews it.
 
 ### ASCII renderer
 

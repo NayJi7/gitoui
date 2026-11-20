@@ -40,9 +40,14 @@ The installer:
 
 <Aside type="caution" title="Experimental">
 Windows support is new. The test suite and a smoke test of the real binary
-run on Windows in CI, but it has had little hands-on use yet. Bug reports are
-welcome.
+run on Windows in CI, and the main views have been checked by hand in Windows
+Terminal, but it has had little everyday use yet. Bug reports are welcome.
 </Aside>
+
+Use **Windows Terminal** (the default on Windows 11). Run <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> in
+PowerShell or cmd there; the graph and avatars are drawn as real images
+(Sixel, detected at startup, Windows Terminal 1.22 or later). Git Bash's own
+window (mintty) cannot run it, see [Terminal compatibility](../compatibility/#windows).
 
 In PowerShell:
 
@@ -60,7 +65,8 @@ install ping. `gitoui --update` runs the same script.
 `git` must be installed and on your `PATH`. Settings live in
 `%APPDATA%\gitoui`, caches in `%LOCALAPPDATA%\gitoui`. The integrated terminal
 (`t`) starts PowerShell (`pwsh`, then `powershell`), or `cmd.exe`, unless
-`SHELL` is set.
+`SHELL` is set. For a build from source on Windows see
+[the contributing guide](https://github.com/NayJi7/gitoui/blob/master/CONTRIBUTING.md#building-on-windows).
 
 </TabItem>
 

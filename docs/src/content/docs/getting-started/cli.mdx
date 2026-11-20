@@ -100,7 +100,7 @@ gitoui --order topo
 | Variable                 | Effect                                                  |
 |--------------------------|---------------------------------------------------------|
 | `GITOUI_CONFIG_FILE`     | Override the config file path (skips the XDG lookup).   |
-| `XDG_CONFIG_HOME`        | Base directory for the config + themes + token.         |
+| `XDG_CONFIG_HOME`        | Base directory for the config + themes + token (on Windows, `%APPDATA%` unless this is set). |
 | `NO_COLOR`               | Honored by the `--help` output and by the no-repo error splash. |
 
 <Aside type="tip">

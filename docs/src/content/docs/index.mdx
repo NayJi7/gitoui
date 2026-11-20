@@ -14,7 +14,7 @@ head:
     content: >-
       {"@context":"https://schema.org","@type":"SoftwareApplication",
       "name":"gitoui","applicationCategory":"DeveloperApplication",
-      "operatingSystem":"Linux, macOS",
+      "operatingSystem":"Linux, macOS, Windows",
       "description":"A terminal UI for git with a rich commit graph, diff, blame, staging, interactive rebase, conflict editor and GitHub PRs and issues.",
       "url":"https://gitoui.nayji7.dev/",
       "downloadUrl":"https://gitoui.nayji7.dev/getting-started/installation/",
@@ -45,13 +45,14 @@ import HomeFilm from "../../components/HomeFilm.astro";
   <Card title="Rich commit graph" icon="rocket">
     Inline image rendering via Kitty graphics (Ghostty, Kitty), iTerm2 or Sixel protocols. Pre-rendered
     branches and edges land in the terminal as actual images, not ASCII art.
+    Now on Windows Terminal too (experimental).
   </Card>
   <Card title="GitHub built in" icon="github">
     Open Pull Requests and Issues from inside your repo. Comments, reviews,
     labels, assignees, reactions, merge, without leaving the terminal.
   </Card>
   <Card title="Configurable end to end" icon="setting">
-    Ten built-in themes plus user-defined `.toml` palettes. Every shortcut is
+    Eleven built-in themes plus user-defined `.toml` palettes. Every shortcut is
     rebindable (global + per-view scopes), with live-tracking footers.
   </Card>
   <Card title="Daily git tools" icon="document">

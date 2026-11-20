@@ -32,6 +32,7 @@ body:
       label: How did you install it?
       options:
         - install.sh (curl one-liner)
+        - install.ps1 (Windows PowerShell)
         - Homebrew
         - cargo install
         - Built from source
@@ -42,7 +43,7 @@ body:
     id: os
     attributes:
       label: Operating system
-      placeholder: macOS 15.3, Ubuntu 24.04, Arch, ...
+      placeholder: macOS 15.3, Ubuntu 24.04, Arch, Windows 11, ...
     validations:
       required: true
   - type: input
@@ -50,7 +51,7 @@ body:
     attributes:
       label: Terminal and version
       description: Most display issues depend on it.
-      placeholder: Ghostty 1.1.3, Kitty 0.40, WezTerm, iTerm2, Konsole, foot, ...
+      placeholder: Ghostty 1.1.3, Kitty 0.40, WezTerm, iTerm2, Konsole, foot, Windows Terminal 1.22, ...
     validations:
       required: true
   - type: dropdown

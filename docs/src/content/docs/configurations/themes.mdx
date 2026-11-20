@@ -5,7 +5,7 @@ description: Built-in themes and how to ship your own as a TOML file.
 
 import { Steps, Aside, FileTree, Code, Tabs, TabItem } from "@astrojs/starlight/components";
 
-<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships **10 built-in themes**, and lets you drop your own as a TOML
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> ships **11 built-in themes**, and lets you drop your own as a TOML
 file under `~/.config/gitoui/themes/`. Both are addressed by name through
 the `core.option.theme` config key.
 
@@ -23,6 +23,7 @@ the `core.option.theme` config key.
 | `Solarized Light` | Classic light.    |
 | `One Dark`        | Atom-derived.     |
 | `Monokai Pro`     | Vivid contrast.   |
+| `PowerShell`      | Windows Terminal's default look (Campbell, `#0c0c0c` background). |
 
 Pick one from the Configuration view (`p` from the list, then ←/→ on the
 "theme" row) or set it in `config.toml`:
@@ -50,7 +51,8 @@ own with `syntax_theme = "..."`.
 </FileTree>
 
 The name you set in `core.option.theme` must match the **file stem**
-(without `.toml`).
+(without `.toml`). On Windows the folder is `%APPDATA%\gitoui\themes\`.
+A custom file with the name of a built-in theme is ignored: the built-in wins.
 
 <Steps>
 

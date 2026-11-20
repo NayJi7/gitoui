@@ -22,7 +22,8 @@ speak one of three image protocols.
 | **Alacritty**          |❌     |❌      |❌     | No image protocol, graph falls back to Unicode. |
 | **Terminal.app** (macOS) |❌   |❌      |❌     | Same fallback as Alacritty.        |
 | **gnome-terminal / Ptyxis** | 🟡 |❌    |❌     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
-| **Windows Terminal**   |❌     |❌      | 🟡    | Unicode graph by default. Sixel (`--graph-renderer sixel`) draws, but the images are not yet sized to the terminal's cells, so rows overlap: known issue, not recommended for now. |
+| **Windows Terminal**   |❌     |❌      | ✅    | Recent versions (1.22 and later) speak Sixel, and <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> detects it at startup (it asks the terminal), or force it with `--graph-renderer sixel`. The cell size is read once at startup: after a font zoom, restart <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> to resize the images. PowerShell and cmd inside Windows Terminal work the same way. |
+| **Git Bash (mintty)**   |❌     |❌      |❌     | Not supported directly: <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> reads the keyboard through the Windows console, which mintty does not provide. It stops with a message instead of showing a dead screen. `winpty gitoui` is the usual way to run a Windows program there (not tested yet); opening Git Bash inside Windows Terminal is the safe option. |
 
 ✅ <Badge text="first-class" variant="success" /> &nbsp;
 🟡 <Badge text="config needed" variant="caution" /> &nbsp;
@@ -32,6 +33,33 @@ When in doubt, run `gitoui --graph-renderer sixel` (or `kitty`, `iterm`, `ascii`
 force a specific renderer and bypass auto-detect.
 
 {/* PHOTO of a side-by-side comparison of the commit graph in Kitty (image rendering) vs the same view forced to `--graph-renderer ascii` (ASCII glyph fallback). Same repo, same range, two terminals. Needs the unicode fallback to ship first. */}
+
+## Windows
+
+On Windows, <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> needs a real Windows console to read the keyboard. That
+rules in **Windows Terminal** (with PowerShell, cmd or any other shell inside it),
+and rules out terminals that do not provide one, such as Git Bash's mintty.
+
+| Where it runs | Status |
+|---------------|--------|
+| Windows Terminal, PowerShell / cmd | ✅ Images through Sixel (1.22 and later), Unicode graph otherwise. |
+| Git Bash (mintty) | ❌ Stops with a message, see the table above. |
+| Other consoles (classic console host, the VS Code terminal) | Not tested: the Unicode graph is the safe choice, force it with `--graph-renderer ascii`. |
+
+What to know on Windows Terminal:
+
+- **Sixel is detected at startup.** <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> asks the terminal what it supports and how big a
+  character cell is, so the images fit the rows exactly. With `--graph-renderer auto` (the default) it
+  picks Sixel when the terminal says it speaks it, and keeps the Unicode graph otherwise.
+- **Font zoom.** Windows Terminal keeps reporting the old cell size after a
+  zoom (`Ctrl` + wheel), so the images no longer line up. Quit and start
+  <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> again at the new size.
+- **Resizing the window** is handled: the graph is drawn again.
+- **Colors.** The built-in `PowerShell` theme matches Windows Terminal's default
+  look (background `#0c0c0c`), see [Themes](../../configurations/themes/).
+- **Keyboards.** Keys typed with Shift (`?`, digits on AZERTY) and AltGr (`@`, `#`, `{`, `[`…)
+  arrive as their character, in the search bar and every text field.
+- **Files.** Settings are in `%APPDATA%\gitoui`, caches in `%LOCALAPPDATA%\gitoui`.
 
 ## Keyboard protocol
 
@@ -54,6 +82,14 @@ Switch to `Ctrl+...` for your custom bindings, see
 
 - **Mouse**, enabled by default (`ui.common.mouse_enabled = true`). Click on
   rows / tabs / chips to interact. Wheel scrolls.
+- **Select and copy**, in every view. Hold `Ctrl` and drag over the screen:
+  the text is copied the moment you release the button, and the footer says
+  `Copied N chars to clipboard`. The highlight goes away with the button. A plain click or
+  drag still does what the view does with it, and `Ctrl` + click on a commit still
+  marks it for a comparison. Hold `Shift` and drag instead to use your terminal's
+  own selection (copy it with your terminal's copy shortcut). Inside a program
+  running in the integrated terminal that asks for the mouse (vim, htop…), the
+  program gets the mouse.
 - **Clipboard**, system clipboard via the
   [`arboard`](https://crates.io/crates/arboard) crate. On Wayland, `wl-copy`
   is **not** required, `arboard`'s `wayland-data-control` feature talks the

@@ -88,6 +88,14 @@ Same flow for **Issues** with `Shift+I`.
 
 ![PR detail, Conversation tab, author avatar, label chips, focused comment card with action ribbon](https://raw.githubusercontent.com/NayJi7/gitoui/master/assets/readme/pr-conversation.png)
 
+### Copy text from the screen
+
+Hold `Ctrl` and drag over any text, in any view: it is copied the moment you
+release the button, and the footer says `Copied N chars to clipboard`. A plain
+click or drag is left to the view, and `Shift` + drag is your terminal's own
+selection (copy it with your terminal's copy shortcut). More in
+[Terminal compatibility](../compatibility/#mouse--clipboard).
+
 <Aside type="tip">
 The Help page is the live reference: every shortcut shown there matches your
 current config, so any rebind is reflected automatically.
@@ -106,4 +114,5 @@ current config, so any rebind is reflected automatically.
 </FileTree>
 
 Override the config path with `GITOUI_CONFIG_FILE=...`. Move the whole
-folder with `XDG_CONFIG_HOME=...` (POSIX-standard).
+folder with `XDG_CONFIG_HOME=...` (POSIX-standard). On Windows these live in
+`%APPDATA%\gitoui` (settings, themes, token) and `%LOCALAPPDATA%\gitoui` (caches).

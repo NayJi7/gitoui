@@ -43,7 +43,9 @@ The commit graph stays serie's: pre-rendered images sent inline through your ter
 - Full GitHub workflow: PR + Issue threads, reviews, reactions, labels, assignees, mention autocomplete, comment CRUD.
 - Inline GitHub avatars rendered through the same image protocols as the graph.
 - Two-layer keybinds: global `[keybind]` UserEvents plus per-view `[keybind.scope.<path>]` overrides.
-- Ten built-in themes (Tokyo Night, Dracula, Catppuccin, Gruvbox, Nord, Solarized, One Dark, Monokai Pro), and a `.toml` in `~/.config/gitoui/themes/` for your own.
+- Select text with `Ctrl` + drag in any view: it is copied the moment you let go, and the footer says how many characters. `Shift` + drag stays your terminal's own selection.
+- Windows support (experimental): PowerShell installer, and the graph and avatars as real images in Windows Terminal (Sixel, detected at startup).
+- Eleven built-in themes (Tokyo Night, Dracula, Catppuccin, Gruvbox, Nord, Solarized, One Dark, Monokai Pro, PowerShell), and a `.toml` in `~/.config/gitoui/themes/` for your own.
 
 Full feature tour at [gitoui.nayji7.dev/introduction/](https://gitoui.nayji7.dev/introduction/).
 
@@ -53,6 +55,12 @@ One-liner for Linux + macOS (auto-detects OS/arch, drops `gitoui` into `~/.local
 
 ```sh
 curl -fsSL https://gitoui.nayji7.dev/install.sh | sh
+```
+
+On Windows (experimental), in PowerShell (installs `gitoui.exe` into `%LOCALAPPDATA%\Programs\gitoui`):
+
+```powershell
+irm https://gitoui.nayji7.dev/install.ps1 | iex
 ```
 
 Or with Homebrew on macOS and Linux:
@@ -71,7 +79,9 @@ For pinned versions, manual downloads, or building from source, see the [install
 
 ### Terminals
 
-Linux and macOS. The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel). Anywhere else (Alacritty, Terminal.app, Windows Terminal, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`. Windows is experimental (PowerShell installer, Unicode graph by default). Full matrix in [terminal compatibility](https://gitoui.nayji7.dev/getting-started/compatibility/).
+Linux, macOS and Windows (experimental). The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel), and **Windows Terminal** (Sixel, detected at startup, in PowerShell and cmd). Anywhere else (Alacritty, Terminal.app, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`.
+
+On Windows, gitoui reads the keyboard through the Windows console, so it runs in Windows Terminal, PowerShell and cmd. Git Bash (mintty) does not provide one: gitoui stops with a message there, use Windows Terminal or `winpty gitoui`. Full matrix in [terminal compatibility](https://gitoui.nayji7.dev/getting-started/compatibility/).
 
 ## Quick start
 

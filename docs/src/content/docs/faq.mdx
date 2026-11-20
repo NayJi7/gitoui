@@ -86,6 +86,8 @@ Help is computed from your live config at render time. If the displayed key is w
 | `~/.cache/gitoui/<repo-hash>/commits.bin` | Commit history cache. Speeds up subsequent launches by avoiding a full `git log` walk. Invalidated automatically when HEAD moves or sort order changes. Clear manually with `gitoui -C`. |
 | `~/.config/gitoui/logs/`               | Daily-rotating debug log files.  |
 
+On Windows, settings, themes, the token and logs are under `%APPDATA%\gitoui` and the caches under `%LOCALAPPDATA%\gitoui`.
+
 Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder and cache always live next to the config.
 
 </details>
@@ -98,6 +100,50 @@ Set `GITOUI_CONFIG_FILE` to point at a different file. The themes folder and cac
 </summary>
 
 `gitoui --graph-renderer ascii` uses Unicode box-drawing characters for the commit graph and skips avatar rendering. The result looks like a slightly fancier `git log --graph` and works in any terminal.
+
+</details>
+
+<details class="faq-item">
+<summary>
+
+## Does <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> run on Windows?
+
+</summary>
+
+Yes, as an experimental target. Install it from PowerShell (`irm https://gitoui.nayji7.dev/install.ps1 | iex`) and run it in **Windows Terminal**, from PowerShell or cmd. There the commit graph and avatars are real images (Sixel, detected at startup, Windows Terminal 1.22 or later). Settings live in `%APPDATA%\gitoui`. Details in the [Windows notes](/getting-started/compatibility/#windows).
+
+</details>
+
+<details class="faq-item">
+<summary>
+
+## Nothing shows up (or it exits with a message) in Git Bash
+
+</summary>
+
+Git Bash's own window (mintty) does not provide the Windows console that <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> reads the keyboard from, so it stops with a message instead of drawing a screen that never answers. Open Git Bash as a Windows Terminal profile, or use PowerShell or cmd. `winpty gitoui` is the usual workaround for Windows programs in mintty; it has not been tested with <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> yet.
+
+</details>
+
+<details class="faq-item">
+<summary>
+
+## The images are misaligned after I zoomed the font in Windows Terminal
+
+</summary>
+
+<span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> reads the size of a character cell once, at startup, and fits every image to it. Windows Terminal keeps reporting the old size after a zoom (`Ctrl` + wheel), so the images stop lining up with the rows. Quit and start <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> again at the new size, or use `--graph-renderer ascii`.
+
+</details>
+
+<details class="faq-item">
+<summary>
+
+## How do I copy text from the screen?
+
+</summary>
+
+Hold `Ctrl` and drag over the text, in any view. It is copied as soon as you release the button, and the footer says `Copied N chars to clipboard`. A plain click or drag keeps doing what the view does with it, and `Shift` + drag is your terminal's own selection, which you copy with the terminal's copy shortcut (in Windows Terminal that is whatever your settings bind, often `Ctrl+C` while a selection exists).
 
 </details>
 
