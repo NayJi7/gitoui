@@ -71,7 +71,7 @@ For pinned versions, manual downloads, or building from source, see the [install
 
 ### Terminals
 
-Linux and macOS. The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel). Anywhere else (Alacritty, Terminal.app, Windows Terminal, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`. Windows is not officially supported. Full matrix in [terminal compatibility](https://gitoui.nayji7.dev/getting-started/compatibility/).
+Linux and macOS. The graph and avatars are drawn as inline images in terminals that speak an image protocol: Ghostty, Kitty, WezTerm, iTerm2, Konsole, foot (Sixel). Anywhere else (Alacritty, Terminal.app, Windows Terminal, …) gitoui falls back to a Unicode box-drawing graph, or force it with `--graph-renderer ascii`. Windows is experimental (PowerShell installer, Unicode graph by default). Full matrix in [terminal compatibility](https://gitoui.nayji7.dev/getting-started/compatibility/).
 
 ## Quick start
 

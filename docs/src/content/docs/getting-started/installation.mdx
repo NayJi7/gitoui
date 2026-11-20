@@ -36,6 +36,34 @@ The installer:
 
 </TabItem>
 
+<TabItem label="Windows">
+
+<Aside type="caution" title="Experimental">
+Windows support is new. The test suite and a smoke test of the real binary
+run on Windows in CI, but it has had little hands-on use yet. Bug reports are
+welcome.
+</Aside>
+
+In PowerShell:
+
+```powershell
+irm https://gitoui.nayji7.dev/install.ps1 | iex
+```
+
+The installer downloads the latest release (a `.zip`), verifies its SHA256
+against `checksum.txt`, installs `gitoui.exe` into
+`%LOCALAPPDATA%\Programs\gitoui` and adds that folder to your user `PATH`
+(open a new terminal afterwards). `GITOUI_VERSION=vX.Y.Z` pins a version,
+`INSTALL_DIR` changes the folder, `GITOUI_NO_TRACK=1` skips the anonymous
+install ping. `gitoui --update` runs the same script.
+
+`git` must be installed and on your `PATH`. Settings live in
+`%APPDATA%\gitoui`, caches in `%LOCALAPPDATA%\gitoui`. The integrated terminal
+(`t`) starts PowerShell (`pwsh`, then `powershell`), or `cmd.exe`, unless
+`SHELL` is set.
+
+</TabItem>
+
 <TabItem label="Homebrew">
 
 On macOS (Apple Silicon and Intel) and Linux, install the prebuilt binary

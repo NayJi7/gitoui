@@ -22,7 +22,7 @@ speak one of three image protocols.
 | **Alacritty**          |❌     |❌      |❌     | No image protocol, graph falls back to Unicode. |
 | **Terminal.app** (macOS) |❌   |❌      |❌     | Same fallback as Alacritty.        |
 | **gnome-terminal / Ptyxis** | 🟡 |❌    |❌     | Recent VTE (≥ 0.78) supports the Kitty protocol; older VTE falls back. |
-| **Windows Terminal**   |❌     |❌      |❌     | Unicode fallback only (as of Windows Terminal 1.x). |
+| **Windows Terminal**   |❌     |❌      | 🟡    | Recent versions (1.22 and later) speak Sixel, but <span class="gitoui-wordmark"><span class="git-part">git</span><span class="oui-part">oui</span></span> does not auto-detect it: run with `--graph-renderer sixel` to try it. Unicode fallback by default. |
 
 ✅ <Badge text="first-class" variant="success" /> &nbsp;
 🟡 <Badge text="config needed" variant="caution" /> &nbsp;
