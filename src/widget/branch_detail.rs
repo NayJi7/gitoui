@@ -166,7 +166,7 @@ impl StatefulWidget for BranchDetail<'_> {
             Layout::horizontal([Constraint::Length(12), Constraint::Min(0)])
                 .areas(meta_scroll_area);
 
-        let (mut label_lines, mut value_lines) = self.contents(value_area.width);
+        let (mut label_lines, mut value_lines, author) = self.contents(value_area.width);
 
         let content_height = meta_scroll_area.height as usize;
         state.update(value_lines.len(), content_height);
@@ -176,6 +176,9 @@ impl StatefulWidget for BranchDetail<'_> {
 
         self.render_labels_paragraph(label_lines, labels_area, buf);
         self.render_value_paragraph(value_lines, value_area, buf);
+        if let Some((row, email)) = author {
+            self.render_author_avatar(row, &email, state.offset, value_area, buf);
+        }
         self.render_action_bar(action_bar_area, buf, state);
     }
 }
@@ -280,7 +283,10 @@ impl BranchDetail<'_> {
         paragraph.render(action_inner, buf);
     }
 
-    fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
+    /// The label and value rows, plus the content row and the email of the
+    /// author line when an avatar goes in front of it.
+    #[allow(clippy::type_complexity)]
+    fn contents(&self, width: u16) -> (Vec<Line<'_>>, Vec<Line<'_>>, Option<(usize, String)>) {
         let theme = &self.ctx.color_theme;
         let mut rows = LabelledRows::new(width, theme.detail_label_fg);
 
@@ -318,15 +324,31 @@ impl BranchDetail<'_> {
         };
         rows.row("      Tip: ", tip);
 
-        // Author of tip commit
+        // Author of tip commit, drawn like the author of a commit: avatar,
+        // name and `<email>` each in their own color.
+        let mut author = None;
         if !self.metadata.tip_author.is_empty() {
-            rows.row(
-                "   Author: ",
-                Line::from(Span::styled(
-                    self.metadata.tip_author.clone(),
-                    Style::default().fg(theme.detail_name_fg),
-                )),
-            );
+            let (name, email) = split_author(&self.metadata.tip_author);
+            let avatar_enabled = self.ctx.avatar_manager.lock().unwrap().is_enabled();
+            let mut spans = Vec::new();
+            if avatar_enabled && !email.is_empty() {
+                // 2 cells of avatar and 1 of gap before the name.
+                spans.push(Span::raw("   "));
+                author = Some((rows.values.len(), email.to_string()));
+            }
+            spans.push(Span::styled(
+                name.to_string(),
+                Style::default().fg(theme.detail_name_fg),
+            ));
+            if !email.is_empty() {
+                spans.push(Span::raw(" <"));
+                spans.push(Span::styled(
+                    email.to_string(),
+                    Style::default().fg(theme.detail_email_fg),
+                ));
+                spans.push(Span::raw(">"));
+            }
+            rows.row("   Author: ", Line::from(spans));
         }
 
         // Date of tip commit, formatted with the user's configured format
@@ -395,6 +417,63 @@ impl BranchDetail<'_> {
             }
         }
 
-        (rows.labels, rows.values)
+        (rows.labels, rows.values, author)
+    }
+
+    /// Draws the avatar of the tip's author in front of the author name, on
+    /// the row `row` of the content (`offset` rows are scrolled out of view).
+    fn render_author_avatar(
+        &self,
+        row: usize,
+        email: &str,
+        offset: usize,
+        area: Rect,
+        buf: &mut Buffer,
+    ) {
+        if row < offset || area.width <= 5 {
+            return;
+        }
+        let y = area.top() as usize + (row - offset);
+        if y >= area.bottom() as usize {
+            return;
+        }
+        let mut avatar_manager = self.ctx.avatar_manager.lock().unwrap();
+        if !avatar_manager.is_enabled() {
+            return;
+        }
+        avatar_manager.prefetch(vec![self.metadata.tip_hash.clone()], email);
+        avatar_manager.ensure_uploaded(email, 1, false, self.ctx.color_theme.bg);
+        if let Some(prepared) = avatar_manager.prepared_image(email, 1, false) {
+            for (x, image_cell) in prepared.cells().iter().enumerate() {
+                let cell = &mut buf[(area.left() + x as u16 + 1, y as u16)];
+                cell.set_symbol(image_cell.symbol());
+                cell.set_style(image_cell.style());
+                cell.set_skip(image_cell.skip());
+            }
+        }
+    }
+}
+
+/// Splits `Name <email>` (git's `%an <%ae>`) into its two parts. Without an
+/// email the whole text is the name.
+pub(crate) fn split_author(author: &str) -> (&str, &str) {
+    match author.rsplit_once(" <") {
+        Some((name, rest)) => (name, rest.strip_suffix('>').unwrap_or(rest)),
+        None => (author, ""),
+    }
+}
+
+#[cfg(test)]
+mod author_tests {
+    use super::split_author;
+
+    #[test]
+    fn the_author_is_split_into_name_and_email() {
+        assert_eq!(split_author("NayJi7 <a@b.com>"), ("NayJi7", "a@b.com"));
+        assert_eq!(
+            split_author("Jane <Doe> <j@d.org>"),
+            ("Jane <Doe>", "j@d.org")
+        );
+        assert_eq!(split_author("Just a name"), ("Just a name", ""));
     }
 }
