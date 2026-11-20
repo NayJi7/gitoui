@@ -73,6 +73,15 @@ try {
     Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# One anonymous ping after a real install, to count installs (no data is
+# sent). Set GITOUI_NO_TRACK=1 to skip it.
+if (-not $env:GITOUI_NO_TRACK) {
+    try {
+        Invoke-WebRequest -Uri 'https://gitoui-install-counter.nayji7.workers.dev/ping' `
+            -UserAgent "gitoui-install-windows/$Version" -TimeoutSec 2 -UseBasicParsing | Out-Null
+    } catch { }
+}
+
 # PATH (user level, effective in new terminals).
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $InstallDir) {

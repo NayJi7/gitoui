@@ -13,6 +13,7 @@ skills-lock.json
 # directly here. Source of truth lives at ../install.sh and
 # ../assets/brand/. Re-runs on every `npm run dev` / `npm run build`.
 public/install.sh
+public/install.ps1
 public/brand/
 
 # environment files
