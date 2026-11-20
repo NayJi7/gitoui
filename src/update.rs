@@ -174,15 +174,21 @@ pub fn install_label() -> &'static str {
     let Ok(exe) = env::current_exe() else {
         return "unknown";
     };
-    let exe_str = exe.to_string_lossy();
-    if exe_str.contains("/target/debug/") || exe_str.contains("/target/release/") {
+    if is_build_artifact_path(&exe.to_string_lossy()) {
         return "dev";
     }
     match detect_install_method() {
         InstallMethod::Cargo => "cargo",
-        InstallMethod::CurlScript => "curl",
+        InstallMethod::CurlScript => "script",
         InstallMethod::Homebrew => "brew",
     }
+}
+
+/// True for a binary built in place by `cargo build`, on either path style
+/// (Windows paths use backslashes).
+fn is_build_artifact_path(exe_str: &str) -> bool {
+    let exe_str = exe_str.replace('\\', "/");
+    exe_str.contains("/target/debug/") || exe_str.contains("/target/release/")
 }
 
 fn which(cmd: &str) -> bool {
@@ -693,6 +699,20 @@ mod tests {
                 "cargo must not be probed for a non-cargo path"
             )),
             InstallMethod::CurlScript
+        ));
+    }
+
+    #[test]
+    fn a_cargo_build_is_recognised_on_both_path_styles() {
+        assert!(is_build_artifact_path("/home/u/gitoui/target/debug/gitoui"));
+        assert!(is_build_artifact_path(
+            r"A:\gitstore\gitoui\target\debug\gitoui.exe"
+        ));
+        assert!(is_build_artifact_path(
+            r"A:\gitstore\gitoui\target\release\gitoui.exe"
+        ));
+        assert!(!is_build_artifact_path(
+            r"C:\Users\u\AppData\Local\Programs\gitoui\gitoui.exe"
         ));
     }
 

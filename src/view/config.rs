@@ -200,12 +200,30 @@ impl<'a> ConfigView<'a> {
                 Some(crate::protocol::auto_detect_name().to_string())
             }
             GRAPH_WIDTH_INDEX if self.core_config.graph_width() == crate::GraphWidthType::Auto => {
-                let (w, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
-                let label = if w >= 100 { "Double" } else { "Single" };
+                let label = match self.auto_cell_width() {
+                    crate::graph::CellWidthType::Double => "Double",
+                    crate::graph::CellWidthType::Single => "Single",
+                };
                 Some(label.to_string())
             }
             _ => None,
         }
+    }
+
+    /// What `graph_width = "auto"` gives right now, by the same rule as the
+    /// commit list: it depends on the lanes of the open repository and the
+    /// terminal width. The hint and both previews read it from here so they
+    /// never disagree. Without a list behind (opened from another view) the
+    /// two lanes of the preview graph stand in.
+    fn auto_cell_width(&self) -> crate::graph::CellWidthType {
+        const PREVIEW_LANES: usize = 2;
+        let lanes = match &self.before {
+            View::List(list) => list.graph_lane_count(),
+            _ => None,
+        }
+        .unwrap_or(PREVIEW_LANES);
+        let (width, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
+        crate::check::auto_cell_width(lanes, width as usize)
     }
 
     fn render_vertical_separator(&self, f: &mut Frame, area: Rect) {
@@ -1280,7 +1298,7 @@ impl<'a> ConfigView<'a> {
                 }
             },
             "Controls how commit connection lines are rendered in the graph.\n\nSmooth is only available in Image render mode.".into(),
-            "Cell width used by each graph row image.\n\nAuto picks between Double and Single based on the detected image protocol.".into(),
+            "Cell width used by each graph row image.\n\nAuto picks Double when the graph fits that wide in the terminal, and Single otherwise.".into(),
             diff_mode_description(self.ui_config.common.diff_mode),
             conflict_view_description(self.ui_config.common.conflict_view),
             rebase_view_description(self.ui_config.common.rebase_view),
@@ -1531,15 +1549,7 @@ impl<'a> ConfigView<'a> {
         let cell_width = match self.core_config.graph_width() {
             GraphWidthType::Double => crate::graph::CellWidthType::Double,
             GraphWidthType::Single => crate::graph::CellWidthType::Single,
-            GraphWidthType::Auto => {
-                use crate::protocol::ImageProtocol;
-                match preview_protocol {
-                    ImageProtocol::Sixel | ImageProtocol::KittyUnicode { .. } => {
-                        crate::graph::CellWidthType::Single
-                    }
-                    _ => crate::graph::CellWidthType::Double,
-                }
-            }
+            GraphWidthType::Auto => self.auto_cell_width(),
         };
         let needs_rebuild = self
             .graph_preview
@@ -1700,14 +1710,10 @@ impl<'a> ConfigView<'a> {
         let lane_width: usize = match self.core_config.graph_width() {
             GraphWidthType::Double => 3,
             GraphWidthType::Single => 2,
-            GraphWidthType::Auto => {
-                let (w, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
-                if w >= 100 {
-                    3
-                } else {
-                    2
-                }
-            }
+            GraphWidthType::Auto => match self.auto_cell_width() {
+                crate::graph::CellWidthType::Double => 3,
+                crate::graph::CellWidthType::Single => 2,
+            },
         };
 
         let hashes = ["m1", "f1", "m0"];
