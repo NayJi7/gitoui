@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 
 const CRATES_URL: &str = "https://crates.io/api/v1/crates/gitoui";
 const INSTALL_SH_URL: &str = "https://gitoui.nayji7.dev/install.sh";
+#[cfg(windows)]
+const INSTALL_PS1_URL: &str = "https://gitoui.nayji7.dev/install.ps1";
 const GH_RELEASES_BASE: &str = "https://github.com/NayJi7/gitoui/releases/download";
 const CACHE_DIRNAME: &str = "gitoui";
 const CACHE_FILENAME: &str = "update.toml";
@@ -229,6 +231,24 @@ fn run_update(keep_welcome: bool) -> io::Result<()> {
                 print_post_update_welcome();
             }
         }
+        #[cfg(windows)]
+        InstallMethod::CurlScript => {
+            // install.ps1 renames the running gitoui.exe out of the way and
+            // writes the new one, which Windows allows while it runs.
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]);
+            cmd.arg(format!("irm '{INSTALL_PS1_URL}' | iex"));
+            if !keep_welcome {
+                cmd.env("GITOUI_INSTALL_NO_WELCOME", "1");
+            }
+            let status = cmd.status()?;
+            if !status.success() {
+                return Err(io::Error::other(
+                    "install.ps1 exited non-zero, leaving current binary in place",
+                ));
+            }
+        }
+        #[cfg(not(windows))]
         InstallMethod::CurlScript => {
             // sh -c "curl -fsSL <url> | sh" so the pipe stays inside
             // the shell. install.sh honours these env knobs:
@@ -288,6 +308,7 @@ fn current_target_triple() -> Option<&'static str> {
         ("linux", "aarch64") => "aarch64-unknown-linux-musl",
         ("macos", "x86_64") => "x86_64-apple-darwin",
         ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
         _ => return None,
     })
 }
@@ -306,7 +327,8 @@ fn current_target_triple() -> Option<&'static str> {
 /// in that window resolves an older tag and silently exits "up to date".
 fn github_release_ready(version: &str) -> Option<bool> {
     let target = current_target_triple()?;
-    let url = format!("{GH_RELEASES_BASE}/v{version}/gitoui-{version}-{target}.tar.gz");
+    let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
+    let url = format!("{GH_RELEASES_BASE}/v{version}/gitoui-{version}-{target}.{ext}");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .user_agent(concat!("gitoui/", env!("CARGO_PKG_VERSION")))

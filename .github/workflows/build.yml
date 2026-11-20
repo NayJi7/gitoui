@@ -79,6 +79,12 @@ jobs:
           cache-bin: false
       - name: Tests
         run: cargo test --lib -- --test-threads=1
+      - name: install.ps1 parses
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
       - name: Smoke test (the real binary in a pseudo-terminal)
         run: cargo test --test smoke -- --nocapture
 
