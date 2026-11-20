@@ -183,8 +183,10 @@ mod tests {
             .send_retrying()
             .unwrap_err();
         assert!(connection_failed(&err), "{err}");
+        // Windows takes about two seconds to give up on each refused connection.
+        let limit = if cfg!(windows) { 40 } else { 10 };
         assert!(
-            start.elapsed() < Duration::from_secs(10),
+            start.elapsed() < Duration::from_secs(limit),
             "refusals are fast"
         );
     }

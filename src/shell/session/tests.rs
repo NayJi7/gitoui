@@ -415,6 +415,8 @@ fn zsh_history_file_never_points_into_the_integration_dir() {
     assert!(!text.contains("gitoui-shell"), "{text}");
 }
 
+// `/bin/sh` only exists on Unix.
+#[cfg(unix)]
 #[test]
 fn an_unknown_shell_runs_without_directory_tracking() {
     let home = tempfile::tempdir().unwrap();

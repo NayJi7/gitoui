@@ -250,6 +250,8 @@ mod tests {
         );
     }
 
+    // A quote is not allowed in a Windows file name.
+    #[cfg(unix)]
     #[test]
     fn path_with_special_chars_round_trips() {
         let _g = EnvGuard::new();
