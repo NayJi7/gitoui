@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 const CRATES_URL: &str = "https://crates.io/api/v1/crates/gitoui";
+#[cfg(not(windows))]
 const INSTALL_SH_URL: &str = "https://gitoui.nayji7.dev/install.sh";
 #[cfg(windows)]
 const INSTALL_PS1_URL: &str = "https://gitoui.nayji7.dev/install.ps1";

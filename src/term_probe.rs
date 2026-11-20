@@ -25,7 +25,10 @@ pub struct TerminalReport {
     pub answered: bool,
 }
 
-/// Reads every CSI reply in `reply` and keeps what we asked for.
+/// Reads every CSI reply in `reply` and keeps what we asked for. Only the
+/// Windows probe reads replies from the key events (Unix gets the cell size
+/// from the terminal's ioctl), so elsewhere it exists for the tests alone.
+#[cfg(any(windows, test))]
 pub fn parse_reply(reply: &str) -> TerminalReport {
     let mut report = TerminalReport::default();
     let mut rest = reply;
